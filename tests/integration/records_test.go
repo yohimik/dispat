@@ -17,10 +17,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1626,4 +1628,466 @@ func TestRecordsRefuseInvalidAliasTags(t *testing.T) {
 			c.Spaces["libs"] = s
 		}, "format is required"},
 	})
+}
+
+// TestRecordsChangelogRefusesAPathItCannotWriteAtomically: a changelog is
+// rewritten whole through a temporary file and a rename, because a write
+// interrupted halfway would take the package's history with it. A configured
+// path whose parent is a file cannot be examined at all, which is neither "no
+// changelog yet" nor "one to append to", so the write is refused and the run
+// fails on the record rather than replacing the file with a guess.
+func TestRecordsChangelogRefusesAPathItCannotWriteAtomically(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Changelog = &models.ChangelogConfig{File: "notes/CHANGELOG.md"}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	// A file where the changelog's folder would be.
+	r.WriteFile("packages/core/notes", "not a folder\n")
+	r.Commit("feat(core): bootstrap")
+
+	res := r.Release()
+	assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout+res.Stderr, "changelog")
+	assert.Contains(t, res.Stdout+res.Stderr, "notes",
+		"the path the write could not examine is named")
+	assert.NoFileExists(t, r.Path("packages", "core", "notes", "CHANGELOG.md"),
+		"and nothing was written anywhere near it")
+}
+
+// TestRecordsChangelogRefusesToReplaceASymlink: a record file that is a symlink
+// is never replaced. The write is refused by name, the link still points where
+// it did, and what it points at is untouched — a repository that publishes its
+// changelogs through links keeps them.
+func TestRecordsChangelogRefusesToReplaceASymlink(t *testing.T) {
+	t.Run("a changelog symlinked elsewhere", func(t *testing.T) {
+		r := singlePackageRepo(t, echoBuild)
+		r.WriteFile("docs/core-history.md", "# kept by hand\n")
+		require.NoError(t, os.Symlink(r.Path("docs", "core-history.md"),
+			r.Path("packages", "core", "CHANGELOG.md")))
+		r.Commit("feat(core): first feature")
+
+		res := r.Command("changelog", "--package", "core")
+		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout+res.Stderr, "refusing to replace symlink")
+
+		info, err := os.Lstat(r.Path("packages", "core", "CHANGELOG.md"))
+		require.NoError(t, err)
+		assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link is still a link")
+		assert.Equal(t, "# kept by hand\n", readRepoFile(t, r, "docs/core-history.md"),
+			"and what it points at was never written through")
+	})
+
+	t.Run("a config file symlinked to nowhere", func(t *testing.T) {
+		r := harness.New(t)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+		require.NoError(t, os.Symlink(r.Path("absent", "dispat.json"), r.Path("dispat.json")))
+
+		res := r.Command("init")
+		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout+res.Stderr, "refusing to replace symlink")
+		_, err := os.Stat(r.Path("dispat.json"))
+		assert.True(t, os.IsNotExist(err), "the dangling link was not turned into a file")
+	})
+}
+
+// TestRecordsChangelogStopsWhenTheFolderTakesNoTemporaryFile: the temporary file
+// lands beside its target so the rename never crosses a filesystem, which
+// means a folder that cannot be written in stops the write there — before any
+// part of the record exists.
+func TestRecordsChangelogStopsWhenTheFolderTakesNoTemporaryFile(t *testing.T) {
+	skipIfSuperuser(t)
+
+	t.Run("a package folder that cannot be written in", func(t *testing.T) {
+		r := singlePackageRepo(t, echoBuild)
+		r.Commit("feat(core): first feature")
+		dir := r.Path("packages", "core")
+		require.NoError(t, os.Chmod(dir, 0o555))
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+		res := r.Command("changelog", "--package", "core")
+		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout+res.Stderr, "permission denied")
+		_, err := os.Stat(filepath.Join(dir, "CHANGELOG.md"))
+		assert.True(t, os.IsNotExist(err), "no changelog was created")
+	})
+
+	t.Run("a repository root that cannot be written in", func(t *testing.T) {
+		r := harness.New(t)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+		require.NoError(t, os.Chmod(r.Root, 0o555))
+		t.Cleanup(func() { _ = os.Chmod(r.Root, 0o755) })
+
+		res := r.Command("init")
+		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout+res.Stderr, "permission denied")
+	})
+}
+
+// TestRecordsChangelogSurvivesAPartialDiskWrite models a filesystem quota after
+// the temporary record exists. A partial write cannot truncate release history,
+// and the next attempt after removing the quota must add exactly one entry.
+func TestRecordsChangelogSurvivesAPartialDiskWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the file-size limit fixture uses a POSIX shell")
+	}
+	r := singlePackageRepo(t, echoBuild)
+	r.Commit("feat(core): first feature")
+	history := "# Changelog\n\n" + strings.Repeat("previous release notes\n", 150000)
+	r.WriteFile("packages/core/CHANGELOG.md", history)
+	path := r.Path("packages", "core", "CHANGELOG.md")
+	require.NoError(t, os.Chmod(path, 0o640))
+
+	failed := r.Shell("trap '' XFSZ; ulimit -f 2048; dispat changelog --package core")
+
+	require.Equal(t, 1, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+	assert.Regexp(t, `file too large|short write`, failed.Stdout+failed.Stderr)
+	assert.Equal(t, history, readRepoFile(t, r, "packages/core/CHANGELOG.md"))
+	partial, err := filepath.Glob(path + ".tmp-*")
+	require.NoError(t, err)
+	assert.Empty(t, partial, "the incomplete temporary record was removed")
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+
+	retried := r.Command("changelog", "--package", "core")
+	require.Equal(t, 0, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
+	content := readRepoFile(t, r, "packages/core/CHANGELOG.md")
+	assert.Equal(t, 1, strings.Count(content, "## core@0.1.0 ("))
+	assert.Equal(t, 150000, strings.Count(content, "previous release notes\n"))
+}
+
+// TestRecordsReleaseCommitIsSkippedWhenNothingWasStaged: with the changelog off
+// and no manifest to rewrite, the release commit would have nothing in it. An
+// empty commit is not a record of anything, so none is made, and the tag then
+// names the commit the release was planned on — which is where it would have
+// pointed had there been no commit stage at all.
+func TestRecordsReleaseCommitIsSkippedWhenNothingWasStaged(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(false)}
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true)}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+	planned := r.Git("rev-parse", "HEAD")
+
+	res := r.ReleaseOK()
+	assert.NotContains(t, res.Stdout, "created release commit")
+	assert.Equal(t, planned, r.Git("rev-parse", "HEAD"), "no commit was made")
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	assert.Equal(t, planned, r.Git("rev-list", "-n", "1", "core@0.1.0"),
+		"and the tag names the commit that was planned")
+
+	// A second run converges: the package has nothing pending, and the
+	// staging question is asked again on the same clean tree.
+	r.ReleaseOK()
+	assert.Equal(t, 1, r.TagCount("core@"), "tags: %v", r.TagList())
+}
+
+// TestRecordsPrereleaseSpellingFormatRendersBothShapes: one format, two
+// releases. The stable release renders neither the channel, the counter, nor
+// the separators around them — the version a script is handed is the plain
+// core — and the prerelease renders all three. The alias written beside each
+// release is built from the version's parts rather than from the version, so
+// it exercises the other half of the renderer in the same run.
+func TestRecordsPrereleaseSpellingFormatRendersBothShapes(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig("echo tagversion=$DISPAT_TAG_VERSION", 1)
+	cfg.TagFormat = "{name}@{version}-{channel}.{counter}"
+	cfg.AliasTags = []models.AliasTagConfig{
+		{Format: "{name}-v{major}.{minor}.{patch}", Moving: true},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first work")
+
+	stable := r.ReleaseOK()
+	assert.True(t, r.IsTagged("core@0.1.0"),
+		"the stable release drops the prerelease section entirely; tags: %v", r.TagList())
+	assert.True(t, r.IsTagged("core-v0.1.0"),
+		"and the alias names the three parts of the version; tags: %v", r.TagList())
+	assert.Contains(t, stable.Stdout, "tagversion=0.1.0",
+		"the version section handed to a script is the plain core: %s", stable.Stdout)
+
+	r.Commit("chore(release): record the changelog")
+	r.WriteFile("packages/core/more.txt", "work\n")
+	r.Commit("fix(core)%beta: enter a train")
+
+	prerelease := r.ReleaseOK()
+	assert.True(t, r.IsTagged("core@0.1.1-beta.0"),
+		"the prerelease renders channel and counter; tags: %v", r.TagList())
+	assert.Contains(t, prerelease.Stdout, "tagversion=0.1.1-beta.0",
+		"and the version section carries them too: %s", prerelease.Stdout)
+	assert.True(t, r.IsTagged("core-v0.1.1"),
+		"while the alias still names the core parts; tags: %v", r.TagList())
+}
+
+// TestRecordsTagInventoryIsNotTheGlobThatFetchedIt: the glob a package's
+// format produces is a filter, not a decision. It is deliberately loose — "*"
+// spans any run of characters — so the listing it returns holds refs that are
+// not this package's releases and, for a format broad enough, are not releases
+// at all: dispat's own release-lock ref is on HEAD for the whole of a run, and
+// a ref that is exactly the format's literal prefix with nothing where the
+// version goes matches the glob and no version. Neither may be adopted as a
+// baseline, which is what `compute` reports here by proposing an initial for
+// the package whose listing holds nothing readable.
+func TestRecordsTagInventoryIsNotTheGlobThatFetchedIt(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	// "{version}" is the broadest format there is: its glob is "*", so this
+	// package's listing is every ref in the repository.
+	cfg.Packages = map[string]models.PackageConfig{"solo": {TagFormat: "{version}"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "solo")
+	r.WriteFile("packages/core/package.json", `{"name": "core", "version": "1.4.2"}`)
+	r.WriteFile("packages/solo/package.json", `{"name": "solo", "version": "2.1.0"}`)
+	r.Commit("feat(core,solo): bootstrap")
+
+	tagAt(r, "core@1.0.0", "HEAD")
+	// A ref that is the format's literal prefix and nothing else, which the
+	// glob matches and the format cannot read.
+	r.Git("tag", "core@")
+	// dispat's own coordination ref, which the "{version}" glob also returns.
+	r.Git("tag", lockTag)
+
+	res := r.Command("compute")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.NotContains(t, res.Stdout, "+ initial core",
+		"the package whose listing holds a real release tag needs no initial: %s", res.Stdout)
+	assert.Contains(t, res.Stdout, "+ initial solo 2.1.0",
+		"while the one whose listing holds nothing readable does: %s", res.Stdout)
+	assert.NotContains(t, res.Stdout, lockTag,
+		"and no proposal is justified by dispat's own lock ref: %s", res.Stdout)
+}
+
+// TestRecordsGithubReissuesAReadOnlyCallThatFailedTransiently: a 5xx and a rate limit
+// are answers a later attempt can outlive, so the verification is re-issued
+// with backoff — honouring a Retry-After the server names in whole seconds and
+// ignoring one it does not. The ladder is finite: a repository that never
+// answers refuses the run rather than retrying forever.
+func TestRecordsGithubReissuesAReadOnlyCallThatFailedTransiently(t *testing.T) {
+	seed := func(t *testing.T, srv *httptest.Server) *harness.Repo {
+		t.Helper()
+		r := harness.New(t)
+		r.WriteConfigModel(githubConfig(srv.URL))
+		t.Setenv("DISPAT_IT_TOKEN", "tkn")
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+		return r
+	}
+
+	t.Run("the third attempt succeeds", func(t *testing.T) {
+		srv, verifications := retryingGitHub(t, []gitHubAnswer{
+			{status: http.StatusServiceUnavailable, retryAfter: "1"},
+			{status: http.StatusTooManyRequests, retryAfter: "in a little while"},
+			{status: http.StatusOK},
+		})
+		r := seed(t, srv)
+
+		start := time.Now()
+		r.ReleaseOK()
+		assert.Equal(t, 3, verifications(), "the ladder is three attempts, not one")
+		assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+		assert.GreaterOrEqual(t, time.Since(start), time.Second,
+			"a Retry-After of one second is waited out rather than ignored")
+	})
+
+	t.Run("a repository that never answers refuses the run", func(t *testing.T) {
+		srv, verifications := retryingGitHub(t, []gitHubAnswer{
+			{status: http.StatusBadGateway, retryAfter: "-5"},
+		})
+		r := seed(t, srv)
+
+		res := r.Release()
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout+res.Stderr, "502")
+		assert.Equal(t, 3, verifications(), "and it gave up after the ladder rather than at the first refusal")
+		assert.Equal(t, 0, r.TagCount("core@"), "tags: %v", r.TagList())
+	})
+}
+
+// The GitHub command reads JSON after receiving a successful status line.
+// A server that stops there must not keep the CLI alive past its API timeout.
+func TestRecordsGithubHeadersWithoutBodyRespectTheRequestTimeout(t *testing.T) {
+	hang := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		<-hang
+	}))
+	t.Cleanup(func() { close(hang); srv.Close() })
+
+	r := harness.New(t)
+	cfg := githubConfig(srv.URL)
+	cfg.GitHub.AllPackages = models.Bool(true)
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	start := time.Now()
+	res := r.Command("github", "--package", "core")
+	assert.Less(t, time.Since(start), 45*time.Second)
+	assert.NotEqual(t, 0, res.Code, "a partial GitHub response cannot complete the command")
+	assert.Contains(t, res.Stdout+res.Stderr, "deadline exceeded")
+}
+
+// TestRecordsGithubRefusesALookupItCannotRead: "does this tag already have a
+// release" is the question that decides whether anything is created, so an
+// answer that is not one is a hard error rather than a shrug. A refusal, a
+// body that is not JSON and a body past the bound are three ways to get a
+// non-answer, and none of them may read as "nothing published yet".
+func TestRecordsGithubRefusesALookupItCannotRead(t *testing.T) {
+	for name, tc := range map[string]struct {
+		lookup http.HandlerFunc
+		want   string
+	}{
+		"the endpoint refuses the lookup": {
+			lookup: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"message":"Resource not accessible by personal access token"}`))
+			},
+			want: "looking up release",
+		},
+		"the lookup answers with something that is not JSON": {
+			lookup: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`<html>a proxy sign-in page</html>`))
+			},
+			want: "parsing lookup",
+		},
+		"the lookup answers with more than a release can be": {
+			// One release is read under a 1 MiB bound, above the 125,000
+			// characters of notes GitHub accepts; an answer past that is not a
+			// release at all.
+			lookup: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"id":1,"body":"` + strings.Repeat("x", 1<<20+1) + `"}`))
+			},
+			want: "response exceeds",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := lookupGitHub(t, tc.lookup)
+			r := githubRecorderRepo(t, srv.URL, nil)
+
+			res := r.Command("github", "--package", "core")
+			assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout+res.Stderr, tc.want,
+				"the refusal names the call that produced it")
+		})
+	}
+}
+
+// gitHubVerifyPath is the endpoint the upfront verification asks for, and
+// the only one these scenarios answer transiently: it is a read-only call, so
+// it is the one marked safe to re-issue.
+const gitHubVerifyPath = "/repos/acme/mono"
+
+// retryingGitHub is a fake whose verification endpoint answers the given
+// statuses in order, the last one repeating, and carries the matching
+// Retry-After header where one is given. Everything else it answers the way
+// githubFake does.
+func retryingGitHub(t *testing.T, answers []gitHubAnswer) (*httptest.Server, func() int) {
+	t.Helper()
+	var mu sync.Mutex
+	verifications := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == gitHubVerifyPath && req.Method == http.MethodGet {
+			mu.Lock()
+			at := verifications
+			verifications++
+			mu.Unlock()
+			if at >= len(answers) {
+				at = len(answers) - 1
+			}
+			answer := answers[at]
+			if answer.retryAfter != "" {
+				w.Header().Set("Retry-After", answer.retryAfter)
+			}
+			w.WriteHeader(answer.status)
+			_, _ = w.Write([]byte(`{"message":"try again"}`))
+			return
+		}
+		if githubTagProbe(w, req, nil) {
+			return
+		}
+		switch req.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id": 1}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return verifications
+	}
+}
+
+// gitHubAnswer is one scripted answer of the verification endpoint.
+type gitHubAnswer struct {
+	status     int
+	retryAfter string
+}
+
+// gitHubLookupPath is the by-tag lookup every record makes before it
+// creates anything. A scenario answers this one path its own way and leaves
+// everything else to the ordinary fake behaviour.
+const gitHubLookupPath = "/releases/tags/"
+
+// lookupGitHub stands up a recorder API whose by-tag lookup is the
+// scenario's, answering the upfront verification, the listing and the create
+// the way a healthy API would.
+func lookupGitHub(t *testing.T, lookup http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodGet && strings.Contains(req.URL.Path, gitHubLookupPath) {
+			lookup(w, req)
+			return
+		}
+		switch {
+		case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/releases"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		case req.Method == http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id": 1}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// githubRecorderRepo is the recorder fixture: one package, the export the
+// recorder needs, and a token in the environment.
+func githubRecorderRepo(t *testing.T, apiURL string, adjust func(*models.File)) *harness.Repo {
+	t.Helper()
+	r := harness.New(t)
+	cfg := githubConfig(apiURL)
+	// Every package is recorded, so a scenario about the lookup does not have
+	// to export an artefact it never attaches.
+	cfg.GitHub.AllPackages = models.Bool(true)
+	if adjust != nil {
+		adjust(&cfg)
+	}
+	r.WriteConfigModel(cfg)
+	t.Setenv("DISPAT_IT_TOKEN", "tkn")
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+	return r
 }

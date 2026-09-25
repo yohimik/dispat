@@ -333,3 +333,12 @@ func readRepoFile(t *testing.T, r *harness.Repo, relPath string) string {
 	require.NoError(t, err, "reading %s", relPath)
 	return string(data)
 }
+
+// skipIfSuperuser skips a scenario that relies on filesystem permissions
+// actually stopping the process.
+func skipIfSuperuser(t *testing.T) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("a read-only folder does not stop the superuser")
+	}
+}

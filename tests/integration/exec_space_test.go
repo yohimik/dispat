@@ -123,3 +123,36 @@ func TestExecInSpaceIsStillTheSpacesPrimaryFolder(t *testing.T) {
 	assert.Contains(t, res.Stdout, "FILE_ONLY=unset",
 		"--in moves the folder alone, never the environment")
 }
+
+// TestExecRefusesAPlaceItCannotRunIn: --in takes a folder or a level,
+// and each way of naming neither is refused before the script is handed to a
+// shell: a space the configuration does not declare, and a path that is there
+// but is a file.
+func TestExecRefusesAPlaceItCannotRunIn(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["where"] = models.Script{"pwd"}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.WriteFile("packages/core/main.txt", "core\n")
+	r.Commit("feat(core): bootstrap")
+
+	t.Run("a space the configuration does not declare", func(t *testing.T) {
+		res := r.Command("exec", "where", "--in", "space:nowhere")
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout+res.Stderr, "unknown space")
+		assert.Contains(t, res.Stdout+res.Stderr, "nowhere")
+	})
+
+	t.Run("a path that is a file rather than a folder", func(t *testing.T) {
+		res := r.Command("exec", "where", "--in", "packages/core/main.txt")
+		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.Contains(t, res.Stdout+res.Stderr, "is not a folder")
+	})
+
+	t.Run("a folder that is one is what the refusals are measured against", func(t *testing.T) {
+		res := r.Command("exec", "where", "--in", "space:libs")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout, "packages")
+	})
+}

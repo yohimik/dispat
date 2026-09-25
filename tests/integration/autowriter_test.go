@@ -607,3 +607,31 @@ func computeReport(res harness.RunResult) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// TestAutoWriterLeavesTheVersionOfAPackageNobodyVersions: {version}
+// resolves to the planned version of the covered package, and a package under
+// versioning "none" has none. Writing the zero version instead would put
+// "0.0.0" into a manifest nobody versions, so the own-version write is skipped
+// and said so while the package's other edits still land.
+func TestAutoWriterLeavesTheVersionOfAPackageNobodyVersions(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces["tools"] = models.SpaceConfig{
+		Path: models.PathList{"tools"}, Flow: buildPublish(), Versioning: "none",
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("tools", "kit")
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+	r.WriteFile("tools/kit/package.json", `{"name": "@acme/kit", "version": "0.0.0"}`)
+	r.Commit("feat(core,kit): bootstrap")
+
+	res := r.Command("autowriter", "--set-version", "{version}", "--since", "all", "--log-level", "debug")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "own-version write skipped: the package has versioning",
+		"the skip is said rather than left to the reader to infer from an unchanged file")
+	assert.Contains(t, arRead(t, r, "packages", "core", "package.json"), `"version": "0.1.0"`,
+		"the versioned package is still stamped")
+	assert.Contains(t, arRead(t, r, "tools", "kit", "package.json"), `"version": "0.0.0"`,
+		"and the unversioned one keeps what it had")
+}

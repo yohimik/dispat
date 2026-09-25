@@ -14,6 +14,8 @@ package integration
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -596,7 +598,7 @@ func TestAutoVersionRefusesAnOnlyNamingNoPackage(t *testing.T) {
 	}{
 		"declared by the space": {
 			adjust: func(cfg *models.File) {
-				cfg.Spaces["libs"] = covTailAVSpace(&models.AutoVersionConfig{Only: []string{"nobody"}})
+				cfg.Spaces["libs"] = autoVersionSpace(&models.AutoVersionConfig{Only: []string{"nobody"}})
 			},
 			want: `space "libs": autoVersion.only: unknown package "nobody"`,
 		},
@@ -622,4 +624,452 @@ func TestAutoVersionRefusesAnOnlyNamingNoPackage(t *testing.T) {
 			configRefused(t, r, tc.want)
 		})
 	}
+}
+
+// TestAutoVersionSyncLockSkippedWhenNothingWasReconciled: syncLock exists to
+// regenerate a lock file after a manifest was rewritten, so a release that
+// rewrote nothing has nothing to regenerate and the script is not run. A space
+// that configured no reconciling strategy at all is the deliberate exception,
+// since it never produces the signal to gate on.
+func TestAutoVersionSyncLockSkippedWhenNothingWasReconciled(t *testing.T) {
+	syncSpace := func(av *models.AutoVersionConfig) models.SpaceConfig {
+		return models.SpaceConfig{
+			Path: models.PathList{"packages"}, Flow: buildPublish(), AutoVersion: av,
+		}
+	}
+
+	t.Run("a reconciling space with nothing to reconcile skips it", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Scripts["locksync"] = models.Script{`echo ran >> ../../locksync.log`}
+		cfg.Spaces["libs"] = syncSpace(&models.AutoVersionConfig{
+			// Writing the package's own version is what would otherwise
+			// change a file on every release; without it this manifest
+			// declares nothing the run can reconcile.
+			WriteVersion: models.Bool(false),
+			SyncLock:     []string{"locksync"},
+		})
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+		r.Commit("feat(core): bootstrap")
+
+		res := r.ReleaseOK("--log-level", "debug")
+		assert.Contains(t, res.Stdout, "syncLock: nothing was reconciled")
+		assert.NoFileExists(t, r.Path("locksync.log"),
+			"a lock nothing invalidated is not regenerated")
+		assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	})
+}
+
+// TestAutoVersionSubstringNameMatchReachesAPackageWithNoManifest: the
+// substring fallback exists for the workspaces where a package has no manifest
+// to declare a name in — a Gradle module, a folder of shell scripts — while
+// its consumers still name it in theirs. The declared name's last segment is
+// the package's folder name, and "exact" leaves the same declaration alone.
+func TestAutoVersionSubstringNameMatchReachesAPackageWithNoManifest(t *testing.T) {
+	setup := func(t *testing.T, nameMatch string) *harness.Repo {
+		t.Helper()
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Spaces["libs"] = models.SpaceConfig{
+			Path:        models.PathList{"packages"},
+			Flow:        buildPublish(),
+			AutoVersion: &models.AutoVersionConfig{NameMatch: nameMatch},
+		}
+		cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "app"}}
+		r.WriteConfigModel(cfg)
+		// app is a folder with no manifest at all, so nothing declares the
+		// name its consumer writes.
+		r.SeedPackage("packages", "app")
+		r.SeedPackage("packages", "web")
+		r.WriteFile("packages/web/package.json", `{
+  "name": "@acme/web",
+  "version": "0.0.0",
+  "dependencies": {"@acme/app": "0.0.0"}
+}`)
+		r.Commit("feat(app,web): bootstrap")
+		return r
+	}
+
+	t.Run("substring", func(t *testing.T) {
+		r := setup(t, "substring")
+		r.ReleaseOK()
+		require.True(t, r.IsTagged("app@0.1.0"), "tags: %v", r.TagList())
+		data, err := os.ReadFile(r.Path("packages", "web", "package.json"))
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"@acme/app": "^0.1.0"`,
+			"the declared name's last segment is the package's folder name")
+	})
+
+	t.Run("exact", func(t *testing.T) {
+		r := setup(t, "exact")
+		r.ReleaseOK()
+		require.True(t, r.IsTagged("app@0.1.0"), "tags: %v", r.TagList())
+		data, err := os.ReadFile(r.Path("packages", "web", "package.json"))
+		require.NoError(t, err)
+		assert.Contains(t, string(data), `"@acme/app": "0.0.0"`,
+			"without the fallback nothing connects the two, which is the default")
+	})
+}
+
+// TestAutoVersionReplaceRewritesOnlyWhatItMay: a replace rule walks the
+// package folder, and the folders a workspace walk never enters are skipped
+// here too — the version text inside node_modules belongs to somebody else's
+// code. A link is not a file to rewrite either: rewriting it would write
+// through it, twice.
+func TestAutoVersionReplaceRewritesOnlyWhatItMay(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating a link needs a privilege the test runner may not have")
+	}
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces["libs"] = models.SpaceConfig{
+		Path: models.PathList{"packages"},
+		Flow: buildPublish(),
+		AutoVersion: &models.AutoVersionConfig{
+			Manifests: "none",
+			Replace: []models.AutoVersionReplaceConfig{
+				{Files: []string{"*.marker"}, Find: "core {previous}", Write: "core {version}"},
+				// A rule about a provider, in a package that has none: it
+				// expands to nothing, so it selects no files at all. The
+				// selector reads an empty glob list as "nothing", which is the
+				// opposite of what an empty list means for a range policy.
+				{Files: []string{"*.marker"}, Find: "{provider} {providerPrevious}",
+					Write: "{provider} {providerVersion}"},
+			},
+		},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.WriteFile("packages/core/version.marker", "core 0.0.0\n")
+	r.WriteFile("packages/core/node_modules/vendored/version.marker", "core 0.0.0\n")
+	require.NoError(t, os.Symlink(r.Path("packages", "core", "version.marker"),
+		r.Path("packages", "core", "link.marker")))
+	r.Commit("feat(core): bootstrap")
+
+	r.ReleaseOK()
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+
+	own, err := os.ReadFile(r.Path("packages", "core", "version.marker"))
+	require.NoError(t, err)
+	assert.Equal(t, "core 0.1.0\n", string(own))
+
+	vendored, err := os.ReadFile(r.Path("packages", "core", "node_modules", "vendored", "version.marker"))
+	require.NoError(t, err)
+	assert.Equal(t, "core 0.0.0\n", string(vendored), "a rule must not reach into node_modules")
+
+	info, err := os.Lstat(r.Path("packages", "core", "link.marker"))
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink, "the link is still a link, not a rewritten copy")
+}
+
+// TestAutoVersionReportsManifestsItCannotParse: a manifest that does
+// not parse is missing from the name index every later reconciliation reads,
+// so a consumer naming that package could silently go unversioned. It is a
+// warning rather than a debug line for that reason, said once where the index
+// is built and once where the package's own files are reconciled, and the
+// manifests that did parse are still rewritten.
+func TestAutoVersionReportsManifestsItCannotParse(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces["libs"] = autoVersionSpace(&models.AutoVersionConfig{Manifests: "all"})
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+	// web's root manifest is not JSON at all: the identity of the package is
+	// what the index loses, and the nested one still has to be reconciled.
+	r.WriteFile("packages/web/package.json", `{"name": "@acme/web", "version":`)
+	r.WriteFile("packages/web/tools/package.json",
+		`{"name": "@acme/web-tools", "version": "0.0.0", "dependencies": {"@acme/core": "^0.0.1"}}`)
+	r.Commit("feat(core,web): bootstrap")
+
+	res := r.ReleaseOK()
+	assert.Contains(t, res.Stdout, "root manifest failed to parse",
+		"the index says which package it lost an identity for")
+	assert.Contains(t, res.Stdout, "some manifests failed to parse",
+		"and the package's own reconciliation says it read a partial scan")
+
+	assert.Contains(t, arRead(t, r, "packages", "web", "tools", "package.json"),
+		`"@acme/core": "^0.1.0"`, "the manifests that did parse are still reconciled")
+	assert.True(t, r.IsTagged("web@0.1.0"), "and an unreadable manifest is not a failed release; tags: %v", r.TagList())
+}
+
+// TestAutoVersionDerivesNothingFromAnAmbiguousName: two packages
+// declaring one manifest name make that name answer to nothing, because
+// rewriting a range for it would pick one of them arbitrarily. The name is
+// reported (W220) and the declaration naming it is left exactly as written.
+func TestAutoVersionDerivesNothingFromAnAmbiguousName(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces["libs"] = autoVersionSpace(&models.AutoVersionConfig{Enabled: models.Bool(true)})
+	r.WriteConfigModel(cfg)
+	for _, name := range []string{"one", "two"} {
+		r.SeedPackage("packages", name)
+		// One manifest identity, two packages behind it.
+		r.WriteFile("packages/"+name+"/package.json", `{"name": "@acme/shared", "version": "0.0.0"}`)
+	}
+	r.SeedPackage("packages", "app")
+	r.WriteFile("packages/app/package.json",
+		`{"name": "@acme/app", "version": "0.0.0", "dependencies": {"@acme/shared": "workspace:*"}}`)
+	r.Commit("feat(one,two,app): bootstrap")
+
+	res := r.ReleaseOK()
+	assert.True(t, harness.IsCodePresent(res.Events, "W220"), "stdout:\n%s", res.Stdout)
+	assert.Contains(t, arRead(t, r, "packages", "app", "package.json"),
+		`"@acme/shared": "workspace:*"`,
+		"a name answering to two packages answers to neither")
+	assert.Contains(t, arRead(t, r, "packages", "app", "package.json"),
+		`"version": "0.1.0"`, "the package's own version is not an ambiguous name")
+}
+
+// TestAutoVersionSelectorsNarrowTheRewrite: the three selectors each
+// leave a declaration alone for a different reason — the field it sits in is
+// not one of the configured kinds, the provider is not one of the configured
+// names, or the range as written is not one the match globs claim. One
+// manifest carries all three next to a declaration nothing narrows, so the
+// rewrite that does happen proves the others were narrowed rather than broken.
+func TestAutoVersionSelectorsNarrowTheRewrite(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces["libs"] = autoVersionSpace(&models.AutoVersionConfig{
+		Kinds: []string{"dependencies"},
+		Only:  []string{"core", "extra"},
+		Match: []string{"workspace:*"},
+	})
+	cfg.Dependencies = []models.DependencyConfig{
+		{Consumer: "web", Provider: "core"},
+		{Consumer: "web", Provider: "extra"},
+		{Consumer: "web", Provider: "tools", Kind: "devDependencies"},
+		{Consumer: "web", Provider: "aside"},
+	}
+	r.WriteConfigModel(cfg)
+	for _, name := range []string{"core", "extra", "tools", "aside"} {
+		r.SeedPackage("packages", name)
+		r.WriteFile("packages/"+name+"/package.json",
+			`{"name": "@acme/`+name+`", "version": "0.0.0"}`)
+	}
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/web/package.json", `{
+  "name": "@acme/web",
+  "version": "0.0.0",
+  "dependencies": {
+    "@acme/core": "workspace:*",
+    "@acme/extra": "1.0.0",
+    "@acme/aside": "workspace:*"
+  },
+  "devDependencies": {"@acme/tools": "workspace:*"}
+}`)
+	r.Commit("feat(core,extra,tools,aside,web): bootstrap")
+
+	r.ReleaseOK()
+	web := arRead(t, r, "packages", "web", "package.json")
+	assert.Contains(t, web, `"@acme/core": "^0.1.0"`, "the declaration no selector narrows is rewritten")
+	assert.Contains(t, web, `"@acme/extra": "1.0.0"`,
+		"a range the match globs do not claim is a hand pin the policy protects")
+	assert.Contains(t, web, `"@acme/aside": "workspace:*"`,
+		"a provider outside `only` is none of this block's business")
+	assert.Contains(t, web, `"@acme/tools": "workspace:*"`,
+		"and a field outside `kinds` is not rewritten wherever the provider is listed")
+}
+
+// TestAutoVersionResolvesAProviderByItsDeclaredPath: a declaration
+// naming a package by a name no manifest in the workspace carries is still a
+// workspace edge when it points at the folder with a file: range. That is how
+// a workspace whose declared names and folder names disagree is reconciled at
+// all, and the replace strategy resolves the same declaration the same way.
+func TestAutoVersionResolvesAProviderByItsDeclaredPath(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces["libs"] = autoVersionSpace(&models.AutoVersionConfig{Range: "exact"})
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+	// "the-core" is a name nothing in the workspace declares; the path is
+	// what says which package it is.
+	r.WriteFile("packages/web/package.json",
+		`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"the-core": "file:../core"}}`)
+	r.Commit("feat(core,web): bootstrap")
+
+	r.ReleaseOK()
+	assert.Contains(t, arRead(t, r, "packages", "web", "package.json"),
+		`"the-core": "0.1.0"`, "the declared path named the provider the declared name did not")
+}
+
+// TestAutoVersionOnlyUpdatedLeavesTheRestBehind: `--only-updated` is
+// the flag of a job wired to run after every commit — it asks for this run's
+// updates alone, so a range that had fallen behind a provider released in an
+// earlier run stays behind rather than quietly catching up, and a replace rule
+// scoped to such a provider expands into nothing. Without the flag the same
+// fixture catches both up, which is what proves the flag is doing the
+// narrowing.
+func TestAutoVersionOnlyUpdatedLeavesTheRestBehind(t *testing.T) {
+	fixture := func(t *testing.T) *harness.Repo {
+		t.Helper()
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Spaces["libs"] = autoVersionSpace(&models.AutoVersionConfig{
+			WriteVersion: models.Bool(false),
+			Replace: []models.AutoVersionReplaceConfig{{
+				Files: []string{"README.md"},
+				Find:  "{provider}: pinned",
+				Write: "{provider}: {providerVersion}",
+			}},
+		})
+		cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.SeedPackage("packages", "web")
+		r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.1.0"}`)
+		r.WriteFile("packages/web/package.json",
+			`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "^0.0.1"}}`)
+		r.WriteFile("packages/web/README.md", "core: pinned\n")
+		r.Commit("feat(core,web): bootstrap")
+		// core is already released at this commit and has nothing pending;
+		// web's files still name the version before it, which is the "fallen
+		// behind" state both runs below start from.
+		r.Git("tag", "core@0.1.0")
+		return r
+	}
+
+	t.Run("the flag keeps a run to its own updates", func(t *testing.T) {
+		r := fixture(t)
+		res := r.Command("autoversion", "--only-updated", "--since", "all")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, arRead(t, r, "packages", "web", "package.json"),
+			`"@acme/core": "^0.0.1"`, "no provider this run updates, so no range moves")
+		assert.Equal(t, "core: pinned\n", arRead(t, r, "packages", "web", "README.md"),
+			"and a rule scoped to such a provider expands into nothing")
+	})
+
+	t.Run("without it the same run catches both up", func(t *testing.T) {
+		r := fixture(t)
+		res := r.Command("autoversion", "--since", "all")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, arRead(t, r, "packages", "web", "package.json"),
+			`"@acme/core": "^0.1.0"`, "the catch-up is what the flag was turning off")
+		assert.Equal(t, "core: 0.1.0\n", arRead(t, r, "packages", "web", "README.md"))
+	})
+}
+
+// TestAutoVersionRangePolicySpellsEachEcosystem: the keyword policies
+// are npm's, and an ecosystem that has no caret cannot be handed one. Python
+// pins with ==, and a policy that is neither a keyword nor a {version}
+// template is written through verbatim, which is how a workspace protocol
+// survives a reconciliation that is otherwise about versions.
+func TestAutoVersionRangePolicySpellsEachEcosystem(t *testing.T) {
+	t.Run("a python specifier pins whatever keyword was asked for", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Spaces["libs"] = autoVersionSpace(&models.AutoVersionConfig{Range: "caret"})
+		cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "lib"}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "lib")
+		r.SeedPackage("packages", "app")
+		r.WriteFile("packages/lib/pyproject.toml", "[project]\nname = \"acme-lib\"\nversion = \"0.0.0\"\n")
+		r.WriteFile("packages/app/pyproject.toml",
+			"[project]\nname = \"acme-app\"\nversion = \"0.0.0\"\ndependencies = [\"acme-lib==0.0.1\"]\n")
+		r.Commit("feat(lib,app): bootstrap")
+
+		r.ReleaseOK()
+		app := arRead(t, r, "packages", "app", "pyproject.toml")
+		assert.Contains(t, app, "acme-lib==0.1.0", "a caret is not a thing a specifier can carry")
+		assert.Contains(t, app, `version = "0.1.0"`, "and the package's own version still advances")
+	})
+
+	t.Run("a literal policy is written through as it stands", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Spaces["libs"] = autoVersionSpace(&models.AutoVersionConfig{Range: "workspace:^"})
+		cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.SeedPackage("packages", "web")
+		r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+		r.WriteFile("packages/web/package.json",
+			`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "workspace:*"}}`)
+		r.Commit("feat(core,web): bootstrap")
+
+		r.ReleaseOK()
+		assert.Contains(t, arRead(t, r, "packages", "web", "package.json"),
+			`"@acme/core": "workspace:^"`,
+			"a policy naming no version is a protocol, not a range to compute")
+	})
+}
+
+// TestAutoVersionReplaceRuleStepsOverAFolderItCannotEnter: failing a release over
+// an unreadable folder no rule was ever going to reach would be the worse
+// trade, so the folder is named in a warning and skipped whole, and the files
+// the rule could reach are rewritten as if it were not there.
+func TestAutoVersionReplaceRuleStepsOverAFolderItCannotEnter(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a folder's mode does not gate a directory read on windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root enters a folder whatever its mode says")
+	}
+	r := harness.New(t)
+	r.WriteConfigModel(libsConfig(echoBuild, 1))
+	r.SeedPackage("packages", "core")
+	r.WriteFile("packages/core/pin.txt", "pinned at 0.0.1\n")
+	r.WriteFile("packages/core/sealed/pin.txt", "pinned at 0.0.1\n")
+	r.Commit("feat(core): bootstrap")
+
+	sealed := r.Path("packages", "core", "sealed")
+	require.NoError(t, os.Chmod(sealed, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(sealed, 0o755) })
+
+	res := r.Command("autoreplacer", "--replace", "pinned at 0.0.1=>pinned at {version}",
+		"--files", "*.txt", "--since", "all")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "folder skipped", "the folder that was stepped over is named")
+	assert.Contains(t, res.Stdout, "sealed")
+
+	assert.Equal(t, "pinned at 0.1.0\n", arRead(t, r, "packages", "core", "pin.txt"),
+		"everything the rule could reach was still rewritten")
+}
+
+// TestAutoVersionManifestSurvivesAPartialDiskWrite exercises the public manifest
+// writer through the CLI. A short temporary-file write cannot replace a
+// package manifest with its truncated prefix, including on runtimes that
+// report the short count without an error.
+func TestAutoVersionManifestSurvivesAPartialDiskWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the file-size limit fixture uses a POSIX shell")
+	}
+	r := singlePackageRepo(t, echoBuild)
+	body := `{"name":"core","version":"0.0.0","description":"` +
+		strings.Repeat("previous manifest note", 150000) + `"}`
+	r.WriteFile("packages/core/package.json", body)
+	r.Commit("feat(core): first feature")
+	path := r.Path("packages", "core", "package.json")
+	require.NoError(t, os.Chmod(path, 0o640))
+
+	failed := r.Shell("trap '' XFSZ; ulimit -f 2048; dispat autowriter --package core --set-version 0.1.0")
+
+	require.Equal(t, 1, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
+	assert.Regexp(t, `file too large|short write`, failed.Stdout+failed.Stderr)
+	assert.Equal(t, body, readRepoFile(t, r, "packages/core/package.json"))
+	partial, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".dispat-write-*"))
+	require.NoError(t, err)
+	assert.Empty(t, partial, "the incomplete manifest was removed")
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+
+	retried := r.Command("autowriter", "--package", "core", "--set-version", "0.1.0")
+	require.Equal(t, 0, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
+	assert.Equal(t, strings.Replace(body, `"version":"0.0.0"`, `"version":"0.1.0"`, 1),
+		readRepoFile(t, r, "packages/core/package.json"))
+}
+
+// autoVersionSpace is the libs space with one autoVersion block and nothing
+// else: every scenario here differs only in that block and in the manifests
+// on disk.
+func autoVersionSpace(av *models.AutoVersionConfig) models.SpaceConfig {
+	return models.SpaceConfig{Path: models.PathList{"packages"}, Flow: buildPublish(), AutoVersion: av}
 }

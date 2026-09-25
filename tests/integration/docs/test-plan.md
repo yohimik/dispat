@@ -812,6 +812,9 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksStageHookAuthoritySplit`                    | Failures in `postPublish` and announce hooks log warnings (exiting 0 and preserving tags), whereas failures in gating hooks like `postBuild` fail the package, prevent tagging, and invoke `onFail` with the failing stage. |
 | `TestHooksSignFrameFiresFirst`                        | A space with a sign stage runs `beforeSign`, `sign` and `postSign` first in both a provider's and a consumer's frame, right after `beforeAll` and before the version stage and the build; a version stage configured under its propagate keys still reports `beforeVersion`, `version` and `postVersion`. |
 | `TestHooksRefuseAMalformedExport` | An export line dispat cannot read is an error of its own rather than a silently dropped export: a line that is not `NAME=value`, a name inside the reserved `DISPAT_` namespace, a line with no name and an export file the script removed each fail the package with exit 1 before the point of no return, quoting the line, and nothing is tagged; the same line from an announce hook, where nothing can be taken back, is a warning and the release stands. |
+| `TestHooksBeforeAllFailureEndsThePackageBeforeItsFirstStage` | beforeAll runs before a package has a stage at all, so its failure ends the package there, with no build, no publish and no tag, while the packages beside it release, and the outcome hook names the stage the package never entered. |
+| `TestHooksVersionScriptsSkippedWhenEveryProviderDied` | A consumer with changes of its own is not skipped when its provider fails, but its version stage then has nothing to sync manifests to, so the stage's scripts and their hooks do not run; the same fixture with the provider alive runs both. |
+| `TestHooksStageOutputTruncatesAnOverlongLine` | A stage that writes a megabyte with no newline in it has its line cut with a marker, the rest of that line dropped rather than logged as a line of its own, and the stage's later output still arrives; a line that never ends is dropped on the flush. |
 
 ### Goal 57: distributed execution across worker nodes (`execution_config_test.go`, `execution_outputs_config_test.go`, `execution_authority_test.go`, `execution_digest_test.go`, `execution_fixture_test.go`, `execution_worker_test.go`, `execution_preflight_test.go`, `execution_preflight_reply_faults_test.go`, `execution_build_test.go`, `execution_identity_test.go`, `execution_outputs_test.go`, `execution_placement_test.go`, `execution_task_identity_test.go`, `execution_crossdevice_linux_test.go`, `execution_prepare_test.go`, `execution_publish_test.go`, `execution_publish_preparation_faults_test.go`, `execution_authorization_test.go`, `execution_unknown_test.go`, `execution_admission_rules_test.go`, `execution_capacity_test.go`, `execution_inputs_test.go`, `execution_nodestate_test.go`, `execution_ownership_test.go`, `execution_fleet_locks_test.go`, `execution_modes_test.go`, `execution_pickup_parity_test.go`, `execution_faults_test.go`, `execution_transport_protocol_test.go`, `execution_recovery_test.go`, `execution_cancel_lease_race_test.go`, `execution_authorized_cancel_ack_test.go`, `execution_result_cancel_race_test.go`, `execution_result_foreign_cancel_test.go`, `execution_cancel_foreign_predecessor_test.go`, `execution_fleet_run_outputs_test.go`, `execution_run_test.go`, `execution_default_mailbox_test.go`, `execution_push_outcomes_test.go`)
 
@@ -1222,6 +1225,16 @@ release moves only because a provider's bump travelled down an edge the space de
 | `TestRecordsForceRewritesAnUnreachableTag` | A tag on a commit this branch cannot reach is invisible to the planner, so it records nothing dispat can plan around: with force on (the default) the write succeeds and the tag names this release. Force means "do not fail because the ref exists", not "overwrite whatever is there". |
 | `TestRecordsTagFailureDoesNotUnpublishTheRelease` | The post-publish failure model end to end: the run publishes, says so, refuses to move a tag sitting at a foreign commit, carries on through the packages after it, and exits non-zero, without ever calling the published package failed. |
 | `TestRecordsRefuseInvalidAliasTags` | An alias naming no part of the version, a moving alias pinned against moving, and an alias readable back as a release tag are each refused. |
+| `TestRecordsChangelogRefusesAPathItCannotWriteAtomically` | A changelog is rewritten whole through a temporary file and a rename, so a configured path whose parent is a file cannot be examined at all and the write is refused, leaving nothing written anywhere near it. |
+| `TestRecordsChangelogRefusesToReplaceASymlink` | A record or config file that is a symlink is refused by name, the link survives, and what it points at is never written through. |
+| `TestRecordsChangelogStopsWhenTheFolderTakesNoTemporaryFile` | A folder that cannot take the neighbouring temporary file stops the write before any part of the record exists. |
+| `TestRecordsChangelogSurvivesAPartialDiskWrite` | A filesystem quota interrupts the temporary changelog write. The original history and permissions survive, the partial file is removed, and an unrestricted retry adds exactly one entry without losing prior notes. |
+| `TestRecordsReleaseCommitIsSkippedWhenNothingWasStaged` | With the changelog off and no manifest to rewrite the release commit would hold nothing, so none is made and the tag names the commit the release was planned on, which is where it would have pointed with no commit stage at all. |
+| `TestRecordsPrereleaseSpellingFormatRendersBothShapes` | One format renders both shapes without being told which: a stable release drops the channel, the counter and the separators around them from the tag and from the version a script is handed, while the prerelease carries all three and the alias beside it still names the version's parts. |
+| `TestRecordsTagInventoryIsNotTheGlobThatFetchedIt` | The glob a format produces is a filter and not a decision: dispat's own release-lock ref and a ref that is the format's literal prefix with nothing where the version goes both come back from it, and neither may become a package's baseline. |
+| `TestRecordsGithubReissuesAReadOnlyCallThatFailedTransiently` | A 5xx and a rate limit are answers a later attempt can outlive, so a read-only call is re-issued with backoff, honouring a `Retry-After` named in whole seconds and ignoring one that is not; the ladder is finite and a repository that never answers refuses the run. |
+| `TestRecordsGithubHeadersWithoutBodyRespectTheRequestTimeout` | A GitHub API returning 200 headers and no completed body ends at its request timeout rather than hanging or treating partial JSON as a record. |
+| `TestRecordsGithubRefusesALookupItCannotRead` | "Does this tag already have a release" decides whether anything is created, so a refusal, a body that is not JSON and a body past the bound are each a hard error naming the call, never a shrug that reads as "nothing published yet". |
 
 ### Goal 46: draft GitHub releases (`draft_test.go`)
 
@@ -1246,6 +1259,7 @@ meets on day one and nowhere afterwards.
 | `TestRecordsFirstReleaseCoversTheWholeHistory` | The first release of a never-released package has no baseline, so its window is the whole history and its entry documents every conventional commit in it (a type that bumps nothing reaches no section); a baseline tag under the configured tagFormat is what cuts the first window down. |
 | `TestRecordsHandWrittenHeadingCollidesWithTheTag` | A heading somebody wrote by hand for the version this release happens to be is read as an entry that already exists: the release goes through and tags, the file is left alone, the skip is reported under W226 rather than silently, and the next release records normally. |
 | `TestRecordsAdoptedChangelogKeepsItsMode` | The rewrite replaces the whole file, so a changelog checked in with permissions of its own keeps them, which matters most on the file dispat did not create. |
+| `TestAdoptingOpensTheRecordUnderAHandWrittenPreamble` | A changelog with no entry headings of its own is all preamble, a heading inside a fenced block is not an entry, and the next entry still lands above the previous one. |
 
 ### Goal 48: the shape of a record entry (`recordformat_test.go`)
 
@@ -1284,6 +1298,8 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestCommandsHelpIsScopedToTheCommand` | `dispat <command> --help` prints that command's synopsis and its own flags only; the program help lists every command with the global flags alone. Both exit 0 with no config file or repository.                                            |
 | `TestCommandsVersionNamesThePlatform`  | `--version` reports the platform alongside the version, so a bug report says which of the release's binaries is running.                                                                                                                     |
 | `TestCommandsReservedWordsShadowTheirScripts` | A command word always wins over a run script of the same name, and `dispat run <word>` is how the script is reached instead. Table-driven over the words whose bare form needs arguments, so the command winning shows as the usage exit; the words whose bare form does something observable prove the same rule in their own areas. |
+| `TestInitWritesJSONByDefaultAndRefusesAFormatItCannotWrite` | `dispat init` writes JSON when no format is asked for, and refuses a format it cannot write with nothing created. |
+| `TestCommandLineUsageRefusalsExitTwo` | Every arity rule, foreign flag and enumerated flag value is refused with exit code 2 and a sentence naming the mistake. |
 
 ### Goal 18: the `dispat run` command (`run_test.go`)
 
@@ -1323,6 +1339,10 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestRunMultiCommandScript` | A name bound to several commands runs all of them, in order, as separate shell invocations in the package folder. Two claims only the real binary can make: the commands are separate processes rather than one string dispat joined, which a `cd` in the first proves by moving that shell and nothing else, so the second still writes where the script started; and the order is the written one, per package, which is what makes a sequence worth writing as one. |
 | `TestRunMultiCommandScriptArgumentsLandOnTheLast` | Arguments after `--` go to the script's work, which is its last command; the setup steps before it are left as the config wrote them. |
 | `TestRunMultiCommandScriptStopsAtAFailure` | The sequence gates its own remainder: the command after a failing one never runs, and the run fails. |
+| `TestRunScriptExecutionIsRecordedAtTrace` | What a run may say about a script is deliberately narrow, because the command text can contain a literal credential: the shell, the folder, the size of the command and how long it took, and never the command line itself. |
+| `TestRunScriptThatLeavesAChildHoldingTheOutputPipes` | Backgrounding a process is a legitimate thing for a release script to do, and a child that outlives the shell inherits the output pipes, so the wait for them is bounded and a script whose own process exited successfully has succeeded. |
+| `TestRunSeparatesAScriptItCannotRunFromOneThatFailed` | A missing interpreter and a script killed by a signal are dispat's own failure, said in its own words, rather than the script's answer. |
+| `TestRunQuotesForwardedArgumentsTheShellWouldOtherwiseRead` | Arguments typed after `--` are appended to a script's command text, so an ordinary flag goes through verbatim while an argument a shell would split, unquote or lose entirely is quoted and arrives as the one word it was typed as. |
 
 ### Goal 19: the standalone step commands (`standalone_test.go`)
 
@@ -1346,6 +1366,7 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestStandaloneCommitPushWithoutRemoteFails`    | `--push` without a remote exits 1, while the local commit and tag it had already made survive.                                                                                                                                                               |
 | `TestStandaloneCommitTagRefusesAProviderAtItsConsumersCommit` | E201 on the standalone path (SPEC 19.3): after the consumer proceeded past its failed provider (vector 80d), `dispat commit --tag --package core` at the consumer's release commit exits 1 naming the consumer, the provider and both remedies, with no tag and no commit; covering both packages tags the provider and then the consumer. A nested `dispat commit --tag` in the provider's publish, inside a run that releases both, is left to that run and succeeds. |
 | `TestStandaloneStepsTakeTheWindowFlags`         | The steps take `dispat run`'s window: `--since` picks what a revision addressed, `--consumers` pulls the dependents in, `--on-error` is validated on every sweeping command, and a package tagged by `dispat commit --tag` falls off the recomputed window until `--since all` puts it back. |
+| `TestStandaloneStepCommandsSummariseForAPerson` | The step commands are run by hand as often as by CI, so a workspace whose log format is the readable one gets its tally printed on standard output instead of logged as a JSON line nobody asked for. |
 
 ### Goal 20: the `--package` / `--space` / `--group` selection (`filter_test.go`)
 
@@ -1446,6 +1467,7 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestFleetSpaceCommandDoesNotReadUnselectedPeerFolder` | A healthy entry space command ignores an unrelated malformed peer folder configuration; selecting that peer reports the error before running. |
 | `TestFleetNestedHelpersKeepTheirCurrentPackageSelection` | Nested changed-package loops and conditional helpers infer the actual peer package directory while inheriting the fleet configuration. |
 | `TestExecInSpaceIsStillTheSpacesPrimaryFolder` | Widening what a space's scripts are moves nothing else: `--in space:<name>` is still the space's first configured folder, which no space folder file can restate, and it moves neither the script nor the environment. |
+| `TestExecRefusesAPlaceItCannotRunIn` | `--in` takes a folder or a level, and each way of naming neither, a space the configuration does not declare or a path that is there but is a file, is refused before the script is handed to a shell. |
 ### Goal 22: self-update (`selfupdate_test.go`)
 
 dispat builds two binaries at two versions and exercises them against a fake releases API. This tests the real
@@ -1536,6 +1558,8 @@ tool is a script that reports its own version, so every claim about which file l
 | `TestComputeEditsTheEntryTheAuthorSpelled` | A `packages` entry spelled with capitals is listed and edited at the key the file holds, so the write lands in the entry that is there rather than adding a folded twin beside it, and the edited config still loads. |
 | `TestComputeRefusesUnusableDiscoveryAndSelectionBeforeWriting` | A broken ignore rule aborts compute during package discovery and an unknown package selection aborts it before applying drift; neither changes the config or writes a backup, and correcting both inputs lets the same manifest edge land and converge. |
 | `TestComputeRefusesASymlinkedConfigWithoutSplittingItsTwoNames` | A root config symlink must not be replaced by a new regular file while its target keeps stale settings: compute refuses before backup or rewrite and preserves the alias and target bytes. |
+| `TestComputeStopsWhenTheAnswersRunOut` | `--interactive` asks per suggestion, and a stream that ends is an answer of its own: the remaining suggestions stay unapplied and the config is left byte for byte as it was. |
+| `TestComputeTOMLRefusalStillReportsTheSuggestion` | The TOML refusal is about writing rather than detecting, so the suggestion is printed exactly as the preview prints it. |
 
 Unit tests in `services/dispat/internal/app` cover the finer-grained rules, testing each case in memory rather than
 invoking the full binary. These include cross-ecosystem matching, interactive selection, TOML snippet fallbacks,
@@ -1562,6 +1586,17 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestAutoSignWritesTheOwnVersionBeforePropagate` | With `autoSign` beside `autoPropagate`, the sign stage writes each own version and leaves the range, the propagate stage then writes the range and no own version (snapshots from `postSign` and `postPropagate`, and the log's stage labels), and syncLock runs after a change only the sign stage made. |
 | `TestAutoSignStandaloneAutoversionWritesRangesOnly` | `dispat autoversion` on a package whose sign stage owns the own version writes the ranges alone, and `--write-version` asks for the own version explicitly. |
 | `TestAutoVersionRefusesAnOnlyNamingNoPackage` | `autoVersion.only` narrows a rewrite to named providers, so a name that is no package narrows it to nothing and is refused wherever the block was written, on the space or on one package of it. |
+| `TestAutoVersionSyncLockSkippedWhenNothingWasReconciled` | A release that rewrote no manifest has no lock to regenerate, so syncLock is not run. |
+| `TestAutoVersionSubstringNameMatchReachesAPackageWithNoManifest` | The substring fallback connects a declared name's last segment to a package's folder name, which is what a workspace whose packages declare no name of their own needs; `exact`, the default, leaves the same declaration alone. |
+| `TestAutoVersionReplaceRewritesOnlyWhatItMay` | A replace rule walks the package folder and skips what a workspace walk never enters and what is not a file to rewrite: the version text inside `node_modules` belongs to somebody else's code, and a link is not rewritten through. |
+| `TestAutoVersionReportsManifestsItCannotParse` | A manifest that does not parse is missing from the name index every later reconciliation reads, so it is a warning where the index is built and again where the package is reconciled, and the manifests that did parse are still rewritten. |
+| `TestAutoVersionDerivesNothingFromAnAmbiguousName` | Two packages declaring one manifest name make that name answer to nothing (W220), so a declaration naming it is left exactly as written while the packages' own versions still advance. |
+| `TestAutoVersionSelectorsNarrowTheRewrite` | `kinds`, `only` and `match` each leave a declaration alone for their own reason (the wrong field, a provider outside the list, a range the globs do not claim) next to one nothing narrows, which is the rewrite that proves the others were narrowed rather than broken. |
+| `TestAutoVersionResolvesAProviderByItsDeclaredPath` | A declaration naming a package by a name no manifest in the workspace carries is still a workspace edge when its `file:` range points at the folder, which is what a workspace whose declared and folder names disagree needs. |
+| `TestAutoVersionOnlyUpdatedLeavesTheRestBehind` | `--only-updated` keeps a run to its own updates: a range that had fallen behind a provider released earlier stays behind and a replace rule scoped to that provider expands into nothing, while the same command without it catches both up. |
+| `TestAutoVersionRangePolicySpellsEachEcosystem` | The keyword policies are npm's, so an ecosystem with no caret cannot be handed one: a Python specifier pins with `==` whatever keyword was asked for, and a policy that is neither keyword nor template is written through verbatim. |
+| `TestAutoVersionReplaceRuleStepsOverAFolderItCannotEnter` | A replace rule reaches any file at all, so it also reaches what the filesystem will not let it read: the folder is named in a warning and skipped whole, and everything the rule could reach is still rewritten. |
+| `TestAutoVersionManifestSurvivesAPartialDiskWrite` | A filesystem quota interrupts the CLI's manifest rewrite after a temporary file exists. Even when the runtime reports a short count without an error, the original bytes and mode survive, the partial file is removed, and an unrestricted retry changes only the version. |
 
 ### Goal 25: the manifest commands (`manifests_test.go`)
 
@@ -1611,6 +1646,7 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestAutoWriterLocalFlagsReachTheExitCode`     | Combining `--link-local` with `--unlink-local` exits 2. Providing a bare local flag completes the request, and derived edits never trip stale checks under `--strict`.                                                                     |
 | `TestAutoWriterLinkLocalReachesAnIndirectRequire` | Go builds only apply replace directives found in the main module. dispat inspects indirect requires so that providers reached through intermediate modules are redirected in the consumer's `go.mod`. |
 | `TestAutoWriterSetLocalLeavesAnIndirectRequireAlone` | Range updates only modify direct declarations. Indirect requires are managed by toolchains, so dispat leaves them untouched. |
+| `TestAutoWriterLeavesTheVersionOfAPackageNobodyVersions` | `{version}` resolves to the covered package's planned version and a package under versioning "none" has none, so the own-version write is skipped and said out loud rather than writing "0.0.0" into a manifest nobody versions. |
 
 ### Goal 27: the `autoreplacer` command (`autoreplacer_test.go`)
 
@@ -1646,6 +1682,7 @@ stale-endpoint removals, manifest-rank and version-shape rules, and error paths.
 | `TestReleaseMergesWhatLandedTwice` | The window the recovery recovers from is still open while it recovers. A second commit lands under the recovery's own push, so the merge and the push go round again, and the invariant holds across both: the tag still names the release commit rather than either merge, and that commit is still on the tip's first-parent chain. |
 | `TestReleaseRefusesToRepublishAnExistingTag` | The recovery pushes this run's tags again, so a checkout that planned a version somebody else published would write its own tag over that record. The remote's tags are read first: the run stops, names the tag, and the published ref is left where its own release put it. The record arrives mid-release here, which is the only way it can still reach the recovery: one the remote already held is refused under the lock (goal 59). |
 | `TestReleaseSettlesAConflictAndKeepsBothSides` | What landed changed the same file the release commit writes. The release has published by then, so it completes: `W243`, exit `0`, this release's side of the conflicting file with no markers in it, everything of theirs that did not conflict still in the merge, their side pushed to a `release-conflicts/...` branch, and both the changelog entry and the GitHub release body naming the file and that branch. The tag stays on the release commit, the lock is given back, and the run after it plans normally: a merge commit that edits changelogs still resolves to no package and raises no `W131`. |
+| `TestReleaseSettlesAConflictOverAFileItDeleted` | The conflict with no file to take: this side removed what the commits that landed mid-release edited, so this side is the absence and the path is removed from the merge, with their edit kept on the quarantine branch and both halves named in the record. |
 
 ### Goal 30: the release lock (`lock_test.go`)
 
@@ -1957,6 +1994,10 @@ the command exits with — plus the wire details only a real HTTP server can wit
 | `TestWebhookScriptProgressTrigger`                  | `dispat trigger progress` raised from a stage script lands its `script.progress` deliveries between the stage's own bracket events, attributed to the raising package, stage and version, with the value (including a genuine 0) and the message intact. |
 | `TestWebhookTriggerOutsideARunIsHarmless`           | The trigger command by hand: it delivers without the package fields, exits 0, and a dead endpoint is a W239 warning rather than an exit code — a script cannot fail its stage by reporting progress.          |
 | `TestWebhookSignStageOnlyWhenConfigured`            | A package with a sign stage reports `stage.started:sign` and `stage.succeeded:sign` before its build, a failed sign stage reports `failedStage: sign`, and a package with no sign configuration reports exactly the stages it always did. |
+| `TestWebhookGivesUpOnAStatusNoRetryWouldChange` | A 5xx and a 429 are answers a later attempt could outlive and a 400 is not, so the ladder stops at the first non-retryable status, reports the ordinary W239, and leaves the command's exit code alone. |
+| `TestWebhookFormatRendersTheProgressValue` | A rendered payload is for an endpoint that wants its own shape, and `progress` is the one event carrying a number: it renders as the number for that event and as nothing for every event without one, so the template stays valid JSON throughout a run. |
+| `TestWebhookTriggerFallsBackWhenTheWorkspaceCannotBeWalked` | A trigger is a leaf command and must not fail over what a release would refuse: with the workspace unreadable the top-level list is resolved unrestricted, the event is still delivered, and the run says why it could do no better. |
+| `TestWebhookWithoutItsSecretDeliversUnsigned` | A secret named in the configuration and missing from the environment still delivers, because a notification is not a security boundary, and the run says out loud that nothing is signing the deliveries rather than letting a receiver quietly stop verifying. |
 
 ### Goal 43: the key-features smoke walk (`smoke_features_test.go`)
 
@@ -2065,6 +2106,12 @@ Unix process-tree termination tests do not prove Windows descendant termination.
 | `TestCommitValidationCancellationStopsEditorProcessTree` | Cancellation stops the editor and its child process, preserves HEAD, and removes invocation-private hook files. |
 | `TestCommitValidationNeverUsesFlagValueAsCommand` | A package flag value named commit cannot select authoring; rejection preserves HEAD and the staged index. |
 | `TestCommitValidationRejectsPrefixedReleaseFlagsBeforeMutation` | Release selectors before an actual authoring command fail without modifying HEAD or the staged index. |
+| `TestCommitAuthoringKeepsGitsOwnShortOptions` | Git's short options survive the argv split, an inline global flag still applies, and a release-step flag cannot ride along with an authoring commit. |
+| `TestCommitScissorsCleanupCutsAtTheRepositoryCommentCharacter` | The scissors cleanup cuts at a line spelled with the repository's own comment character or string, and degrades to the whitespace cleanup when no editor ran. |
+| `TestCommitRefusesCleanupItCannotCarryOut` | A cleanup mode dispat cannot reproduce, from the command line or the repository configuration, and an automatic comment character, are refused before Git creates anything. |
+| `TestCommitRefusesCommandLinesItCannotForward` | A Git option dispat cannot reason about, and an option missing the value it needs, are refused with HEAD and the staged diff untouched. |
+| `TestCommitMessageGateRefusesUnusableHookInput` | Every way Git's commit-msg invocation contract can be broken is refused by name, and an accepted message is rewritten in place under the requested cleanup. |
+| `TestCommitAuthoringHandlesTheRepositoryItFinds` | An oversized Git configuration value is refused rather than truncated, and a repository with no hooks folder or with a folder among its hooks authors normally. |
 
 ### Goal 51: standalone message diagnostics (`diagnostics_test.go`)
 
@@ -2288,22 +2335,7 @@ ordinary authoring paths; nothing here repeats them.
 
 | Test | Invariant |
 | --- | --- |
-| `TestCovAtomicWriteRefusesToReplaceASymlink` | A record or config file that is a symlink is refused by name, the link survives, and what it points at is never written through. |
-| `TestAtomicChangelogSurvivesPartialDiskWrite` | A filesystem quota interrupts the temporary changelog write. The original history and permissions survive, the partial file is removed, and an unrestricted retry adds exactly one entry without losing prior notes. |
-| `TestAtomicManifestSurvivesPartialDiskWrite` | A filesystem quota interrupts the CLI's manifest rewrite after a temporary file exists. Even when the runtime reports a short count without an error, the original bytes and mode survive, the partial file is removed, and an unrestricted retry changes only the version. |
-| `TestCovAtomicWriteStopsWhenTheFolderTakesNoTemporaryFile` | A folder that cannot take the neighbouring temporary file stops the write before any part of the record exists. |
-| `TestCovInitWritesJSONByDefaultAndRefusesTheRest` | `dispat init` writes JSON when no format is asked for, and refuses a format it cannot write with nothing created. |
-| `TestCovCommitScissorsCleanupCutsAtTheRepositoryCommentCharacter` | The scissors cleanup cuts at a line spelled with the repository's own comment character or string, and degrades to the whitespace cleanup when no editor ran. |
-| `TestCovCommitRefusesCleanupItCannotCarryOut` | A cleanup mode dispat cannot reproduce, from the command line or the repository configuration, and an automatic comment character, are refused before Git creates anything. |
-| `TestCovCommitRefusesCommandLinesItCannotForward` | A Git option dispat cannot reason about, and an option missing the value it needs, are refused with HEAD and the staged diff untouched. |
-| `TestCovCommitMessageGateRefusesUnusableHookInput` | Every way Git's commit-msg invocation contract can be broken is refused by name, and an accepted message is rewritten in place under the requested cleanup. |
-| `TestCovCommitAuthoringKeepsGitsOwnShortOptions` | Git's short options survive the argv split, an inline global flag still applies, and a release-step flag cannot ride along with an authoring commit. |
-| `TestCovCommitAuthoringHandlesTheRepositoryItFinds` | An oversized Git configuration value is refused rather than truncated, and a repository with no hooks folder or with a folder among its hooks authors normally. |
-| `TestCovUsageRefusalsExitTwo` | Every arity rule, foreign flag and enumerated flag value is refused with exit code 2 and a sentence naming the mistake. |
 | `TestCovNestedWorkspaceContextIsRefusedWhenItCannotBeRead` | A nested workspace context that does not decode is a usage refusal rather than a silent fall back to this folder's own configuration. |
-| `TestCovShellRunSeparatesAScriptItCannotRunFromOneThatFailed` | A missing interpreter and a script killed by a signal are dispat's own failure, said in its own words, rather than the script's answer. |
-| `TestCovComputeTOMLRefusalStillReportsTheSuggestion` | The TOML refusal is about writing rather than detecting, so the suggestion is printed exactly as the preview prints it. |
-| `TestCovChangelogOpensTheRecordUnderAHandWrittenPreamble` | A changelog with no entry headings of its own is all preamble, a heading inside a fenced block is not an entry, and the next entry still lands above the previous one. |
 | `TestPublicAPIWriterDropsDuplicateNpmLinksAcrossOverrideFields` | A hand-edited package manifest carrying the same local redirect in npm, Yarn and pnpm override fields drops every copy while preserving unrelated registry overrides. |
 | `TestPublicAPIWriterKeepsRegistryOverrideBesideDuplicateLocalLink` | Repointing multiple local redirect copies updates each path, then dropping them leaves a registry-version override of the same package untouched. |
 
@@ -2371,22 +2403,11 @@ silently did nothing both read as success in a log.
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailBeforeAllFailureEndsThePackageBeforeItsFirstStage` | beforeAll runs before a package has a stage at all, so its failure ends the package there, with no build, no publish and no tag, while the packages beside it release, and the outcome hook names the stage the package never entered. |
-| `TestCovTailVersionScriptsSkippedWhenEveryProviderDied` | A consumer with changes of its own is not skipped when its provider fails, but its version stage then has nothing to sync manifests to, so the stage's scripts and their hooks do not run; the same fixture with the provider alive runs both. |
-| `TestCovTailSyncLockSkippedWhenNothingWasReconciled` | A release that rewrote no manifest has no lock to regenerate, so syncLock is not run. |
-| `TestCovTailChangelogRefusesAPathItCannotWriteAtomically` | A changelog is rewritten whole through a temporary file and a rename, so a configured path whose parent is a file cannot be examined at all and the write is refused, leaving nothing written anywhere near it. |
 
 ### Native auto-versioning
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailAutoVersionReportsManifestsItCannotParse` | A manifest that does not parse is missing from the name index every later reconciliation reads, so it is a warning where the index is built and again where the package is reconciled, and the manifests that did parse are still rewritten. |
-| `TestCovTailAutoVersionDerivesNothingFromAnAmbiguousName` | Two packages declaring one manifest name make that name answer to nothing (W220), so a declaration naming it is left exactly as written while the packages' own versions still advance. |
-| `TestCovTailAutoVersionSelectorsNarrowTheRewrite` | `kinds`, `only` and `match` each leave a declaration alone for their own reason (the wrong field, a provider outside the list, a range the globs do not claim) next to one nothing narrows, which is the rewrite that proves the others were narrowed rather than broken. |
-| `TestCovTailAutoVersionResolvesAProviderByItsDeclaredPath` | A declaration naming a package by a name no manifest in the workspace carries is still a workspace edge when its `file:` range points at the folder, which is what a workspace whose declared and folder names disagree needs. |
-| `TestCovTailAutoVersionOnlyUpdatedLeavesTheRestBehind` | `--only-updated` keeps a run to its own updates: a range that had fallen behind a provider released earlier stays behind and a replace rule scoped to that provider expands into nothing, while the same command without it catches both up. |
-| `TestCovTailAutoVersionRangePolicySpellsEachEcosystem` | The keyword policies are npm's, so an ecosystem with no caret cannot be handed one: a Python specifier pins with `==` whatever keyword was asked for, and a policy that is neither keyword nor template is written through verbatim. |
-| `TestCovTailReplaceRuleStepsOverAFolderItCannotEnter` | A replace rule reaches any file at all, so it also reaches what the filesystem will not let it read: the folder is named in a warning and skipped whole, and everything the rule could reach is still rewritten. |
 
 ### The configuration a run is refused for
 
@@ -2397,18 +2418,11 @@ silently did nothing both read as success in a log.
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailStepCommandsSummariseForAPerson` | The step commands are run by hand as often as by CI, so a workspace whose log format is the readable one gets its tally printed on standard output instead of logged as a JSON line nobody asked for. |
-| `TestCovTailAutoWriterLeavesTheVersionOfAPackageNobodyVersions` | `{version}` resolves to the covered package's planned version and a package under versioning "none" has none, so the own-version write is skipped and said out loud rather than writing "0.0.0" into a manifest nobody versions. |
-| `TestCovTailComputeStopsWhenTheAnswersRunOut` | `--interactive` asks per suggestion, and a stream that ends is an answer of its own: the remaining suggestions stay unapplied and the config is left byte for byte as it was. |
-| `TestCovTailWebhookGivesUpOnAStatusNoRetryWouldChange` | A 5xx and a 429 are answers a later attempt could outlive and a 400 is not, so the ladder stops at the first non-retryable status, reports the ordinary W239, and leaves the command's exit code alone. |
-| `TestCovTailExecRefusesAPlaceItCannotRunIn` | `--in` takes a folder or a level, and each way of naming neither, a space the configuration does not declare or a path that is there but is a file, is refused before the script is handed to a shell. |
-| `TestCovTailWebhookFormatRendersTheProgressValue` | A rendered payload is for an endpoint that wants its own shape, and `progress` is the one event carrying a number: it renders as the number for that event and as nothing for every event without one, so the template stays valid JSON throughout a run. |
 
 ### The GitHub recorder's unreadable answers
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailGitHubRefusesALookupItCannotRead` | "Does this tag already have a release" decides whether anything is created, so a refusal, a body that is not JSON and a body past the bound are each a hard error naming the call, never a shrug that reads as "nothing published yet". |
 
 ### The download commands
 
@@ -2436,8 +2450,6 @@ did nothing and a directive that worked produce the same version.
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailPrereleaseSpellingFormatRendersBothShapes` | One format renders both shapes without being told which: a stable release drops the channel, the counter and the separators around them from the tag and from the version a script is handed, while the prerelease carries all three and the alias beside it still names the version's parts. |
-| `TestCovTailTagInventoryIsNotTheGlobThatFetchedIt` | The glob a format produces is a filter and not a decision: dispat's own release-lock ref and a ref that is the format's literal prefix with nothing where the version goes both come back from it, and neither may become a package's baseline. |
 
 ### The planner's channel axis
 
@@ -2467,8 +2479,6 @@ did nothing and a directive that worked produce the same version.
 
 | Test | Claim proven |
 |------|--------------|
-| `TestCovTailScriptExecutionIsRecordedAtTrace` | What a run may say about a script is deliberately narrow, because the command text can contain a literal credential: the shell, the folder, the size of the command and how long it took, and never the command line itself. |
-| `TestCovTailScriptThatLeavesAChildHoldingTheOutputPipes` | Backgrounding a process is a legitimate thing for a release script to do, and a child that outlives the shell inherits the output pipes, so the wait for them is bounded and a script whose own process exited successfully has succeeded. |
 
 ## Production finalization regressions
 
@@ -2786,23 +2796,13 @@ is failure that must be legible.
 
 | Test | Claim proven |
 |------|--------------|
-| `TestReleaseTruncatesAnOverlongOutputLine` | A stage that writes a megabyte with no newline in it has its line cut with a marker, the rest of that line dropped rather than logged as a line of its own, and the stage's later output still arrives; a line that never ends is dropped on the flush. |
-| `TestAutoVersionSubstringNameMatchReachesAPackageWithNoManifest` | The substring fallback connects a declared name's last segment to a package's folder name, which is what a workspace whose packages declare no name of their own needs; `exact`, the default, leaves the same declaration alone. |
-| `TestAutoVersionReplaceRewritesOnlyWhatItMay` | A replace rule walks the package folder and skips what a workspace walk never enters and what is not a file to rewrite: the version text inside `node_modules` belongs to somebody else's code, and a link is not rewritten through. |
-| `TestWebhookTriggerFallsBackWhenTheWorkspaceCannotBeWalked` | A trigger is a leaf command and must not fail over what a release would refuse: with the workspace unreadable the top-level list is resolved unrestricted, the event is still delivered, and the run says why it could do no better. |
-| `TestWebhookWithoutItsSecretDeliversUnsigned` | A secret named in the configuration and missing from the environment still delivers, because a notification is not a security boundary, and the run says out loud that nothing is signing the deliveries rather than letting a receiver quietly stop verifying. |
-| `TestGitHubReissuesAReadOnlyCallThatFailedTransiently` | A 5xx and a rate limit are answers a later attempt can outlive, so a read-only call is re-issued with backoff, honouring a `Retry-After` named in whole seconds and ignoring one that is not; the ladder is finite and a repository that never answers refuses the run. |
-| `TestGitHubHeadersWithoutBodyRespectTheRequestTimeout` | A GitHub API returning 200 headers and no completed body ends at its request timeout rather than hanging or treating partial JSON as a record. |
 
 ### The git layer and the planner
 
 | Test | Claim proven |
 |------|--------------|
-| `TestGitReleaseCommitIsSkippedWhenNothingWasStaged` | With the changelog off and no manifest to rewrite the release commit would hold nothing, so none is made and the tag names the commit the release was planned on, which is where it would have pointed with no commit stage at all. |
 | `TestPolyrepoRefGuardWatchesAliasNamespaces` | The guard reads every ref a configured package may write before planning, so a space that writes alias tags widens that namespace beyond the release tag and an alias is not a ref nobody was watching. |
 | `TestPolyrepoCheckpointVerifiesTheSourceBranchItPinsTo` | A control checkpoint is a gitlink, and a gitlink to a revision the source's own remote does not carry is a pointer into nothing for everybody who clones the fleet next. A checkpoint made with no release tag has only the source branch to prove the revision is durable, so that is what it reads before the control push makes the pointer permanent. |
-| `TestReleaseSettlesAConflictOverAFileItDeleted` | The conflict with no file to take: this side removed what the commits that landed mid-release edited, so this side is the absence and the path is removed from the merge, with their edit kept on the quarantine branch and both halves named in the record. |
-| `TestRunQuotesForwardedArgumentsTheShellWouldOtherwiseRead` | Arguments typed after `--` are appended to a script's command text, so an ordinary flag goes through verbatim while an argument a shell would split, unquote or lose entirely is quoted and arrives as the one word it was typed as. |
 
 ## Regression fences
 

@@ -592,3 +592,46 @@ func conflictBranchOf(t *testing.T, r *harness.Repo) string {
 	t.Fatalf("no release-conflicts branch on the remote:\n%s", r.Git("ls-remote", "--heads", "origin"))
 	return ""
 }
+
+// TestReleaseSettlesAConflictOverAFileItDeleted: the conflict with no file to
+// take. This side removed the file the release no longer ships; the commits
+// that landed mid-release edited it. There is nothing to check out as this
+// side's version, so this side is the absence, and the path is removed from
+// the merge instead. Their edit survives on the branch the run sets aside, and
+// both halves are named in the record.
+func TestReleaseSettlesAConflictOverAFileItDeleted(t *testing.T) {
+	r := harness.New(t)
+	bare := r.AddBareRemote()
+	// The build lands their edit on the remote and then deletes the file this
+	// release is dropping, so the release commit records a deletion of the
+	// path they just changed.
+	script := midReleasePush(t, bare, "docs(core): edit the file this release drops",
+		"packages/core/doomed.txt", "their edit\n") + "; rm -f doomed.txt"
+	cfg := libsConfig(script, 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.WriteFile("packages/core/doomed.txt", "the original\n")
+	r.Commit("feat(core): first")
+	r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+
+	res := r.Release()
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, "W243"), "the conflict is reported: %v", res.Events)
+
+	assert.NoFileExists(t, r.Path("packages", "core", "doomed.txt"),
+		"this side of the conflict is the file's absence")
+	assert.NoFileExists(t, r.Path(".git", "MERGE_HEAD"), "and the merge was finished, not left open")
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	assert.Contains(t, r.Git("ls-remote", "origin"), "refs/tags/core@0.1.0")
+
+	quarantine := conflictBranchOf(t, r)
+	assert.Contains(t, r.Git("log", "--format=%s", "origin/"+quarantine),
+		"edit the file this release drops", "their edit is kept where it can be read")
+	assert.Contains(t, r.Git("show", "origin/"+quarantine+":packages/core/doomed.txt"), "their edit")
+
+	entry := changelogOf(t, r, "core")
+	assert.Contains(t, entry, "packages/core/doomed.txt", "the record names the file")
+	assert.Contains(t, entry, quarantine, "and the branch their side is on")
+	assert.False(t, strings.Contains(entry, "<<<<"), "no conflict markers were committed")
+}

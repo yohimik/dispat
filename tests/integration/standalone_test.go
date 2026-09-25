@@ -692,3 +692,58 @@ func TestStandaloneCommitTagName(t *testing.T) {
 		assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	})
 }
+
+// TestStandaloneStepCommandsSummariseForAPerson: the step commands are run by
+// hand as often as by CI, and a run whose log format is the readable one
+// prints its tally on standard output rather than logging it as a JSON line
+// nobody asked for. The counts are the same either way; only where they go
+// differs.
+func TestStandaloneStepCommandsSummariseForAPerson(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"the writer sweep": {
+			args: []string{"autowriter", "--set-version", "{version}", "--since", "all"},
+			want: "applied",
+		},
+		"the replacer sweep": {
+			args: []string{"autoreplacer", "--replace", "core: pinned=>core: {version}",
+				"--files", "README.md", "--since", "all"},
+			want: "occurrence(s)",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := prettyStepRepo(t)
+			res := r.Command(tc.args...)
+			require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout, "package(s):", "the tally is printed, not logged")
+			assert.Contains(t, res.Stdout, tc.want)
+			// A version the sweep wrote is an applied edit: the summary must
+			// not say "0 applied" beside the manifests it changed.
+			assert.NotContains(t, res.Stdout, " 0 applied", "stdout:\n%s", res.Stdout)
+			assert.Empty(t, res.Events, "a pretty run logs no JSON lines at all")
+		})
+	}
+}
+
+// prettyStepRepo is a workspace whose configured log format is the pretty
+// one a person reads, which is what makes the step commands print a summary
+// instead of logging one.
+func prettyStepRepo(t *testing.T) *harness.Repo {
+	t.Helper()
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.LogFormat = "pretty"
+	cfg.Spaces["libs"] = autoVersionSpace(&models.AutoVersionConfig{Enabled: models.Bool(true)})
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+	r.WriteFile("packages/web/package.json",
+		`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "workspace:*"}}`)
+	r.WriteFile("packages/web/README.md", "core: pinned\n")
+	r.Commit("feat(core,web): bootstrap")
+	return r
+}

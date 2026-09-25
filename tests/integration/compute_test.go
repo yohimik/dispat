@@ -654,3 +654,71 @@ func TestComputeEditsTheEntryTheAuthorSpelled(t *testing.T) {
 	// added: two keys that fold together are refused at load.
 	r.StatusOK()
 }
+
+// TestComputeStopsWhenTheAnswersRunOut: --interactive asks per
+// suggestion, and a stream that ends is an answer of its own — the remaining
+// suggestions stay unapplied and the config is left as it was, rather than the
+// command treating end of input as consent or as a failure.
+func TestComputeStopsWhenTheAnswersRunOut(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	r.WriteConfigModel(cfg)
+	before := arRead(t, r, "dispat.json")
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+	r.WriteFile("packages/web/package.json",
+		`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "^0.0.1"}}`)
+	r.Commit("feat(core,web): a workspace edge no config declares")
+
+	// No answers at all: standard input is at its end before the first prompt.
+	res := r.Command("compute", "--interactive")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "apply?", "the prompt was asked")
+	assert.Equal(t, before, arRead(t, r, "dispat.json"),
+		"and a question nobody answered changes nothing")
+}
+
+// TestComputeTOMLRefusalStillReportsTheSuggestion: the refusal is about
+// writing, not about detecting. The suggestion itself is printed exactly as
+// the preview prints it, so an operator can act on it by hand.
+func TestComputeTOMLRefusalStillReportsTheSuggestion(t *testing.T) {
+	r := harness.New(t)
+	r.WriteFile("dispat.toml", tomlWorkspace)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "web")
+	r.WriteFile("packages/core/package.json", `{"name": "@acme/core", "version": "0.0.0"}`)
+	r.WriteFile("packages/web/package.json",
+		`{"name": "@acme/web", "version": "0.0.0", "dependencies": {"@acme/core": "workspace:*"}}`)
+	r.Commit("feat(core,web): bootstrap")
+
+	preview := r.Command("compute", "--config", "dispat.toml")
+	require.Equal(t, 0, preview.Code, "stdout:\n%s\nstderr:\n%s", preview.Stdout, preview.Stderr)
+	assert.Contains(t, preview.Stdout, "+ add     web -> core (dependencies)")
+
+	refused := r.Command("compute", "--write", "--config", "dispat.toml")
+	assert.Equal(t, 1, refused.Code)
+	assert.Contains(t, refused.Stdout, "+ add     web -> core (dependencies)",
+		"the refusal repeats what it found before saying it cannot write it")
+}
+
+// tomlWorkspace is a TOML configuration of one space at packages/, with the
+// two scripts every fixture uses. extra is appended verbatim.
+const tomlWorkspace = `logLevel = "info"
+logFormat = "json"
+updateCheck = false
+
+[github]
+enabled = false
+
+[scripts]
+build = "echo building"
+publish = "echo publishing"
+
+[spaces.libs]
+path = "packages"
+
+[spaces.libs.flow]
+build = "build"
+publish = "publish"
+`

@@ -266,3 +266,58 @@ func TestRecordsAdoptedChangelogKeepsItsMode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
+
+// TestAdoptingOpensTheRecordUnderAHandWrittenPreamble: a file with no
+// entry headings of its own is all preamble, and a heading inside a fenced
+// block is not an entry. The first dispat entry goes under the whole thing,
+// and the next one goes above it without disturbing the prose.
+func TestAdoptingOpensTheRecordUnderAHandWrittenPreamble(t *testing.T) {
+	r := singlePackageRepo(t, echoBuild)
+	r.WriteFile("packages/core/CHANGELOG.md", handWrittenChangelog)
+	r.Commit("feat(core): first feature")
+
+	res := r.Command("changelog", "--package", "core")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+
+	first := changelogOf(t, r, "core")
+	assertOrderedIn(t, first,
+		"# Core history",
+		"```md",
+		"## core@9.9.9 (1999-01-01)",
+		"Thanks for reading.",
+		"## core@0.1.0 (",
+	)
+	assert.Equal(t, 1, strings.Count(first, "## core@0.1.0 ("), "one entry:\n%s", first)
+
+	// Release the entry that was just written, then earn a second one.
+	r.ReleaseOK()
+	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
+	r.WriteFile("packages/core/main.txt", "fixed\n")
+	r.Commit("fix(core): repair the first feature")
+
+	res = r.Command("changelog", "--package", "core")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+
+	second := changelogOf(t, r, "core")
+	assertOrderedIn(t, second,
+		"# Core history",
+		"## core@9.9.9 (1999-01-01)",
+		"Thanks for reading.",
+		"## core@0.1.1 (",
+		"## core@0.1.0 (",
+	)
+	assert.Contains(t, second, "Kept by hand until now.", "the prose survives the rewrite")
+}
+
+// handWrittenChangelog is a changelog kept by hand: a title dispat did not
+// write, prose, and a fenced example that looks exactly like an entry
+// heading.
+const handWrittenChangelog = "# Core history\n" +
+	"\n" +
+	"Kept by hand until now. Entries look like this:\n" +
+	"\n" +
+	"```md\n" +
+	"## core@9.9.9 (1999-01-01)\n" +
+	"```\n" +
+	"\n" +
+	"Thanks for reading.\n"

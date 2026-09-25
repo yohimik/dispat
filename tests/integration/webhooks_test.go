@@ -858,3 +858,112 @@ func TestWebhookSignStageOnlyWhenConfigured(t *testing.T) {
 	assert.Equal(t, "api", failed["package"])
 	assert.Equal(t, "sign", failed["failedStage"])
 }
+
+// TestWebhookGivesUpOnAStatusNoRetryWouldChange: a 5xx and a 429 are
+// answers a later attempt could outlive, and a 400 is not. Retrying one is
+// only a slower way to fail, so the ladder stops at the first non-retryable
+// status, the failure is the ordinary W239, and the run is unaffected either
+// way.
+func TestWebhookGivesUpOnAStatusNoRetryWouldChange(t *testing.T) {
+	sink := newWebhookSink(t, 400)
+	r := harness.New(t)
+	r.WriteConfigModel(webhooksConfig(echoBuild,
+		models.WebhookConfig{URL: sink.srv.URL, Events: []string{"script.*"}}))
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	res := r.Command("trigger", "progress", "40", "compiling assets")
+	require.Equal(t, 0, res.Code, "a notification may never fail a script; stdout:\n%s", res.Stdout)
+	assert.True(t, harness.IsCodePresent(res.Events, "W239"), "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "webhook delivery failed")
+	assert.Len(t, sink.all(), 1, "a refusal no retry would change is tried once")
+}
+
+// TestWebhookFormatRendersTheProgressValue: a rendered payload is for
+// an endpoint that wants its own shape, and `progress` is the one event
+// carrying a number rather than a string. It renders as the number for the
+// event that has one and as nothing for every event that does not, so a
+// template embedding it stays valid JSON throughout a run.
+func TestWebhookFormatRendersTheProgressValue(t *testing.T) {
+	sink := newWebhookSink(t)
+	r := harness.New(t)
+	r.WriteConfigModel(webhooksConfig(echoBuild, models.WebhookConfig{
+		URL:    sink.srv.URL,
+		Format: `{"event":"{event}","percent":"{progress}","said":"{message}"}`,
+	}))
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	require.Equal(t, 0, r.Command("trigger", "progress", "40", "compiling assets").Code)
+	deliveries := sink.all()
+	require.Len(t, deliveries, 1)
+	body := string(deliveries[0].Body)
+	assert.Contains(t, body, `"percent":"40"`, "the one typed event carries its number")
+	assert.Contains(t, body, `"said":"compiling assets"`)
+	assert.Contains(t, body, `"event":"script.progress"`)
+
+	// An event with no progress renders the same template with nothing in
+	// that position rather than with a zero somebody would read as a value.
+	require.Equal(t, 0, r.Command("trigger", "deployed", "version is live").Code)
+	deliveries = sink.all()
+	require.Len(t, deliveries, 2)
+	assert.Contains(t, string(deliveries[1].Body), `"percent":""`)
+}
+
+// TestWebhookTriggerFallsBackWhenTheWorkspaceCannotBeWalked: a trigger is a
+// leaf command and must not fail over what a release would refuse. With the
+// workspace unreadable there is no per-package routing to resolve, so the
+// top-level list is resolved unrestricted — every event reaches it — and the
+// command says why it could not do better.
+func TestWebhookTriggerFallsBackWhenTheWorkspaceCannotBeWalked(t *testing.T) {
+	sink := newWebhookSink(t)
+	r := harness.New(t)
+	cfg := webhooksConfig(echoBuild, models.WebhookConfig{URL: sink.srv.URL})
+	// A space whose folder is not there: a load concern nobody has, and a
+	// discovery failure every command that walks the workspace meets.
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"packages-that-were-moved"}, Flow: buildPublish()},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	// The release the same configuration would refuse, for contrast: the
+	// discovery failure is real, and only the trigger tolerates it.
+	res := r.Release()
+	assert.NotEqual(t, 0, res.Code, "a release will not run against a workspace it cannot walk")
+
+	res = r.Command("trigger", "smoke-passed", "all", "green")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout+res.Stderr, "workspace discovery failed")
+
+	payload := sink.find(t, "script.smoke-passed")
+	assert.Equal(t, "all green", payload["message"])
+	assert.Nil(t, payload["package"], "outside a run there is no package to name")
+}
+
+// TestWebhookWithoutItsSecretDeliversUnsigned: a secret named in the
+// configuration and missing from the environment is the shape a receiver
+// silently stops verifying under. The deliveries still go out, because a
+// notification is not a security boundary, and the run says out loud that
+// nothing is signing them.
+func TestWebhookWithoutItsSecretDeliversUnsigned(t *testing.T) {
+	sink := newWebhookSink(t)
+	r := harness.New(t)
+	r.WriteConfigModel(webhooksConfig(echoBuild,
+		models.WebhookConfig{URL: sink.srv.URL, SecretEnv: "DISPAT_IT_SECRET_NOBODY_SET"}))
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	res := r.ReleaseOK()
+	assert.Contains(t, res.Stdout, "deliveries are unsigned")
+	assert.Contains(t, res.Stdout, "DISPAT_IT_SECRET_NOBODY_SET", "the variable to set is named")
+
+	deliveries := sink.all()
+	require.NotEmpty(t, deliveries, "the release still reported itself")
+	for _, d := range deliveries {
+		assert.Empty(t, d.Header.Get("X-Dispat-Signature"),
+			"nothing may look signed when nothing signed it")
+	}
+	assert.True(t, r.IsTagged("core@0.1.0"), "and the release is unaffected; tags: %v", r.TagList())
+}

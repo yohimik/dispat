@@ -1025,3 +1025,111 @@ func TestRunMultiCommandScriptArgumentsLandOnTheLast(t *testing.T) {
 		strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"),
 		"the setup step ran untouched; the last command took the argument")
 }
+
+// TestRunScriptExecutionIsRecordedAtTrace: what a run may say about a
+// script is deliberately narrow — the shell, the folder, how many bytes of
+// command and how many environment entries, and how long it took — because
+// the command text itself can contain a literal credential and must not be
+// copied into a log. The claim here is that the record exists and that the
+// command is not in it.
+func TestRunScriptExecutionIsRecordedAtTrace(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["secretive"] = models.Script{"echo published with token hunter2"}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	res := r.RunScriptOK("secretive", "--since", "all", "--log-level", "trace")
+	assert.Contains(t, res.Stdout, "script finished",
+		"the execution is recorded: %s", res.Stdout)
+	assert.Contains(t, res.Stdout, "commandBytes",
+		"as a size rather than as the text: %s", res.Stdout)
+	assert.NotContains(t, res.Stdout, `"command":"echo published with token hunter2"`,
+		"the command line is never copied into the record: %s", res.Stdout)
+}
+
+// TestRunScriptThatLeavesAChildHoldingTheOutputPipes: backgrounding a
+// process is a legitimate thing for a release script to do, and a child that
+// outlives the shell inherits the pipes the run reads the script's output
+// through. Waiting for those pipes forever would hang the release, so the wait
+// is bounded — and a script whose own process exited successfully has
+// succeeded, whatever its children are still doing.
+func TestRunScriptThatLeavesAChildHoldingTheOutputPipes(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	// The shell exits at once; the child it started keeps the write end of
+	// the output pipe open past the bounded wait.
+	cfg.Scripts["daemon"] = models.Script{"sleep 12 & echo started"}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	started := time.Now()
+	res := r.RunScript("daemon", "--since", "all")
+	require.Equal(t, 0, res.Code,
+		"the script's own process succeeded: stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "started", "and its output was read: %s", res.Stdout)
+	if harness.IsTinyGo() {
+		// TinyGo's scheduler is single-threaded: the blocking read of the
+		// inherited pipe stalls every goroutine, the bounded wait included,
+		// so the tiny binary returns when the child lets go of the pipe. The
+		// outcome above still holds; only the bound is the gc runtime's.
+		return
+	}
+	assert.Less(t, time.Since(started), 12*time.Second,
+		"the run did not wait for the child it left behind")
+}
+
+// TestRunSeparatesAScriptItCannotRunFromOneThatFailed: a missing
+// interpreter and a script killed by a signal both exit 1 with dispat saying
+// what happened, rather than being reported as the script's own answer.
+func TestRunSeparatesAScriptItCannotRunFromOneThatFailed(t *testing.T) {
+	t.Run("an interpreter that is not there", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Shell = []string{"/nonexistent/interpreter", "-c"}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+
+		res := r.Command("exec", "build", "--log-format", "json")
+		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, diagnosticText(res), "could not run the script")
+	})
+
+	t.Run("a script killed by a signal", func(t *testing.T) {
+		r := harness.New(t)
+		cfg := libsConfig(echoBuild, 1)
+		cfg.Scripts["suicide"] = models.Script{"kill -TERM $$"}
+		r.WriteConfigModel(cfg)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+
+		res := r.Command("exec", "suicide", "--log-format", "json", "--log-level", "debug")
+		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, diagnosticText(res), "terminated by a signal")
+	})
+}
+
+// TestRunQuotesForwardedArgumentsTheShellWouldOtherwiseRead: an ordinary flag
+// goes through verbatim, which is what keeps the assembled command readable
+// and keeps it correct under a shell that is not POSIX. An argument that a
+// shell would split, take a quote out of, or lose entirely is quoted, and each
+// one arrives as the single argument it was typed as.
+func TestRunQuotesForwardedArgumentsTheShellWouldOtherwiseRead(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	// The script prints each of its arguments in brackets, so an argument
+	// that was split in two, or vanished, is visible as such.
+	cfg.Scripts["show"] = models.Script{`printf '<%s>'`}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): bootstrap")
+
+	res := r.RunScriptOK("show", "--since", "all", "--",
+		"--reporter=dot", "two words", "it's", "")
+	require.NotEmpty(t, res.Stdout)
+	assert.Contains(t, res.Stdout, "<--reporter=dot><two words><it's><>",
+		"every argument arrives as the one word it was typed as")
+}

@@ -300,3 +300,100 @@ func TestCommandsReservedWordsShadowTheirScripts(t *testing.T) {
 		})
 	}
 }
+
+// TestInitWritesJSONByDefaultAndRefusesAFormatItCannotWrite: with no format asked for,
+// the starter is JSON, and a format dispat cannot write is refused with
+// nothing created.
+func TestInitWritesJSONByDefaultAndRefusesAFormatItCannotWrite(t *testing.T) {
+	t.Run("no format is JSON", func(t *testing.T) {
+		r := harness.New(t)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+
+		res := r.Command("init")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout, "created dispat.json")
+		assert.Contains(t, readRepoFile(t, r, "dispat.json"), `"spaces"`)
+		r.StatusOK()
+	})
+
+	t.Run("a format dispat cannot write", func(t *testing.T) {
+		r := harness.New(t)
+		r.SeedPackage("packages", "core")
+		r.Commit("feat(core): bootstrap")
+
+		res := r.Command("init", "--format", "ini")
+		assert.Equal(t, 1, res.Code)
+		assert.Contains(t, res.Stdout+res.Stderr, "unknown config format")
+		assert.Empty(t, r.Git("status", "--porcelain", "--untracked-files=all", "--", "dispat.*"),
+			"nothing was written")
+	})
+}
+
+// TestCommandLineUsageRefusalsExitTwo: each of these command lines is refused before
+// anything runs, with the sentence naming what was wrong and the usage exit
+// code telling a mistyped command apart from a failed one.
+func TestCommandLineUsageRefusalsExitTwo(t *testing.T) {
+	r := usageRepo(t)
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"unknown log level", []string{"diagnostics", "--log-level", "loud", "feat(core): x"},
+			"unknown --log-level value"},
+		{"unknown log format", []string{"diagnostics", "--log-format", "yaml", "feat(core): x"},
+			"unknown --log-format value"},
+		{"too many if arguments", []string{"if", "A", "B", "C", "--then", "build"},
+			"if takes at most one argument"},
+		{"trigger with no event", []string{"trigger"}, "trigger requires an event"},
+		{"trigger event that is not one word", []string{"trigger", "9deployed"},
+			"a triggered event is one word"},
+		{"trigger progress with no value", []string{"trigger", "progress"},
+			"trigger progress requires its value"},
+		{"trigger progress out of range", []string{"trigger", "progress", "150"},
+			"whole number between 0 and 100"},
+		{"trigger progress that is not a number", []string{"trigger", "progress", "half"},
+			"whole number between 0 and 100"},
+		{"too many scanner arguments", []string{"scanner", "one", "two"},
+			"scanner takes at most one argument"},
+		{"run shorthand with extra words", []string{"build", "extra"}, "unexpected arguments"},
+		{"rollback with a download flag", []string{"self-update", "--rollback", "--force"},
+			"--rollback restores the kept binary"},
+		{"rollback naming no tool", []string{"install", "--rollback"},
+			"--rollback needs to know which tool"},
+		{"unknown manifest format", []string{"writer", "--manifest-format", "toml", "--set-version", "1.0.0", "package.json"},
+			"unknown --manifest-format value"},
+		{"file condition naming no path", []string{"if", "--file", "", "--then", "build"},
+			"names no path"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := r.Command(tc.args...)
+			assert.Equal(t, 2, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stdout+res.Stderr, tc.want)
+		})
+	}
+
+	t.Run("arguments after a dash-dash with no command", func(t *testing.T) {
+		res := r.Shell("dispat -- something")
+		assert.Equal(t, 2, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout+res.Stderr, "need a command that forwards them")
+	})
+
+	t.Run("a flag half the commands share, on one that does not", func(t *testing.T) {
+		res := r.Command("init", "--package", "core")
+		assert.Equal(t, 2, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Contains(t, res.Stdout+res.Stderr, "is not an init flag")
+		assert.Contains(t, res.Stdout+res.Stderr, "--help for its flags",
+			"a flag with many owners sends the reader to the command's own help")
+	})
+}
+
+// usageRepo is a loadable single-package repository: every refusal here is
+// about the command line, so the configuration must never be the reason.
+func usageRepo(t *testing.T) *harness.Repo {
+	t.Helper()
+	r := singlePackageRepo(t, echoBuild)
+	r.Commit("feat(core): bootstrap")
+	return r
+}
