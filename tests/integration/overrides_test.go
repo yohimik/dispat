@@ -564,6 +564,28 @@ func TestOverridesFolderConfigFilesAreHeldToTheirLevel(t *testing.T) {
 		refuseStatus(t, r, "path")
 	})
 
+	t.Run("a package folder with an invalid tag format", func(t *testing.T) {
+		r := seed(t)
+		writeJSON(t, r, "packages/core/dispat.json", models.PackageConfig{TagFormat: "{version}-{version}"})
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, "more than one {version} placeholder")
+	})
+
+	t.Run("a package folder naming a script nobody declares", func(t *testing.T) {
+		r := seed(t)
+		writeJSON(t, r, "packages/core/dispat.json", models.PackageConfig{
+			Flow: &models.SpaceFlowConfig{Build: []string{"nope"}}})
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, `flow.build references unknown script \"nope\"`)
+	})
+
+	t.Run("a package folder joining a version group nobody declares", func(t *testing.T) {
+		r := seed(t)
+		writeJSON(t, r, "packages/core/dispat.json", models.PackageConfig{VersionGroup: "nope"})
+		r.Commit("feat(core): bootstrap")
+		refuseStatus(t, r, "nope")
+	})
+
 	t.Run("a space folder with an invalid setting", func(t *testing.T) {
 		r := seed(t)
 		writeJSON(t, r, "packages/dispat.json", models.SpaceFile{Versioning: "calver"})
