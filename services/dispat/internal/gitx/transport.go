@@ -369,6 +369,58 @@ func (c *LocalGitx) DeleteLocalTransportRefs(ctx context.Context, branches []str
 	return nil
 }
 
+// ClearTransportRefs removes every fetched coordination branch from this
+// handle's bare object store, in one listing and one update-ref batch, and
+// answers how many it removed.
+//
+// It is how a serving node starts: the refs an earlier process fetched are
+// remembered by no one once that process is gone, and each keeps a task's
+// inputs or an output set reachable for as long as it exists. It is refused
+// anywhere but in a bare repository, because the one other kind of store a
+// transport ref lives in is the checkout being released, where another dispat
+// process may still be reading its own.
+func (c *LocalGitx) ClearTransportRefs(ctx context.Context) (int, error) {
+	if err := c.requireBareStore(ctx, "clearing the fetched transport refs"); err != nil {
+		return 0, err
+	}
+	out, err := c.run(ctx, "for-each-ref", "--format=%(refname)", TransportRefPrefix)
+	if err != nil {
+		return 0, fmt.Errorf("gitx: listing the fetched transport refs of %s: %w", c.Dir, err)
+	}
+	var commands bytes.Buffer
+	cleared := 0
+	for line := range strings.Lines(out) {
+		ref := strings.TrimSpace(line)
+		if ref == "" {
+			continue
+		}
+		commands.WriteString("delete " + ref + "\n")
+		cleared++
+	}
+	if cleared == 0 {
+		return 0, nil
+	}
+	if _, err := c.runStream(ctx, gitStream{stdin: &commands}, "update-ref", "--stdin"); err != nil {
+		return 0, fmt.Errorf("gitx: removing %d fetched transport refs of %s: %w", cleared, c.Dir, err)
+	}
+	return cleared, nil
+}
+
+// requireBareStore refuses an operation meant for a serving node's own cache
+// when this handle's folder is anything else. git resolves a folder that is
+// not a repository to the repository around it, so a cache folder that was
+// never initialized inside a checkout would otherwise be that checkout.
+func (c *LocalGitx) requireBareStore(ctx context.Context, operation string) error {
+	out, err := c.run(ctx, "rev-parse", "--is-bare-repository")
+	if err != nil {
+		return fmt.Errorf("gitx: %s: %s is not a repository: %w", operation, c.Dir, err)
+	}
+	if strings.TrimSpace(out) != "true" {
+		return fmt.Errorf("gitx: %s: %s is not a bare object store", operation, c.Dir)
+	}
+	return nil
+}
+
 // ResolveFetchedCommit proves that wantOID is a commit this checkout holds and
 // that it sits on localRef's first-parent chain within maxDepth steps of its
 // tip. It returns nothing but an error: callers read from wantOID afterwards,

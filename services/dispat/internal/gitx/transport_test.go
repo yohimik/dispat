@@ -323,6 +323,46 @@ func TestTransportResolvesOnlyWhatTheRefCarries(t *testing.T) {
 		"removing a ref that is already gone converges")
 }
 
+// TestClearTransportRefsEmptiesOnlyABareCache: a serving node starts by
+// dropping every coordination ref an earlier process fetched into its cache,
+// and nothing else; the same call in a checkout, or in a cache folder nobody
+// initialized inside one, is refused and removes nothing.
+func TestClearTransportRefsEmptiesOnlyABareCache(t *testing.T) {
+	f := newTransportFixture(t)
+	ctx := t.Context()
+	branches := []string{"dispat-worker-c-20260925-build-a", "dispat-worker-c-20260925-snapshot-b"}
+	require.NoError(t, f.git.PushCreate(ctx, f.bare, f.first, branches[0]))
+	require.NoError(t, f.git.PushCreate(ctx, f.bare, f.second, branches[1]))
+
+	cache := &LocalGitx{Dir: filepath.Join(t.TempDir(), "cache.git"), Log: zerolog.Nop()}
+	require.NoError(t, os.MkdirAll(cache.Dir, 0o755))
+	require.NoError(t, cache.InitBareStore(ctx))
+	require.NoError(t, cache.FetchRefs(ctx, f.bare, branches))
+	runGit(t, cache.Dir, "update-ref", "refs/heads/kept", f.second)
+
+	cleared, err := cache.ClearTransportRefs(ctx)
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, cleared)
+	assert.Empty(t, strings.TrimSpace(runGit(t, cache.Dir, "for-each-ref", "--format=%(refname)", TransportRefPrefix)))
+	assert.Equal(t, "refs/heads/kept", strings.TrimSpace(runGit(t, cache.Dir, "for-each-ref", "--format=%(refname)")),
+		"a ref outside the transport namespace is not the cache's to drop")
+	cleared, err = cache.ClearTransportRefs(ctx)
+	require.NoError(t, err)
+	assert.Zero(t, cleared, "an empty namespace clears nothing")
+
+	require.NoError(t, f.git.FetchRefs(ctx, f.bare, branches[:1]))
+	nested := filepath.Join(f.root, "never-initialized")
+	require.NoError(t, os.MkdirAll(nested, 0o755))
+	for _, dir := range []string{f.root, nested} {
+		_, err := (&LocalGitx{Dir: dir, Log: zerolog.Nop()}).ClearTransportRefs(ctx)
+		require.Error(t, err, dir)
+	}
+	assert.Equal(t, TransportRefPrefix+branches[0],
+		strings.TrimSpace(runGit(t, f.root, "for-each-ref", "--format=%(refname)", TransportRefPrefix)),
+		"the checkout's own fetched ref is left for the process that fetched it")
+}
+
 // TestTransportReadsTheTagObjectTheRemoteAdvertises: the lock is an annotated
 // tag whose object id identifies one acquisition, so the tag object is what
 // comes back and never the commit it peels to.

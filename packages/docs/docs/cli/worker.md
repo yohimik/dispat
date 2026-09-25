@@ -68,7 +68,9 @@ it, `dispat/worker` under the user cache directory.
 
 The layout is `<state-dir>/<node name>/`, holding `cache/` (one bare repository per endpoint), `seen.json` (the
 answered-work record) and `worker.lock`. Everything in it is reconstructible: a node whose folder was deleted makes
-one again and pays a fetch, so a container may use an empty volume for it.
+one again and pays a fetch, so a container may use an empty volume for it. A worker starts by removing every
+coordination branch an earlier process fetched into `cache/`, because no running process remembers those refs and
+each one keeps a task's inputs or an output set on disk.
 
 Two processes must not serve one node name from one state folder. The second one to start refuses, because two nodes
 sharing a folder would each hold half the record of what has been answered. `worker.lock` holds the serving process's

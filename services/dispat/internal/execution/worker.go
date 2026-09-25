@@ -127,6 +127,10 @@ type Worker struct {
 	// false again after any failure, which is what makes the cache
 	// dispensable rather than a prerequisite.
 	isStorePrepared bool
+	// isCacheCleared becomes true once the transport refs an earlier process
+	// left in the cache have been dropped, which happens once, before the
+	// first poll.
+	isCacheCleared bool
 	// slots is this node's capacity, one entry per task it may run at once.
 	// It is filled lazily by the poll goroutine, which is the only one that
 	// takes a slot; the task goroutines give theirs back.
@@ -355,6 +359,10 @@ func (w *Worker) inspectMailbox(ctx context.Context) (bool, error) {
 		// store holds none of them.
 		w.Mailbox.Forget()
 		w.isStorePrepared = true
+		if !w.isCacheCleared {
+			w.isCacheCleared = true
+			w.clearLeftoverRefs(ctx)
+		}
 	}
 	heads, err := w.Mailbox.Observe(ctx, FormatBranchPattern(w.Node), nil)
 	if err != nil {
@@ -374,6 +382,30 @@ func (w *Worker) inspectMailbox(ctx context.Context) (bool, error) {
 		}
 	}
 	return isProgress, nil
+}
+
+// clearLeftoverRefs drops every coordination ref the cache holds, once, the
+// first time the store is open.
+//
+// The refs a process fetched are the ones it removes again, and it knows them
+// only while it runs: a node that was killed, or restarted after a crash,
+// leaves refs nobody will ever remove, and each keeps a task's inputs or an
+// output set reachable. The cache is dispensable and this process is its only
+// user (worker.lock), and before the first poll nothing of this process's is
+// in it, so the whole namespace goes. It happens here rather than when Serve
+// starts because the store may not be open yet, and it happens only once
+// because a store reopened later may already hold the inputs of a task in
+// flight. A failure costs disk and nothing else, so it is a debug line.
+func (w *Worker) clearLeftoverRefs(ctx context.Context) {
+	if w.Cache == nil {
+		return
+	}
+	cleared, err := w.Cache.ClearTransportRefs(ctx)
+	if err != nil {
+		w.Log.Debug().Err(err).Msg("the coordination refs an earlier process fetched were not removed")
+		return
+	}
+	w.Log.Debug().Int("refs", cleared).Msg("the coordination refs an earlier process fetched were removed")
 }
 
 // handle decides what one moved branch is, and answers it when it is work
