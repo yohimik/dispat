@@ -20,6 +20,30 @@ for name in ccme config manifest models scanner writer tools dispat integration;
   fi
 done
 
+# The integration suite's key is the production code, not the checkout: its
+# source stage takes pkg and services/dispat only from the pruned stage, never
+# from the context and never through src-dispat, and the prune removes the
+# unit tests. A unit-test or changelog commit then replays the suite.
+stage() { sed -n "/^FROM .* AS $1\$/,/^FROM .* AS /p" "$dockerfile" | sed '$d'; }
+integration=$(stage src-integration)
+printf '%s\n' "$integration" | head -1 | grep -q '^FROM runner AS src-integration$' ||
+  { echo 'src-integration must build on runner, not on a stage that copies the checkout' >&2; exit 1; }
+if printf '%s\n' "$integration" | grep '^COPY' | grep -v -- '--from=src-production' |
+  grep -Eq '[[:space:]](\./)?(pkg|services/dispat)(/|[[:space:]])'; then
+  echo 'src-integration copies pkg or services/dispat from the build context' >&2
+  exit 1
+fi
+for tree in pkg services/dispat; do
+  printf '%s\n' "$integration" | grep -q "^COPY --from=src-production .* /src/$tree ./$tree\$" ||
+    { echo "src-integration does not take $tree from src-production" >&2; exit 1; }
+done
+for pruned in src-production tools-production; do
+  printf '%s\n' "$(stage "$pruned")" | grep -q "find .*-name '\*_test.go'.*-delete" ||
+    { echo "$pruned does not delete the *_test.go files" >&2; exit 1; }
+done
+stage runner | grep -q '^COPY --from=tools-production ' ||
+  { echo 'runner does not take the tooling from tools-production' >&2; exit 1; }
+
 flags=$(GITHUB_ACTIONS=true GITHUB_SHA=commit sh "$root/scripts/buildx-cache.sh" measured gotest-a gotest-b)
 case "$flags" in
   *'--build-arg TEST_COMMIT=commit'*'--cache-from type=gha,scope=measured'*'--cache-from type=gha,scope=gotest-a'*'--cache-from type=gha,scope=gotest-b'*'--cache-to type=gha,scope=measured,mode=max'*) ;;

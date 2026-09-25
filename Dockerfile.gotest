@@ -60,12 +60,27 @@ RUN go mod download
 # testreport rides along with every suite (each tests script runs through it),
 # so it sits between the dependency layer and the per-package sources: a
 # tooling change re-runs every suite, a package change re-runs one.
-FROM deps AS runner
+#
+# What the suites run is the tooling's code, not its tests or its prose, so
+# the copy they sit on leaves out the *_test.go files, the testdata folders
+# and the Markdown. BuildKit keys a COPY --from on the checksums of the files
+# it copies, so a tree the prune made identical is a cache hit, and a commit
+# that touches only the tooling's tests re-runs the tooling's own suite and
+# nothing else. The configuration files stay: the bootstrap gate reads
+# tools/bootstrap.yaml. src-tools and src-all, whose gates read the tests,
+# copy the whole folder over this one.
+FROM base AS tools-production
 COPY --chown=gopher:gopher tools ./tools
+RUN find tools -type d -name testdata -prune -exec rm -rf {} + \
+ && find tools -type f \( -name '*_test.go' -o -name '*.md' \) -delete
+
+FROM deps AS runner
+COPY --from=tools-production --chown=gopher:gopher /src/tools ./tools
 
 # Tools conformance tests import the workspace scanner while keeping Aqua's
 # dependency graph out of the production module.
 FROM runner AS src-tools
+COPY --chown=gopher:gopher tools ./tools
 COPY --chown=gopher:gopher pkg/manifest ./pkg/manifest
 COPY --chown=gopher:gopher pkg/scanner ./pkg/scanner
 
@@ -107,11 +122,35 @@ COPY --chown=gopher:gopher docker ./docker
 COPY --chown=gopher:gopher specs/ccme-spec/SPEC.md ./specs/ccme-spec/SPEC.md
 COPY --chown=gopher:gopher packages/docs/docs/internals/architecture.md ./packages/docs/docs/internals/architecture.md
 
-FROM src-dispat AS src-integration
+# The production code of the seven modules the CLI is made from, and nothing
+# else: the non-test Go files, go.mod and go.sum. The black-box suite builds
+# its binary from exactly these (the harness instruments every one of them
+# with -coverpkg), and no production file embeds anything, so a unit test, a
+# changelog, a README or a testdata file is no input of that suite. Every
+# release commit writes changelogs; with them in the key, every release
+# re-ran the integration suite on code it had already measured.
+FROM base AS src-production
+COPY --chown=gopher:gopher pkg ./pkg
+COPY --chown=gopher:gopher services/dispat ./services/dispat
+RUN find pkg services/dispat -type d -name testdata -prune -exec rm -rf {} + \
+ && find pkg services/dispat -type f \( -name '*_test.go' -o ! \( -name '*.go' -o -name go.mod -o -name go.sum \) \) -delete \
+ && find pkg services/dispat -depth -type d -empty -delete
+
+# The black-box suite's inputs: the pruned production tree above, the suite
+# itself, and the three things it reads from the repository at run time (the
+# two package configurations the npm distribution tests replay and the demo
+# fixtures the landing page shares). Not on src-dispat, whose unit tests,
+# installers, image folders and specification are no input of this suite.
+# BuildKit keys a COPY --from on the checksums of the files it copies, so a
+# commit that leaves the pruned tree identical replays test-integration from
+# the cache and only its TEST_COMMIT stamp runs.
+FROM runner AS src-integration
+COPY --from=src-production --chown=gopher:gopher /src/pkg ./pkg
+COPY --from=src-production --chown=gopher:gopher /src/services/dispat ./services/dispat
 COPY --chown=gopher:gopher tests/integration ./tests/integration
 COPY --chown=gopher:gopher packages/cli/dispat.yaml ./packages/cli/dispat.yaml
 COPY --chown=gopher:gopher packages/docs/dispat.yaml ./packages/docs/dispat.yaml
-COPY --chown=gopher:gopher packages/docs/demo ./packages/docs/demo
+COPY --chown=gopher:gopher packages/docs/demo/fixtures ./packages/docs/demo/fixtures
 
 # The lint gate, one target per module: what `dispat run vet --since all`
 # sweeps. vet compiles what it analyses, so these are the build gates too.
@@ -365,8 +404,11 @@ COPY --chown=gopher:gopher ${MODULE} /src/${MODULE}
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
     cd /src/${MODULE} && go test ./... -count=1 -timeout 10m
 
-# The format sweep the lint job runs: every Go source folder, one gofmt.
+# The format sweep the lint job runs: every Go source folder, one gofmt. The
+# whole tools folder is copied over the pruned one runner carries, because
+# gofmt and namingcheck read the tooling's tests and exceptions list too.
 FROM runner AS src-all
+COPY --chown=gopher:gopher tools ./tools
 COPY --chown=gopher:gopher pkg ./pkg
 COPY --chown=gopher:gopher services/dispat ./services/dispat
 COPY --chown=gopher:gopher tests ./tests
