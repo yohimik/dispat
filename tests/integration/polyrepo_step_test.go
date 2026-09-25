@@ -131,6 +131,58 @@ func TestPolyrepoCommitStepOwnsItsWholeTransaction(t *testing.T) {
 	})
 }
 
+// TestPolyrepoCommitStepStopsAtTheGitFailure: the step's transaction is a
+// sequence, source commit, source tag, source push, control checkpoint, and a
+// Git failure at any step ends it there: the step exits non-zero naming the
+// failure, and nothing after it happened. A source commit that fails leaves no
+// tag, a tag that fails leaves the commit local and unpushed, and a push that
+// fails leaves the commit and tag local while the source remote and the
+// control checkpoint stay where they were.
+func TestPolyrepoCommitStepStopsAtTheGitFailure(t *testing.T) {
+	for _, row := range []struct {
+		name, pattern string
+		// isCommitted and isTagged are what the source checkout holds after
+		// the failure.
+		isCommitted, isTagged bool
+	}{
+		{name: "the source commit", pattern: "*sources/lib commit --only*"},
+		{name: "the source tag", pattern: "*sources/lib tag -a lib@0.1.0*", isCommitted: true},
+		{name: "the source push", pattern: "*sources/lib push -- origin HEAD:refs/heads/*",
+			isCommitted: true, isTagged: true},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			control, sourceBare, controlBare := pushableFleet(t)
+			cfg := polyrepoModelFile()
+			cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"sources/lib/packages"}}}
+			cfg.Commit = &models.CommitConfig{
+				Enabled: models.Bool(true), Remote: "origin", Branch: harness.DefaultBranch,
+				MessageFormat: "chore(control): checkpoint {tags}",
+			}
+			control.WriteConfigModel(cfg)
+			control.Commit("chore: configure a fleet a step will record")
+			control.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+			controlBefore := control.Git("rev-parse", "HEAD")
+			sourceBefore := control.Git("-C", "sources/lib", "rev-parse", "HEAD")
+			remoteBefore := control.Git("-C", sourceBare, "rev-parse", "refs/heads/"+harness.DefaultBranch)
+			control.WriteFile("sources/lib/packages/lib/generated.txt", "built\n")
+			fault := harness.NewGitFault(t, harness.GitFault{Pattern: row.pattern, Code: 128})
+
+			res := control.CommandEnv(fault.Env(), "commit", "--tag", "--push", "--remote", "origin")
+			require.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Equal(t, 1, fault.Matches(), "the failing step ran once")
+			assert.Contains(t, res.Stdout+res.Stderr, harness.GitFaultMarker)
+			sourceAfter := control.Git("-C", "sources/lib", "rev-parse", "HEAD")
+			assert.Equal(t, row.isCommitted, sourceAfter != sourceBefore, "the source commit")
+			assert.Equal(t, row.isTagged, len(polyrepoTags(control, "sources/lib")) > 0, "the source tag")
+			assert.Equal(t, remoteBefore, control.Git("-C", sourceBare, "rev-parse", "refs/heads/"+harness.DefaultBranch),
+				"nothing reached the source remote")
+			assert.Empty(t, control.Git("-C", sourceBare, "tag", "--list"), "nor any tag")
+			assert.Equal(t, controlBefore, control.Git("rev-parse", "HEAD"), "no checkpoint was made")
+			assert.Equal(t, controlBefore, control.Git("-C", controlBare, "rev-parse", "refs/heads/"+harness.DefaultBranch))
+		})
+	}
+}
+
 // TestPolyrepoBeforePushHookCannotMoveTheRecordedRevision: the hooks around
 // a push are user scripts, and a script that commits in the repository about
 // to be pushed would make the push publish something the release never
