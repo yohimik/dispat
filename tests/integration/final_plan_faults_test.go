@@ -73,10 +73,11 @@ func TestFinalPlanFaultsRefuseAnUnreadableRepositorySnapshot(t *testing.T) {
 // TestFinalPlanRefusesAMalformedChangedFilesListing: a commit that names no
 // package takes its scope from the files it changed, and that listing is a
 // framed protocol between Git and the planner. A reply Git could not give, one
-// whose framing is broken, one with a path that never ends, and one that lists
-// fewer commits than were asked for are each a refusal naming what was wrong,
-// never a commit that changed nothing and so released nothing. A healthy
-// retry plans the derived scope. Both commits are asked about in one listing.
+// whose framing is broken, one with a path that never ends, one that lists
+// fewer commits than were asked for and one naming a commit that was not asked
+// about are each a refusal naming what was wrong, never a commit that changed
+// nothing and so released nothing. A healthy retry plans the derived scope.
+// Both commits are asked about in one listing.
 func TestFinalPlanRefusesAMalformedChangedFilesListing(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -89,7 +90,13 @@ func TestFinalPlanRefusesAMalformedChangedFilesListing(t *testing.T) {
 			want: "an unterminated path"},
 		{name: "a listing without the commit", output: " ", want: "malformed changed files record"},
 		{name: "a listing that leaves a commit out", output: "\x1e%s\x1f\x00\npackages/core/change.txt\x00",
-			want: "changed files listed 1 of 2 commits"},
+			want: "malformed changed files listing: commit"},
+		// As many records as commits asked, one of them naming a commit
+		// nobody asked about: read as an answer, the other asked commit
+		// would have changed nothing and its fix would never release.
+		{name: "a reply naming another commit",
+			output: "\x1e%s\x1f\x00\npackages/core/change.txt\x00\x1e" + strings.Repeat("a", 40) + "\x1f\x00",
+			want:   "which was not asked about"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := finalPlanRepo(t)

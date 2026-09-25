@@ -104,9 +104,35 @@ func TestChangedFilesRefusesABrokenListing(t *testing.T) {
 		// taken for another commit or dropped from this one.
 		"a path opening with the separator byte": logRecordSep + sha + logFieldSep + "\x00\n" + logRecordSep + "x\x00",
 	} {
-		_, err := parseChangedFiles(out)
+		_, err := parseChangedFiles(out, []string{sha})
 		assert.ErrorContains(t, err, "malformed changed files record", name)
 	}
+}
+
+// TestChangedFilesRefusesAListingOfOtherCommits: the listing answers exactly
+// the commits asked about. A well-framed record naming another commit, a
+// commit listed twice and an asked commit left without a record are each a
+// malformed listing, never an asked commit that changed nothing.
+func TestChangedFilesRefusesAListingOfOtherCommits(t *testing.T) {
+	asked, other := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	record := func(sha string) string { return logRecordSep + sha + logFieldSep + "\x00\npath\x00" }
+	for _, tc := range []struct {
+		name string
+		out  string
+		want string
+	}{
+		{name: "a record naming another commit", out: record(other),
+			want: "a record names commit " + other + ", which was not asked about"},
+		{name: "a commit listed twice", out: record(asked) + record(asked),
+			want: "commit " + asked + " is listed twice"},
+		{name: "an asked commit with no record", out: "", want: "commit " + asked + " has no record"},
+	} {
+		_, err := parseChangedFiles(tc.out, []string{asked})
+		assert.ErrorContains(t, err, "malformed changed files listing: "+tc.want, tc.name)
+	}
+	files, err := parseChangedFiles(record(asked), []string{asked})
+	require.NoError(t, err)
+	assert.Equal(t, map[string][]string{asked: {"path"}}, files, "the asked commit, answered once")
 }
 
 // TestChangedFilesAnswersEachCommitOnceInOneProcess: a list naming a commit

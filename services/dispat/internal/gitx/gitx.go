@@ -1629,6 +1629,7 @@ func (c *LocalGitx) log(ctx context.Context, revisions ...string) ([]Commit, err
 // no package folder is a prefix of.
 func (c *LocalGitx) ChangedFiles(ctx context.Context, commits []string) (map[string][]string, error) {
 	var stdin strings.Builder
+	asked := make([]string, 0, len(commits))
 	seen := make(map[string]bool, len(commits))
 	for _, commit := range commits {
 		if !fullObjectID(commit) {
@@ -1636,10 +1637,11 @@ func (c *LocalGitx) ChangedFiles(ctx context.Context, commits []string) (map[str
 		}
 		if !seen[commit] {
 			seen[commit] = true
+			asked = append(asked, commit)
 			stdin.WriteString(commit + "\n")
 		}
 	}
-	if len(seen) == 0 {
+	if len(asked) == 0 {
 		return map[string][]string{}, nil
 	}
 	out, err := c.runStream(ctx, gitStream{stdin: strings.NewReader(stdin.String())},
@@ -1649,15 +1651,8 @@ func (c *LocalGitx) ChangedFiles(ctx context.Context, commits []string) (map[str
 	if err != nil {
 		return nil, err
 	}
-	commitsDiffed.Add(uint64(len(seen)))
-	files, err := parseChangedFiles(out)
-	if err != nil {
-		return nil, err
-	}
-	if len(files) != len(seen) {
-		return nil, fmt.Errorf("gitx: changed files listed %d of %d commits", len(files), len(seen))
-	}
-	return files, nil
+	commitsDiffed.Add(uint64(len(asked)))
+	return parseChangedFiles(out, asked)
 }
 
 // parseChangedFiles reads the ChangedFiles listing, which -z frames: per
@@ -1666,13 +1661,29 @@ func (c *LocalGitx) ChangedFiles(ctx context.Context, commits []string) (map[str
 // NUL-terminated and raw. A path cannot hold a NUL, so the list ends where the
 // next record's separator follows a terminator; a listing that breaks this
 // framing is refused rather than read as fewer paths.
-func parseChangedFiles(out string) (map[string][]string, error) {
-	files := make(map[string][]string)
+//
+// The listing answers exactly the asked commits, each once. A record naming a
+// commit nobody asked about, a commit listed twice and an asked commit with no
+// record are each a malformed listing: read as an answer, the first would
+// leave an asked commit with no paths, so a commit naming no package would
+// derive none and its change would never release.
+func parseChangedFiles(out string, asked []string) (map[string][]string, error) {
+	isAsked := make(map[string]bool, len(asked))
+	for _, commit := range asked {
+		isAsked[commit] = true
+	}
+	files := make(map[string][]string, len(asked))
 	for out != "" {
 		record, isRecord := strings.CutPrefix(out, logRecordSep)
 		sha, rest, isFramed := strings.Cut(record, logFieldSep+"\x00")
 		if !isRecord || !isFramed || !fullObjectID(sha) {
 			return nil, fmt.Errorf("gitx: malformed changed files record")
+		}
+		if !isAsked[sha] {
+			return nil, fmt.Errorf("gitx: malformed changed files listing: a record names commit %s, which was not asked about", sha)
+		}
+		if _, isListed := files[sha]; isListed {
+			return nil, fmt.Errorf("gitx: malformed changed files listing: commit %s is listed twice", sha)
 		}
 		var paths []string
 		if list, isListed := strings.CutPrefix(rest, "\n"); isListed {
@@ -1690,6 +1701,11 @@ func parseChangedFiles(out string) (map[string][]string, error) {
 		}
 		files[strings.Clone(sha)] = paths
 		out = rest
+	}
+	for _, commit := range asked {
+		if _, isListed := files[commit]; !isListed {
+			return nil, fmt.Errorf("gitx: malformed changed files listing: commit %s has no record", commit)
+		}
 	}
 	return files, nil
 }
