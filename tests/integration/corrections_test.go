@@ -788,11 +788,10 @@ func TestCorrectionDiagnosticsNameWhatTheyCouldNotReach(t *testing.T) {
 	})
 }
 
-// TestCorrectionReachesATargetAcrossAMerge: a merge gives the graph
-// two paths to the same commit, which is the shape that turns a naive walk
-// into a repeated one — and, on a long history, into a quadratic one. The
-// correction below asks the ancestry question about a commit both paths reach,
-// and the answer has to be the same one a linear history would have given.
+// TestCorrectionReachesATargetAcrossAMerge: a merge gives the commit graph two
+// paths to the same commit. The correction below names a commit both paths
+// reach, and it is still an ancestor: the restatement decides the bump, with
+// no E210, exactly as it would on a linear history.
 func TestCorrectionReachesATargetAcrossAMerge(t *testing.T) {
 	r := releasedCorrectionsRepo(t)
 	r.WriteFile("packages/core/shared.txt", "work\n")

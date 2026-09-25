@@ -688,7 +688,10 @@ func TestPlanPropagatedStableLeavesADependentOnItsTrain(t *testing.T) {
 
 	res := r.StatusOK()
 	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W200", "near"),
-		"the dependent on a train is not graduated by propagation: %s", res.Stdout)
+		"the suppression is reported: %s", res.Stdout)
+	near := harness.GraphLine(res.Events, "near")
+	assert.Equal(t, "beta", near.Str("channel"), "the dependent stays on its train: %s", near)
+	assert.Equal(t, "unchanged", near.Str("message"), "and nothing graduates it: %s", near)
 }
 
 // TestPlanPropagatedTransitionNoDependentIsOnIsReportedOnce: a transition
@@ -701,8 +704,12 @@ func TestPlanPropagatedTransitionNoDependentIsOnIsReportedOnce(t *testing.T) {
 	r.CommitEmpty("release(core)%%rc>stable: end an rc train nobody is on")
 
 	res := r.StatusOK()
-	assert.True(t, harness.IsCodePresent(res.Events, "W206"),
-		"the propagated transition matched no dependent it reached: %s", res.Stdout)
+	assert.Equal(t, 1, countCode(res.Events, "W206"),
+		"the propagated transition that matched no dependent is reported once: %s", res.Stdout)
+	for _, name := range []string{"near", "far"} {
+		assert.Equal(t, "unchanged", harness.GraphLine(res.Events, name).Str("message"),
+			"and moved no dependent: %s", res.Stdout)
+	}
 }
 
 // TestPlanInheritedChannelFromDisagreeingSourcesTakesTheFirst: "inherit" means the
@@ -729,6 +736,9 @@ func TestPlanInheritedChannelFromDisagreeingSourcesTakesTheFirst(t *testing.T) {
 	res := r.StatusOK()
 	assert.True(t, harness.IsCodePresent(res.Events, "W160"),
 		"the disagreement is reported rather than resolved silently: %s", res.Stdout)
+	near := harness.GraphLine(res.Events, "near")
+	assert.Equal(t, "stable -> beta", near.Str("channel"),
+		"the first source by name, beta1, is the one whose channel the dependent inherits: %s", near)
 }
 
 // TestPlanPropagationIsTraceableEndToEnd: a run at trace level accounts for

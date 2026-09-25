@@ -495,10 +495,10 @@ func TestAuthorsPreviewRendersTheBlocks(t *testing.T) {
 }
 
 // TestAuthorsNamedOnceByEveryPackageOfOneWindow: two packages released at the
-// same boundaries ask the same question of every commit, so the attribution is
-// computed once and shared. The answer has to be the same one an unshared scan
-// would have given, which is what this asserts: both records name both people,
-// in commit order, over a history long enough for the sharing to engage.
+// same boundaries over a long history each credit both people who wrote it,
+// each person named once however many commits they wrote. The planner reads
+// such a window once for both packages, and what is asserted is that the
+// answer is the one each package would have been given on its own.
 func TestAuthorsNamedOnceByEveryPackageOfOneWindow(t *testing.T) {
 	r := harness.New(t)
 	r.WriteConfigModel(authorsConfig(&models.AuthorsConfig{Placement: "section"}))
