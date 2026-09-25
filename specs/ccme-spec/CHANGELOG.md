@@ -1,5 +1,74 @@
 # Changelog
 
+## specs/ccme-spec/v3.1.0-rc.5 (2026-09-25)
+
+### Fixes
+
+- add the prerelease-train form of vector 80d ([2132a8a](https://github.com/yohimik/dispat/commit/2132a8a490013314dda553be92d2bb67e8dc79cd)) (by yohimik, Claude Opus 5.5)
+  Vector 80d covered only a consumer that proceeds past a failed provider on its
+  stable line. Vector 80e states the same run sequence for a consumer that
+  proceeds onto a prerelease train: the commit stays in its train window but
+  leaves its fresh window, the train published the commit and not the
+  provider's version, so the provider still owes the consumer, E201 and the
+  later catch-up apply unchanged, and the bump keeps counting toward the train.
+  It names the failure an implementation reading a train-carried contribution
+  as delivered produces.
+
+- record the repository as dispat's default mailbox ([61321d4](https://github.com/yohimik/dispat/commit/61321d4e4bcbf0090995764d7c85d9ac575896fd)) (by yohimik, Claude Opus 5.5)
+  Section 28.4 leaves it to an implementation to state whether its mailbox
+  already holds the repository's objects. The design history now records that
+  the dispat engine uses the repository's own remote by default: a worker link
+  with no endpoint reaches the push URL of the remote the release is locked on,
+  checked against the endpoint rules of section 28.2, and an endpoint remains
+  an override. With the repository as the mailbox, the host's branch and tag
+  rules are what keep transport credentials away from release refs. The entry
+  also records the run identity in the lock, ownership verified before the
+  first probe, bounded lock reads, and the lock read before every publication.
+  The example of section 28.2 now shows the project's own repository and a
+  link that states no endpoint; nothing normative changes.
+
+- describe per-repository serialisation without file locks ([54d64cb](https://github.com/yohimik/dispat/commit/54d64cb3a331d6c75b3550c32f01b4395cbb2743)) (by yohimik, Claude Opus 5.5)
+  The polyrepository profile no longer describes per-worktree mutation locks.
+  An implementation serialises its own native Git transactions per repository
+  within one process and claims no exclusion against other processes; the
+  fleet lock coordinates participating runs, and the fixed-input checks still
+  detect relevant changes at their validation points without making
+  publication atomic with arbitrary writers. An operation that serialises more
+  than one repository, like one that holds more than one fleet lock, takes
+  them in one stable total order and releases them in reverse, and hooks,
+  including those that bracket a fleet-link settlement, run outside those
+  transactions.
+
+- restore delivery by ancestry and withdraw the provider receipt ([1f941a6](https://github.com/yohimik/dispat/commit/1f941a6585848417a6963edcf8ca67ade4cb9751)) (by yohimik, Claude Opus 5.5)
+  Delivery is read from tags and ancestry again (§13.4a): a source has delivered
+  a commit to a target when a release of the source carries the commit and the
+  target's baseline reaches that release. The provider receipt of 3.1.0-rc.4,
+  which had every consumer release tag name the provider tags it observed, is
+  withdrawn, and a tag that carries one is an ordinary release tag whose message
+  is not read. The owed windows of §13.3 keep a consumer's debt visible after its
+  provider released in a run the consumer sat out, and E201 (§19.3) keeps the one
+  state ancestry cannot order, two releases on one commit, from arising unseen.
+  The §13.3 admission table, vector 90 and the catch-up text of §13.7a return to
+  that rule; vector 90a is withdrawn because vector 80d covers its case. The
+  design history records the withdrawal and the implementation of both halves.
+
+- keep a linked peer's version groups repository-local ([77d7fa8](https://github.com/yohimik/dispat/commit/77d7fa8d3f606451c123d2c2b39091aecc273ca7)) (by yohimik, Claude Opus 5.5)
+  §27.11 made the active peers of a linked fleet share one case-insensitive
+  version-group namespace, joining same-named groups across repositories
+  and failing composition when their policies differed. That contradicts
+  §27.3, under which every space and version group of an imported
+  configuration is local to its repository, and §27.11's own rule that each
+  peer is such a root. The linked peer topology applies the
+  repository-local spaces and version groups of §27.3 unchanged, and an
+  unqualified group selector still selects the matching group of every
+  peer.
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## specs/ccme-spec/v3.1.0-rc.4 (2026-09-23)
 
 ### Fixes
