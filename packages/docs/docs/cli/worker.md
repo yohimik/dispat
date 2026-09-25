@@ -13,14 +13,21 @@ Read [distributed execution](../distributed-execution.md) for what an orchestrat
 
 ## What it needs
 
-The node is described by the `execution` object of the configuration file this invocation reads. Three of its
-settings are required here, and each is refused by name when it is missing:
+The node is described by the `execution` object of the configuration file this invocation reads. Two of its settings
+are required here, and each is refused by name when it is missing, and a third has a default:
 
-| Setting                | Why it is required                                                                   |
+| Setting                | Why it is needed                                                                     |
 |------------------------|--------------------------------------------------------------------------------------|
-| `execution.name`       | it is how this node recognises the work addressed to it                              |
-| `execution.endpoint`   | it is the repository this node reads that work from: the repository being released, or the mailbox the orchestrator's link names |
-| `execution.secretEnv`  | it names the environment variable holding the secret every message is signed with    |
+| `execution.name`       | required: it is how this node recognises the work addressed to it                    |
+| `execution.secretEnv`  | required: it names the environment variable holding the secret every message is signed with |
+| `execution.endpoint`   | the repository this node reads that work from: the repository being released, or the mailbox the orchestrator's link names. Without it, the push URL of the release remote of the checkout the worker runs in |
+
+A worker started in a checkout of the repository being released needs no `execution.endpoint`: it reads its work from
+that checkout's release remote, `commit.remote` or `origin`, at the push URL Git resolves for it, which is where an
+orchestrator's link with no endpoint sends the work. The folder is `--root`, the current folder by default. A folder
+that is not a Git repository, a remote that is not configured or pushes to more than one URL, and a push URL that
+carries a credential or is otherwise no endpoint are refused with `E225`, naming both remedies: state
+`execution.endpoint`, or start the worker in a checkout of that repository.
 
 `execution.concurrency` (default `1`) is how many assigned command tasks this node takes on at once, counted across
 every run that reaches it. `execution.transfer` is what this node accepts as one task's build outputs; a run whose
@@ -39,8 +46,9 @@ logFormat: json
 
 Nothing else about the repository is needed. A serving node declares no spaces, no packages and no release policy,
 because the assignment carries the commands, the environment names and the exact source state; a file that declares
-no space and no package is complete for this command alone. The folder the process starts in does not have to be a
-Git repository, and the repository being released does not have to be checked out on the node beforehand.
+no space and no package is complete for this command alone. With `execution.endpoint` stated, the folder the process
+starts in does not have to be a Git repository, and the repository being released does not have to be checked out on
+the node beforehand.
 
 The environment must hold the signing secret, and whatever the commands this node will run need. A value a stage
 reads from the environment is expanded here, on the node, from this node's own environment.
@@ -93,6 +101,7 @@ tick and every ref inspected.
 | `SIGINT` or `SIGTERM`                              | `0`, after the tasks already claimed have finished                        |
 | `--idle-timeout` elapsed                           | `0`                                                                       |
 | a required setting is missing, or the secret is unset or empty | non-zero, reported as `E225`                                   |
+| no `execution.endpoint`, and no release remote a mailbox can be found in `--root` | non-zero, reported as `E225`                |
 | the state folder is already held by another process | non-zero, reported as `E225`                                             |
 | another process's id appears in `worker.lock` while serving | non-zero, reported as `E225`, after the tasks already claimed have finished |
 

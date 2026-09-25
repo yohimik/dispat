@@ -13,6 +13,8 @@ package integration
 // credential, before anything is locked or run.
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -167,4 +169,41 @@ func executionCoordinationBranches(t *testing.T, remote string) []string {
 		}
 	}
 	return branches
+}
+
+// TestExecutionWorkerFindsItsMailboxInItsCheckout: a worker that states no
+// endpoint and is started in a checkout of the repository being released
+// reads its work from that checkout's own remote, which is where a link with
+// no endpoint sends it. The whole arrangement names the mailbox nowhere. The
+// same worker started in a folder that is not a repository is refused with
+// E225 naming both remedies, before it serves anything (see
+// TestExecutionWorkerStartRefusals).
+func TestExecutionWorkerFindsItsMailboxInItsCheckout(t *testing.T) {
+	rig := newExecutionRigOnOrigin(t, func(cfg *models.File) {
+		cfg.LogLevel = "debug"
+		cfg.Scripts["build"] = models.Script{executionRecordingScript}
+	})
+	checkout := t.TempDir()
+	gitIn(t, checkout, "", "init", "-q")
+	gitIn(t, checkout, "", "remote", "add", "origin", rig.origin)
+	cfg := executionWorkerConfig(rig.origin, func(settings *models.ExecutionConfig) { settings.Endpoint = "" })
+	document, err := json.MarshalIndent(cfg, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(checkout, "dispat.json"), document, 0o644))
+	proc := rig.repo.StartCommandEnv([]string{executionSecretEnv + "=" + executionSecret,
+		executionBuildLogEnv + "=" + rig.builds}, "worker", "--root", checkout,
+		"--state-dir", t.TempDir(), "--idle-timeout", fmt.Sprint(resolveWorkerIdleBackstop(0)))
+	worker := &executionWorker{t: t, proc: proc}
+
+	res := rig.release()
+	reply := stopAll(t, []*executionWorker{worker})[0]
+
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s\nworker:\n%s", res.Stdout, res.Stderr, reply.Stdout)
+	assert.Equal(t, executionNode, rig.nodesByPackage()["core"], "the build ran on the worker: %v", rig.runs())
+	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
+	reached, isReached := executionLine(reply, "the worker reads its work from the repository it runs in")
+	require.True(t, isReached, "stdout:\n%s", reply.Stdout)
+	assert.Equal(t, "origin", reached.Str("remote"))
+	assert.Equal(t, rig.origin, reached.Str("endpoint"))
+	assert.Empty(t, executionCoordinationBranches(t, rig.origin))
 }

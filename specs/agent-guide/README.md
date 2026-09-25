@@ -608,7 +608,7 @@ After `publish` succeeds, failure to write a tag, changelog, GitHub record, rele
 
 ## Run a distributed release
 
-A repository whose root configuration carries an `execution` object with a non-empty `workers` list runs its build stages, and sometimes its publish stages, on other machines. The machine the release is started on keeps the release locks, the plan, every publication authorization and every release record. Read [distributed execution](../../packages/docs/docs/distributed-execution.md) before working on such a repository, and its security section before touching the signing secret or the repository's branch and tag rules. The mailbox is the repository being released: a worker link with no `endpoint` reaches the remote the release takes its lock on, and an `endpoint` names another mailbox.
+A repository whose root configuration carries an `execution` object with a non-empty `workers` list runs its build stages, and sometimes its publish stages, on other machines. The machine the release is started on keeps the release locks, the plan, every publication authorization and every release record. Read [distributed execution](../../packages/docs/docs/distributed-execution.md) before working on such a repository, and its security section before touching the signing secret or the repository's branch and tag rules. The mailbox is the repository being released: a worker link with no `endpoint` reaches the remote the release takes its lock on, a worker started in a checkout of the repository with no `endpoint` of its own polls the same remote, and an `endpoint` names another mailbox.
 
 Before a release:
 

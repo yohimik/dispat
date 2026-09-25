@@ -100,7 +100,8 @@ the object are worth knowing before the keys:
 
 The mailbox is the repository being released. A worker link with no `endpoint` reaches the remote the release takes
 its lock on, at the push URL Git resolves for it: `commit.remote`, or `origin` when that names none, and in a composed
-workspace the entry repository's. Every worker names that same repository as its own `endpoint`. The
+workspace the entry repository's. Every worker names that same repository as its own `endpoint`, or, started in a
+checkout of the repository, states none and reads the same remote of that checkout. The
 coordination branches live on it beside the release branches, under `refs/heads/dispat-worker-*`, and a run deletes
 the ones it created when it ends. A remote that already holds the repository's objects receives only what a task
 changed.
@@ -150,9 +151,11 @@ dispat worker --config dispat.worker.yaml --state-dir /var/lib/dispat/worker --i
 
 Nothing connects to a worker. It polls its mailbox over Git, every five seconds when it is idle and almost at once
 after it has answered something, so it runs behind NAT and on hosted CI runners with no inbound network of any kind.
-It needs no checkout of the repository beforehand, and the folder it starts in does not have to be a Git repository:
-the assignment carries the commands, the environment names and the exact source state, and the node materializes a
-checkout of its own.
+With its `endpoint` stated it needs no checkout of the repository beforehand, and the folder it starts in does not have
+to be a Git repository: the assignment carries the commands, the environment names and the exact source state, and the
+node materializes a checkout of its own. Started in a checkout of the repository being released, it needs no
+`endpoint` at all: it reads its work from that checkout's release remote, as a link with no endpoint reaches it, and
+is refused with `E225` when the folder is not a repository or that remote's push URL cannot be a mailbox.
 
 `--idle-timeout` ends the process with exit code `0` after that many seconds with nothing claimed and nothing in
 flight, counted from its last activity, which is how a node started for one release ends by itself. `SIGINT` and
@@ -662,7 +665,7 @@ switches on.
 
 | Code   | Category                    | Means                                                                            |
 |--------|-----------------------------|----------------------------------------------------------------------------------|
-| `E225` | `execution-configuration`   | a configuration no distributed run could be executed under: an unknown role, a capacity that is not one, a malformed or credential-carrying endpoint, a duplicated node name, a missing signing secret, a lock bypass beside workers, `commit.verify: false` beside workers on a release, a link with no endpoint whose release remote's push URL carries credentials or is not a Git remote a mailbox can use, an unsatisfiable `buildPlatforms`, `runOnly: worker` with no worker links, a node that failed preflight, overlapping `buildOutputs`, or a `runOutputs` root that is or holds a package folder or overlaps a build output root |
+| `E225` | `execution-configuration`   | a configuration no distributed run could be executed under: an unknown role, a capacity that is not one, a malformed or credential-carrying endpoint, a duplicated node name, a missing signing secret, a lock bypass beside workers, `commit.verify: false` beside workers on a release, a link with no endpoint whose release remote's push URL carries credentials or is not a Git remote a mailbox can use, a worker with no endpoint started outside a checkout whose release remote a mailbox can be, an unsatisfiable `buildPlatforms`, `runOnly: worker` with no worker links, a node that failed preflight, overlapping `buildOutputs`, or a `runOutputs` root that is or holds a package folder or overlaps a build output root |
 | `E226` | `execution-authority`       | work refused because of who asked: a release or a distributed sweep initiated on a worker or under a task's authority, a `--worker` link stated there, an assignment that is not authentically this run's, or a write the task's authority does not extend to |
 | `E227` | `io-integrity`              | input or output data that is missing, changed, incomplete, incompatible or escaping its declared roots, or two tasks of one sweep writing one path with different bytes; it fails one prerequisite and blocks that prerequisite's consumers |
 | `E228` | `publication-unknown`       | an authorized publication that never reported back; the run is incomplete, makes no second attempt, and retains the lock of an unfenced publisher |

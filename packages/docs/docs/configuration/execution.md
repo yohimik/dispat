@@ -50,7 +50,7 @@ a transported checkout is never read for authority either.
 | `role`        | string                      | `orchestrator`    | `orchestrator` or `worker`, matched exactly. A worker refuses to start a release with `E226`.        |
 | `concurrency` | int                         | `1`               | How many assigned command tasks this node runs at once, across runs. Must be at least 1.              |
 | `name`        | string                      | none              | This node's identity when it serves tasks. Required by `dispat worker`.                               |
-| `endpoint`    | string                      | none              | The repository this node reads its work from when it serves tasks. Required by `dispat worker`.       |
+| `endpoint`    | string                      | the release remote | The repository this node reads its work from when it serves tasks. Without it, `dispat worker` reads the release remote of the checkout it runs in. |
 | `secretEnv`   | string                      | none              | The name of the environment variable holding the shared signing secret. Required with `workers`, and required by `dispat worker`. |
 | `workers`     | array of `{name, endpoint}` | empty             | The worker nodes this orchestrator may delegate to, `endpoint` optional. A worker states none.        |
 | `timeouts`    | object                      | see below         | The bounded waits of a distributed run, in seconds.                                                   |
@@ -95,6 +95,13 @@ It refuses `http` and `git`, which authenticate nobody; a query or a fragment, w
 for; a leading `-`, which git reads as an option; the `transport::address` form, which names a helper program to
 run; and user information, except a bare ssh account such as `git@host`, because the configuration file is
 committed. A refused endpoint is redacted in the message.
+
+A worker that states no `endpoint` reads its work from the repository it is started in: the push URL of its release
+remote, `commit.remote` or `origin`, which is what an orchestrator's link with no `endpoint` reaches. The resolution is
+strict. `dispat worker` is refused with `E225` when the folder `--root` names is not a Git repository, when the remote
+is not configured or pushes to more than one URL, and when its push URL breaks a rule above, a credential in it above
+all; each refusal names both remedies, stating `endpoint`, or starting the worker in a checkout of the repository the
+orchestrator's link names.
 
 ### `secretEnv`
 

@@ -424,9 +424,9 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 		"no name": {
 			adjust: func(settings *models.ExecutionConfig) { settings.Name = "" },
 			says:   "execution.name"},
-		"no mailbox": {
+		"no mailbox and no checkout to find one in": {
 			adjust: func(settings *models.ExecutionConfig) { settings.Endpoint = "" },
-			says:   "execution.endpoint"},
+			says:   "start the worker in a checkout"},
 		"no secret variable": {
 			adjust: func(settings *models.ExecutionConfig) { settings.SecretEnv = "" },
 			says:   "execution.secretEnv"},

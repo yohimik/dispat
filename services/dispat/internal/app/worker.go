@@ -12,7 +12,10 @@ package app
 // therefore small and entirely local: a name to recognise work by, a mailbox
 // to read it from, a secret to authenticate it with, and a folder of its own
 // to keep what it has already answered. Each of the four is refused by name
-// rather than discovered as a node that serves nothing.
+// rather than discovered as a node that serves nothing. The mailbox may go
+// unstated: a worker started in a checkout of the repository being released
+// reads its work from that repository's own remote, exactly as a link that
+// states no endpoint reaches it.
 
 import (
 	"context"
@@ -55,6 +58,12 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 	if err := a.checkWorkerSettings(settings); err != nil {
 		return err
 	}
+	// Resolved before the state folder is opened, because the object cache
+	// in it is kept per mailbox.
+	endpoint, err := a.resolveWorkerEndpoint(ctx, settings)
+	if err != nil {
+		return a.refuseToServe(err)
+	}
 	signer, err := execution.NewSigner(os.Getenv(settings.SecretEnv))
 	if err != nil {
 		return a.refuseToServe(execution.NewDiagnostic(
@@ -66,7 +75,7 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 	if err != nil {
 		return a.refuseToServe(err)
 	}
-	state, release, err := execution.OpenNodeState(root, settings.Name, settings.Endpoint)
+	state, release, err := execution.OpenNodeState(root, settings.Name, endpoint)
 	if err != nil {
 		return a.refuseToServe(err)
 	}
@@ -86,13 +95,13 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 	git := &gitx.LocalGitx{Dir: state.Cache, Log: a.log}
 	worker := &execution.Worker{
 		Node:        settings.Name,
-		Endpoint:    settings.Endpoint,
+		Endpoint:    endpoint,
 		StateDir:    state.Dir,
 		IdleTimeout: opts.IdleTimeout,
 		// The transfer window bounds the push of a task's outputs, which is
 		// the one report a node makes whose size the node does not choose.
 		TransferTimeout: time.Duration(settings.ResolveTransfer().Timeout) * time.Second,
-		Mailbox:         execution.NewGitMailbox(settings.Endpoint, git, signer, a.log),
+		Mailbox:         execution.NewGitMailbox(endpoint, git, signer, a.log),
 		Cache:           git,
 		Seen:            seen,
 		Log:             a.log,
@@ -120,17 +129,16 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 // checkWorkerSettings refuses a node that could not serve, naming the setting
 // that is missing.
 //
-// All three are optional in the configuration language, because an
-// orchestrator that never serves states none of them, and all three are
-// required here: a node with no name cannot recognise the work addressed to
-// it, a node with no mailbox has nowhere to read it from, and a node with no
-// secret cannot tell an assignment from anything else somebody pushed.
+// Both are optional in the configuration language, because an orchestrator
+// that never serves states neither, and both are required here: a node with
+// no name cannot recognise the work addressed to it, and a node with no secret
+// cannot tell an assignment from anything else somebody pushed. The mailbox is
+// not among them, because a node started in a checkout has one without being
+// told (see resolveWorkerEndpoint).
 func (a *App) checkWorkerSettings(settings *config.ExecutionConfig) error {
 	for _, required := range []struct{ key, value, why string }{
 		{"execution.name", settings.Name,
 			"it is how this node recognises the work addressed to it"},
-		{"execution.endpoint", settings.Endpoint,
-			"it is the mailbox this node reads its work from"},
 		{"execution.secretEnv", settings.SecretEnv,
 			"it names the variable holding the secret every message is signed with"},
 	} {
@@ -142,6 +150,46 @@ func (a *App) checkWorkerSettings(settings *config.ExecutionConfig) error {
 			"%s is required to serve tasks: %s", required.key, required.why))
 	}
 	return nil
+}
+
+// workerEndpointRemedy is what a worker that could not find its mailbox can do
+// about it, named in every such refusal.
+const workerEndpointRemedy = "set execution.endpoint to the repository the orchestrator's link names, " +
+	"or start the worker in a checkout of that repository"
+
+// resolveWorkerEndpoint is the mailbox this node reads its work from: the
+// endpoint it states, and otherwise the push URL of the remote the repository
+// it runs in releases to, which is what an orchestrator's link with no
+// endpoint reaches.
+//
+// The resolution is strict. The remote is `commit.remote`, or `origin`, of the
+// folder `--root` names, and it has to resolve to exactly one push URL: a
+// folder that is not a repository, a remote that is not configured and a
+// remote that pushes to several places are refused rather than guessed at, and
+// a remote's name is never taken for a path. The URL is then held to every
+// rule of an endpoint, a credential in it above all, exactly as a link's is.
+func (a *App) resolveWorkerEndpoint(ctx context.Context, settings *config.ExecutionConfig) (string, error) {
+	if settings.Endpoint != "" {
+		return settings.Endpoint, nil
+	}
+	name := a.pushRemote()
+	url, err := a.git.RemotePushURL(ctx, name)
+	if err != nil {
+		return "", execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
+			"this worker states no execution.endpoint, and the push URL of the release remote %s of %s could not be resolved: %s: %w",
+			gitx.RedactEndpoint(name), a.root, workerEndpointRemedy, err)
+	}
+	remote := coordinationRemote{name: name, url: url}
+	if err := requireReleaseRemoteEndpoint(releaseRemoteUse{
+		subject:          "this worker states no execution.endpoint, so it",
+		credentialRemedy: workerEndpointRemedy + " whose push URL carries no credential",
+		shapeRemedy:      workerEndpointRemedy,
+	}, remote); err != nil {
+		return "", err
+	}
+	a.log.Debug().Str("remote", gitx.RedactEndpoint(name)).Str("endpoint", gitx.RedactEndpoint(url)).
+		Msg("the worker reads its work from the repository it runs in")
+	return url, nil
 }
 
 // refuseToServe writes one refusal at error level and hands it back to the
