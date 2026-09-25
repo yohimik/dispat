@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -499,6 +500,144 @@ func TestSelfUpdateRefusesAnUnsafePreviousBackup(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Dir(r.exe))
 	require.NoError(t, err)
 	assert.Len(t, entries, 2, "no download is left behind: %v", entries)
+}
+
+// TestSelfUpdateNamesWhatStandsInTheBackupPlace: whatever other than a
+// regular file stands where the backup is kept is named by what it is, with
+// its remedy, and moves nothing. An update is refused before its download,
+// `--check` in JSON says so as a warning, and a rollback accepts a link to a
+// binary, which is what an install that replaced a link on PATH keeps, while
+// refusing a link to a folder and a folder itself.
+func TestSelfUpdateNamesWhatStandsInTheBackupPlace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symbolic links and named pipes are POSIX fixtures here")
+	}
+	const next = "1.2.0"
+	updated := func(t *testing.T) *suRepo {
+		t.Helper()
+		r := newSURepoVersions(t, map[string]string{
+			suNew: harness.BuildVersioned(t, suNew),
+			next:  harness.BuildVersioned(t, next),
+		})
+		require.Equal(t, 0, r.update("--release", suNew).Code, "the update that leaves a backup behind")
+		return r
+	}
+	downloads := func(r *suRepo) int { return strings.Count(strings.Join(r.requests(), "\n"), "/dl/") }
+	// The binary names its backup by its own resolved path, which a temporary
+	// folder behind a symbolic link spells differently, so the name is matched
+	// from the backup's base onwards.
+	blocked := func(r *suRepo, kind string) string {
+		return filepath.Base(r.backup) + " is a " + kind + " where the previous binary is kept; move or remove it, then re-run"
+	}
+
+	t.Run("an update is refused by a link or a named pipe before it downloads", func(t *testing.T) {
+		for _, row := range []struct {
+			kind  string
+			place func(t *testing.T, backup string)
+		}{
+			{kind: "symbolic link", place: func(t *testing.T, backup string) {
+				require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "elsewhere"), backup))
+			}},
+			{kind: "named pipe", place: func(t *testing.T, backup string) {
+				require.NoError(t, syscall.Mkfifo(backup, 0o600))
+			}},
+		} {
+			t.Run(row.kind, func(t *testing.T) {
+				r := updated(t)
+				require.NoError(t, os.Remove(r.backup))
+				row.place(t, r.backup)
+				before := downloads(r)
+
+				res := r.update("--check", "--log-format", "json", "--release", next)
+				assert.Equal(t, 1, res.Code, "an update is still available\nstdout:\n%s", res.Stdout)
+				warning := jsonLine(t, res, "the update cannot be installed until the backup's place is cleared")
+				assert.Contains(t, warning.Str("error"), blocked(r, row.kind))
+
+				res = r.update("--release", next)
+				assert.NotEqual(t, 0, res.Code)
+				assert.Contains(t, res.Stdout+res.Stderr, blocked(r, row.kind))
+				assert.Equal(t, before, downloads(r), "the refusal costs no download")
+				assert.Equal(t, suNew, r.version(r.exe), "and the working binary is where it was")
+			})
+		}
+	})
+
+	t.Run("a rollback restores through a link to a binary", func(t *testing.T) {
+		r := updated(t)
+		kept := filepath.Join(t.TempDir(), "dispat-kept"+exeSuffix())
+		require.NoError(t, os.Rename(r.backup, kept))
+		require.NoError(t, os.Symlink(kept, r.backup))
+
+		res := r.CommandBin(r.exe, "self-update", "--rollback")
+		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		assert.Equal(t, suOld, r.version(r.exe), "the linked binary is what runs now")
+	})
+
+	t.Run("a rollback is refused by a link to a folder and by a folder", func(t *testing.T) {
+		for _, row := range []struct {
+			kind  string
+			place func(t *testing.T, backup string)
+		}{
+			{kind: "link to something that is not a file", place: func(t *testing.T, backup string) {
+				require.NoError(t, os.Symlink(t.TempDir(), backup))
+			}},
+			{kind: "folder", place: func(t *testing.T, backup string) {
+				require.NoError(t, os.Mkdir(backup, 0o700))
+			}},
+		} {
+			t.Run(row.kind, func(t *testing.T) {
+				r := updated(t)
+				require.NoError(t, os.Remove(r.backup))
+				row.place(t, r.backup)
+
+				res := r.CommandBin(r.exe, "self-update", "--check", "--rollback")
+				assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+				assert.Contains(t, res.Stdout+res.Stderr, blocked(r, row.kind))
+
+				res = r.CommandBin(r.exe, "self-update", "--rollback")
+				assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+				assert.Contains(t, res.Stdout+res.Stderr, blocked(r, row.kind))
+				assert.Equal(t, suNew, r.version(r.exe), "nothing moved")
+			})
+		}
+	})
+}
+
+// TestSelfUpdateLeavesTheLeftoversItCannotSettle: the housekeeping an update
+// or a rollback does for a crashed update touches only what is abandoned and
+// unambiguous. A parked rollback copy is dropped when a newer backup already
+// holds its place, while a staging folder younger than an hour, one holding
+// another binary's copy, and one holding more than one file are left for a
+// later run; the rollback itself goes on.
+func TestSelfUpdateLeavesTheLeftoversItCannotSettle(t *testing.T) {
+	r := newSURepo(t)
+	require.Equal(t, 0, r.update().Code)
+	dir := filepath.Dir(r.exe)
+	crashed := time.Now().Add(-2 * time.Hour)
+	staging := func(name string, isAbandoned bool, files ...string) string {
+		path := filepath.Join(dir, "dispat-previous-backup-"+name)
+		require.NoError(t, os.Mkdir(path, 0o700))
+		for _, file := range files {
+			require.NoError(t, os.WriteFile(filepath.Join(path, file), []byte("an older binary"), 0o755))
+		}
+		if isAbandoned {
+			require.NoError(t, os.Chtimes(path, crashed, crashed))
+		}
+		return path
+	}
+	superseded := staging("superseded", true, filepath.Base(r.backup))
+	young := staging("young", false, filepath.Base(r.backup))
+	foreign := staging("foreign", true, "other-tool.backup")
+	crowded := staging("crowded", true, filepath.Base(r.backup), "notes.txt")
+
+	res := r.CommandBin(r.exe, "self-update", "--rollback")
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Equal(t, suOld, r.version(r.exe), "the rollback went on")
+	assert.Equal(t, suNew, r.version(r.backup), "and the newer backup kept its place")
+	assert.NoDirExists(t, superseded, "a copy a newer backup supersedes is dropped")
+	for _, kept := range []string{young, foreign, crowded} {
+		assert.DirExists(t, kept, "left for a later run")
+	}
 }
 
 // The downloaded candidate makes the executable directory unwritable during
