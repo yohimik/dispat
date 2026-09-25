@@ -68,21 +68,9 @@ func composeWorkspace(ctx context.Context, cfg *File, configPath, controlRoot st
 		return nil, nil
 	}
 	cfg.Polyrepo = true
-	root, err := filepath.Abs(controlRoot)
+	root, controlHead, err := resolveControlRepository(controlRoot)
 	if err != nil {
-		return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: resolve control root: %w", err))
-	}
-	root, err = filepath.EvalSymlinks(root)
-	if err != nil {
-		return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: resolve control root: %w", err))
-	}
-	if err := requireCompleteRepository(root, ControlRepository); err != nil {
 		return nil, err
-	}
-	controlHead, err := gitOutput(root, "rev-parse", "HEAD")
-	if err != nil {
-		return nil, WithDiagnostic(DiagnosticRepositoryInvalid,
-			fmt.Errorf("E330: polyrepo control repository has no HEAD: %w", err))
 	}
 	modules, disabled, err := loadSubmodules(root, cfg.RepositoryOverrides)
 	if err != nil {
@@ -92,114 +80,21 @@ func composeWorkspace(ctx context.Context, cfg *File, configPath, controlRoot st
 	// excluded repository owns are removed here, ahead of source
 	// initialization, history, pins, package discovery, hooks and locks.
 	participants := resolveParticipation(cfg, root, disabled)
+	c := centralComposition{cfg: cfg, configPath: configPath, root: root, controlHead: controlHead,
+		modules: modules, participants: participants}
 	repos := []Repository{{Name: ControlRepository, Root: root, ConfigPath: configPath, Config: cfg,
 		Control: true, Entry: true, Commit: cfg.Commit, CompositionHead: controlHead}}
-
-	seenConfig := map[string]bool{}
-	if canonical, err := canonicalFile(configPath); err == nil {
-		seenConfig[canonical] = true
-	}
-	modulesByName := make(map[string]submodule, len(modules))
-	modulesByRoot := make(map[string]submodule, len(modules))
-	for _, module := range modules {
-		modulesByName[module.Name] = module
-		modulesByRoot[module.Root] = module
-	}
-	importedRepo := map[string]string{}
-	imports, err := workspaceImports(cfg, configPath, root, cliConfigs)
+	imported, importedRepo, err := c.importRepositories(cliConfigs)
 	if err != nil {
-		return nil, WithDiagnostic(DiagnosticComposition, err)
+		return nil, err
 	}
-	for _, imp := range imports {
-		declared := imp.Path
-		path, err := resolveImportPath(root, imp.Base, declared)
-		if err != nil {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: config %q: %w", declared, err))
-		}
-		if participants.ownerOf(path) != nil {
-			continue
-		}
-		canonical, err := canonicalFile(path)
-		if err != nil {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: config %q: %w", declared, err))
-		}
-		if seenConfig[canonical] {
-			continue
-		}
-		seenConfig[canonical] = true
-		repoRoot, err := gitOutput(filepath.Dir(canonical), "rev-parse", "--show-toplevel")
-		if err != nil {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: imported config %s is not inside an initialized Git repository: %w", canonical, err))
-		}
-		repoRoot, err = filepath.EvalSymlinks(repoRoot)
-		if err != nil {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: imported repository root %s: %w", repoRoot, err))
-		}
-		if !within(repoRoot, canonical) {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf(
-				"polyrepo: Git root %s does not contain imported config %s", repoRoot, canonical))
-		}
-		module, ok := modulesByRoot[repoRoot]
-		if !ok {
-			return nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: imported config %s belongs to %s, which is not an initialized .gitmodules repository", canonical, repoRoot))
-		}
-		name := module.Name
-		if previous := importedRepo[name]; previous != "" && previous != canonical {
-			return nil, WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repository %q has conflicting imported configs %s and %s", name, previous, canonical))
-		}
-		importedRepo[name] = canonical
-		if err := requireCompleteRepository(repoRoot, name); err != nil {
-			return nil, err
-		}
-		imported, err := Load(canonical, nil)
-		if err != nil {
-			return nil, fmt.Errorf("polyrepo: imported config %s: %w", canonical, err)
-		}
-		// Imports compose one level. A repository config cannot silently pull a
-		// second fleet into the control run; list every participant at control.
-		if len(imported.Configs) > 0 {
-			return nil, WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: imported config %s declares configs; nested workspace imports are not allowed", canonical))
-		}
-		repos = append(repos, Repository{Name: name, Root: repoRoot, GitlinkPath: module.Path, ConfigPath: canonical, Config: imported, Imported: true, Commit: imported.Commit})
+	repos = append(repos, imported...)
+	if err := c.checkRepositoryOverrides(importedRepo); err != nil {
+		return nil, err
 	}
-	for key := range cfg.RepositoryOverrides {
-		if !cfg.RepositoryOverrides[key].IsEnabled() {
-			continue
-		}
-		module, ok := modulesByName[key]
-		if !ok {
-			return nil, WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repositoryOverrides names unknown source repository %q", key))
-		}
-		if importedRepo[module.Name] != "" && cfg.RepositoryOverrides[key].Commit != nil {
-			return nil, WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repositoryOverrides[%q] cannot override imported repository config %s", key, importedRepo[module.Name]))
-		}
-	}
-	for _, module := range modules {
-		if _, imported := importedRepo[module.Name]; imported {
-			continue
-		}
-		commit := cfg.Commit
-		if override, ok := cfg.RepositoryOverrides[module.Name]; ok && override.Commit != nil {
-			commit = override.Commit
-		}
-		repos = append(repos, Repository{Name: module.Name, Root: module.Root, GitlinkPath: module.Path, Config: cfg, Commit: commit})
-	}
-
-	// Only initialized, pinned repositories may participate. Check all source
-	// roots once here; package discovery below merely assigns packages to them.
-	compositionHeads := map[string]string{ControlRepository: controlHead}
-	for _, module := range modules {
-		if err := requireCompleteRepository(module.Root, module.Name); err != nil {
-			return nil, err
-		}
-		head, err := requirePinnedModuleResolved(ctx, root, controlHead, module, runPins[module.Name], resolve)
-		if err != nil {
-			return nil, err
-		}
-		compositionHeads[module.Name] = head
-	}
-	for i := range repos {
-		repos[i].CompositionHead = compositionHeads[repos[i].Name]
+	repos = append(repos, c.sourceRepositories(importedRepo)...)
+	if err := c.resolveCompositionHeads(ctx, repos, runPins, resolve); err != nil {
+		return nil, err
 	}
 	if err := resolveRepositoryBaselines(cfg, baselineResolution{repos: repos, participants: participants}); err != nil {
 		return nil, err
@@ -210,6 +105,177 @@ func composeWorkspace(ctx context.Context, cfg *File, configPath, controlRoot st
 	workspace.excludedSpaces = participants.spaces
 	workspace.inheritedPins = resolve != nil
 	return workspace, nil
+}
+
+// centralComposition is what the steps of a central composition share: the
+// control configuration and repository, the source repositories .gitmodules
+// declares and the participation settled over them.
+type centralComposition struct {
+	cfg          *File
+	configPath   string
+	root         string
+	controlHead  string
+	modules      []submodule
+	participants *participation
+}
+
+// resolveControlRepository returns the control repository's root, resolved
+// through any symbolic link, and the HEAD the composition is taken at.
+func resolveControlRepository(controlRoot string) (string, string, error) {
+	root, err := filepath.Abs(controlRoot)
+	if err != nil {
+		return "", "", WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: resolve control root: %w", err))
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", "", WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: resolve control root: %w", err))
+	}
+	if err := requireCompleteRepository(root, ControlRepository); err != nil {
+		return "", "", err
+	}
+	controlHead, err := gitOutput(root, "rev-parse", "HEAD")
+	if err != nil {
+		return "", "", WithDiagnostic(DiagnosticRepositoryInvalid,
+			fmt.Errorf("E330: polyrepo control repository has no HEAD: %w", err))
+	}
+	return root, controlHead, nil
+}
+
+// importRepositories loads the repository-local configurations the control
+// file and the command line import, each one a source repository's own, and
+// returns them with the canonical configuration path of each imported
+// repository.
+func (c centralComposition) importRepositories(cliConfigs []string) ([]Repository, map[string]string, error) {
+	seenConfig := map[string]bool{}
+	if canonical, err := canonicalFile(c.configPath); err == nil {
+		seenConfig[canonical] = true
+	}
+	modulesByRoot := make(map[string]submodule, len(c.modules))
+	for _, module := range c.modules {
+		modulesByRoot[module.Root] = module
+	}
+	importedRepo := map[string]string{}
+	imports, err := workspaceImports(c.cfg, c.configPath, c.root, cliConfigs)
+	if err != nil {
+		return nil, nil, WithDiagnostic(DiagnosticComposition, err)
+	}
+	var repos []Repository
+	for _, imp := range imports {
+		declared := imp.Path
+		path, err := resolveImportPath(c.root, imp.Base, declared)
+		if err != nil {
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: config %q: %w", declared, err))
+		}
+		if c.participants.ownerOf(path) != nil {
+			continue
+		}
+		canonical, err := canonicalFile(path)
+		if err != nil {
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: config %q: %w", declared, err))
+		}
+		if seenConfig[canonical] {
+			continue
+		}
+		seenConfig[canonical] = true
+		repoRoot, err := gitOutput(filepath.Dir(canonical), "rev-parse", "--show-toplevel")
+		if err != nil {
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: imported config %s is not inside an initialized Git repository: %w", canonical, err))
+		}
+		repoRoot, err = filepath.EvalSymlinks(repoRoot)
+		if err != nil {
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: imported repository root %s: %w", repoRoot, err))
+		}
+		if !within(repoRoot, canonical) {
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf(
+				"polyrepo: Git root %s does not contain imported config %s", repoRoot, canonical))
+		}
+		module, ok := modulesByRoot[repoRoot]
+		if !ok {
+			return nil, nil, WithDiagnostic(DiagnosticRepositoryInvalid, fmt.Errorf("polyrepo: imported config %s belongs to %s, which is not an initialized .gitmodules repository", canonical, repoRoot))
+		}
+		name := module.Name
+		if previous := importedRepo[name]; previous != "" && previous != canonical {
+			return nil, nil, WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repository %q has conflicting imported configs %s and %s", name, previous, canonical))
+		}
+		importedRepo[name] = canonical
+		if err := requireCompleteRepository(repoRoot, name); err != nil {
+			return nil, nil, err
+		}
+		imported, err := Load(canonical, nil)
+		if err != nil {
+			return nil, nil, fmt.Errorf("polyrepo: imported config %s: %w", canonical, err)
+		}
+		// Imports compose one level. A repository config cannot silently pull a
+		// second fleet into the control run; list every participant at control.
+		if len(imported.Configs) > 0 {
+			return nil, nil, WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: imported config %s declares configs; nested workspace imports are not allowed", canonical))
+		}
+		repos = append(repos, Repository{Name: name, Root: repoRoot, GitlinkPath: module.Path, ConfigPath: canonical, Config: imported, Imported: true, Commit: imported.Commit})
+	}
+	return repos, importedRepo, nil
+}
+
+// checkRepositoryOverrides refuses an override naming no source repository,
+// and a commit override of a repository whose own imported configuration
+// states its commit settings.
+func (c centralComposition) checkRepositoryOverrides(importedRepo map[string]string) error {
+	modulesByName := make(map[string]submodule, len(c.modules))
+	for _, module := range c.modules {
+		modulesByName[module.Name] = module
+	}
+	for key := range c.cfg.RepositoryOverrides {
+		if !c.cfg.RepositoryOverrides[key].IsEnabled() {
+			continue
+		}
+		module, ok := modulesByName[key]
+		if !ok {
+			return WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repositoryOverrides names unknown source repository %q", key))
+		}
+		if importedRepo[module.Name] != "" && c.cfg.RepositoryOverrides[key].Commit != nil {
+			return WithDiagnostic(DiagnosticComposition, fmt.Errorf("polyrepo: repositoryOverrides[%q] cannot override imported repository config %s", key, importedRepo[module.Name]))
+		}
+	}
+	return nil
+}
+
+// sourceRepositories are the source repositories no import configures: they
+// run under the control file, with its commit settings unless an override
+// states their own.
+func (c centralComposition) sourceRepositories(importedRepo map[string]string) []Repository {
+	var repos []Repository
+	for _, module := range c.modules {
+		if _, imported := importedRepo[module.Name]; imported {
+			continue
+		}
+		commit := c.cfg.Commit
+		if override, ok := c.cfg.RepositoryOverrides[module.Name]; ok && override.Commit != nil {
+			commit = override.Commit
+		}
+		repos = append(repos, Repository{Name: module.Name, Root: module.Root, GitlinkPath: module.Path, Config: c.cfg, Commit: commit})
+	}
+	return repos
+}
+
+// resolveCompositionHeads checks every source repository is initialized and
+// pinned, and records on each participant the HEAD composition accepted.
+func (c centralComposition) resolveCompositionHeads(ctx context.Context, repos []Repository, runPins map[string][]string, resolve SourcePinResolver) error {
+	// Only initialized, pinned repositories may participate. Check all source
+	// roots once here; package discovery below merely assigns packages to them.
+	compositionHeads := map[string]string{ControlRepository: c.controlHead}
+	for _, module := range c.modules {
+		if err := requireCompleteRepository(module.Root, module.Name); err != nil {
+			return err
+		}
+		head, err := requirePinnedModuleResolved(ctx, c.root, c.controlHead, module, runPins[module.Name], resolve)
+		if err != nil {
+			return err
+		}
+		compositionHeads[module.Name] = head
+	}
+	for i := range repos {
+		repos[i].CompositionHead = compositionHeads[repos[i].Name]
+	}
+	return nil
 }
 
 // Repository is one participant of a composed workspace.
