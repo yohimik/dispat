@@ -178,6 +178,73 @@ func TestReleaseLockRefusedRemoteUnwindsEarlierLocks(t *testing.T) {
 	assertLockCleared(t, control, controlRemote)
 }
 
+// TestReleaseLockOverlappingFleetsRefuseTheSecondAndUnwind proves the fleet lock
+// between two control repositories started together over a repository both
+// compose. The first fleet takes every lock it needs and is held by a
+// stand-in git on its first call after the last one; the second, started in
+// that window, takes the locks nobody else holds, is refused at the shared
+// repository with E336 and gives back every lock it had already taken before
+// any package script runs. Resumed, the first fleet releases.
+func TestReleaseLockOverlappingFleetsRefuseTheSecondAndUnwind(t *testing.T) {
+	first, firstRemote, aRemote, zRemote := lockedFleet(t, "echo ran > ../../../../build-ran")
+	bareGit(t, zRemote, "symbolic-ref", "HEAD", "refs/heads/"+harness.DefaultBranch)
+
+	// The second control repository composes a source of its own and the
+	// first fleet's z-source, cloned from the same remote.
+	bSource := harness.New(t)
+	bSource.SeedPackage("packages", "b")
+	bSource.Commit("feat(b): bootstrap the second fleet's own source")
+	second := harness.New(t)
+	addPolyrepoSource(t, second, "b-source", "sources/b", bSource)
+	second.Git("-c", "protocol.file.allow=always", "submodule", "add", "-q", "--name", "z-source", zRemote, "sources/z")
+	second.Git("-C", "sources/z", "config", "user.email", "integration@dispat.test")
+	second.Git("-C", "sources/z", "config", "user.name", "dispat integration")
+	cfg := polyrepoFile()
+	cfg["spaces"] = centralSpaces(map[string]string{"b": "sources/b/packages", "z": "sources/z/packages"})
+	cfg["scripts"] = map[string]any{"build": []string{"echo ran > ../../../../build-ran"}, "publish": []string{"echo publishing"}}
+	writePolyrepoJSON(t, second, "dispat.json", cfg)
+	second.Commit("chore: configure a fleet overlapping the first")
+	secondRemote := second.AddBareRemote()
+	bRemote := filepath.Join(t.TempDir(), "b-source.git")
+	second.Git("init", "-q", "--bare", bRemote)
+	second.Git("-C", "sources/b", "remote", "set-url", "origin", bRemote)
+	second.Git("-C", "sources/b", "push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+
+	lastLockPush := "*-C " + filepath.Join(canonicalRoot(t, first), "sources", "z") + " *push*refs/tags/" + lockTag + "*"
+	hold := harness.NewGitFault(t, harness.GitFault{ArmAfter: lastLockPush, Pattern: "*", Nth: 1, Hold: true})
+	proc := first.StartReleaseEnv(append(hold.Env(), harness.LockEnabled...))
+	require.Eventually(t, func() bool { return hold.IsHeld() && remoteHoldsLock(t, zRemote) },
+		20*time.Second, 20*time.Millisecond, "the first fleet never held its last lock")
+	held := lockObject(t, zRemote)
+
+	res := releaseLocked(second)
+	assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, "E336"), "stdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "repository z-source", "the refusal names the shared repository")
+	var acquired []string
+	for _, event := range res.Events {
+		if lockAcquired(event) {
+			acquired = append(acquired, event.Str("repository"))
+		}
+	}
+	assert.Equal(t, []string{"b-source", "control"}, acquired,
+		"the second fleet took the locks nobody else held, in name order, before it was refused")
+	assert.Equal(t, held, lockObject(t, zRemote), "the first fleet's lock on the shared repository is untouched")
+	assert.False(t, remoteHoldsLock(t, bRemote), "the lock the second fleet took first is given back")
+	assert.False(t, remoteHoldsLock(t, secondRemote), "and so is its own control lock")
+	assert.NoFileExists(t, second.Path("build-ran"), "the refused fleet ran no package script")
+	assert.Empty(t, polyrepoTags(second, "sources/b"))
+
+	hold.Resume()
+	out := proc.Wait()
+	require.Equal(t, 0, out.Code, "stdout:\n%s\nstderr:\n%s", out.Stdout, out.Stderr)
+	assert.NotEmpty(t, polyrepoTags(first, "sources/a"), "the first fleet released")
+	assert.NotEmpty(t, polyrepoTags(first, "sources/z"))
+	assertLockCleared(t, first, firstRemote)
+	assert.False(t, remoteHoldsLock(t, aRemote))
+	assert.False(t, remoteHoldsLock(t, zRemote))
+}
+
 // TestReleaseLockCancelledAcquisitionUnwinds proves that an interrupt during
 // acquisition is the same refusal: the run never plans, and the locks it had
 // already taken are given back even though the interrupt cancelled its
