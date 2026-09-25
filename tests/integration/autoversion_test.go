@@ -587,6 +587,73 @@ func TestAutoSignStandaloneAutoversionWritesRangesOnly(t *testing.T) {
 	assert.Contains(t, readFile(t, r, "packages", "web", "package.json"), `"version": "0.1.0"`)
 }
 
+// TestAutoSignAllScopeWritesOnlyThePackagesOwnManifests: `manifests: all`
+// lets the sign stage reach a manifest whose folder is part of its format's
+// name, Unity's ProjectSettings/ProjectSettings.asset, and still writes the
+// package's own manifests alone: an example nested inside the package keeps
+// its own version. A manifest the scan cannot parse is reported from the sign
+// stage and the ones it could parse are written all the same.
+func TestAutoSignAllScopeWritesOnlyThePackagesOwnManifests(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Spaces["libs"] = models.SpaceConfig{
+		Path:     models.PathList{"packages"},
+		Flow:     buildPublish(),
+		AutoSign: &models.AutoSignConfig{Manifests: "all"},
+	}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "game")
+	r.WriteFile("packages/game/ProjectSettings/ProjectSettings.asset", unityProjectSettings)
+	r.WriteFile("packages/game/package.json", `{"name": "@acme/game", "version": "0.0.0"}`)
+	r.WriteFile("packages/game/examples/demo/package.json", `{"name": "demo", "version": "7.7.7"}`)
+	r.WriteFile("packages/game/examples/broken/package.json", `{"name": "broken", "version": `)
+	r.Commit("feat(game): first release")
+
+	res := r.ReleaseOK()
+	require.True(t, r.IsTagged("game@0.1.0"), "tags: %v", r.TagList())
+	assert.Contains(t, readFile(t, r, "packages", "game", "package.json"), `"version": "0.1.0"`)
+	assert.Contains(t, readFile(t, r, "packages", "game", "ProjectSettings", "ProjectSettings.asset"),
+		"bundleVersion: 0.1.0", "the scope reached the format whose folder is part of its name")
+	assert.Contains(t, readFile(t, r, "packages", "game", "examples", "demo", "package.json"), `"version": "7.7.7"`,
+		"a nested example keeps its own version")
+	parse := jsonLine(t, res, "auto-signing: some manifests failed to parse")
+	assert.Equal(t, "sign", parse.Str("stage"), "reported from the sign stage: %v", parse)
+}
+
+// TestAutoSignRefusesABlockThatWritesNothingOrTwice: the sign stage owns the
+// package's own version, so a configuration that would have it write nothing,
+// or have the version stage write the same field beside it, is refused when
+// the configuration loads, naming the keys, before any script or tag. A
+// `writeVersion: true` inherited from the top level is refused for a space
+// that enables autoSign itself, exactly as one stated beside it.
+func TestAutoSignRefusesABlockThatWritesNothingOrTwice(t *testing.T) {
+	r := refusalRepo(t)
+	signing := func(sign *models.AutoSignConfig, version *models.AutoVersionConfig) func(*models.File) {
+		return func(cfg *models.File) {
+			cfg.Spaces["libs"] = models.SpaceConfig{Path: models.PathList{"packages"}, Flow: buildPublish(),
+				AutoSign: sign, AutoVersion: version}
+		}
+	}
+	runRefusals(t, r, []refusal{
+		{name: "a scope that scans nothing",
+			mutate: signing(&models.AutoSignConfig{Manifests: "none"}, nil),
+			want:   `autoSign: manifests: "none" would write nothing`},
+		{name: "a scope the loader does not know",
+			mutate: signing(&models.AutoSignConfig{Manifests: "nested"}, nil),
+			want:   `autoSign: manifests: unknown value "nested" (want "root" or "all")`},
+		{name: "writeVersion stated beside it",
+			mutate: signing(&models.AutoSignConfig{Enabled: models.Bool(true)},
+				&models.AutoVersionConfig{WriteVersion: models.Bool(true)}),
+			want: "autoVersion.writeVersion and autoSign both write the package's own version"},
+		{name: "writeVersion inherited from the top level",
+			mutate: func(cfg *models.File) {
+				signing(&models.AutoSignConfig{Enabled: models.Bool(true)}, nil)(cfg)
+				cfg.AutoVersion = &models.AutoVersionConfig{WriteVersion: models.Bool(true)}
+			},
+			want: "autoVersion.writeVersion and autoSign both write the package's own version"},
+	})
+}
+
 // TestAutoVersionRefusesAnOnlyNamingNoPackage: autoVersion.only
 // narrows a rewrite to named providers, so a name that is no package narrows
 // it to nothing — a typo that would otherwise present as "the rewrite silently
