@@ -502,17 +502,25 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 		return inv, true
 	}
 	inv.args = forwarded
+	bad = inv.readPositionals(rest, usage, log)
+	return inv, bad
+}
+
+// readPositionals checks the command's arity and records its positional
+// arguments; rest starts with the command word. It reports whether the
+// command line is unusable, already logged.
+func (inv *invocation) readPositionals(rest []string, usage func(string), log zerolog.Logger) (bad bool) {
 	switch inv.cmd {
 	case cmdRelease, cmdStatus, cmdInit, cmdCompute, cmdSelfUpdate, cmdWorker:
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
-			return inv, true
+			return true
 		}
 	case cmdDiagnostics:
 		if len(rest) != 2 {
 			log.Error().Msg("diagnostics requires exactly one commit-message argument")
 			usage(inv.cmd)
-			return inv, true
+			return true
 		}
 		inv.diagnosticMessage = rest[1]
 	case cmdInstall:
@@ -522,7 +530,7 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 			log.Error().Strs("args", rest[2:]).
 				Msg("install takes one repository: dispat install https://github.com/owner/repo")
 			usage(inv.cmd)
-			return inv, true
+			return true
 		}
 		if len(rest) == 2 {
 			inv.repository = rest[1]
@@ -531,7 +539,7 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 		if len(rest) != 2 {
 			log.Error().Msg("run requires exactly one argument: the script name (select packages with --package, --space or --group; pass arguments to the script after `--`)")
 			usage(inv.cmd)
-			return inv, true
+			return true
 		}
 		inv.script = rest[1]
 	case cmdIf:
@@ -541,7 +549,7 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 		if len(rest) > 2 {
 			log.Error().Strs("args", rest[2:]).Msg("if takes at most one argument: the condition (or none, with --changed, --file or --dir)")
 			usage(inv.cmd)
-			return inv, true
+			return true
 		}
 		if len(rest) == 2 {
 			inv.cond, inv.condSet = rest[1], true
@@ -555,7 +563,7 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 		if len(rest) != 2 {
 			log.Error().Msg("exec requires exactly one argument: the script name (choose the subject with --for pkg:<name>, space:<name>, root or cwd; pass arguments to the script after `--`)")
 			usage(inv.cmd)
-			return inv, true
+			return true
 		}
 		inv.script = rest[1]
 	case cmdPreview, cmdChangelog, cmdAutoversion, cmdAutowriter, cmdAutoreplacer, cmdCommit, cmdGithub:
@@ -563,46 +571,15 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 			log.Error().Strs("args", rest[1:]).
 				Msgf("%s takes no arguments (select packages with --package, --space or --group)", inv.cmd)
 			usage(inv.cmd)
-			return inv, true
+			return true
 		}
 	case cmdTrigger:
-		// `trigger <event> [message...]` raises script.<event>; `progress`
-		// is the one typed kind, whose first argument is its 0-100 value.
-		if len(rest) < 2 {
-			log.Error().Msg("trigger requires an event: trigger <event> [message], or trigger progress <0-100> [message]")
-			usage(inv.cmd)
-			return inv, true
-		}
-		word := rest[1]
-		if !public.IsWebhookScriptWord(word) {
-			log.Error().Str("event", word).
-				Msg("a triggered event is one word: a letter, then letters, digits, dashes or underscores")
-			usage(inv.cmd)
-			return inv, true
-		}
-		inv.event = public.WebhookScriptEvent(word)
-		args := rest[2:]
-		if word == "progress" {
-			if len(rest) < 3 {
-				log.Error().Msg("trigger progress requires its value: trigger progress <0-100> [message]")
-				usage(inv.cmd)
-				return inv, true
-			}
-			pct, err := strconv.Atoi(rest[2])
-			if err != nil || pct < 0 || pct > 100 {
-				log.Error().Str("value", rest[2]).Msg("trigger progress wants a whole number between 0 and 100")
-				usage(inv.cmd)
-				return inv, true
-			}
-			inv.progress = &pct
-			args = rest[3:]
-		}
-		inv.message = strings.Join(args, " ")
+		return inv.readTrigger(rest, usage, log)
 	case cmdScanner:
 		if len(rest) > 2 {
 			log.Error().Msg("scanner takes at most one argument: the folder to scan")
 			usage(inv.cmd)
-			return inv, true
+			return true
 		}
 		if len(rest) == 2 {
 			inv.dir = rest[1] // no argument: scan --root itself
@@ -611,14 +588,14 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 		if len(rest) < 2 {
 			log.Error().Msg("writer requires at least one manifest file to edit")
 			usage(inv.cmd)
-			return inv, true
+			return true
 		}
 		inv.paths = rest[1:]
 	case cmdReplacer:
 		if len(rest) < 2 {
 			log.Error().Msg("replacer requires at least one file to edit")
 			usage(inv.cmd)
-			return inv, true
+			return true
 		}
 		inv.paths = rest[1:]
 	default:
@@ -628,11 +605,48 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
 			usage(cmdRun) // the shorthand's own help, not the program's
-			return inv, true
+			return true
 		}
 		inv.script, inv.cmd = inv.cmd, cmdRun
 	}
-	return inv, false
+	return false
+}
+
+// readTrigger reads `trigger <event> [message...]`, which raises
+// script.<event>; `progress` is the one typed kind, whose first argument is
+// its 0-100 value. It reports whether the command line is unusable.
+func (inv *invocation) readTrigger(rest []string, usage func(string), log zerolog.Logger) (bad bool) {
+	if len(rest) < 2 {
+		log.Error().Msg("trigger requires an event: trigger <event> [message], or trigger progress <0-100> [message]")
+		usage(inv.cmd)
+		return true
+	}
+	word := rest[1]
+	if !public.IsWebhookScriptWord(word) {
+		log.Error().Str("event", word).
+			Msg("a triggered event is one word: a letter, then letters, digits, dashes or underscores")
+		usage(inv.cmd)
+		return true
+	}
+	inv.event = public.WebhookScriptEvent(word)
+	args := rest[2:]
+	if word == "progress" {
+		if len(rest) < 3 {
+			log.Error().Msg("trigger progress requires its value: trigger progress <0-100> [message]")
+			usage(inv.cmd)
+			return true
+		}
+		pct, err := strconv.Atoi(rest[2])
+		if err != nil || pct < 0 || pct > 100 {
+			log.Error().Str("value", rest[2]).Msg("trigger progress wants a whole number between 0 and 100")
+			usage(inv.cmd)
+			return true
+		}
+		inv.progress = &pct
+		args = rest[3:]
+	}
+	inv.message = strings.Join(args, " ")
+	return false
 }
 
 // forwardsArgs reports whether a command word passes what follows `--` to the
