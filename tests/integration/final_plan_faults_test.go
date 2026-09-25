@@ -74,10 +74,11 @@ func TestFinalPlanFaultsRefuseAnUnreadableRepositorySnapshot(t *testing.T) {
 // package takes its scope from the files it changed, and that listing is a
 // framed protocol between Git and the planner. A reply Git could not give, one
 // whose framing is broken, one with a path that never ends, one that lists
-// fewer commits than were asked for and one naming a commit that was not asked
-// about are each a refusal naming what was wrong, never a commit that changed
-// nothing and so released nothing. A healthy retry plans the derived scope.
-// Both commits are asked about in one listing.
+// fewer commits than were asked for, one naming a commit that was not asked
+// about and one listing a commit twice are each a refusal naming what was
+// wrong, never a commit that changed nothing and so released nothing. A
+// healthy retry plans the derived scope. Both commits are asked about in one
+// listing.
 func TestFinalPlanRefusesAMalformedChangedFilesListing(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -97,6 +98,9 @@ func TestFinalPlanRefusesAMalformedChangedFilesListing(t *testing.T) {
 		{name: "a reply naming another commit",
 			output: "\x1e%s\x1f\x00\npackages/core/change.txt\x00\x1e" + strings.Repeat("a", 40) + "\x1f\x00",
 			want:   "which was not asked about"},
+		{name: "a reply listing one commit twice",
+			output: "\x1e%s\x1f\x00\npackages/core/change.txt\x00\x1e%s\x1f\x00\npackages/core/change.txt\x00",
+			want:   "is listed twice"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := finalPlanRepo(t)
