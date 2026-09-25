@@ -78,6 +78,14 @@ func (cp *computation) walk(sources map[string]bool, depth int, kinds map[model.
 	kindsKey := kindsCacheKey(kinds)
 	if len(sources) == 1 {
 		for s := range sources {
+			// Once the budget has turned a walk away, a bounded walk that is
+			// not cached is walked to its own depth: the unbounded one it
+			// would be a prefix of may not be kept either, and a unit written
+			// "^" needs one level of it, not the whole reach.
+			if _, isCached := cp.walks.single[walkKey{sources: s, kinds: kindsKey}]; !isCached &&
+				cp.walks.isSpilled && depth != depthUnbounded {
+				return cp.walkLiteral(sources, depth, kinds)
+			}
 			return withinDepth(cp.walks.from(cp, s, kindsKey, kinds), depth)
 		}
 	}
@@ -105,8 +113,10 @@ func (cp *computation) walk(sources map[string]bool, depth int, kinds map[model.
 // of the workspace is walked outright.
 const walkComposeLimit = 8
 
-// walkCacheBudget bounds the targets retained under exact keys. Past it a walk
-// is still computed, just not kept.
+// walkCacheBudget bounds the targets the cache retains, under both keys
+// together (CCME §13.11). Past it a walk is still computed, just not kept: a
+// chain of a few thousand packages holds a quadratic number of targets in its
+// unbounded walks alone.
 const walkCacheBudget = 4 << 20
 
 // walkKey names one traversal. sources is one package for the single cache and
@@ -120,7 +130,9 @@ type walkKey struct {
 type walkCache struct {
 	single map[walkKey][]target // one source, unbounded, level by level
 	exact  map[walkKey][]target
-	held   int
+	held   int // targets retained under either key, against walkCacheBudget
+	// isSpilled records that the budget has turned a single-source walk away.
+	isSpilled bool
 }
 
 // from is the unbounded walk from one source package.
@@ -129,7 +141,12 @@ func (wc *walkCache) from(cp *computation, source, kindsKey string, kinds map[mo
 	walked, ok := wc.single[key]
 	if !ok {
 		walked = cp.walkLiteral(map[string]bool{source: true}, depthUnbounded, kinds)
-		wc.single[key] = walked
+		if wc.held+len(walked) <= walkCacheBudget {
+			wc.held += len(walked)
+			wc.single[key] = walked
+		} else {
+			wc.isSpilled = true
+		}
 	}
 	return walked
 }

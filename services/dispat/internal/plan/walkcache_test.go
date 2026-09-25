@@ -90,6 +90,36 @@ func TestWalkResultCannotReachItsSharedTail(t *testing.T) {
 	require.Equal(t, "c", all[1].name)
 }
 
+// TestWalkCacheChargesBothTiersToOneBudget: the single-source walks are the
+// cache's larger tier, a quadratic number of targets over a dependency chain,
+// so they are retained only while the one budget both tiers share allows. A
+// walk past it is still answered in full, and simply not kept.
+func TestWalkCacheChargesBothTiersToOneBudget(t *testing.T) {
+	cp := &computation{log: zerolog.Nop(), edges: map[string][]edge{
+		"a": {{to: "b", kind: model.KindDependencies}},
+		"b": {{to: "c", kind: model.KindDependencies}},
+		"c": {{to: "d", kind: model.KindDependencies}},
+	}}
+	cp.walks = &walkCache{single: make(map[walkKey][]target), exact: make(map[walkKey][]target),
+		held: walkCacheBudget - 2}
+
+	fromA := cp.walk(map[string]bool{"a": true}, depthUnbounded, nil)
+	require.Equal(t, cp.walkLiteral(map[string]bool{"a": true}, depthUnbounded, nil), fromA)
+	require.Empty(t, cp.walks.single, "three targets do not fit in the two left")
+	require.Equal(t, walkCacheBudget-2, cp.walks.held)
+
+	require.True(t, cp.walks.isSpilled)
+	near := cp.walk(map[string]bool{"a": true}, 1, nil)
+	require.Equal(t, cp.walkLiteral(map[string]bool{"a": true}, 1, nil), near,
+		"past the budget a bounded walk goes to its own depth only")
+	require.Empty(t, cp.walks.single)
+
+	fromB := cp.walk(map[string]bool{"b": true}, depthUnbounded, nil)
+	require.Len(t, fromB, 2)
+	require.Len(t, cp.walks.single, 1, "two targets do")
+	require.Equal(t, walkCacheBudget, cp.walks.held)
+}
+
 // TestGlobMatchesIsTheScan checks the indexed glob against the definition it
 // replaced, a fold and a match of every package for every term: over the
 // sorted-run shortcut for a trailing "*", the general matcher for an interior

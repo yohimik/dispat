@@ -50,13 +50,19 @@ type owedPair struct {
 	provider, consumer, baseline string
 }
 
-// listOwedPairs lists every pair of §13.3: D reachable from P over
-// propagation.kinds, P with at least one parsed release and D with a baseline
-// in P's repository. Providers come in plan order and consumers in walk order,
-// so the windows are read, and the union extended, the same way on every run.
-func (cp *computation) listOwedPairs() []owedPair {
+// listOwedPairs lists the pairs of §13.3 that can name a distinct window: D
+// reachable from P over propagation.kinds, P with at least one parsed release
+// and D with a baseline in P's repository, the first pair of each (provider,
+// baseline), since the window depends on nothing else. total counts every
+// pair. Providers come in plan order and consumers in walk order, so the
+// windows are read, and the union extended, the same way on every run.
+//
+// Only the distinct pairs are kept: every consumer a provider reaches is a
+// pair, which in a long dependency chain is a quadratic number of them, and
+// packages released at one commit share a baseline.
+func (cp *computation) listOwedPairs() (pairs []owedPair, total int) {
 	kinds := cp.resolveOwedKinds()
-	var pairs []owedPair
+	found := make(map[[2]string]bool)
 	for _, provider := range cp.order {
 		if !isAnyReleaseParsed(cp.tags[provider]) {
 			continue // nothing released, so nobody can have got ahead of a release
@@ -70,10 +76,14 @@ func (cp *computation) listOwedPairs() []owedPair {
 			if baseline == "" {
 				continue // a consumer that never released has overtaken nothing
 			}
-			pairs = append(pairs, owedPair{provider: provider, consumer: t.name, baseline: baseline})
+			total++
+			if key := [2]string{provider, baseline}; !found[key] {
+				found[key] = true
+				pairs = append(pairs, owedPair{provider: provider, consumer: t.name, baseline: baseline})
+			}
 		}
 	}
-	return pairs
+	return pairs, total
 }
 
 // resolveOwedKinds is propagation.kinds (§8.4): the configured parser's in one
@@ -241,16 +251,10 @@ func (cp *computation) loadOwedWindows(ordinary []windowBoundary) error {
 	}
 	isLoaded := func(boundary string) bool { return loaded[boundary] }
 
-	pairs := cp.listOwedPairs()
+	pairs, total := cp.listOwedPairs()
 	var owed []windowBoundary
 	var frontier *unionFrontier
-	found := make(map[[2]string]bool)
 	for _, pair := range pairs {
-		key := [2]string{pair.provider, pair.baseline}
-		if found[key] {
-			continue
-		}
-		found[key] = true
 		boundary := windowBoundary{key: rootWindowKey, pkg: pair.consumer}
 		if tag, isReached := cp.findOwedRelease(pair, isLoaded); isReached {
 			boundary = windowBoundary{key: commitWindowCacheKey(tag.Commit, tag.Name),
@@ -269,7 +273,7 @@ func (cp *computation) loadOwedWindows(ordinary []windowBoundary) error {
 		}
 		owed = append(owed, boundary)
 	}
-	cp.log.Debug().Int("pairs", len(pairs)).Int("boundaries", len(owed)).Msg("plan: owed windows examined")
+	cp.log.Debug().Int("pairs", total).Int("boundaries", len(owed)).Msg("plan: owed windows examined")
 	if len(owed) == 0 {
 		return nil
 	}
@@ -307,17 +311,11 @@ func (cp *computation) loadRepositoryOwedWindows(idx *windowIndex) error {
 		_, isRead := idx.commitLists[historyKey(history.Name, raw)]
 		return ok && isRead
 	}
-	pairs := cp.listOwedPairs()
+	pairs, total := cp.listOwedPairs()
 	frontiers := make(map[string]unionFrontier)
-	found := make(map[[2]string]bool)
 	listed := len(idx.lists)
 	boundaries := 0
 	for _, pair := range pairs {
-		key := [2]string{pair.provider, pair.baseline}
-		if found[key] {
-			continue
-		}
-		found[key] = true
 		history, ok := cp.histories[globx.Fold(cp.byName[pair.provider].Repository)]
 		if !ok {
 			continue
@@ -346,7 +344,7 @@ func (cp *computation) loadRepositoryOwedWindows(idx *windowIndex) error {
 		}
 		boundaries++
 	}
-	cp.log.Debug().Int("pairs", len(pairs)).Int("boundaries", boundaries).Msg("plan: owed windows examined")
+	cp.log.Debug().Int("pairs", total).Int("boundaries", boundaries).Msg("plan: owed windows examined")
 	if boundaries == 0 {
 		return nil
 	}
