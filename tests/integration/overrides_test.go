@@ -192,6 +192,39 @@ func TestOverridesDispatexclude(t *testing.T) {
 		"the ignored folder's name is an unknown scope, like any non-package")
 }
 
+// TestOverridesRefuseAnEntryForAnExcludedFolder: an override naming a folder
+// the space's .dispatexclude leaves out configures nothing, and the refusal
+// says why, naming the folder and the exclusion, rather than calling the key a
+// typo. It holds for the space's own packages map and for the top-level one.
+func TestOverridesRefuseAnEntryForAnExcludedFolder(t *testing.T) {
+	for name, place := range map[string]func(*models.File){
+		"the space's packages map": func(cfg *models.File) {
+			space := cfg.Spaces["libs"]
+			space.Packages = map[string]models.PackageConfig{"scratch": {Src: "src"}}
+			cfg.Spaces["libs"] = space
+		},
+		"the top-level packages map": func(cfg *models.File) {
+			cfg.Packages = map[string]models.PackageConfig{"scratch": {Src: "src"}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			place(&cfg)
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.SeedPackage("packages", "scratch")
+			r.WriteFile("packages/.dispatexclude", "scratch\n")
+			r.Commit("feat(core): real work")
+
+			res := r.Status()
+			require.NotZero(t, res.Code, "stdout:\n%s", res.Stdout)
+			assert.Contains(t, res.Stdout+res.Stderr, `folder \"scratch\" in space \"libs\" is excluded by .dispatexclude`)
+			assert.Empty(t, r.TagList())
+		})
+	}
+}
+
 // The declared-version-group scenarios that used to sit here duplicated the
 // versiongroups file's fixture and claims verbatim; the group lifecycle in
 // all its modes lives in versiongroups_test.go now, and this file keeps to
