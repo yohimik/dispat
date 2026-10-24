@@ -96,7 +96,8 @@ protocol checks the manifests out by hand and runs it again. nx runs `nx release
 versioned, or `nx release` again when it versioned nothing, and the release commit nx leaves on the clone is pushed by
 hand. changesets runs `changeset publish` again, and the operator pushes what it tagged.
 
-Five more cells are dispat's alone. `build-distributed` repeats the `build` fault with every build on a worker node,
+Five more scenarios reach the same catch-up through other ways a consumer comes to be owed its provider, and every
+tool runs each of them. Under dispat, `build-distributed` repeats the `build` fault with every build on a worker node,
 which the release reaches through the repository being released: each command names it with `--worker build-a` and no
 endpoint. Its record matches the local cell's, and its log names the worker that ran `cli`'s build. In `deselected` the
 first run is `dispat release --package core,ui,api`, so `cli` sits the provider's release out. In `held`, `cli` is held
@@ -111,6 +112,22 @@ The `deferred-build` companion keeps `cli`'s actual build, and the fault proxy h
 `cli`'s build output exists, so `cli` has always built over the provider's planned version when the provider fails.
 dispat withholds that artifact with `W194`, and the catch-up rebuilds and publishes the consumer's own pending fix
 against the version that really shipped.
+
+lerna, nx and changesets take the same scenarios through their nearest mechanism, and where a tool has none, the
+protocol runs its ordinary release and the transcript says so. None of them has a self-hosted worker, so their
+`build-distributed` cells repeat the `build` protocol: nx distributes tasks only through Nx Cloud, which the harness
+disables. In `deselected`, nx runs `nx release --projects core,ui,api` and changesets runs
+`changeset version --ignore cli`; `lerna version` takes no package selection, so lerna's first run is unselected. In
+`held`, the hold is a committed edit the operator reverses before the catch-up: `cli` marked private with
+`--no-private` on every `lerna version`, `["*", "!cli"]` as nx's `release.projects`, and `cli` in changesets' `ignore`
+list. changesets refuses a changeset that names an ignored package beside others, so in these two scenarios its
+fixture asks for the same four patches in two files. In `deferred` and `deferred-build`, `cli` commits a fix of its own
+before the provider's fix, and in `deferred` it has no build script, because these tools run every build they find.
+After the refused first run, nx releases the provider with `--projects core,ui,api`, while lerna and changesets
+publish whatever the registry is missing, because their publish commands take no selection. A `deselected` or `held`
+catch-up is the tool's own release again; a `deferred` catch-up is the recovery the `build` protocol uses. nx runs
+`nx release publish` instead whenever a version it tagged is missing from the registry. These rows are held to
+dispat's sentences about what shipped, never to dispat's own diagnostic codes.
 
 The colleague's push lands at a point in the tool's own sequence rather than on a timer. A shim placed first on `PATH`
 for the duration of the release command records every git call the tool makes and fires the colleague's commit and push

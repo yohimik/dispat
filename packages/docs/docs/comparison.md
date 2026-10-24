@@ -131,15 +131,21 @@ file; `changeset publish` uploads the missing `cli` and tags it, and the tags le
 never makes: one run and two commands, one of them manual. Every one of these catch-ups converged, and every tool
 published `core` exactly once.
 
-Further dispat cells take the same catch-up through the other ways a consumer comes to be owed its provider: with
-every build on a worker node reached through the repository being released, after the consumer sat out its provider's
+Further cells take the same catch-up through the other ways a consumer comes to be owed its provider: with every
+build on a worker node reached through the repository being released, after the consumer sat out its provider's
 selected release, and after an operator held the consumer while the provider shipped and then resumed it. Two more
 cells test a consumer that published its own fix against the old provider after the provider failed and then sat out
-the provider's release. With no build command, the next full plan carries the missed delivery although the consumer's
-own tag already contains the propagation commit. With a real build that finished against the planned provider, dispat
-withholds that artifact with `W194`, and the next run builds the still-pending fix against the published provider.
-Each of these catch-ups is one run of one command. The [experiment record](./internals/experiments.mdx) shows the
-commands and states used to check them.
+the provider's release. With no build command, dispat's next full plan carries the missed delivery although the
+consumer's own tag already contains the propagation commit. With a real build that finished against the planned
+provider, dispat withholds that artifact with `W194`, and the next run builds the still-pending fix against the
+published provider. Each of dispat's catch-ups is one run of one command.
+
+lerna, nx and changesets run every one of these cells too, each through its nearest mechanism: no tool has a
+self-hosted worker, so the distributed cell repeats the build fault where the tool builds; nx selects with
+`--projects` and changesets with `--ignore`, while `lerna version` takes no selection; a hold is `"private": true`
+under `lerna version --no-private`, an excluding `release.projects` pattern for nx, and the `ignore` list for
+changesets. The [experiment record](./internals/experiments.mdx) shows the commands and states used to check every
+tool.
 
 ### Replay against real history
 
