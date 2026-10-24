@@ -15,6 +15,15 @@ Keep review findings, audit summaries and task plans in the conversation. Never 
 
 Use small cohesive types, explicit dependencies, and abstractions at the boundary that needs them. Apply a pattern when it solves a concrete problem. Do not add factories, wrappers, or inheritance-like layers merely to give a pattern a name.
 
+Write code a person understands by reading it. Names, small functions and plain control flow say what the code does,
+so a comment never does. Write a comment only to explain why the code was made this way, when the reason is not
+visible in the code: a constraint, a trade-off, a workaround, or the specification section it follows. Doc comments
+that a published API's reference requires, and directives a tool reads, are the other exceptions. Keep every comment
+short and readable by a person who has not seen the code before.
+
+Apply this to the code a change touches. Do not rewrite unrelated code to remove its comments; when a task works in
+code whose comments only narrate it, trim them there.
+
 - Use explicit, descriptive names. The wider a name's scope, the more context its name must carry: package-level and exported names should be more descriptive than names used within a small local block. Avoid unexplained abbreviations and generic names such as `data` or `obj` when a domain name is available.
 - Name variables, parameters, fields, and data types primarily with nouns or noun phrases that describe what they hold or represent, such as `repository`, `packageName`, or `releasePlan`. Use plural nouns for collections, such as `packages`.
 - Name interfaces with an adjective describing their capability or an `x` suffix, such as `Configurable` or `Gitx`. Name implementations logically, such as `LocalGitx`.
@@ -131,7 +140,7 @@ export type { BaseReleaseSummaryProps, ReleaseSummaryProps } from './ReleaseSumm
 
 ### Shell and documentation
 
-Follow the local shell and documentation conventions. Shell scripts use POSIX `sh` and `set -eu`; quote paths and pass data separately from executable command text. Prefer a Go command under `tools/` or a dispat config script over a new shell file.
+Follow the local shell and documentation conventions. Keep shell to a minimum. Put short, readable scripts in the owning package's dispat configuration and run them with `dispat run` or `dispat exec`. Add a shell file only for work that must run before dispat is installed, and move logic longer than a few lines into a Go command under `tools/`. Shell uses POSIX `sh` and `set -eu`; quote paths and pass data separately from executable command text.
 
 ## Configuration is an API
 
