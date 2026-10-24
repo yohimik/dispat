@@ -1,5 +1,95 @@
 # Changelog
 
+## specs/agent-guide/v1.11.0-rc.7 (2026-10-24)
+
+### Features
+
+- add an optional tests stage and name the version stage by its key ([45c5768](https://github.com/yohimik/dispat/commit/45c57689121e31c15e86746dba32edab5d299ca4)) (by yohimik, Claude Opus 5.5)
+  A release can run a tests stage between the build and the publish:
+  `flow.tests`, `flow.beforeTests` and `flow.postTests` name its scripts and
+  hooks on every level a flow is stated. Its job is checking what the build
+  produced, so a package whose artefact fails is never published: the
+  failure is the `tests` stage, revertOnFail and onFail apply, and its
+  consumers are blocked as after a failed build. The build's exports reach
+  it and its own reach the publish. It shares the build budget, and with
+  worker nodes it is placed under the build's runOnly value, preferring
+  the node that built the package, and given the package's admitted
+  outputs. A package that configures none of the three has no tests
+  stage, and its release runs exactly as before.
+
+  The stages are data: one ordered table of descriptors (sign, version,
+  syncLock, build, tests, publish) states each stage's name and hook
+  spelling, its budget, where its frame may run, what a node installs
+  first, whether its outputs are admitted and whether its commands wait
+  for authorization. The task graph chains the stages a package has in
+  that order, and the executor reaches a coordinator through one Stage
+  call carrying the descriptor in place of one method per stage. Build
+  and publish assignments keep their kinds and formats; any other stage
+  travels under the generic kind `stage`, whose assignment names it.
+
+  The version stage now runs under the name of the key that configured
+  it. Under flow.propagate or autoPropagate it is `propagate` in
+  DISPAT_STAGE, DISPAT_FAILED_STAGE, the failed stage, the events, the
+  webhooks, the log and its hooks' names (beforePropagate,
+  postPropagate); under the version keys it stays `version`. The stage's
+  entry decides first, then the native block, then the hooks.
+
+  The plan digest carries the tests commands and the stage's name, so its
+  schema is dispat-plan-digest/3.
+
+### Fixes
+
+- tie the solo-package scope rule to the configured src ([f62620e](https://github.com/yohimik/dispat/commit/f62620eccfb7e68467c59b8b1f3eba5e3445af5f)) (by yohimik, Claude Opus 5.5)
+  The rule now says which commits it covers: in a repository with one
+  configured package, a commit whose release intent is the package's
+  `src` (the whole folder when unset, minus `ignore`) carries no scope,
+  because those files already select the package. A change outside `src`
+  stays inert as intended and is not scoped to force a release; the
+  package is named only when it must release with nothing changed in
+  `src`, as an empty Release-As commit does.
+
+- treat the publish stage as irreversible and check it after publish ([a60fa08](https://github.com/yohimik/dispat/commit/a60fa085ec0c11459d720e339b4d49a3ff1ee13c)) (by yohimik, Claude Opus 5.5)
+  The agent skill now states as a working rule that a publication is never
+  taken back and an immutable version cannot be replaced by a retry. It
+  also explains that a registry can accept an upload before the version
+  can be read back, as npm does, so a lookup made right after the upload
+  can fail for a version that shipped. Every check of the published result
+  belongs in flow.postPublish with a bounded retry; a postPublish failure
+  only warns and is never answered by republishing.
+
+- keep scripts short and inside the dispat configuration ([a07d32b](https://github.com/yohimik/dispat/commit/a07d32b9f6040dbf16b69578a2f55ef838de427b)) (by yohimik, Claude Opus 5.5)
+  The agent skill now asks for a repository's scripts to live in the
+  configuration's `scripts` map, short and readable, and to be triggered
+  with `dispat run` or `dispat exec`. A shell file is kept for work that
+  runs before dispat is installed, and longer logic moves into the
+  project's own language.
+
+  A new section lists the ways to install dispat, pinned in CI, and has
+  dispat install Aqua so that Aqua installs a pipeline's pinned,
+  checksummed tools from a configuration script. The reference map links
+  the install pages.
+
+- never scope a commit in a repository with one package ([1189d7b](https://github.com/yohimik/dispat/commit/1189d7b5dce933f5be8410fcf5ede79558e2f448)) (by yohimik, Claude Opus 5.5)
+  The agent skill now states the rule beside the shared-record guidance:
+  where exactly one package is configured, a commit changing its files
+  carries no scope, because file ownership already selects the package.
+  The breaking marker and the inline directives work unscoped. A commit
+  owning no files, an empty one included, derives no package and stays
+  inert unscoped (W131), so it still names the package, as a Release-As
+  pin does. The intent table gains the solo-repository row.
+
+- name the agent guide the AI agent skill (agent work guide) ([07ed726](https://github.com/yohimik/dispat/commit/07ed726f4c2bd757c01f24477a859d8a7f5fc253)) (by yohimik, Claude Opus 5.5)
+  The guide is the skill an AI agent follows to inspect, test, release and
+  recover a dispat repository. Its title, the READMEs, CONTRIBUTING, the
+  CLI reference page, the requirement matrix and `dispat --help` now give
+  it that full name at their first mention, and the agent skill after it.
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## specs/agent-guide/v1.11.0-rc.6 (2026-09-25)
 
 ### Features

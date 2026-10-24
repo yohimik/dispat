@@ -1,6 +1,6 @@
 # dispat AI agent skill (agent work guide)
 
-**Version:** 1.11.0-rc.6
+**Version:** 1.11.0-rc.7
 
 **License:** MIT. See [LICENSE](./LICENSE).
 
