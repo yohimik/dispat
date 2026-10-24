@@ -23,10 +23,6 @@ const SITE = 'https://dispat.dev';
 // many-repositories one, and the pattern the run is built on. The list is one
 // place because the meta tag and both structured-data blocks read it.
 const KEYWORDS = [
-  'ADHD developers',
-  'autistic developers',
-  'autism',
-  'neurodivergent developers',
   'deterministic releases',
   'monorepo release tool',
   'monorepo',
