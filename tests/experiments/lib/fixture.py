@@ -18,9 +18,9 @@ midrelease fixtures run no build under lerna, nx or changesets.
 
     fixture.py <root> lerna|nx|changesets|dispat
     fixture.py <root> <flavour> --feature      also commit the minor to core
-    fixture.py <root> dispat --held           also hold cli's release first
+    fixture.py <root> <flavour> --held        also hold cli's release first
     fixture.py <root> <flavour> --propagation  also commit the patch to core
-    fixture.py <root> dispat --deferred       also commit own cli and provider fixes
+    fixture.py <root> <flavour> --deferred    also commit own cli and provider fixes
     fixture.py <root> <flavour> --colleague    also clone the origin a second time
 
 EXPERIMENT and SCENARIO are read from the environment, as the harness exports
@@ -98,7 +98,14 @@ def build_script(package):
 
 def package_scripts(package, flavour):
     """The package's scripts: the build, and in the propagation experiment the
-    lifecycle hook through which lerna and changesets run it."""
+    lifecycle hook through which lerna and changesets run it.
+
+    In the deferred scenario cli has no build. dispat's flavour says so with
+    `flow: {build: []}` and keeps the script; the other tools run every build
+    script they find, so their cli carries none."""
+    if (package == "cli" and experiment() == "propagation" and scenario() == "deferred"
+            and flavour != "dispat"):
+        return {}
     scripts = {"build": build_script(package)}
     if experiment() == "propagation" and flavour in ("lerna", "changesets"):
         scripts["prepack"] = PREPACK
@@ -190,6 +197,18 @@ def npmrc(path):
     host = REG.split("//", 1)[1]
     with open(path, "w") as f:
         f.write(f"registry={REG}\n//{host}/:_authToken={TOKEN}\n")
+
+
+# The propagation scenarios in which cli sits the provider's release out,
+# selected away or held.
+CLI_SITS_OUT = ("deselected", "held")
+
+
+def write_changeset(root, name, packages, summary):
+    """One changeset file asking for a patch of each named package."""
+    entries = "".join(f'"{package}": patch\n' for package in packages)
+    with open(os.path.join(root, ".changeset", f"{name}.md"), "w") as f:
+        f.write(f"---\n{entries}---\n\n{summary}\n")
 
 
 def write_json(path, data):
@@ -327,14 +346,36 @@ def feature(root, flavour):
     sh(["git", "push", "-q", "origin", "main"], root)
 
 
+# How each tool withholds one package, as a committed edit: the file and the
+# change that holds cli, which the protocol's resume reverses. lerna never
+# publishes a private package, and `lerna version --no-private` does not
+# version one; nx releases the projects its `release.projects` patterns match;
+# changesets skips the packages its configuration ignores.
+HOLDS = {
+    "lerna": ("packages/cli/package.json", lambda data: {**data, "private": True}),
+    "nx": ("nx.json", lambda data: {**data, "release": {**data["release"], "projects": ["*", "!cli"]}}),
+    "changesets": (".changeset/config.json", lambda data: {**data, "ignore": ["cli"]}),
+}
+
+
 def held(root, flavour):
-    """cli's release held before the provider's fix: an empty commit
-    `release(cli): hold` with the footer `Release-As: none`, which is how an
-    operator withholds one package. The provider's release then ships without
-    the consumer, as a release its consumer sat out."""
-    if flavour != "dispat":
-        raise SystemExit("a held consumer is a dispat-only protocol")
-    commit(root, "release(cli): hold", "Release-As: none", empty=True)
+    """cli's release held before the provider's fix, which is how an operator
+    withholds one package. The provider's release then ships without the
+    consumer, as a release its consumer sat out.
+
+    dispat's hold is an empty commit `release(cli): hold` with the footer
+    `Release-As: none`. The other tools have no commit directive for it, so
+    their hold is the edit HOLDS names, committed as `chore(release): hold
+    cli`."""
+    if flavour == "dispat":
+        commit(root, "release(cli): hold", "Release-As: none", empty=True)
+    else:
+        path, hold = HOLDS[flavour]
+        manifest = os.path.join(root, path)
+        with open(manifest) as f:
+            write_json(manifest, hold(json.load(f)))
+        sh(["git", "add", "-A"], root)
+        commit(root, "chore(release): hold cli")
     sh(["git", "push", "-q", "origin", "main"], root)
 
 
@@ -349,8 +390,15 @@ def propagation(root, flavour):
     if flavour == "changesets":
         # Changesets has no CCME caret. Give it the same requested direct
         # consumer releases as explicit changeset entries.
-        with open(os.path.join(root, ".changeset", "correct-reader.md"), "w") as f:
-            f.write('---\n"core": patch\n"cli": patch\n"ui": patch\n"api": patch\n---\n\ncorrect reader and rebuild direct consumers\n')
+        if scenario() in CLI_SITS_OUT:
+            # A changeset that names an ignored package beside others is
+            # refused, so where cli sits the release out its entry is a
+            # changeset of its own: the same four entries, in two files.
+            write_changeset(root, "correct-reader", ("core", "ui", "api"), "correct reader and rebuild direct consumers")
+            write_changeset(root, "rebuild-cli", ("cli",), "rebuild against the corrected reader")
+        else:
+            write_changeset(root, "correct-reader", ("core", "cli", "ui", "api"),
+                            "correct reader and rebuild direct consumers")
     sh(["git", "add", "-A"], root)
     commit(root, "fix(core)^: correct reader" if flavour == "dispat"
            else "fix(core): correct reader")
@@ -362,18 +410,23 @@ def deferred(root, flavour):
 
     It publishes that work at the old provider baseline. The later protocol
     releases the provider alone and asks whether the next full run remembers
-    the consumer that missed the provider's release.
+    the consumer that missed the provider's release. changesets reads no
+    commit, so each fix also gets the changeset that asks for it.
     """
-    if flavour != "dispat":
-        raise SystemExit("deferred propagation is a dispat-only protocol")
     with open(os.path.join(root, "packages", "cli", "index.js"), "a") as f:
         f.write("// own fix\n")
+    if flavour == "changesets":
+        write_changeset(root, "repair-command", ("cli",), "repair command")
     sh(["git", "add", "-A"], root)
     commit(root, "fix(cli): repair command")
     with open(os.path.join(root, "packages", "core", "index.js"), "a") as f:
         f.write("// corrected reader\n")
+    if flavour == "changesets":
+        write_changeset(root, "correct-reader", ("core", "cli", "ui", "api"),
+                        "correct reader and rebuild direct consumers")
     sh(["git", "add", "-A"], root)
-    commit(root, "fix(core)^: correct reader")
+    commit(root, "fix(core)^: correct reader" if flavour == "dispat"
+           else "fix(core): correct reader")
     sh(["git", "push", "-q", "origin", "main"], root)
 
 

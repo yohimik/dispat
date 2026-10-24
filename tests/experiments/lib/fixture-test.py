@@ -53,6 +53,19 @@ class PropagationIntentTest(FixtureTest):
                 self.assertEqual(self.manifest(root, "cli")["dependencies"]["core"], "~1.0.0")
                 self.assertEqual(self.git(root, "log", "-1", "--format=%s").strip(), subject)
 
+    def test_changesets_splits_the_entry_of_a_consumer_that_sits_out(self):
+        """A changeset naming an ignored package beside others is refused, so
+        where cli sits the release out its entry is a file of its own. The
+        four entries are the ones every other scenario asks for."""
+        for scenario, flags in (("deselected", ("--propagation",)), ("held", ("--held", "--propagation"))):
+            with self.subTest(scenario=scenario):
+                folder = self.build("changesets", scenario=scenario, flags=flags) / ".changeset"
+                self.assertEqual((folder / "correct-reader.md").read_text(),
+                                 '---\n"core": patch\n"ui": patch\n"api": patch\n---\n\n'
+                                 'correct reader and rebuild direct consumers\n')
+                self.assertEqual((folder / "rebuild-cli.md").read_text(),
+                                 '---\n"cli": patch\n---\n\nrebuild against the corrected reader\n')
+
     def test_changesets_explicitly_selects_direct_consumers(self):
         root = self.build("changesets")
         changeset = (root / ".changeset" / "correct-reader.md").read_text()
@@ -127,7 +140,7 @@ class FaultTest(FixtureTest):
 
     def test_the_fault_is_in_the_consumer_build_script(self):
         for flavour in ("dispat", "lerna", "nx", "changesets"):
-            for scenario in ("build", "build-distributed") if flavour == "dispat" else ("build",):
+            for scenario in ("build", "build-distributed"):
                 with self.subTest(flavour=flavour, scenario=scenario):
                     root = self.build(flavour, scenario=scenario)
                     self.assertIn("fault-consumer-build", self.manifest(root, "cli")["scripts"]["build"])
@@ -140,6 +153,7 @@ class FaultTest(FixtureTest):
         for flavour, scenario in (
             ("dispat", "publish"), ("lerna", "publish"), ("nx", "publish"), ("changesets", "publish"),
             ("dispat", "deselected"), ("dispat", "held"),
+            ("lerna", "deselected"), ("nx", "held"), ("changesets", "deferred-build"),
         ):
             with self.subTest(flavour=flavour, scenario=scenario):
                 root = self.build(flavour, scenario=scenario)
@@ -212,6 +226,83 @@ class DispatScenarioTest(FixtureTest):
         config = (root / "dispat.yaml").read_text()
         self.assertNotIn("flow: {build: []}", config)
         self.assertIn("build: npm run --silent build", config)
+
+
+class CompetitorScenarioTest(FixtureTest):
+    """lerna, nx and changesets run every propagation scenario, each told in
+    the way it reads."""
+
+    HOLDS = {
+        "lerna": lambda root: json.loads((root / "packages" / "cli" / "package.json").read_text())["private"],
+        "nx": lambda root: json.loads((root / "nx.json").read_text())["release"]["projects"],
+        "changesets": lambda root: json.loads((root / ".changeset" / "config.json").read_text())["ignore"],
+    }
+    HELD = {"lerna": True, "nx": ["*", "!cli"], "changesets": ["cli"]}
+
+    def test_held_commits_the_tools_own_hold_before_the_fix(self):
+        for flavour in ("lerna", "nx", "changesets"):
+            with self.subTest(flavour=flavour):
+                root = self.build(flavour, scenario="held", flags=("--held", "--propagation"))
+                subjects = self.git(root, "log", "--format=%s").splitlines()
+                self.assertEqual(subjects, ["fix(core): correct reader", "chore(release): hold cli", "chore: baseline"])
+                self.assertEqual(self.HOLDS[flavour](root), self.HELD[flavour])
+                self.assertEqual(self.git(root, "rev-parse", "HEAD").strip(),
+                                 self.git(root, "rev-parse", "origin/main").strip(), "the hold was not pushed")
+
+    def test_a_held_baseline_is_published_from_its_tag(self):
+        """npm skips a private package and exits 0, so a baseline published
+        from the held working tree left lerna's cli off the registry. The
+        harness publishes a package whose manifest moved since its baseline
+        from that tag instead, and the tag must hold the public manifest."""
+        root = self.build("lerna", scenario="held", flags=("--held", "--propagation"))
+        moved = subprocess.run(["git", "diff", "--quiet", "cli@1.0.0", "--", "packages/cli/package.json"], cwd=root)
+        self.assertEqual(1, moved.returncode, "the hold did not move cli's manifest")
+        tagged = json.loads(self.git(root, "show", "cli@1.0.0:packages/cli/package.json"))
+        self.assertNotIn("private", tagged)
+        self.assertEqual("1.0.0", tagged["version"])
+        for package in PACKAGES:
+            if package == "cli":
+                continue
+            unmoved = subprocess.run(["git", "diff", "--quiet", f"{package}@1.0.0", "--",
+                                      f"packages/{package}/package.json"], cwd=root)
+            self.assertEqual(0, unmoved.returncode, f"{package}'s manifest moved")
+
+    def test_the_hold_is_absent_from_every_other_scenario(self):
+        root = self.build("lerna", scenario="deselected")
+        self.assertNotIn("private", self.manifest(root, "cli"))
+        nx = json.loads((self.build("nx", scenario="deselected") / "nx.json").read_text())
+        self.assertEqual(nx["release"]["projects"], ["*"])
+        config = json.loads((self.build("changesets", scenario="deselected") / ".changeset" / "config.json").read_text())
+        self.assertEqual(config["ignore"], [])
+
+    def test_deferred_commits_the_consumers_fix_then_the_providers(self):
+        for flavour in ("lerna", "nx", "changesets"):
+            for scenario in ("deferred", "deferred-build"):
+                with self.subTest(flavour=flavour, scenario=scenario):
+                    root = self.build(flavour, scenario=scenario, flags=("--deferred",))
+                    subjects = self.git(root, "log", "-2", "--format=%s").splitlines()
+                    self.assertEqual(subjects, ["fix(core): correct reader", "fix(cli): repair command"])
+                    self.assertEqual(self.manifest(root, "cli")["dependencies"]["core"], "~1.0.0")
+
+    def test_deferred_changesets_ask_for_each_fix(self):
+        folder = self.build("changesets", scenario="deferred", flags=("--deferred",)) / ".changeset"
+        self.assertEqual((folder / "repair-command.md").read_text(), '---\n"cli": patch\n---\n\nrepair command\n')
+        self.assertEqual((folder / "correct-reader.md").read_text(),
+                         '---\n"core": patch\n"cli": patch\n"ui": patch\n"api": patch\n---\n\n'
+                         'correct reader and rebuild direct consumers\n')
+
+    def test_deferred_consumer_has_no_build_and_deferred_build_keeps_it(self):
+        """dispat's deferred cli opts out of its build stage; a tool that runs
+        every build script it finds is given a cli without one."""
+        for flavour in ("lerna", "nx", "changesets"):
+            with self.subTest(flavour=flavour):
+                deferred = self.build(flavour, scenario="deferred", flags=("--deferred",))
+                self.assertEqual({}, self.manifest(deferred, "cli")["scripts"])
+                self.assertIn("build", self.manifest(deferred, "core")["scripts"])
+                kept = self.build(flavour, scenario="deferred-build", flags=("--deferred",))
+                self.assertIn("build", self.manifest(kept, "cli")["scripts"])
+        self.assertEqual(["build"], list(self.manifest(
+            self.build("dispat", scenario="deferred", flags=("--deferred",)), "cli")["scripts"]))
 
 
 class BaselineTest(FixtureTest):

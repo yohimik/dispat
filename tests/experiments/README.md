@@ -24,7 +24,7 @@ run.sh <experiment> <tool> [scenario]
 |---------------|---------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|
 | `orphan`      | The registry answers 502 to `cli`'s upload while `core`, `ui` and `api` publish.                  | none                                                                                                         |
 | `midrelease`  | A colleague's commit lands on `origin/main` right before the tool's own first push of the branch. | `clean` (touches `api`, no overlap); `conflict` (edits `core/package.json` next to the version line)         |
-| `propagation` | `core` publishes, then `cli` fails; the fault is removed without another source change.           | `build` (`cli`'s build script fails) and `publish` (the registry refuses `cli`'s upload) under every tool; under dispat alone `build-distributed`, `deselected`, `held`, `deferred` and `deferred-build`, described below |
+| `propagation` | `core` publishes, then `cli` fails; the fault is removed without another source change.           | `build` (`cli`'s build script fails), `publish` (the registry refuses `cli`'s upload), `build-distributed`, `deselected`, `held`, `deferred` and `deferred-build`, described below; every scenario runs under every tool |
 
 Tools: `lerna` 10.0.1, `nx` 23.1.2, `changesets` 3.0.1, `dispat` at the version the image was built from.
 
@@ -82,7 +82,9 @@ the protocol checks the manifests out by hand and runs it again. nx's is `nx rel
 hand when the release left its commit on the clone alone, because nx 23.1.2 pushes before it commits in this fixture.
 changesets' is `changeset status`, `changeset publish` again, and the push changesets never makes.
 
-The dispat-only cells take the same catch-up through the other ways a consumer comes to be owed its provider:
+The further scenarios take the same catch-up through the other ways a consumer comes to be owed its provider. Every
+tool runs each of them. dispat's protocol is described first; the other tools follow under the same intent, each
+through its own nearest mechanism:
 
 - `build-distributed` is the `build` fault with every build on a worker node, `build-a`, started in the container.
   The fixture sets `runOnly: [worker, orchestrator]` and names the signing secret's variable; every dispat command
@@ -102,6 +104,28 @@ The dispat-only cells take the same catch-up through the other ways a consumer c
 - `deferred-build` keeps `cli`'s build. The proxy holds `core`'s refused upload until `cli`'s build has written
   `dist/index.js`, so `cli` has always built against the provider's planned version when the provider fails, and
   dispat withholds it with `W194`. The catch-up builds and publishes it against the version that shipped.
+
+lerna, nx and changesets run the same scenarios this way. Where a tool has no mechanism for the operator's intent, the
+protocol runs its ordinary documented release and says so in the transcript.
+
+| Scenario            | lerna                                                                                 | nx                                                                         | changesets                                                                          |
+|---------------------|---------------------------------------------------------------------------------------|----------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
+| `build-distributed` | the `build` protocol: lerna has no worker of its own                                  | the `build` protocol: nx distributes tasks only through Nx Cloud, which the image disables | the `build` protocol: changesets has no worker                                      |
+| `deselected`        | `lerna version` takes no package selection, so the first run is unselected            | `nx release --projects core,ui,api`                                        | `changeset version --ignore cli`, with `cli`'s entry in a changeset of its own      |
+| `held`              | `cli` is marked `"private": true` and every version step passes `--no-private`        | `release.projects` is `["*", "!cli"]`                                      | the configuration's `ignore` is `["cli"]`, with `cli`'s entry in a changeset of its own |
+| `deferred`          | the provider's run is `lerna publish from-package`, which takes no selection          | the provider's run selects `--projects core,ui,api`                        | the provider's run is `changeset publish`, which takes no selection                 |
+| `deferred-build`    | as `deferred`, with `cli`'s build                                                     | as `deferred`, with `cli`'s build                                          | as `deferred`, with `cli`'s build                                                   |
+
+A hold is a committed edit, `chore(release): hold cli`, and the resume is a manual step of the first phase that
+reverses it as `chore(release): resume cli`. A changeset that names an ignored package beside others is refused, so in
+`deselected` and `held` the changesets fixture asks for the same four patches in two files. In `deferred`, `cli` has a
+fix of its own committed as `fix(cli): repair command` (and a changeset for changesets) and no build script, because
+these tools run every build script they find; `deferred-build` keeps it. After the first run, a `deselected` or `held`
+catch-up is the tool's own release again, and a `deferred` catch-up is the tool's documented recovery from the
+`build` protocol. nx publishes with `nx release publish` instead whenever a version it tagged is missing from the
+registry. The expectations are dispat's sentences that are not about dispat's own diagnostics: what the first
+run shipped, whether the provider's refused version stayed off the registry, whether `cli` had built before that
+refusal in `deferred-build`, and the catch-up questions below.
 
 ### The catch-up
 

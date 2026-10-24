@@ -76,13 +76,10 @@ scripts:
         echo "midrelease $tool $scenario"
       done
     done
-    for scenario in build publish; do
+    for scenario in build publish build-distributed deselected held deferred deferred-build; do
       for tool in dispat lerna nx changesets; do
         echo "propagation $tool $scenario"
       done
-    done
-    for scenario in build-distributed deselected held deferred deferred-build; do
-      echo "propagation dispat $scenario"
     done
   # Every cell of the campaign, four at a time. A completed campaign can be
   # reused when it names this exact native image (which includes the released

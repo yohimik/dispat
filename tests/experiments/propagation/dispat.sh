@@ -14,7 +14,9 @@
 # cli's build until core is published. The protocol reads that ordering back
 # out of the run's own log rather than assuming it.
 #
-# Every scenario but `build` and `publish` is dispat's alone:
+# lerna, nx and changesets run every scenario as well, each through its own
+# nearest mechanism; their protocols say which. The scenarios beyond `build`
+# and `publish`:
 #
 #   build-distributed  the build fault, with every build on a worker node the
 #                      run reaches through the repository being released
@@ -47,12 +49,6 @@ published_before_built() {
     at(.package == "core" and .stage == "publish" and .plannedTag == "core@1.0.1") as $provider
     | at(.package == "cli" and .stage == "build") as $consumer
     | $provider != null and $consumer != null and $provider < $consumer' > /dev/null
-}
-
-# released_with <step> <observation> <jq filter>: the step exited 0 and the
-# observation taken after it meets the filter.
-released_with() {
-  [ "${STEP_RC[$1]:-}" = 0 ] && observed "$2" "$3" > /dev/null
 }
 
 # The catch-up plan: cli alone, at the version it is owed, as a W193.

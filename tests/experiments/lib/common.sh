@@ -264,15 +264,39 @@ fixture() { # <flavour> [--feature] [--colleague]
   [ -e node_modules ] || ln -s /opt/tools/node_modules node_modules
 }
 
-baseline_publish() { # all six at the baseline, straight to the registry
-  local p
+# baseline_publish: all six at the baseline, straight to the registry.
+#
+# A package whose manifest a later fixture commit changed, such as a hold that
+# marks it private, publishes the manifest its baseline tag recorded: npm
+# skips a private package and still exits 0, so the working manifest would
+# leave that package off the registry while the run carried on. A package
+# missing from the registry afterwards fails the run, because every reading
+# after it would measure a fixture nobody released.
+baseline_publish() {
+  local p dir tag tagged
   for p in $EXPERIMENT_PACKAGES; do
-    (cd "$REPO/packages/$p" && npm publish --ignore-scripts --registry "$REGISTRY" > /dev/null 2>&1) \
+    dir=$REPO/packages/$p tag=$p@$EXPERIMENT_BASELINE tagged=""
+    if ! git -C "$REPO" diff --quiet "$tag" -- "packages/$p/package.json"; then
+      tagged=$(mktemp -d)
+      git -C "$REPO" archive "$tag" "packages/$p" | tar -x -C "$tagged"
+      dir=$tagged/packages/$p
+      echo "   baseline: $p publishes the manifest $tag recorded"
+    fi
+    (cd "$dir" && npm publish --ignore-scripts --registry "$REGISTRY" > /dev/null 2>&1) \
       || { echo "baseline publish of $p failed"; exit 1; }
+    [ -z "$tagged" ] || rm -rf "$tagged"
   done
-  local line=""
-  for p in $EXPERIMENT_PACKAGES; do line="$line$p=$(registry_version "$p") "; done
+  local line="" missing="" version
+  for p in $EXPERIMENT_PACKAGES; do
+    version=$(registry_version "$p")
+    line="$line$p=$version "
+    [ "$version" = "$EXPERIMENT_BASELINE" ] || missing="$missing $p"
+  done
   echo "   baseline: $line"
+  if [ -n "$missing" ]; then
+    echo "the baseline never reached the registry for:$missing; the run is not a record"
+    exit 1
+  fi
   # The proxy logs a request before it answers it, so every baseline upload
   # is in the log by now and the mark is past all of them.
   REGISTRY_MARK=$(wc -l < /registry/failproxy.log)
@@ -456,6 +480,43 @@ recovery_summary() {
 first_run_asserts() {
   first_run_shipped "$2"
   assert "the first run reported the failure" [ "${STEP_RC[$1]:-0}" != 0 ]
+}
+
+# released_with <step> <observation> <jq filter>: the step exited 0 and the
+# observation taken after it meets the filter.
+released_with() {
+  [ "${STEP_RC[$1]:-}" = 0 ] && observed "$2" "$3" > /dev/null
+}
+
+# resume_release <file> <jq filter>: the operator lifts a committed hold as a
+# manual step of the first phase. The filter reverses the hold's edit, and the
+# commit is dated by the fixture's clock one minute after the fix, like
+# dispat's own resume.
+resume_release() {
+  local file=$1 filter=$2 resumed
+  resumed="$(( ${EXPERIMENT_EPOCH:-1735689600} + 60 * 3 )) +0000"
+  # shellcheck disable=SC2016 # the inner shell expands its own arguments
+  step manual:resume env GIT_AUTHOR_DATE="$resumed" GIT_COMMITTER_DATE="$resumed" \
+    bash -c 'jq --indent 1 "$2" "$1" > "$1.resumed" && mv "$1.resumed" "$1" &&
+      git commit -qam "chore(release): resume cli" && git push -q origin main' resume "$file" "$filter"
+}
+
+# provider_phase_asserts <first step> <observation> <provider observation>:
+# the provider's refusal failed the first run and left no release of it, and
+# the provider-only run that followed shipped it. dispat states the same
+# facts in its own words, with its own rollback; these are the sentences a
+# tool without that rollback is asked.
+provider_phase_asserts() {
+  assert "the first run reported the failure" [ "${STEP_RC[$1]:-0}" != 0 ]
+  assert "the provider's refused version is not on the registry" observed "$2" '.packages.core.registry == "1.0.0"'
+  assert "the provider shipped in the provider-only run" \
+    observed "$3" '.packages.core.registry == "1.0.1" and .packages.core.state == "consistent"'
+  if [ "$SCENARIO" = deferred-build ]; then
+    # The gate holds the refusal until cli's build output exists, and gives up
+    # after GATE_TIMEOUT; which of the two happened is the proxy's log line.
+    assert "the provider was refused after cli had built" \
+      grep -qE "^failproxy: DENY PUT [^ ]+ \\(package core\\) after " /registry/failproxy.log
+  fi
 }
 
 # first_run_shipped <observation>: the two halves of a first run that left a
