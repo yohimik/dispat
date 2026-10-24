@@ -1,5 +1,29 @@
 # Changelog
 
+## packages/cli/v1.11.0-rc.6 (2026-10-24)
+
+### Fixes
+
+- drop the neurodivergence search keywords ([9f30829](https://github.com/yohimik/dispat/commit/9f308298866778526fba1e641d57efabb7afe1fb)) (by yohimik, Claude Opus 5.5)
+  The tagline no longer speaks of ADHD or autism, so the site's search
+  keywords and the npm package keywords stop advertising them: the docs
+  site loses "ADHD developers", "autistic developers", "autism" and
+  "neurodivergent developers", and the CLI package loses "adhd",
+  "autism" and "neurodivergent".
+
+- state the project as a next generation CI/CD framework ([efe4cdf](https://github.com/yohimik/dispat/commit/efe4cdfc4858c3ebaf90a70e7cd699aa0a278aec)) (by yohimik, Claude Opus 5.5)
+  The tagline now opens with "Next generation CI/CD framework" in the
+  READMEs, the npm description, the landing page hero, the page title, the
+  structured data and social cards, and the announcement notes and
+  templates. The rest of the tagline, mathematical planning and saga
+  recovery, is unchanged.
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## packages/cli/v1.11.0-rc.5 (2026-09-25)
 
 ### Fixes
