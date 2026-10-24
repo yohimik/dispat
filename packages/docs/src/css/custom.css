@@ -116,7 +116,18 @@ body {
   letter-spacing: -0.02em;
 }
 
+/* The mark is square, and its box is sized before the image arrives: Infima
+   gives the logo a height only, so until the SVG loads it is zero wide and the
+   title beside it shifts over when it does. */
+.navbar__logo {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+}
+
 .navbar__logo img {
+  width: 100%;
+  height: 100%;
   -webkit-user-drag: none;
   pointer-events: none;
 }
