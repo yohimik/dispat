@@ -19,3 +19,11 @@
 .whole {
   white-space: nowrap;
 }
+
+/* An experiment table is wider than the doc column once its entries are kept
+   whole, and a markdown table is laid out as a table above the mobile
+   breakpoint, so on its own it would run under the table of contents. */
+.scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}

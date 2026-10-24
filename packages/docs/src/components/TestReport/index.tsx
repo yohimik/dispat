@@ -611,40 +611,42 @@ export function ExperimentsTable(): React.ReactElement | null {
       {groups.map((group) => (
         <div key={group.title}>
           <h3>{group.title}</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Tool</th>
-                <th>Steps</th>
-                <th className={styles.number}>Expectations</th>
-                {isCatchUpMeasured && <th>Catch-up</th>}
-                <th>Outcome</th>
-                <th>Final state</th>
-              </tr>
-            </thead>
-            <tbody>
-              {group.cells.map((cell) => (
-                <tr key={cell.id}>
-                  <td>
-                    <code className={styles.whole}>{cell.tool}</code>
-                  </td>
-                  <td>
-                    <code>{keptWhole({entries: cell.steps.map((step) => `${step.step}=${step.exit}`)})}</code>
-                  </td>
-                  <td className={styles.number}>
-                    {count(cell.checks.filter((check) => check.ok).length)}/{count(cell.checks.length)}
-                  </td>
-                  {isCatchUpMeasured && <td>{catchUpText(cell)}</td>}
-                  <td>{cellOutcome(cell)}</td>
-                  <td>
-                    <code>
-                      {keptWhole({entries: cell.final.packages.map((pkg) => `${pkg.name}=${pkg.registry}/${pkg.state}`)})}
-                    </code>
-                  </td>
+          <div className={styles.scroll}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Tool</th>
+                  <th>Steps</th>
+                  <th className={styles.number}>Expectations</th>
+                  {isCatchUpMeasured && <th>Catch-up</th>}
+                  <th>Outcome</th>
+                  <th>Final state</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {group.cells.map((cell) => (
+                  <tr key={cell.id}>
+                    <td>
+                      <code className={styles.whole}>{cell.tool}</code>
+                    </td>
+                    <td>
+                      <code>{keptWhole({entries: cell.steps.map((step) => `${step.step}=${step.exit}`)})}</code>
+                    </td>
+                    <td className={styles.number}>
+                      {count(cell.checks.filter((check) => check.ok).length)}/{count(cell.checks.length)}
+                    </td>
+                    {isCatchUpMeasured && <td>{catchUpText(cell)}</td>}
+                    <td>{cellOutcome(cell)}</td>
+                    <td>
+                      <code>
+                        {keptWhole({entries: cell.final.packages.map((pkg) => `${pkg.name}=${pkg.registry}/${pkg.state}`)})}
+                      </code>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ))}
     </>
