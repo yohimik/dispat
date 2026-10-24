@@ -38,20 +38,16 @@ scripts:
   verify-unlinked: |
     dispat scanner --root-only --verify-unlinked || exit 1
     phase=pre
-    [ "${DISPAT_STAGE:-}" = build ] && phase=post
+    case "${DISPAT_STAGE:-}" in build|tests) phase=post ;; esac
     sh ../../scripts/verify-go-sums.sh go.mod go.sum "$phase"
-  build:
+  # The release build: the binaries, exported into dist/. DIST_DIR is
+  # exported for the tests stage, which checks exactly this folder.
+  release-build:
     - dispat exec link --for pkg:dispat
     # DISPAT_EXPORT_BASE is where the export is about to land, which is
     # the one thing the container cannot work out for itself: it names
     # its artefacts against that path, so what comes back needs no
     # rewriting here.
-    #
-    # The export target descends from the Dockerfile's test stage, so
-    # this one invocation is also the smoke gate: every binary is
-    # validated, both linux binaries are executed, and the e2e smoke
-    # suite runs against the exact bytes about to land in dist/. A
-    # binary that merely compiled never comes out.
     #
     # The token rides in as a build secret, and only when there is one:
     # the tiny-toolchain stage installs the TinyGo fork through Aqua,
@@ -65,13 +61,40 @@ scripts:
       --build-arg DISPAT_EXPORT_BASE="$PWD/dist"
       ${GITHUB_TOKEN:+--secret id=GITHUB_TOKEN,env=GITHUB_TOKEN}
       --output "type=local,dest=$PWD/dist" ../..
-    # Already this stage's outputs, in $DISPAT_OUTPUT's own format.
-    - cat dist/dispat-output >> "$DISPAT_OUTPUT"
+    # Already this stage's outputs, in $DISPAT_OUTPUT's own format. A
+    # nested `dispat exec`, which is how the CI build gate below runs this
+    # script, has no output file, and /dev/null takes the lines nobody reads.
+    - cat dist/dispat-output >> "${DISPAT_OUTPUT:-/dev/null}"
     - rm -f dist/dispat-output
+    - echo "DIST_DIR=$PWD/dist" >> "${DISPAT_OUTPUT:-/dev/null}"
     - dispat exec unlink --for pkg:dispat
     # Checked here rather than on the way out, so a leak fails the
     # build, which is still ahead of anything being published.
     - dispat exec verify-unlinked --for pkg:dispat
+  # The smoke gate over the folder the build exported: every binary is
+  # validated, the linux binaries are executed, the TinyGo binary carries
+  # the whole integration suite and the gc one the e2e smoke suite. The
+  # dist build context replaces the Dockerfile's own build of the
+  # binaries, so what is checked is the bytes about to be published. The
+  # fixture binaries the gate compiles read pkg/* through the same link
+  # bracket the build holds. A run with no build output to read, such as
+  # the CI build gate below, checks dist/ in this folder.
+  smoke:
+    - dispat exec link --for pkg:dispat
+    - >-
+      docker buildx build --file Dockerfile --target test
+      --build-arg DISPAT_VERSION="$DISPAT_NEW_VERSION"
+      --build-context dist="${DISPAT_OUTPUT_DIST_DIR:-$PWD/dist}"
+      ${GITHUB_TOKEN:+--secret id=GITHUB_TOKEN,env=GITHUB_TOKEN}
+      --output type=cacheonly ../..
+    - dispat exec unlink --for pkg:dispat
+    - dispat exec verify-unlinked --for pkg:dispat
+  # The CI build gate `dispat run build` executes: the release build and
+  # the smoke gate over what it exported, which is what the release runs
+  # as its build and tests stages.
+  build:
+    - dispat exec release-build --for pkg:dispat
+    - dispat exec smoke --for pkg:dispat
   # Both suites run as builds of the shared Dockerfile.gotest — the unit
   # target and the black-box target — through `testreport test` inside, so
   # each run leaves its machine-readable log beside its profile and the job
@@ -124,7 +147,8 @@ scripts:
 # stages services/dispat — a link still in place there would be
 # published as a go.mod no consumer can resolve.
 flow:
-  build: build
+  build: release-build
+  tests: smoke
   postPublish: released
   onFail: unlink
 

@@ -67,10 +67,10 @@ func Build(t testing.TB) (dispatBin, tsmarkBin string) {
 func coverDir() string { return os.Getenv("DISPAT_COVERDIR") }
 
 // prebuiltBin is the value of DISPAT_TEST_BINARY: a dispat binary to drive
-// instead of building one from the working tree. The release build sets it to
-// run the smoke suite against the exact artefact about to be exported (see
-// services/dispat/Dockerfile's test stage) — a fresh native build passing
-// says nothing about the cross-compiled bytes that ship. Empty (the default)
+// instead of building one from the working tree. The release's tests stage
+// sets it to run the smoke suite against the exact artefact its build stage
+// exported (see services/dispat/Dockerfile's test stage) — a fresh native
+// build passing says nothing about the cross-compiled bytes that ship. Empty (the default)
 // means the suite builds its own, as it always has.
 func prebuiltBin() string { return os.Getenv("DISPAT_TEST_BINARY") }
 

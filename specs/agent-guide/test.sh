@@ -15,6 +15,11 @@ case "$dispat" in
   *) dispat=$(CDPATH='' cd -- "$(dirname "$dispat")" && pwd)/$(basename "$dispat") ;;
 esac
 
+# The fixtures below are released with this package's own dispat.yaml, whose
+# tests stage runs this script. The marker turns that stage into a no-op inside
+# a fixture, so a fixture release never starts this suite again.
+export DISPAT_SPEC_TEST_FIXTURE=1
+
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/agent-guide-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 1' HUP INT TERM

@@ -115,9 +115,10 @@ To advance the fork, follow the
 explicitly. Review and commit the manifest and checksums together. The explicit version avoids selecting an unreleased
 draft tag. The darwin spike checks the recorded version on every run and reuses Aqua’s verified downloads.
 
-The release export gate runs the complete integration suite against the exact native TinyGo binary it will export.
-Version-stamped self-update fixtures use the same compiler, including trusted TLS update and offline rollback checks.
-Any failed or skipped test blocks export. CI exercises this gate on native Linux AMD64 and ARM64 builders.
+The release's tests stage runs the complete integration suite against the exact native TinyGo binary its build stage
+exported. Version-stamped self-update fixtures use the same compiler, including trusted TLS update and offline rollback
+checks. Any failed or skipped test fails the stage, so nothing is published. The CI build gate runs the same build and
+tests on native Linux AMD64 and ARM64 builders.
 The test reporter retains the complete event stream and prints failed-test output separately, so Docker's log
 limit cannot bury a failure behind the output from passing tests.
 

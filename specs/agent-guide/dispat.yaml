@@ -9,6 +9,10 @@ runOnly: orchestrator
 scripts:
   verify-guide: sh verify.sh
   tests: sh test.sh
+  # The release's tests stage: the same suite, after the build has verified
+  # the document. Inside the suite's own fixture releases it does nothing,
+  # because those releases read this file too (see test.sh).
+  release-tests: '[ -n "${DISPAT_SPEC_TEST_FIXTURE:-}" ] || sh test.sh'
 
 autoVersion:
   manifests: none
@@ -23,4 +27,5 @@ autoVersion:
 flow:
   beforeVersion: [verify-guide]
   build: verify-guide
+  tests: release-tests
   publish: [changelog, commit]

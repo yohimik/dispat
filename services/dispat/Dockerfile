@@ -1,11 +1,15 @@
 # syntax=docker/dockerfile:1
 #
-# The dispat CLI's build-and-test stage, containerised: the six release
-# binaries, built from this checkout with the release version baked in, smoke
-# tested, and exported to the host as a plain folder. The export descends from
-# the test stage, so a failed check fails this build and nothing comes out:
-# what lands in dist/ is six binaries that were tested, never six that merely
-# compiled.
+# The dispat CLI's build and its smoke gate, containerised as two targets. The
+# `export` target builds the release binaries from this checkout with the
+# release version baked in and exports them to the host as a plain folder. The
+# `test` target checks exactly those bytes: a release's tests stage builds it
+# with `--build-context dist=<the exported folder>`, which replaces the `dist`
+# stage below, so what is tested is the folder the build produced and not a
+# second compile of the same source. Built without that context, `test`
+# checks a fresh build of its own, which is what a hand run wants. A release
+# publishes only after its tests stage passed, so what it publishes is six
+# binaries that were tested, never six that merely compiled.
 #
 # One binary per mainstream platform, because `dispat self-update` downloads the
 # asset named after the running platform: a target missing here is a platform
@@ -179,6 +183,43 @@ RUN set -eu; \
     echo "DISPAT_EXPORT_GITHUB=$assets" > /out/dispat-output; \
     cat /out/dispat-output
 
+# The stage's outputs, GITHUB_OUTPUT-style, as the caller will read them: the
+# build above knows the binaries' names and nothing about where the export will
+# land, so the destination is passed in and joined onto them here. What comes
+# out is a file whoever exported the folder can append to the real
+# $DISPAT_OUTPUT unread — see the `release-build` script in dispat.yaml.
+#
+# A stage of its own, and the only place DISPAT_EXPORT_BASE is declared, so
+# building from a different checkout path does not invalidate the
+# cross-compile layer above it.
+#
+# The default is what a hand build of this target gets: names relative to the
+# folder that was exported, which is the one reading they are always correct
+# under. A release passes the absolute path.
+FROM tiny AS staged
+ARG DISPAT_EXPORT_BASE=.
+RUN set -eu; \
+    while IFS= read -r line; do \
+      paths=""; \
+      for name in ${line#*=}; do paths="$paths${paths:+ }$DISPAT_EXPORT_BASE/$name"; done; \
+      printf '%s=%s\n' "${line%%=*}" "$paths"; \
+    done < /out/dispat-output > /out/dispat-output.joined; \
+    mv /out/dispat-output.joined /out/dispat-output; \
+    cat /out/dispat-output
+
+# Nothing but the artefacts: `--output type=local` writes this stage's whole
+# filesystem to the destination folder, so anything else here would land in
+# dist/ beside the binaries.
+FROM scratch AS export
+COPY --from=staged /out /
+
+# The bytes the smoke gate checks. A build passing `--build-context
+# dist=<folder>` replaces this stage with that folder, which is how a release's
+# tests stage checks the exact files its build stage exported; without it the
+# gate checks this checkout's own build.
+FROM scratch AS dist
+COPY --from=tiny /out /
+
 # The version-stamped binaries the self-update tests install, built once by
 # the same fork, for the builder's own architecture, before any shard starts.
 # The versions are harness.SelfUpdateFixtureVersions and the flags, stamp and
@@ -215,6 +256,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # which test it was.
 FROM tiny-build AS tiny-test
 ARG TARGETARCH
+# The TinyGo binary under test is the one in dist, never the one this stage's
+# parent compiled: the gate accepts or refuses the bytes that will be
+# published.
+COPY --from=dist /dispat-tiny-linux-${TARGETARCH} /dist/dispat-tiny-linux-${TARGETARCH}
 RUN apt-get update && apt-get install -y --no-install-recommends git jq \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --uid 1001 gopher
@@ -253,7 +298,7 @@ RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     --mount=type=cache,target=/home/gopher/go/pkg/mod,uid=1001,gid=1001 \
     set -eu; \
     git --version; \
-    DISPAT_TEST_BINARY="/out/dispat-tiny-linux-${TARGETARCH}" \
+    DISPAT_TEST_BINARY="/dist/dispat-tiny-linux-${TARGETARCH}" \
       testreport test tiny-integration --shards 6 -- \
         -C /src/tests/integration -count=1 -timeout 120m \
         -skip '^TestGoInstallBuildUsesTheGoToolchainForUpdates$' ./...; \
@@ -264,9 +309,13 @@ RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     jq -s '{passed:([.[] | select(.Action == "pass" and has("Test"))] | length),failed:([.[] | select(.Action == "fail")] | length),skipped:([.[] | select(.Action == "skip" and has("Test"))] | length)}' /gate/integration.json; \
     touch /gate/passed
 
-FROM tiny AS test
-# This dependency prevents export if full TinyGo integration acceptance fails.
+# The smoke gate over the bytes in dist. It fails when full TinyGo
+# integration acceptance fails, and then validates and runs the gc binaries.
+FROM golang:${GO_VERSION}-alpine AS test
 COPY --from=tiny-test /gate/passed /tmp/tinygo-integration-passed
+COPY --from=dist / /out/
+WORKDIR /src
+COPY pkg ./pkg
 
 # The builder's own architecture — which of the six binaries can carry the
 # test suite natively.
@@ -331,36 +380,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     GOWORK=/src/go.work DISPAT_TEST_BINARY="/out/dispat-linux-${TARGETARCH}" \
       go test -C /src/tests/integration -run 'TestSmoke' -count=1 -timeout 20m .; \
     echo "smoke suite passed against dispat-linux-${TARGETARCH}"
-
-# The stage's outputs, GITHUB_OUTPUT-style, as the caller will read them: the
-# build above knows the binaries' names and nothing about where the export will
-# land, so the destination is passed in and joined onto them here. What comes
-# out is a file whoever exported the folder can append to the real
-# $DISPAT_OUTPUT unread — see the `build` script in dispat.yaml.
-#
-# A stage of its own, and the only place DISPAT_EXPORT_BASE is declared, so
-# building from a different checkout path does not invalidate the
-# cross-compile layer above it.
-#
-# The default is what a hand build of this target gets: names relative to the
-# folder that was exported, which is the one reading they are always correct
-# under. A release passes the absolute path.
-FROM test AS staged
-ARG DISPAT_EXPORT_BASE=.
-RUN set -eu; \
-    while IFS= read -r line; do \
-      paths=""; \
-      for name in ${line#*=}; do paths="$paths${paths:+ }$DISPAT_EXPORT_BASE/$name"; done; \
-      printf '%s=%s\n' "${line%%=*}" "$paths"; \
-    done < /out/dispat-output > /out/dispat-output.joined; \
-    mv /out/dispat-output.joined /out/dispat-output; \
-    cat /out/dispat-output
-
-# Nothing but the artefacts: `--output type=local` writes this stage's whole
-# filesystem to the destination folder, so anything else here would land in
-# dist/ beside the binaries.
-FROM scratch AS export
-COPY --from=staged /out /
 
 # The CI bootstrap: the fresh dispat every workflow job builds from its
 # checkout before any dispat command runs, exported as a single native-arch
