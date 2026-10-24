@@ -196,9 +196,8 @@ fixture, the observer and the fault proxy are documented in
 The release workflow carries forward a completed campaign when the published native image and harness are identical.
 The docs package's `beforeBuild` hook checks the image id, exact cell list, every verdict and observation stream, and
 every dispat verdict before reuse. A new binary or protocol, or a missing, corrupt, partial or failed record, reruns
-every campaign cell. This page is built from the validated records. The
-[Experiments workflow](https://github.com/yohimik/dispat/actions/workflows/experiments.yml) uses the same generated cell list on
-demand, for any released version.
+every campaign cell. This page is built from the validated records, and only the release workflow writes them: a run
+by hand, as above, measures any released version without reaching this page.
 
 ## What this is for
 

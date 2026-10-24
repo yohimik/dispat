@@ -62,7 +62,7 @@ Set the repository secret `CRIER_PUBLISH_DISCORD_WEBHOOK_URL` to an incoming Dis
 
 The stage reports each destination's result and returns failure if an announcement is incomplete. It does not retry an ambiguous publishing failure. Inspect the destination before replaying to avoid duplicate posts.
 
-The announcement replay workflow selects `rc` or `stable` and a replay script within that folder. A replay script is a few lines: it sets `ANNOUNCE_NEW_VERSION`, switches off the destinations that already have the post with `CRIER_PUBLISH_<NAME>_ENABLED=false`, and calls `crier publish` with the channel's `crier.yaml`. The replay workflow holds no Instagram credentials, so a replay there disables Instagram.
+A replay posts to the destination that needs recovery and to no other. With that destination's credential in the environment, set `ANNOUNCE_NEW_VERSION` to the published version, switch off the destinations that already have the post with `CRIER_PUBLISH_<NAME>_ENABLED=false`, and call `crier publish` with the channel's `crier.yaml`. `sh scripts/install-tools.sh crier` installs the pinned crier.
 
 ## Requirements
 

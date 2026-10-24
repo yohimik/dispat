@@ -63,9 +63,9 @@ scripts:
   # order `cell` and run.sh take.
   #
   # This is the only place the cells are enumerated. The sweep below pipes
-  # it into xargs and the Experiments workflow turns it into its matrix, so
-  # a cell added here is a cell both runs, and neither can drift into
-  # measuring a different campaign than the other.
+  # it into xargs and the cache manifest stores it, so a cell added here is
+  # a cell the next campaign runs, and a reused campaign can never be one
+  # that measured a different list.
   cells: |
     set -eu
     for tool in dispat lerna nx changesets; do

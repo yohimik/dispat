@@ -255,11 +255,11 @@ The release workflow restores the newest records for the current harness. The do
 reuses them only when the experiments image id is identical, the manifest names the exact current cell list, every
 verdict and observation stream parses, and every dispat verdict passed. The image id covers the published native
 binary, pinned comparison tools and harness. A version or protocol change therefore reruns every cell, as does
-any missing, corrupt, partial or failed record. The `Experiments` workflow remains the by-hand run for any released
-version; its matrix is `cells` read at the start of the run.
+any missing, corrupt, partial or failed record. Only the release workflow writes the records the site is built from;
+a run by hand, with `dispat exec experiments`, measures any released version.
 
 The campaign is whatever `cells` prints and nothing else counts it. The sweep pipes that list into `xargs`, the
-workflow turns it into its matrix, the cache manifest stores it verbatim, and the report's headline counts the records
+cache manifest stores it verbatim, and the report's headline counts the records
 it found. A cell added to `cells` is therefore a cell every one of them runs, with no number to update anywhere.
 
 Underneath, one cell is one container:

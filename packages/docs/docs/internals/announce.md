@@ -132,8 +132,7 @@ platform's resolved caption with `crier publish --dry-run --json`, which makes n
 An incomplete announcement returns failure. There is no automatic retry after an ambiguous publishing result: inspect
 the destination first so a replay does not duplicate a successful post.
 
-The [replay workflow](https://github.com/yohimik/dispat/blob/main/.github/workflows/announce.yml) accepts a channel
-(`rc` or `stable`) and a script filename inside that channel folder. Write the replay script for the published version
-and the destination that needs recovery. It sets `ANNOUNCE_NEW_VERSION`, disables the destinations that already have the
-post with `CRIER_PUBLISH_<NAME>_ENABLED=false`, and calls `crier publish` with the channel's `crier.yaml`. The workflow
-puts the released crier first on `PATH`.
+Replay only the destination that needs recovery, with that destination's credential in the environment. Set
+`ANNOUNCE_NEW_VERSION` to the published version, disable every destination that already has the post with
+`CRIER_PUBLISH_<NAME>_ENABLED=false`, and run `crier publish` with the channel's `crier.yaml`. Use the crier version
+recorded in `.aqua/aqua.yaml`, which `sh scripts/install-tools.sh crier` installs.
