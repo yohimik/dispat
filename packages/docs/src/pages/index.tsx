@@ -104,7 +104,7 @@ function Hero(): React.ReactElement {
     <header className={styles.hero}>
       <div className="container">
         <Heading as="h1" className={styles.title}>
-          Autistic stability<br className={styles.desktopBreak} /> for ADHD projects.
+          Next generation<br className={styles.desktopBreak} /> CI/CD framework.
         </Heading>
         {repository.lead.slice(1, 3).map((paragraph, i) => (
           <p className={styles.lead} key={i}><Inlines tokens={paragraph} /></p>

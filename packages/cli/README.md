@@ -1,6 +1,6 @@
 # @dispat/bin <img alt="dispat logo" align="right" width="128" height="128" src="https://raw.githubusercontent.com/yohimik/dispat/main/imgs/logo.png" />
 
-**Autistic stability for ADHD projects. Mathematical planning. Saga recovery.**
+**Next generation CI/CD framework. Mathematical planning. Saga recovery.**
 
 **dispat** reads your conventional commits, computes the next package versions, and runs build and publish commands in dependency order. Preview the release with `dispat status` before running it.
 

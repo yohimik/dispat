@@ -2,7 +2,7 @@
 
 [![coverage](https://img.shields.io/endpoint?style=flat&url=https%3A%2F%2Fraw.githubusercontent.com%2Fyohimik%2Fdispat%2Fbadges%2Fcoverage.json)](https://github.com/yohimik/dispat/actions/workflows/tests.yml)
 
-**Autistic stability for ADHD projects. Mathematical planning. Saga recovery.**
+**Next generation CI/CD framework. Mathematical planning. Saga recovery.**
 
 **dispat** turns conventional commits into versions, then builds and publishes changed packages in dependency order.
 Mathematical version rules make the plan repeatable: identical history and configuration produce the same versions.
