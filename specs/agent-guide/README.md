@@ -302,6 +302,36 @@ When a release pipeline needs many toolchains, prefer containerized build and te
 
 Configure BuildKit cache import and export for ephemeral CI runners. Use `--cache-from` and `--cache-to` with the CI cache backend or a dedicated registry cache, scoped by package and branch to avoid competing writes. Keep credentials in BuildKit secrets, outside image layers. Check both a cold run and a cached run: cache availability must not determine correctness or replace release records. See [Docker's cache backend documentation](https://docs.docker.com/build/cache/backends/).
 
+## Install dispat and the tools a pipeline needs
+
+Install dispat through the channel that suits the machine, and pin the version in CI:
+
+| Where | How |
+| --- | --- |
+| GitHub Actions | `uses: yohimik/dispat@v1`, with the `version` input pinned. See [the GitHub Action](../../packages/docs/docs/reference/ci.md#the-github-action). |
+| Other CI systems | The [container images](../../packages/docs/docs/reference/ci.md#the-container-images) or the [install script](../../packages/docs/docs/reference/ci.md#the-install-script) with `--version`. |
+| A workstation | The install script (`curl`, `wget`, or PowerShell), `npm install --global @dispat/bin`, `go install`, or a binary from a GitHub release. See [Install](../../packages/docs/docs/getting-started.md#install). |
+
+Check `dispat --version` after installing. An older copy earlier on `PATH` shadows the new one; `which -a dispat` lists
+every copy.
+
+Install the other tools a job needs with dispat rather than with ad hoc downloads. `dispat install` fetches one
+release asset, verifies it and puts it on `PATH`; pin it with `--release`. For a set of tools with recorded checksums,
+let dispat install [Aqua](https://aquaproj.github.io/) and let Aqua install the pinned tools:
+
+```yaml
+scripts:
+  install-tools: |
+    dispat install aquaproj/aqua --release v2.63.0 --asset 'aqua_{os}_{arch}.tar.gz' --pipe 'tar -xz aqua'
+    aqua -c aqua.yaml install
+```
+
+Run it with `dispat exec install-tools`. Keep `aqua.yaml` with `checksum.require_checksum: true` and commit its
+checksum file, so an install fails instead of accepting a changed asset. See [the install
+command](../../packages/docs/docs/cli/install.md), [the other tools a job
+needs](../../packages/docs/docs/reference/ci.md#the-other-tools-a-job-needs) and [Aqua tool
+pins](../../packages/docs/docs/examples/aqua.md).
+
 ## Preserve structured logs and exit status
 
 Use `--log-format json` when a program or agent consumes dispat logs. Parse each JSON line and its diagnostic `code`; do not scrape colored console text. `--log-level debug` is useful for configuration resolution. Review trace output before sharing it because scripts and environments can expose sensitive data.
@@ -403,6 +433,32 @@ test -x "$binary" || exit 1
 Printing the assignment to stdout or exporting a shell variable does not populate the next sequence. Outputs are captured after the whole sequence completes, so a value appended during one command is not immediately available as `DISPAT_OUTPUT_*` to the next command in that same sequence. Use a shell variable within one script or consume the captured value in a later hook.
 
 An output's presence does not prove its producing sequence succeeded. Preserve the original failure and require the smoke gate to pass. Output values are paths or strings, not transported file contents; files must remain accessible to later scripts and containers. See [script outputs](../../packages/docs/docs/reference/environment.md#script-outputs).
+
+## Keep scripts short and inside the configuration
+
+Put a repository's scripts in the dispat configuration's `scripts` map and trigger them with dispat. Do not add a
+shell file for work a few configuration lines can say. A script in the configuration is reviewed with the release
+policy it belongs to, resolves through the package, space and root ladder, and runs with the same environment in a
+release, in `dispat run` and in `dispat exec`.
+
+Keep each script short and readable by a person who has not seen it before: one task, descriptive names, `set -eu`
+when it has more than one step, and no clever shell. When a script outgrows a few lines, move the logic into the
+project's own language, such as a Go command or a Node script, and keep the configuration entry as the one line that
+calls it. Add a shell file only for work that must run before dispat exists on the machine, such as the bootstrap
+that installs dispat itself.
+
+```yaml
+scripts:
+  lint: golangci-lint run ./...
+  tests: go test ./...
+  build: |
+    set -eu
+    go build -o dist/app ./cmd/app
+    printf 'BINARY=%s\n' "$PWD/dist/app" >> "$DISPAT_OUTPUT"
+```
+
+Run `dispat run tests` to sweep the changed packages, or `dispat exec lint --for pkg:app --in pkg:app` to run one
+script once.
 
 ## Select script work deliberately
 
@@ -730,6 +786,7 @@ Do not describe a repository-wide release as rolled back merely because one pack
 - [Configuration](../../packages/docs/docs/configuration/README.md)
 - [Go API](../../packages/docs/docs/api.md)
 - [Packages](../../packages/docs/docs/configuration/packages.md), [spaces](../../packages/docs/docs/configuration/spaces.md), and [dependencies](../../packages/docs/docs/configuration/dependencies.md)
+- [Install](../../packages/docs/docs/getting-started.md#install), [dispat in CI](../../packages/docs/docs/reference/ci.md) and [the install command](../../packages/docs/docs/cli/install.md)
 - [Scripts](../../packages/docs/docs/configuration/scripts.md) and [run hooks](../../packages/docs/docs/configuration/run-hooks.md)
 - [Environment and script outputs](../../packages/docs/docs/reference/environment.md)
 - [Partial releases](../../packages/docs/docs/reference/releasing/partial-releases.md)
