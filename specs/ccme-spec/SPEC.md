@@ -3275,9 +3275,106 @@ phase-specific statements. Neither `Ω(Z)` output work nor a dense `H × m` or `
 instance requires that representation or that the complete planner is jointly time- and space-optimal. Correction,
 reachability, scope and cache choices retain input-dependent tradeoffs.
 
+**The dispat theorem (the one fastest release plan, reached only by a saga).** For a fixed history, configuration
+and inventory there is one release plan (§17.2), so the fastest release is a question about how that one plan is
+executed. The plan runs as a task graph: the sign, version, build, tests and publication tasks of its packages,
+ordered by the precedence edges of §19.2, §19.2a and §28.5, each task `i` with a duration `d_i`. Write
+`Wk = sum(d_i)` for the run's total work, `Lk` for the duration of its longest precedence chain, and `s` for the task
+slots usable at once, the lesser of the summed node capacities and the applicable run-wide stage limits. Then:
+
+1. **Lower bound.** No execution of the plan finishes before `max(Lk, Wk / s)`. The tasks of one chain run one after
+   another, so no execution is shorter than the longest chain, and `s` slots complete at most `s` units of work in a
+   unit of time, so none is shorter than `Wk / s`. The bound holds for every engine, dispat included, whatever it
+   places where.
+2. **Greedy placement is near the bound.** An execution that never leaves a usable slot idle while a compatible task is
+   ready finishes within `Wk / s + (1 - 1/s) · Lk`, which is at most `(2 - 1/s)` times the lower bound, when slots are
+   interchangeable and transfers cost nothing. At every instant such an execution either runs a task of one fixed
+   longest chain or keeps every slot busy, so its idle slot-time is at most `(s - 1) · Lk`; this is Graham's bound for
+   list scheduling under precedence constraints. Under separate stage budgets the same argument gives the looser bound
+   stated under *Build readiness* below.
+3. **Where the bound binds.** On a chain `Lk = Wk`, and no number of nodes helps. Beyond `s = Wk / Lk` the chain and
+   not the pool is the limit, and more slots only close the gap between a greedy execution and `Lk`, which is below a
+   factor of two. Where one owner's publications are serialized (§27.2, §28.6), `sum(p_i)` over them is a floor as
+   well.
+4. **Only a saga reaches it.** A saga here is an execution with three properties: every task's effect is recorded
+   durably in the shared history the instant it completes, never before and never later; a task whose provider
+   failed is blocked rather than attempted; and a resumed run recomputes the remaining work from the records and runs
+   that alone. §19.1, §19.3 and §17.2 require exactly these. Across a failure the bound is on the work the plan still
+   owes: a release keeps it when no completed task is paid for a second time over all its attempts and the resumed
+   attempt obeys clause 1 on the remaining work. Suppose an execution keeps the bound and is not a saga. Then it
+   lacks one of the three properties, and each way of lacking one ends in a specific anomaly:
+   * *No record kept.* Progress lives in the run's memory and a resumed run starts the plan over. Every finished task
+     is paid again, so the work exceeds the bound by what the failed attempt had finished, and the second publication
+     of a version already published is refused or duplicated, because a publication cannot be taken back (§19.1,
+     §26): the double publication.
+   * *Record before effect.* The record is written ahead of the task, a tag before the publication. A failure between
+     them leaves a record of a task that did not happen; the resumed run trusts it and never does the task, and §13.3
+     reads the version as released: the orphan record, a version nothing can install and no run will publish, which
+     §19.1 calls unrecoverable. The release never converges, so it keeps no bound.
+   * *Record after effect, deferred.* Records are batched to the end of the run. A failure between a task and its
+     record leaves a publication no record names; the resumed run does the task again and meets the double
+     publication: the unrecorded publication, which is why §19.1 forbids batching.
+   * *Record not durable.* The record is kept in the local clone, is never pushed, or is moved or rewritten by a
+     rebase. Another machine, or the same one after the rewrite, sees no record and the next plan owes every finished
+     task again: the dangling record, with the double publication behind it, which is why §19.1 forbids moving or
+     deleting a release tag.
+   * *No blocking.* A consumer of a failed provider is attempted anyway. It was prepared against a version that never
+     published, so either §19.3 reconciles and rebuilds it, which is the task paid twice, or it ships a manifest that
+     names a version nothing holds, a state ancestry cannot order and no later run can repair (§13.7b).
+   * *Resume by replay.* The old plan is run again as written instead of being recomputed from the records. It
+     predates the outcome it resumes from: it attempts tasks the records show complete, the double publication, or
+     carries a consumer past a provider that did not ship, the state above: the stale plan.
+   * *Resume by querying the destination.* The remaining work is read from the registry rather than from the records.
+     A destination can answer that an upload succeeded before the version can be read back, can hold a version no
+     plan recorded, and may offer no query at all. The read fails for a version that shipped and the task is paid
+     again, or passes for one that did not and the task is never done: the double publication and the orphan record
+     once more, and where no query exists the variant does not exist.
+   * *Undo instead of resume.* The release takes its finished tasks back and starts over. A publication to an
+     independent registry cannot be taken back, and a withdrawal is a further record and a further effect, not an
+     undo (§26), so this variant is either a saga with compensations or the first case.
+
+   Every variant repeats paid work, never converges, or reaches a state only a further release can repair, so none
+   keeps the bound, against the assumption. An execution that keeps the bound is therefore a saga, and what it costs
+   is the records themselves, one per completed task. One window no record closes: a publication and its record are
+   two writes against two systems, and a run can stop between them. §19.4 is the saga's answer to it. A resumed run
+   that meets a version the destination already holds verifies the artefact's identity and adopts it with its record
+   (`W196`), and refuses it when identity cannot be shown (`E198`); without that rule the window is the double
+   publication, and every later run fails on it.
+5. **A branch that moves mid-release is joined, never rewritten.** The release lock (§13.2, §28.3) excludes a second
+   release, not a push by someone who is not releasing, so a commit can land on the branch after the plan was fixed
+   at `HEAD` and before the run's records reach the shared history. That commit is outside `Wk`: the plan is fixed
+   (§17.2), so the commit belongs to the next plan. The join records the completed tasks on the commit they were
+   planned at and merges what arrived on top of that commit, so the records stay where they are and the arrived
+   commits sit outside their ancestry for the next plan to read. Suppose an execution keeps the bound and does
+   anything else. Each other variant ends in an anomaly already named:
+   * *Rebase the release commit onto what arrived.* The records name a commit the branch no longer descends from:
+     the dangling record, and the next plan owes every finished task again.
+   * *Overwrite what arrived.* A forced push rewrites the shared history, and the arrived work is gone from the
+     branch and is paid again by its author: work outside the plan, paid twice.
+   * *Refuse the push.* The packages are already published, so their records never reach the shared history: the
+     unrecorded publication, and the double publication on retry.
+   * *Replan over what arrived.* The fixed `HEAD` of §17.2 is abandoned, finished tasks are repeated, and the plan is
+     no longer the one plan: the stale plan, from the other side.
+   * *Resolve a conflicting edit by rewriting the release commit.* The tagged tree is no longer the one that was
+     published, so the record lies about its own content: the orphan record by another route. A conflict is answered
+     inside the join, keeping the release's side and setting the arrived side aside under a record of its own, which
+     rewrites nothing.
+
+   The join repeats while the window stays open, a bounded number of times, and stops only where the remote already
+   carries a record this run is about to write, because moving a released record is the dangling record again. An
+   execution that keeps the bound across a moving branch therefore joins, which the resumption rule of §17.2 and the
+   immutability of records in §19.1 already require.
+
+The theorem bounds the fastest execution the one plan admits; it is not a conformance obligation (§17.2), and it says
+nothing about the time taken to compute the plan, which the table above accounts for. Its premises are what an
+implementation has to watch: nodes differ in platform and speed, an output transfer delays the consumer it feeds, and
+under finite budgets a weaker constraint or an added slot can lengthen a greedy execution although never the best one.
+The two passages below work the theorem out for the build readiness relation and for distributed placement.
+
 **Build readiness: what a weaker relation can and cannot buy.** Let `b_i` and `p_i` be the build and publication
-durations of package `i`, and let every slot be free. A run then lasts as long as the longest path of the task graph
-of §19.2a, and a weaker relation never lengthens it, because its constraints are a subset of the stronger one's. On a
+durations of package `i`, and let every slot be free. By the dispat theorem a run then lasts as long as the longest
+path of the task graph of §19.2a, and a weaker relation never lengthens it, because its constraints are a subset of
+the stronger one's. On a
 chain of `n` packages, each consuming the one before it, under one relation throughout: `publish` gives
 `sum(b_i + p_i)`; `build` gives the greatest over `k` of `b_1 + … + b_k + p_k + … + p_n`; `none` gives the greatest
 over `k` of `b_k + p_k + … + p_n`. With equal durations these are `n · (b + p)`, `max(n · b + p, b + n · p)` and
@@ -3290,10 +3387,10 @@ every relation gives the greatest over `k` of `e_k + p_k + … + p_n`, with `e_k
 floor is `sum(p_i)` whatever the relation, and a weaker relation only lowers the `e_k`.
 
 Under budgets of `m_b` build slots and `m_p` publication slots, write `Wb = sum(b_i)`, `Wp = sum(p_i)` and `Lk` for the
-longest path. No schedule beats `max(Lk, Wb / m_b, Wp / m_p)`. A placement that never idles a slot of a stage while a
-task of that stage is ready finishes within `Lk + Wb / m_b + Wp / m_p`, because at every instant either a task of one
-fixed chain is running or the stage that chain waits for has every slot busy; that is within three times the best
-possible, and it is not claimed tight for this shape of graph. The unlimited-slot result does not carry over: under
+longest path. By the dispat theorem, applied per stage, no schedule beats `max(Lk, Wb / m_b, Wp / m_p)`. A placement
+that never idles a slot of a stage while a task of that stage is ready finishes within `Lk + Wb / m_b + Wp / m_p`,
+because at every instant either a task of one fixed chain is running or the stage that chain waits for has every slot
+busy; that is within three times the best possible, and it is not claimed tight for this shape of graph. The unlimited-slot result does not carry over: under
 budgets a weaker relation can lengthen such a schedule, although never the best one. With two build slots and one
 publication slot, packages `(b, p) = (2, 3)`, `(1, 2)` consuming the first, and an unrelated `(8, 3)` finish at 11 under
 `build` and at 12 under `none` when ready tasks start in package order, the consumer's before the unrelated one, because
@@ -3302,11 +3399,11 @@ why §19.2a promises a happens-before relation and no duration.
 
 **Distributed execution: what placement can and cannot buy.** Let `Wk` be the summed duration of a run's command tasks,
 `Lk` the duration of its longest precedence chain, and `s` the task slots usable at once, the lesser of the summed node
-capacities and the applicable run-wide stage limits. No schedule finishes before `max(Lk, Wk / s)`. A placement that
-never leaves a usable slot idle while a compatible task is ready finishes within `Wk / s + (1 - 1/s) · Lk`, which is at
-most `(2 - 1/s)` times the best possible, when slots are interchangeable and transfers cost nothing; this is Graham's
-bound for list scheduling under precedence constraints. Neither premise holds in general: nodes differ in platform and
-speed, and an output transfer delays the consumer it feeds. This section therefore states no bound once transfers count,
+capacities and the applicable run-wide stage limits. The dispat theorem gives the two bounds: no schedule finishes
+before `max(Lk, Wk / s)`, and a placement that never leaves a usable slot idle while a compatible task is ready
+finishes within `Wk / s + (1 - 1/s) · Lk`, at most `(2 - 1/s)` times the best possible, when slots are interchangeable
+and transfers cost nothing. Neither premise holds in general: nodes differ in platform and speed, and an output
+transfer delays the consumer it feeds. This section therefore states no bound once transfers count,
 and the measurement §28.7 requires stands in its place. The inequality still says what to expect. On a chain `Lk = Wk`
 and no number of nodes helps. Beyond `s = Wk / Lk` the chain and not the pool is the limit: the lower bound is `Lk`,
 which a schedule can still miss by the packing of tasks into slots (four independent tasks of 10, 7, 7 and 6 on three
@@ -4237,7 +4334,7 @@ deployment order: infrastructure before the application that runs on it, a schem
   build dependency is met because the declaration says there is none. `C`'s publication task runs after `P`'s
   publication and MAY read what that publication exported.
 
-§13.11 gives the run durations the three values lead to, and what no value promises.
+§13.11 states the dispat theorem, gives the run durations the three values lead to, and says what no value promises.
 
 ### 19.3 Partial failure
 

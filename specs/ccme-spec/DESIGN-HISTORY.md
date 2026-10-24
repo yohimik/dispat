@@ -229,3 +229,23 @@ identity those rules can tell apart from the release job's. The same candidate r
 of the release lock tag, the place section 28.6 requires; verifies ownership before the first worker probe, as section
 28.3 requires before dispatch; bounds each read of a lock and retries a failed one before a run stops for it; and reads
 the lock back before every publication of a release that delegates nothing as well.
+
+## 2026-10-25: The dispat theorem
+
+Section 13.11 states as one named theorem what its cost discussion had said in passing. For a fixed history,
+configuration and inventory there is one release plan, and the fastest execution of it is bounded below by the longer
+of its longest precedence chain and its total work divided by the usable slots; an execution that never idles a usable
+slot while a task is ready stays within Graham's factor of that bound when slots are interchangeable and transfers
+cost nothing. The theorem adds, by contradiction, that only a saga reaches the bound across a failure: an execution that
+records each completed task durably the instant it completes, blocks the consumers of a failure and resumes by
+recomputing from the records. Each other way of executing a release ends in a named anomaly, the double publication,
+the orphan record, the unrecorded publication, the dangling record, the stale plan or destination lag, and each
+repeats paid work, never converges or needs a further release to repair, which is what the tagging rules of 19.1, the
+blocking of 19.3 and the resumption rule of 17.2 already require. The publication-to-record window is named as the
+one no record closes and the reconciliation of 19.4 as the saga's answer to it. A branch that moves mid-release is
+covered the same way: the only execution that keeps the bound joins, recording on the planned commit and merging what
+arrived on top, and a rebase, an overwrite, a refused push, a replan or a rewritten release commit each end in one of
+the anomalies above.
+The build readiness and distributed placement passages now cite the theorem instead of restating it. This is an
+informative addition: no grammar, release plan, diagnostic or conformance obligation changes, and the theorem is
+explicitly not one.
