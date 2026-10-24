@@ -8,13 +8,25 @@ import path from 'node:path'
 
 const execute = promisify(execFile)
 
+// The fixture sits outside the repository, where corepack would otherwise
+// resolve the newest pnpm rather than the one the release build runs. The
+// repository root's packageManager is that pin, read from the source tree the
+// compiled test runs beside.
+const repositoryManifest = new URL('../../../package.json', import.meta.url)
+
+async function packageManager(): Promise<string> {
+  const { packageManager:pin } = JSON.parse(await readFile(repositoryManifest, 'utf8')) as { packageManager?:unknown }
+  assert.equal(typeof pin, 'string', 'the repository root names no packageManager')
+  return pin as string
+}
+
 async function workspace(t: TestContext): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'dispat pnpm release '))
   t.after(() => rm(root, { recursive:true, force:true }))
   await mkdir(path.join(root, 'packages/cli'), { recursive:true })
   await mkdir(path.join(root, 'packages/provider'), { recursive:true })
   await writeFile(path.join(root, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n")
-  await writeFile(path.join(root, 'package.json'), JSON.stringify({ private:true }))
+  await writeFile(path.join(root, 'package.json'), JSON.stringify({ private:true, packageManager:await packageManager() }))
   await writeFile(path.join(root, 'packages/provider/package.json'), JSON.stringify({ name:'fixture-provider', version:'1.0.0' }))
   await writeFile(path.join(root, 'packages/cli/package.json'), JSON.stringify({
     name:'fixture-cli', version:'1.0.0', scripts:{
