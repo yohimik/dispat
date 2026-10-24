@@ -1,12 +1,12 @@
-# Using dispat as a coding agent
+# dispat AI agent skill (agent work guide)
 
 **Version:** 1.11.0-rc.6
 
 **License:** MIT. See [LICENSE](./LICENSE).
 
-The guide shares dispat’s major/minor release line and can receive its own patches. Released `dispat --help` links to the guide and reference documents captured by that CLI’s immutable release tag. Relative documentation links in this guide preserve the same snapshot.
+This is the AI agent skill (agent work guide) for dispat. The agent skill shares dispat’s major/minor release line and can receive its own patches. Released `dispat --help` links to the agent skill and reference documents captured by that CLI’s immutable release tag. Relative documentation links in the agent skill preserve the same snapshot.
 
-This guide explains how a coding agent should inspect, test, release, and recover a repository managed by dispat. It complements the [dispat documentation](../../packages/docs/docs/getting-started.md) and the repository's own instructions. It does not replace either one.
+The agent skill explains how an AI agent should inspect, test, release, and recover a repository managed by dispat. It complements the [dispat documentation](../../packages/docs/docs/getting-started.md) and the repository's own instructions. It does not replace either one.
 
 dispat can execute arbitrary configured scripts and can publish packages, write files, create commits and tags, push branches, and call external services. Treat the repository configuration as executable release policy.
 

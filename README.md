@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex
 
 The install script downloads the binary for your platform and verifies its checksum. No language runtime is required.
 
-Coding agents should also use the version-matched [agent work guide](./specs/agent-guide/README.md).
+AI agents should also use the version-matched [AI agent skill (agent work guide)](./specs/agent-guide/README.md).
 
 ```sh
 # ...or with npm (Node.js required)
@@ -151,11 +151,11 @@ dispat draws on tools and ideas that make complex work easier to inspect, compos
 
 ## Where to go
 
-- **[Agent work guide](./specs/agent-guide/README.md)**: if you are a coding agent working with dispat, start with
-  `dispat --version` and read the versioned guide linked by `dispat --help`. Use the latest published guide patch
-  on that CLI's major/minor release line, not the guide from another release line or the default branch. If you
-  cannot check for newer patches, use the pinned guide from help. Keep configuration and API references pinned
-  to the installed CLI release, and follow the guide's CI/CD release workflow.
+- **[AI agent skill (agent work guide)](./specs/agent-guide/README.md)**: if you are an AI agent working with dispat,
+  start with `dispat --version` and read the versioned agent skill linked by `dispat --help`. Use the latest published
+  agent skill patch on that CLI's major/minor release line, not the agent skill from another release line or the
+  default branch. If you cannot check for newer patches, use the pinned agent skill from help. Keep configuration and
+  API references pinned to the installed CLI release, and follow the agent skill's CI/CD release workflow.
 - **[dispat](./services/dispat)**: the CLI itself. Read a terminal tour, the key features, and the full documentation.
   This includes getting started, an example per package manager, concepts, CLI, configuration, commit messages, script
   environment, architecture, and coverage.

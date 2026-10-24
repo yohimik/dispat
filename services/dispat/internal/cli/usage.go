@@ -690,7 +690,7 @@ func printUsage(out io.Writer, master *pflag.FlagSet) {
 		b.WriteString("\nDevelopment build: references point to upcoming documentation.\n")
 	}
 	const repository = "https://github.com/yohimik/dispat/blob/"
-	fmt.Fprintf(&b, "\nIf you are an agent, read the common guide:\n  %s%s/specs/agent-guide/README.md\n", repository, ref)
+	fmt.Fprintf(&b, "\nIf you are an AI agent, read the agent skill (agent work guide):\n  %s%s/specs/agent-guide/README.md\n", repository, ref)
 	fmt.Fprintf(&b, "\nConfiguration reference: %s%s/packages/docs/docs/configuration/README.md\n", repository, ref)
 	fmt.Fprintf(&b, "API reference:           %s%s/packages/docs/docs/api.md\n", repository, ref)
 	fmt.Fprint(out, b.String())

@@ -1,8 +1,8 @@
 # Contributing to dispat
 
-Start with the [agent work guide](specs/agent-guide/README.md), the [architecture](packages/docs/docs/internals/architecture.md), and the configuration of the package you intend to change. Use explicit help commands to explore the CLI. Bare `dispat` runs a release.
+Start with the [AI agent skill (agent work guide)](specs/agent-guide/README.md), the [architecture](packages/docs/docs/internals/architecture.md), and the configuration of the package you intend to change. Use explicit help commands to explore the CLI. Bare `dispat` runs a release.
 
-Two documents are normative and are not repeated here. The [agent work guide](specs/agent-guide/README.md) owns the
+Two documents are normative and are not repeated here. The [agent skill](specs/agent-guide/README.md) owns the
 working procedure: how to pick up a task, what to verify, and what to record. The
 [CCME specification](specs/ccme-spec/SPEC.md) owns the commit-message grammar, the release units, the corrections, and the
 diagnostic codes. Read them there and link to them rather than restating them.
@@ -343,7 +343,7 @@ It must cover:
   without installed dependencies.
 
 The publish command is the last external action of the publish stage, as the
-[agent work guide](specs/agent-guide/README.md#test-before-and-during-release) requires. An upload npm accepted
+[agent skill](specs/agent-guide/README.md#test-before-and-during-release) requires. An upload npm accepted
 without a release tag is recovered as the
 [recovery guide](packages/docs/docs/reference/releasing/recovery.md#recover-an-npm-publication-without-a-release-tag)
 describes.

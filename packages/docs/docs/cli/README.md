@@ -7,10 +7,10 @@ commands to narrow that release or perform a single step.
 dispat [command] [flags]
 ```
 
-From dispat 1.8.2, `dispat --help` links to the agent guide, configuration reference, and API reference captured by
-that binary's release tag. Development builds explicitly link to upcoming documentation. Agents should check for newer
-guide patches on the installed CLI's major/minor line, while keeping the configuration and API references pinned to the
-installed binary.
+From dispat 1.8.2, `dispat --help` links to the AI agent skill (agent work guide), configuration reference, and API
+reference captured by that binary's release tag. Development builds explicitly link to upcoming documentation. Agents
+should check for newer agent skill patches on the installed CLI's major/minor line, while keeping the configuration and
+API references pinned to the installed binary.
 
 ## Commands
 

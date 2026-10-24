@@ -11,7 +11,7 @@ It does not attempt an automatic rollback across registries and deployment syste
 
 [Documentation](https://dispat.dev/) · [GitHub](https://github.com/yohimik/dispat) · [Discord](https://discord.gg/83PwVSCCmk)
 
-Coding agents should follow the version-matched [agent work guide](https://github.com/yohimik/dispat/blob/main/specs/agent-guide/README.md) for inspection, testing, release, and recovery.
+AI agents should follow the version-matched [AI agent skill (agent work guide)](https://github.com/yohimik/dispat/blob/main/specs/agent-guide/README.md) for inspection, testing, release, and recovery.
 
 ## Install
 
