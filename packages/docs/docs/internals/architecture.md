@@ -105,9 +105,11 @@ read it back as a release tag.
    source-history mode, revalidate every participating repository after all control and imported hooks finish. A
    relevant head, release-tag, or pin change is `E330` before the first package task.
 10. Execute the task graph with per-stage concurrency budgets. This runs a version, build, and publish stage per
-    *releasing* package, excluding held packages, and a sign stage first for a package whose space configures one. The
-    space's gating hooks bracket each stage (`beforeAll`, `beforeSign`/`postSign`, `beforeVersion`/`postVersion`,
-    `beforeBuild`/`postBuild`, `beforePublish`). A space's `flow.login` runs once before
+    *releasing* package, excluding held packages, a sign stage first for a package whose space configures one, and a
+    tests stage between the build and the publish for a package whose space configures one. The version stage runs
+    under the name its configuration gave it, `version` or `propagate`. The space's gating hooks bracket each stage
+    (`beforeAll`, `beforeSign`/`postSign`, `beforeVersion`/`postVersion`, `beforeBuild`/`postBuild`,
+    `beforeTests`/`postTests`, `beforePublish`). A space's `flow.login` runs once before
     its first publish. Every other publish in that space waits on it. Source-history mode revalidates a package's
     owner plus the transitive provider and shared-version-group repository closure after `beforePublish` and before its
     publish command. The same check includes control when applicable control intent was consulted or a checkpoint will
@@ -359,8 +361,9 @@ Gating on `DueTo` made a scripted version stage and a native `autoVersion` block
 ```
 
 (The two provider edges land on web's *first* task, its `version`, and on its `publish`. With a sign stage, web's
-chain starts `sign ─► version`, and the first provider edge lands on `sign` instead. Read the bullets below for the
-precise rule.)
+chain starts `sign ─► version`, and the first provider edge lands on `sign` instead. With a tests stage, a package's
+chain ends `build ─► tests ─► publish`, and the publish edges are unchanged. Read the bullets below for the precise
+rule.)
 
 - What a consumer's **first** task (sign when present, then version, build otherwise) waits for on each changed
   provider is that provider's [relation](../configuration/spaces.md#the-provider-relation): nothing under
@@ -425,13 +428,20 @@ command that covers packages requires only one small file rather than a copy of 
 
 ### The stage seam: where a frame may leave this machine
 
-The task graph is the same graph whether a release runs on one machine or several. Only build and publish frames can
-leave this machine: the sign, version and syncLock frames write the working tree every delegated frame is
+The task graph is the same graph whether a release runs on one machine or several. Only build, tests and publish frames
+can leave this machine: the sign, version and syncLock frames write the working tree every delegated frame is
 snapshotted from, so they run on the orchestrator under the snapshot guard, as every manifest reconciliation must
 (§28.3 of the specification). [Distributed
 execution](../distributed-execution.md) adds no barrier nodes and no edges, because a second scheduler would be a
 second answer to the order a release already has. What it adds is one seam inside the executor: the call that runs a
 stage frame asks a coordinator first, and the coordinator either runs the frame here or places it on a node.
+
+The stages are data. One ordered table describes sign, version, syncLock, build, tests and publish: each stage's name
+and hook spelling, the budget its tasks hold, whether its frame stays on the orchestrator or is placed by the build's
+or the publish's `runOnly` value, what a node must install before it runs (nothing, the providers' outputs, or the
+package's own outputs), whether its outputs are admitted, and whether its commands wait for the run's authorization.
+The task graph chains the stages a package has in table order, and the seam is one call carrying the descriptor, so a
+stage added to the table is placed, transported, reported and gated the way the stages beside it are.
 
 Three properties follow from putting the seam there. A run-wide stage budget is never multiplied by the number of
 nodes, because a task holds its budget slot from the moment it is ready and asks for a node afterwards. The

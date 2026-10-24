@@ -783,8 +783,8 @@ func TestHooksRunLevelHooksAreTheReleasesOwn(t *testing.T) {
 // TestHooksSignFrameFiresFirst: a space with a sign stage runs the sign frame
 // first in every package's frame, after beforeAll and before the version stage
 // and the build, and each hook reports its runtime name. The version stage is
-// configured under its propagate keys here, and its hooks still report
-// themselves as the version stage's.
+// configured under its propagate keys here, so the stage and its hooks report
+// themselves under that name.
 func TestHooksSignFrameFiresFirst(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
@@ -813,7 +813,7 @@ func TestHooksSignFrameFiresFirst(t *testing.T) {
 	}, hookSequence(t, r, "core"), "the provider's frame")
 	assert.Equal(t, []string{
 		"beforeAll", "beforeSign", "sign", "postSign",
-		"beforeVersion", "version", "postVersion",
+		"beforePropagate", "propagate", "postPropagate",
 		"beforeBuild", "build", "postBuild",
 		"beforePublish", "publish", "postPublish",
 		"beforeAnnounce", "announce", "postAnnounce",
@@ -1010,4 +1010,158 @@ func TestHooksStageOutputTruncatesAnOverlongLine(t *testing.T) {
 // would otherwise grow without bound for the whole life of the command.
 func megabyteOfX(char string) string {
 	return "head -c 1200000 /dev/zero | tr '\\0' " + char
+}
+
+// testsHookLog is hookLog with the tests frame wired in as well: the tests
+// stage's own script and its two hooks, each appending its runtime name.
+func testsHookLog() map[string]models.Script {
+	scripts := hookLog()
+	for _, name := range []string{"beforeTests", "tests", "postTests"} {
+		scripts[name] = models.Script{"echo $DISPAT_STAGE:$DISPAT_PACKAGE >> ../../hooks.log"}
+	}
+	return scripts
+}
+
+// testsHookFlow is hookFlow with the tests frame referenced from its slots.
+func testsHookFlow() *models.SpaceFlowConfig {
+	flow := hookFlow()
+	flow.Tests, flow.BeforeTests, flow.PostTests = []string{"tests"}, []string{"beforeTests"}, []string{"postTests"}
+	return flow
+}
+
+// TestHooksTestsFrameFiresBetweenBuildAndPublish: a space configuring the
+// tests stage runs beforeTests, tests and postTests after the build frame and
+// before the publish frame, in a provider's frame and a consumer's alike, and
+// each reports its runtime name.
+func TestHooksTestsFrameFiresBetweenBuildAndPublish(t *testing.T) {
+	r := harness.New(t)
+	cfg := harness.BaseFile(1)
+	cfg.Scripts = testsHookLog()
+	cfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}, Flow: testsHookFlow()}}
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "app")
+	r.Commit("feat(core)^: reach the consumer")
+
+	r.ReleaseOK()
+	assert.Equal(t, []string{
+		"beforeAll", "beforeBuild", "build", "postBuild",
+		"beforeTests", "tests", "postTests",
+		"beforePublish", "publish", "postPublish",
+		"beforeAnnounce", "announce", "postAnnounce",
+	}, hookSequence(t, r, "core"), "the provider's frame")
+	assert.Equal(t, []string{
+		"beforeAll", "beforeVersion", "version", "postVersion",
+		"beforeBuild", "build", "postBuild",
+		"beforeTests", "tests", "postTests",
+		"beforePublish", "publish", "postPublish",
+		"beforeAnnounce", "announce", "postAnnounce",
+	}, hookSequence(t, r, "app"), "the consumer's frame")
+	assert.ElementsMatch(t, []string{"core@0.1.0", "app@0.0.1"}, r.TagList())
+}
+
+// TestHooksTestsFrameCarriesExports: what the build exports reaches the tests
+// stage, and what the tests stage exports reaches the publish, the way a
+// build's export has always reached the publish.
+func TestHooksTestsFrameCarriesExports(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(`echo "ARTIFACT=core-$DISPAT_NEW_VERSION.tgz" >> "$DISPAT_OUTPUT"`, 1)
+	cfg.Scripts["check"] = models.Script{
+		`echo "$DISPAT_STAGE $DISPAT_OUTPUT_ARTIFACT" > ../../tests.txt && echo "TESTED=$DISPAT_OUTPUT_ARTIFACT" >> "$DISPAT_OUTPUT"`}
+	cfg.Scripts["publish"] = models.Script{
+		`echo "$DISPAT_OUTPUT_ARTIFACT $DISPAT_OUTPUT_TESTED $DISPAT_OUTPUT_SOURCE_TESTED" > ../../publish.txt`}
+	space := cfg.Spaces["libs"]
+	space.Flow.Tests = []string{"check"}
+	cfg.Spaces["libs"] = space
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	r.ReleaseOK()
+	assert.Equal(t, "tests core-0.1.0.tgz\n", readFile(t, r, "tests.txt"), "the build's export reached the tests stage")
+	assert.Equal(t, "core-0.1.0.tgz core-0.1.0.tgz core:tests\n", readFile(t, r, "publish.txt"),
+		"both exports reached the publish, the tests stage's under its own source")
+}
+
+// TestHooksTestsFailureGatesThePublish: a tests stage that fails fails its
+// package at the tests stage before anything is published or tagged, onFail
+// is told so, and a consumer owed nothing but the provider's propagation is
+// skipped behind it.
+func TestHooksTestsFailureGatesThePublish(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["check"] = models.Script{`test "$DISPAT_PACKAGE" != core`}
+	cfg.Scripts["publish"] = models.Script{`echo "$DISPAT_PACKAGE" >> ../../published.log`}
+	cfg.Scripts["failed"] = models.Script{`echo "$DISPAT_PACKAGE:$DISPAT_FAILED_STAGE" >> ../../failed.log`}
+	space := cfg.Spaces["libs"]
+	space.Flow.Tests, space.Flow.OnFail = []string{"check"}, []string{"failed"}
+	cfg.Spaces["libs"] = space
+	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.SeedPackage("packages", "app")
+	r.Commit("feat(core)^: reach the consumer")
+
+	res := r.Release()
+	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+	assert.Empty(t, r.TagList(), "neither package is tagged")
+	assert.NoFileExists(t, r.Path("published.log"), "nothing was published")
+	assert.Equal(t, "core:tests\n", readFile(t, r, "failed.log"))
+	assert.Contains(t, res.Stdout, `"failedStage":"tests"`)
+	assert.Contains(t, res.Stdout, `"code":"W194"`, "the consumer is skipped behind its provider")
+}
+
+// TestHooksVersionStageRunsUnderItsConfiguredName: a version stage written as
+// flow.propagate runs, fails and is reported as propagate, its onFail hook
+// included, and the same stage written as flow.version keeps the name version.
+func TestHooksVersionStageRunsUnderItsConfiguredName(t *testing.T) {
+	for _, row := range []struct {
+		key, stage string
+	}{{"version", "version"}, {"propagate", "propagate"}} {
+		t.Run(row.key, func(t *testing.T) {
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			cfg.Scripts["sync"] = models.Script{`echo "$DISPAT_STAGE" > ../../stage.txt && exit 1`}
+			cfg.Scripts["failed"] = models.Script{`echo "$DISPAT_FAILED_STAGE" > ../../failed.txt`}
+			space := cfg.Spaces["libs"]
+			if row.key == "propagate" {
+				space.Flow.Propagate = []string{"sync"}
+			} else {
+				space.Flow.Version = []string{"sync"}
+			}
+			space.Flow.OnFail = []string{"failed"}
+			cfg.Spaces["libs"] = space
+			cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
+			r.WriteConfigModel(cfg)
+			r.SeedPackage("packages", "core")
+			r.SeedPackage("packages", "app")
+			r.Commit("feat(core)^: reach the consumer")
+
+			res := r.Release()
+			assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
+			assert.Equal(t, row.stage+"\n", readFile(t, r, "stage.txt"))
+			assert.Equal(t, row.stage+"\n", readFile(t, r, "failed.txt"))
+			assert.Contains(t, res.Stdout, `"failedStage":"`+row.stage+`"`)
+			assert.True(t, r.IsTagged("core@0.1.0"), "the provider is unaffected: %v", r.TagList())
+		})
+	}
+}
+
+// TestHooksRunTestsRunsTheScriptNotTheStage: `dispat run tests` runs the script
+// named tests, as it always has, whatever a flow's tests stage names.
+func TestHooksRunTestsRunsTheScriptNotTheStage(t *testing.T) {
+	r := harness.New(t)
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["tests"] = models.Script{`echo script >> ../../ran.log`}
+	cfg.Scripts["check"] = models.Script{`echo stage >> ../../ran.log`}
+	space := cfg.Spaces["libs"]
+	space.Flow.Tests = []string{"check"}
+	cfg.Spaces["libs"] = space
+	r.WriteConfigModel(cfg)
+	r.SeedPackage("packages", "core")
+	r.Commit("feat(core): first release")
+
+	r.RunScriptOK("tests", "--since", "all")
+	assert.Equal(t, "script\n", readFile(t, r, "ran.log"))
 }

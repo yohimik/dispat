@@ -35,6 +35,7 @@ type digestPackage struct {
 	TagFormat      string              `json:"tagFormat"`
 	AliasFormats   []digestAliasFormat `json:"aliasFormats"`
 	Commands       digestCommands      `json:"commands"`
+	VersionStage   string              `json:"versionStage"`
 	Env            []string            `json:"env"`
 	BuildOutputs   []string            `json:"buildOutputs"`
 	BuildPlatforms []string            `json:"buildPlatforms"`
@@ -84,6 +85,7 @@ type digestCommands struct {
 	Sign      []string `json:"sign"`
 	Version   []string `json:"version"`
 	Build     []string `json:"build"`
+	Tests     []string `json:"tests"`
 	Publish   []string `json:"publish"`
 	Login     []string `json:"login"`
 	Announce  []string `json:"announce"`
@@ -95,6 +97,8 @@ type digestCommands struct {
 	PostVersion    []string `json:"postVersion"`
 	BeforeBuild    []string `json:"beforeBuild"`
 	PostBuild      []string `json:"postBuild"`
+	BeforeTests    []string `json:"beforeTests"`
+	PostTests      []string `json:"postTests"`
 	BeforePublish  []string `json:"beforePublish"`
 	PostPublish    []string `json:"postPublish"`
 	BeforeAnnounce []string `json:"beforeAnnounce"`
@@ -189,6 +193,7 @@ func canonicalPackage(name string, release *Release, root string) digestPackage 
 		TagFormat:      string(release.TagFormat()),
 		AliasFormats:   canonicalAliasFormats(space.AliasTags),
 		Commands:       canonicalCommands(space),
+		VersionStage:   space.VersionStage.String(),
 		Env:            append([]string(nil), space.Env...),
 		BuildOutputs:   append([]string(nil), space.BuildOutputs...),
 		BuildPlatforms: append([]string(nil), space.BuildPlatforms...),
@@ -237,6 +242,7 @@ func canonicalCommands(space *model.Space) digestCommands {
 		Sign:           append([]string(nil), space.SignScript...),
 		Version:        append([]string(nil), space.VersionScript...),
 		Build:          append([]string(nil), space.BuildScript...),
+		Tests:          append([]string(nil), space.TestsScript...),
 		Publish:        append([]string(nil), space.PublishScript...),
 		Login:          append([]string(nil), space.LoginScript...),
 		Announce:       append([]string(nil), space.AnnounceScript...),
@@ -247,6 +253,8 @@ func canonicalCommands(space *model.Space) digestCommands {
 		PostVersion:    append([]string(nil), space.PostVersionScript...),
 		BeforeBuild:    append([]string(nil), space.BeforeBuildScript...),
 		PostBuild:      append([]string(nil), space.PostBuildScript...),
+		BeforeTests:    append([]string(nil), space.BeforeTestsScript...),
+		PostTests:      append([]string(nil), space.PostTestsScript...),
 		BeforePublish:  append([]string(nil), space.BeforePublishScript...),
 		PostPublish:    append([]string(nil), space.PostPublishScript...),
 		BeforeAnnounce: append([]string(nil), space.BeforeAnnounceScript...),

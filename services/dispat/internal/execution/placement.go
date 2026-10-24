@@ -20,6 +20,9 @@ package execution
 
 import (
 	public "github.com/yohimik/dispat/pkg/models"
+
+	"github.com/yohimik/dispat/services/dispat/internal/model"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // Placement is where a run may put one stage frame.
@@ -82,14 +85,26 @@ func resolveBuildPlacement(value string) Placement {
 	}
 }
 
-// The two stages a run may delegate, under the names the executor gives them.
-// Everything else a release does (the version stage, the lock-file
-// preparation, the login, the records, the tags and every run-level hook) is
-// the orchestrator's and is not configurable, so it is not named here.
+// The two stages whose runOnly values place a delegable frame, under the names
+// the executor gives them. Every other delegable stage is placed by one of the
+// two, as its descriptor says. Everything else a release does (the sign and
+// version stages, the lock-file preparation, the login, the records, the tags
+// and every run-level hook) is the orchestrator's and is not configurable, so
+// it is not named here.
 const (
 	StageBuild   = "build"
 	StagePublish = "publish"
 )
+
+// resolveDescriptorPlacement answers where one stage's frame of one package
+// runs: under the build's runOnly value and meaning, or the publish's, as the
+// stage's descriptor says.
+func resolveDescriptorPlacement(descriptor release.Stage, space *model.Space) Placement {
+	if descriptor.Placement == release.PlacementByPublish {
+		return ResolveStagePlacement(StagePublish, space.RunOnly.ResolvePublish(), len(space.LoginScript) > 0)
+	}
+	return ResolveStagePlacement(StageBuild, space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0)
+}
 
 // IsDelegable reports whether a placement may leave this machine, which is
 // the one question a caller with no pool has to ask: a frame that must be

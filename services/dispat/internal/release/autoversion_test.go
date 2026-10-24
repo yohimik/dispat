@@ -413,7 +413,7 @@ func TestAutoVersionSkipsUserScriptShortCircuitButNotNative(t *testing.T) {
 
 func TestAutoVersionOrderingStrings(t *testing.T) {
 	assert.Equal(t, "syncLock", taskSyncLock.String())
-	assert.True(t, strings.HasPrefix(stageTitle(taskSyncLock), "S"))
+	assert.True(t, strings.HasPrefix(stageOf(taskSyncLock).Title, "S"))
 }
 
 // syncedLog returns a logger writing into buf through zerolog's sync writer:

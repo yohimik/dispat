@@ -93,10 +93,10 @@ func TestPlanDigestIsStableAcrossRecomputation(t *testing.T) {
 // purpose is legitimate and requires bumping DigestSchema in the same commit,
 // because a node running the older code has to disagree loudly rather than
 // agree by accident. The value is the fixture's digest under
-// dispat-plan-digest/2, the schema that added the sign stage's commands and its
-// autoSign policy to every package.
+// dispat-plan-digest/3, the schema that added the tests stage's commands and
+// the version stage's name to every package.
 func TestPlanDigestGolden(t *testing.T) {
-	const golden = "d0fb41ef721a9f19ad13850b087749efda353fb7b7d233f8b30bc0e01ff13fa5"
+	const golden = "4fab4a8044f678641a7f0575cf6fd768302e9e70efc916ddb3a489f67fecf7f8"
 	assert.Equal(t, golden, digestOfFixture(t),
 		"changing the canonical document requires bumping DigestSchema in the same commit")
 }
@@ -180,6 +180,15 @@ func TestPlanDigestFollowsWhatIsReleased(t *testing.T) {
 		}, heads},
 		"a sign command": {func(o *Options) {
 			o.Packages[0].Space.SignScript = []string{"sign-manifests"}
+		}, heads},
+		"a tests command": {func(o *Options) {
+			o.Packages[0].Space.TestsScript = []string{"make check"}
+		}, heads},
+		"a tests hook": {func(o *Options) {
+			o.Packages[0].Space.PostTestsScript = []string{"collect-reports"}
+		}, heads},
+		"the version stage configured as propagate": {func(o *Options) {
+			o.Packages[0].Space.VersionStage = model.StagePropagate
 		}, heads},
 		"an autoSign policy": {func(o *Options) {
 			o.Packages[0].Space.AutoSign = &model.AutoSign{Manifests: model.ScopeRoot}

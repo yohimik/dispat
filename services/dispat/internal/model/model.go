@@ -291,6 +291,17 @@ type Space struct {
 	BuildScript   []string
 	PublishScript []string
 	VersionScript []string
+	// TestsScript is the optional tests stage's command sequence, run after
+	// the build and before the publish: its job is checking what the build
+	// produced. Any of the three tests sequences gives the package a tests
+	// stage; with none of them the package has no tests stage at all.
+	TestsScript []string
+	// VersionStage is the name the version stage runs under, which is the key
+	// that configured it: `propagate` for flow.propagate, autoPropagate or a
+	// propagate hook, `version` otherwise. It is what DISPAT_STAGE, the
+	// failed stage, the events and the hook names report; the stage itself is
+	// the same stage under either name.
+	VersionStage VersionStage
 	// SignScript is the optional sign stage's command sequence: the first
 	// stage of a package's release, before the version stage and the build,
 	// whose job is writing the package's own version. Any of the three sign
@@ -324,6 +335,8 @@ type Space struct {
 	PostVersionScript    []string
 	BeforeBuildScript    []string
 	PostBuildScript      []string
+	BeforeTestsScript    []string
+	PostTestsScript      []string
 	BeforePublishScript  []string
 	PostPublishScript    []string
 	BeforeAnnounceScript []string // warn-only, like the announce stage they bracket
@@ -374,6 +387,33 @@ type Space struct {
 	// never writes the own version (its WriteVersion is false), so the sign
 	// stage is the one writer of it.
 	AutoSign *AutoSign
+}
+
+// VersionStage is the name a package's version stage runs under. The stage
+// has two names because it is two descriptions of one job: it propagates the
+// versions a package takes from its providers into the package's files.
+type VersionStage string
+
+// The two names of the version stage. The zero value reads as StageVersion,
+// so a space built by hand keeps the name every release has used.
+const (
+	StageVersion   VersionStage = "version"
+	StagePropagate VersionStage = "propagate"
+)
+
+// String is the stage name as DISPAT_STAGE carries it.
+func (s VersionStage) String() string {
+	if s == "" {
+		return string(StageVersion)
+	}
+	return string(s)
+}
+
+// Title is the stage name as it appears inside a hook name: "beforeVersion"
+// or "beforePropagate".
+func (s VersionStage) Title() string {
+	name := s.String()
+	return strings.ToUpper(name[:1]) + name[1:]
 }
 
 // AutoSign is a space's resolved autoSign policy: which of a package's

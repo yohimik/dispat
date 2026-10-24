@@ -224,6 +224,9 @@ func (c *Coordinator) prepareProvider(ctx context.Context, packageName string) (
 	if err != nil {
 		return "", c.refuseTask(task, "", 1, err)
 	}
+	// A preparation is the provider's build frame, so it reads, produces and
+	// is placed as the build does.
+	prepared.Request.Descriptor = release.BuildStage()
 	if err := c.prepareProviderOutputs(ctx, task, prepared.Request); err != nil {
 		return "", err
 	}
@@ -238,10 +241,10 @@ func (c *Coordinator) prepareProvider(ctx context.Context, packageName string) (
 				Msg("building a provider this run does not release")
 			if lease.IsLocal {
 				node = c.Local.Name
-				return c.buildHere(ctx, lease, task, prepared.Request, prepared.Here)
+				return c.runHere(ctx, lease, task, prepared.Request, prepared.Here)
 			}
 			node = lease.Node
-			return c.dispatchBuild(ctx, lease, KindPrepare, task, attempt, prepared.Request)
+			return c.dispatchStage(ctx, lease, KindPrepare, task, attempt, prepared.Request, nil)
 		})
 	return node, err
 }

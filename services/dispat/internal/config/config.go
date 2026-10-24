@@ -160,6 +160,7 @@ func DefaultNonPackageScopes() []string { return public.DefaultNonPackageScopes(
 func scriptRefs(s *SpaceConfig) map[string][]string {
 	return map[string][]string{
 		"flow.build":           s.Flow.Build,
+		"flow.tests":           s.Flow.Tests,
 		"flow.publish":         s.Flow.Publish,
 		"flow.version":         s.Flow.Version,
 		"flow.propagate":       s.Flow.Propagate,
@@ -175,6 +176,8 @@ func scriptRefs(s *SpaceConfig) map[string][]string {
 		"flow.postPropagate":   s.Flow.PostPropagate,
 		"flow.beforeBuild":     s.Flow.BeforeBuild,
 		"flow.postBuild":       s.Flow.PostBuild,
+		"flow.beforeTests":     s.Flow.BeforeTests,
+		"flow.postTests":       s.Flow.PostTests,
 		"flow.beforePublish":   s.Flow.BeforePublish,
 		"flow.postPublish":     s.Flow.PostPublish,
 		"flow.beforeAnnounce":  s.Flow.BeforeAnnounce,
@@ -1772,6 +1775,35 @@ func resolveAutoVersionSetting(sc SpaceConfig) (*public.AutoVersionConfig, strin
 	return sc.AutoVersion, "autoVersion"
 }
 
+// resolveVersionStage answers the name the version stage runs under: the key
+// that configured it. The stage's own flow entry decides first, then the
+// native block, then its hooks in the order they run, because each of those
+// is a sentence about the stage and the entry is the one that names it most
+// directly. The ladder leaves at most one key of each pair set, and a space
+// that wrote no propagate key keeps the name `version` it always had.
+func resolveVersionStage(sc SpaceConfig) model.VersionStage {
+	flow := sc.Flow
+	if flow == nil {
+		flow = &SpaceFlowConfig{}
+	}
+	for _, pair := range []struct {
+		canonical, synonym bool
+	}{
+		{flow.Version != nil, flow.Propagate != nil},
+		{sc.AutoVersion != nil, sc.AutoPropagate != nil},
+		{flow.BeforeVersion != nil, flow.BeforePropagate != nil},
+		{flow.PostVersion != nil, flow.PostPropagate != nil},
+	} {
+		switch {
+		case pair.synonym:
+			return model.StagePropagate
+		case pair.canonical:
+			return model.StageVersion
+		}
+	}
+	return model.StageVersion
+}
+
 // resolveFlowEntry answers the entry a pair of flow synonyms resolved to: the
 // ladder leaves at most one of them set, and the stage runs whichever it is.
 func resolveFlowEntry(canonical, synonym []string) []string {
@@ -2380,6 +2412,9 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		PostVersionScript:    scope.commands(resolveFlowEntry(sc.Flow.PostVersion, sc.Flow.PostPropagate)),
 		BeforeBuildScript:    scope.commands(sc.Flow.BeforeBuild),
 		PostBuildScript:      scope.commands(sc.Flow.PostBuild),
+		TestsScript:          scope.commands(sc.Flow.Tests),
+		BeforeTestsScript:    scope.commands(sc.Flow.BeforeTests),
+		PostTestsScript:      scope.commands(sc.Flow.PostTests),
 		BeforePublishScript:  scope.commands(sc.Flow.BeforePublish),
 		PostPublishScript:    scope.commands(sc.Flow.PostPublish),
 		BeforeAnnounceScript: scope.commands(sc.Flow.BeforeAnnounce),
@@ -2396,6 +2431,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		BeforeSignScript:     scope.commands(sc.Flow.BeforeSign),
 		PostSignScript:       scope.commands(sc.Flow.PostSign),
 		AutoSign:             resolveAutoSign(sc.AutoSign),
+		VersionStage:         resolveVersionStage(sc),
 	}, nil
 }
 

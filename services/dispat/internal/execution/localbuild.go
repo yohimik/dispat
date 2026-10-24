@@ -34,13 +34,14 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
-// buildHere runs one build frame in this process and admits what it produced.
+// runHere runs one frame in this process and, for a stage that produces an
+// output set, admits what it produced.
 //
 // The slot is given back on every path, and it is given back rather than
 // leaked whatever the frame did: a frame that ran here ended here, so there
 // is no machine left running something nobody can account for, which is the
 // only thing a leaked slot is for.
-func (c *Coordinator) buildHere(ctx context.Context, lease *Lease, task string,
+func (c *Coordinator) runHere(ctx context.Context, lease *Lease, task string,
 	request release.StageRequest, here release.LocalFrame) (release.StageOutcome, error) {
 	defer lease.Release()
 	c.Log.Info().Str("run", c.Run).Str("task", task).
@@ -64,6 +65,13 @@ func (c *Coordinator) buildHere(ctx context.Context, lease *Lease, task string,
 		// machine fails its package exactly as it did before any of this
 		// existed, hooks, revert and onFail included.
 		return release.StageOutcome{LocalFailure: what}, err
+	}
+	if !request.Descriptor.IsProducingOutputs {
+		// A frame that checks what a build produced captures nothing: the
+		// bytes it read are already in this checkout and already admitted.
+		c.Log.Info().Str("run", c.Run).Str("task", task).Str("status", StatusSucceeded).
+			Msg("task finished")
+		return release.StageOutcome{}, nil
 	}
 	if err := c.admitLocalOutputs(ctx, task, request); err != nil {
 		return release.StageOutcome{FailedPart: release.PartOutputs}, err

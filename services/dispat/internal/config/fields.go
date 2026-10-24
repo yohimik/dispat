@@ -204,6 +204,7 @@ func versionGroupFields(dst *VersionGroupConfig) fields {
 func spaceFlowFields(dst *SpaceFlowConfig) fields {
 	return fields{
 		"build":           strs(&dst.Build),
+		"tests":           strs(&dst.Tests),
 		"publish":         strs(&dst.Publish),
 		"version":         strs(&dst.Version),
 		"propagate":       strs(&dst.Propagate),
@@ -219,6 +220,8 @@ func spaceFlowFields(dst *SpaceFlowConfig) fields {
 		"postpropagate":   strs(&dst.PostPropagate),
 		"beforebuild":     strs(&dst.BeforeBuild),
 		"postbuild":       strs(&dst.PostBuild),
+		"beforetests":     strs(&dst.BeforeTests),
+		"posttests":       strs(&dst.PostTests),
 		"beforepublish":   strs(&dst.BeforePublish),
 		"postpublish":     strs(&dst.PostPublish),
 		"beforeannounce":  strs(&dst.BeforeAnnounce),

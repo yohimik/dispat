@@ -53,9 +53,21 @@ under the other, so a package's `autoPropagate` replaces the `autoVersion` its s
 One object that states both spellings of a pair is refused when the configuration loads, because the merge could keep
 only one of them. A message about the block names the key you wrote.
 
-The stage keeps its runtime name whichever key configured it. `DISPAT_STAGE` carries `version`, `beforeVersion` and
-`postVersion`, `DISPAT_FAILED_STAGE` and the webhook `stage` and `failedStage` fields carry `version`, and the log
-labels the stage `version`.
+The key you wrote also names the stage at runtime. A package whose stage is configured under a propagate key runs it
+as `propagate`: `DISPAT_STAGE` carries `propagate`, `beforePropagate` and `postPropagate`, and `DISPAT_FAILED_STAGE`,
+the webhook `stage` and `failedStage` fields and the log label carry `propagate`. Under the version keys every one of
+them carries `version`, exactly as before. One name is chosen per package, from its effective configuration, in this
+order:
+
+1. The stage's own entry: `flow.propagate` gives `propagate`, `flow.version` gives `version`.
+2. Without an entry, the native block: `autoPropagate` gives `propagate`, `autoVersion` gives `version`.
+3. Without either, the hooks in the order they run: `beforePropagate` or `beforeVersion`, then `postPropagate` or
+   `postVersion`.
+4. Without any of them, `version`.
+
+A hook spelled under the other name runs under the stage's name. A space that writes `flow.version` and
+`flow.beforePropagate` runs the hook as `beforeVersion`. The plan digest carries the chosen name, because a script
+reading `DISPAT_STAGE` sees it.
 
 ### Picking up providers released without you
 

@@ -311,8 +311,8 @@ func TestSyncLockRunsAfterASignOnlyChange(t *testing.T) {
 // TestSignStageNames: the task kind's two spellings, from the one table.
 func TestSignStageNames(t *testing.T) {
 	assert.Equal(t, "sign", taskSign.String())
-	assert.Equal(t, "Sign", stageTitle(taskSign))
+	assert.Equal(t, "Sign", stageOf(taskSign).Title)
 	assert.Equal(t, "auto-signing failed", formatNativeFailure(taskSign))
 	assert.Equal(t, "auto-versioning failed", formatNativeFailure(taskVersion))
-	assert.True(t, isPreparingStage(taskSign))
+	assert.True(t, stageOf(taskSign).IsPreparing)
 }

@@ -252,7 +252,7 @@ release.
 
 ## The pipeline
 
-**Per released package**, dispat runs up to five stages, and each is optional to script:
+**Per released package**, dispat runs up to six stages, and each is optional to script:
 
 1. **sign**: runs only for a package whose space configures it, with [`autoSign`](./configuration/autosign.md) or a
    `flow.sign`, `flow.beforeSign` or `flow.postSign` entry. It writes the package's own version wherever that version
@@ -260,6 +260,8 @@ release.
 2. **version** (also called **propagate**): runs when any provider of the package moved in this run, and for every
    releasing package of a space with [`autoVersion`](./configuration/autoversion.md) (or `autoPropagate`), where native
    reconciliation checks the baselines too. It runs right before the build, after the sign stage when there is one.
+   It runs and reports under the name its configuration gave it: `propagate` for `flow.propagate` or `autoPropagate`,
+   `version` otherwise.
    What the package's first stage waits for on each moving provider is that provider's
    [relation](./configuration/spaces.md#the-provider-relation): the provider's build *and publish* under
    `isBuildWaitingPublish: true`, the provider's *build* only under `false`, and nothing of the provider at all under
@@ -269,7 +271,12 @@ release.
    to every later script of the package as `DISPAT_OUTPUT_<NAME>`, with `DISPAT_OUTPUT_SOURCE_<NAME>` naming the
    exporter. One export is special: `DISPAT_EXPORT_GITHUB` holds absolute file paths and opts the package into a GitHub
    release with those files as assets.
-4. **publish**: waits for the package's own build and always for its providers' publishes. A space with a `flow.login`
+4. **tests**: runs only for a package whose space configures `flow.tests`, `flow.beforeTests` or `flow.postTests`. It
+   checks what the build produced, after the build and before the publish, so a package whose artefact fails its
+   checks is never published. It reads the build's exports and hands its own to the publish. A package without that
+   configuration has no tests stage at all.
+5. **publish**: waits for the package's own build, through its tests stage when it has one, and always for its
+   providers' publishes. A space with a `flow.login`
    authenticates **once per space** before its first publish, failing all publishes on error, while successful login
    exports reach every package of the space. On success, the release recorders run (the changelog file, and a GitHub
    release for packages that exported `DISPAT_EXPORT_GITHUB`) and the annotated tag is created, leaving pushing to CI
@@ -285,12 +292,13 @@ release.
 Every script option accepts a single script name or an array of names run in sequence. A failing command in a
 release-gating sequence stops it and fails the package, while warn-only sequences keep running and only log.
 
-The build and publish frames are also the two a release can place on another machine. With
+The build, tests and publish frames are the ones a release can place on another machine. With
 [worker nodes](./distributed-execution.md) configured, they run where the run placed them and everything else stays on
 the machine the release was started on; with none, every stage runs where it always did.
 
 You can bracket the stages with per-space hooks. `flow.beforeAll`, `flow.beforeSign`, `flow.postSign`,
-`flow.beforeVersion`, `flow.postVersion`, `flow.beforeBuild`, `flow.postBuild` and `flow.beforePublish` all *gate* the
+`flow.beforeVersion`, `flow.postVersion`, `flow.beforeBuild`, `flow.postBuild`, `flow.beforeTests`, `flow.postTests`
+and `flow.beforePublish` all *gate* the
 release, so their failure fails the package. `flow.postPublish` only warns since the release is already out.
 
 Run-level hooks observe the whole run instead. A gating `run.beforeAll` runs once before the task graph, and its

@@ -194,9 +194,10 @@ What stays on the orchestrator:
 | release commits, tags, changelogs, GitHub releases, records     | a worker is never granted the right to write a release ref  |
 | `postPublish`, `announce`, `onFail`, `onSkip` and every run-level hook | they observe the run, which exists here          |
 
-What a worker runs: the build frame (`beforeBuild`, the build commands, `postBuild`) and, where `runOnly` delegates
-it, the publish frame (`beforePublish`, the publish commands and the stage's after hook). A frame always runs as one
-unit on one node, because a hook that observed a folder another machine wrote would be observing nothing.
+What a worker runs: the build frame (`beforeBuild`, the build commands, `postBuild`), the tests frame (`beforeTests`,
+the tests commands, `postTests`) where the package has one, and, where `runOnly` delegates it, the publish frame
+(`beforePublish`, the publish commands and the stage's after hook). A frame always runs as one unit on one node,
+because a hook that observed a folder another machine wrote would be observing nothing.
 
 **Budgets are the run's and capacity is the node's.** The root `concurrency` budget bounds how many builds and
 publishes are in flight across the whole run and is never multiplied by the number of workers: a task holds its stage
@@ -590,6 +591,30 @@ Five rules follow from what the two stages are:
 `buildPlatforms` is the other placement filter: the `os/arch` values in Go's spelling that a package's build may run
 on, empty meaning any node. A preparation obeys the provider's own `runOnly` and `buildPlatforms`, not its
 consumer's.
+
+### The tests stage
+
+A package whose space configures [`flow.tests`](./configuration/spaces.md#stages-and-hooks) or one of its hooks runs
+its tests frame after its build and before its publish. The frame checks what the build produced, so it is placed the
+way the build is:
+
+- **It reads the build's `runOnly` value** with the build's meaning, and the same `buildPlatforms`. A space's login
+  does not pin it, because a login is the publication's affair.
+- **The node that built the package is asked for first.** Its cache already holds the objects the frame reads, and a
+  busy one is passed over rather than waited for.
+- **The package's own admitted outputs are installed first** on a node that did not build them, together with the
+  provider outputs its build was given, exactly as for a delegated publication. A frame placed on the orchestrator
+  installs nothing: the outputs are already in its checkout. A package that declares no `buildOutputs` hands a node
+  its sources alone, so declare what the tests read.
+- **It produces no output set.** The admitted set stays the one the build reported. What its scripts export travels
+  back in the signed result and reaches the publish, as a build's exports do.
+
+The frame travels as a task of its own, `<package>:tests`, and shares the build budget. Its assignment has the
+generic kind `stage` and names the stage in its own `stage` field, which is what the node's scripts read as
+`DISPAT_STAGE` and what its hooks are named after; the build and the publish keep the kinds `build` and `publish`, so
+their assignments read exactly as they always have. A worker that predates the generic kind leaves such an
+assignment unclaimed, so the task is placed again and fails its package once no node claims it. Run the same dispat
+on every node of a run that uses the stage.
 
 ## The coordination branches
 

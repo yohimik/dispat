@@ -257,6 +257,8 @@ func resolveStageRank(stage string) int {
 		return 0
 	case KindBuild, KindRun:
 		return 1
+	case StagePublish:
+		return 3
 	default:
 		return 2
 	}

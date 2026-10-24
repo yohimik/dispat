@@ -64,7 +64,7 @@
         "publish": "publish",
         "version": "sync-deps",
         "login": "npm-login",
-        "postBuild": "smoke-test",
+        "tests": "smoke-test",
         "announce": "announce"
       }
     },

@@ -75,23 +75,26 @@ because you need them to understand the ordering.
 | 11 | `beforeBuild` | hook | Before the build stage. Fails the release. |
 | 12 | `build` | stage | Build stage command(s). |
 | 13 | `postBuild` | hook | After the build stage. Fails the release. |
-| 14 | `login` | stage | Authentication command(s). Runs once **per space**, before that space's first publish. Every other publish of the space waits on it. See [`flow.login`](#flowlogin). |
-| 15 | `beforePublish` | hook | Before the publish stage, after the login. The last **hook** that can still stop a release. Fails the release. |
-| 16 | `publish` | stage | Publish stage command(s). Still gating. A publish script that exits non-zero has not released the package, so it fails exactly like a failed build and nothing below runs. |
-| 17 | *(records and tag)* | - | Not a script. Writes the changelog entry, the GitHub release and the annotated tag. Reached only once the publish **succeeded**, which is the point of no return. From here nothing can fail the package. |
-| 18 | `postPublish` | hook | After a successful publish. Only **warns**. |
-| 19 | `beforeAnnounce` | hook | Before the announce stage. Only **warns**, and does not stop the announce. |
-| 20 | `announce` | stage | Pushing the release out to update channels, with the release-notes variables. Only **warns**. |
-| 21 | `postAnnounce` | hook | After the announce stage. Only **warns**. |
+| 14 | `beforeTests` | hook | Before the tests stage. Fails the release. |
+| 15 | `tests` | stage | Command(s) checking what the build produced. Runs only for a package whose space sets any of `tests`, `beforeTests` and `postTests`; a package without them has no tests stage at all. |
+| 16 | `postTests` | hook | After the tests stage. Fails the release. |
+| 17 | `login` | stage | Authentication command(s). Runs once **per space**, before that space's first publish. Every other publish of the space waits on it. See [`flow.login`](#flowlogin). |
+| 18 | `beforePublish` | hook | Before the publish stage, after the login. The last **hook** that can still stop a release. Fails the release. |
+| 19 | `publish` | stage | Publish stage command(s). Still gating. A publish script that exits non-zero has not released the package, so it fails exactly like a failed build and nothing below runs. |
+| 20 | *(records and tag)* | - | Not a script. Writes the changelog entry, the GitHub release and the annotated tag. Reached only once the publish **succeeded**, which is the point of no return. From here nothing can fail the package. |
+| 21 | `postPublish` | hook | After a successful publish. Only **warns**. |
+| 22 | `beforeAnnounce` | hook | Before the announce stage. Only **warns**, and does not stop the announce. |
+| 23 | `announce` | stage | Pushing the release out to update channels, with the release-notes variables. Only **warns**. |
+| 24 | `postAnnounce` | hook | After the announce stage. Only **warns**. |
 | - | `onFail` | outcome | Instead of the rest. Runs once when the package **fails** at any stage above, in the folder's final state (after `revertOnFail`). Warn-only. See below. |
 | - | `onSkip` | outcome | Instead of the rest. Runs once when the package is **skipped** because a provider failed. Warn-only. See below. |
 
-Steps 1 to 16 are the **gating** half. A failure anywhere in them fails the package. Nothing is tagged or recorded,
+Steps 1 to 19 are the **gating** half. A failure anywhere in them fails the package. Nothing is tagged or recorded,
 `revertOnFail` applies, and `onFail` runs instead of the rest. The publish stage itself is part of that half. A publish
 script that exits non-zero has *not* released the package, so the run treats it exactly like a failed build.
 
-The line falls between 16 and 17. Once the publish script has **succeeded**, the artefact is on its registry. No later
-failure can take it back, so 18 to 21 only warn. Every one of them runs even after an earlier one failed. Step 17 makes
+The line falls between 19 and 20. Once the publish script has **succeeded**, the artefact is on its registry. No later
+failure can take it back, so 21 to 24 only warn. Every one of them runs even after an earlier one failed. Step 20 makes
 the release irreversible. A tag or a record that cannot be written there is reported as a
 [critical](../internals/architecture.md#after-the-point-of-no-return) and the package stays published. That split is
 the whole reason there are two kinds of hook.
@@ -99,14 +102,24 @@ the whole reason there are two kinds of hook.
 The version stage is also called the propagate stage, and each of its three keys has a twin: `flow.propagate`,
 `flow.beforePropagate` and `flow.postPropagate` are `flow.version`, `flow.beforeVersion` and `flow.postVersion`. A pair
 is one entry, so a level stating either spelling replaces both inherited values, and one object stating both is
-refused. Whichever key configured it, the stage runs under its runtime name: `DISPAT_STAGE` carries `version`,
-`beforeVersion` or `postVersion`. See [Two names for one block](./autoversion.md#two-names-for-one-block).
+refused. The key that configured the stage names it at runtime. Under `flow.propagate` `DISPAT_STAGE` carries
+`propagate`, and its hooks carry `beforePropagate` and `postPropagate`; under `flow.version` they carry `version`,
+`beforeVersion` and `postVersion`, as they always have. The failed stage, the events and the log use the same name. See
+[Two names for one block](./autoversion.md#two-names-for-one-block) for the order in which the keys decide.
 
 The sign stage is the one stage that exists only where it is configured. A package gets one when its space sets
 [`autoSign`](./autosign.md) or any of `flow.sign`, `flow.beforeSign` and `flow.postSign`, and it is then the package's
 first stage: `beforeAll` runs before it, and it waits for the package's providers the way the version stage does when
 it comes first. It shares the build budget with the version stage and the build, and it runs on the machine the
 release was started on. A package without that configuration runs exactly the stages it always did.
+
+The tests stage exists only where it is configured, like the sign stage. A package gets one when its space sets any of
+`flow.tests`, `flow.beforeTests` and `flow.postTests`. It runs after the build and before the publish, so a package
+whose artefact fails its checks is never published, and a failure there blocks its consumers exactly as a failed build
+does. What the build [exported](../reference/environment.md#script-outputs) reaches it, and what it exports reaches the
+publish. It shares the build budget, and with worker nodes it is placed the way the build is (see
+[distributed execution](../distributed-execution.md#the-tests-stage)). `dispat run tests` still runs the script named
+`tests`, whatever the flow names.
 
 All script references are optional. A stage without a script still runs and preserves ordering, skip semantics,
 statuses, tags and release records. It just executes no shell command. An unconfigured hook is a no-op. Scripts run
@@ -164,7 +177,7 @@ is `onFail` / `onSkip`) plus the specifics:
 
 | Variable              | Set for  | Meaning                                                 |
 |-----------------------|----------|---------------------------------------------------------|
-| `DISPAT_FAILED_STAGE` | `onFail` | The stage that failed: `sign`, `version`, `syncLock`, `build` or `publish`. |
+| `DISPAT_FAILED_STAGE` | `onFail` | The stage that failed: `sign`, `version` or `propagate`, `syncLock`, `build`, `tests` or `publish`. |
 | `DISPAT_ERROR`        | `onFail` | The error message of the failing command or operation.  |
 | `DISPAT_BLOCKED_BY`   | `onSkip` | The provider whose failure caused the skip.             |
 

@@ -42,31 +42,6 @@ import (
 // operator would do by hand.
 const authorizationLifetime = 2 * time.Minute
 
-// Publish runs one package's publish frame where this run places it.
-//
-// The placement is the same decision the build stage makes, asked of the
-// publish stage: one function, one vocabulary, and the asymmetry between the
-// two stages stated there rather than here. A publication this run keeps takes
-// the local path unchanged, which is the path every release has always taken,
-// hook and revalidation and commands in one sequence in this checkout.
-func (c *Coordinator) Publish(ctx context.Context, request release.StageRequest,
-	here release.LocalFrame, authorize func(context.Context) error) (release.StageOutcome, error) {
-	space := request.Release.Pkg.Space
-	placement := ResolveStagePlacement(request.Stage,
-		space.RunOnly.ResolvePublish(), len(space.LoginScript) > 0)
-	if placement != PlacementWorker {
-		return c.publishHere(ctx, here)
-	}
-	task := request.Release.Pkg.Name + ":" + request.Stage
-	// The node that built the package is asked for first: its cache already
-	// holds the objects this publication is about to install. It is a
-	// preference and the pool treats it as one.
-	return c.placeTask(ctx, task, placement, space.BuildPlatforms, c.producerOf(request),
-		func(ctx context.Context, lease *Lease, attempt int) (release.StageOutcome, error) {
-			return c.dispatchPublish(ctx, lease, task, attempt, request, authorize)
-		})
-}
-
 // publishHere runs the publish frame in this process, as a release with no
 // worker link runs it.
 //
@@ -95,7 +70,7 @@ func (c *Coordinator) producerOf(request release.StageRequest) string {
 	return admitted.node
 }
 
-// dispatchPublish offers one package's publish frame to the node the pool
+// offerPublication offers one package's publish frame to the node the pool
 // chose and carries it through the handshake.
 //
 // The input state is prepared exactly as a build's is, and by publish time the
@@ -103,32 +78,12 @@ func (c *Coordinator) producerOf(request release.StageRequest) string {
 // That is not a problem the snapshot has to solve: what decides whether this
 // publication may happen is the revalidation behind the authorization, and it
 // compares the package's own inputs rather than the whole tree.
-func (c *Coordinator) dispatchPublish(ctx context.Context, lease *Lease, task string, attempt int,
-	request release.StageRequest, authorize func(context.Context) error) (release.StageOutcome, error) {
+func (c *Coordinator) offerPublication(ctx context.Context, lease *Lease, task string, attempt int,
+	frame preparedFrame, request release.StageRequest,
+	authorize func(context.Context) error) (release.StageOutcome, error) {
 	outcome := release.StageOutcome{Node: lease.Node}
-	sources := c.dispatch.Sources(request.Release.Pkg.Name)
-	dir, err := resolvePackageDir(sources, request)
-	if err != nil {
-		lease.Release()
-		return outcome, c.refuseTask(task, lease.Node, attempt, err)
-	}
-	commits, err := c.captureInputs(ctx, sources)
-	if err != nil {
-		lease.Release()
-		return outcome, c.refuseTask(task, lease.Node, attempt, err)
-	}
-	repositories, err := c.offerInputs(ctx, lease.Node, sources, commits)
-	if err != nil {
-		lease.Release()
-		return outcome, c.refuseTask(task, lease.Node, attempt, err)
-	}
-	inputs, err := c.resolvePublishInputs(ctx, lease.Node, request, sources, dir)
-	if err != nil {
-		lease.Release()
-		return outcome, c.refuseTask(task, lease.Node, attempt, err)
-	}
 	offer, err := c.offerAssignment(ctx, lease, task,
-		c.formatAssignment(lease.Node, KindPublish, task, attempt, dir, repositories, inputs, request))
+		c.formatAssignment(lease.Node, KindPublish, task, attempt, frame.dir, frame.repositories, frame.inputs, request))
 	if err != nil {
 		return outcome, err
 	}

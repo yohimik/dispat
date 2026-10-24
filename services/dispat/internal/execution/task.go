@@ -284,9 +284,25 @@ func resolveFrameStage(assignment Assignment) string {
 		return KindBuild
 	case KindRun:
 		return KindRun + ":" + assignment.Script
+	case KindStage:
+		return assignment.Stage
 	default:
 		return assignment.Kind
 	}
+}
+
+// isStageName reports whether a generic frame names a stage it can run under:
+// a word of letters, which is every name a stage has.
+func isStageName(stage string) bool {
+	if stage == "" {
+		return false
+	}
+	for _, r := range stage {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 // formatStageTitle renders a stage name as it appears inside a hook name, so

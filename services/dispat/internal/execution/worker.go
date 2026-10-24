@@ -626,10 +626,11 @@ func (w *Worker) isStateOwned() bool {
 }
 
 // isFrameKind reports whether an assignment of this kind is a frame this node
-// runs: a build, a preparation, a publication or a sweep task.
+// runs: a build, a preparation, the frame of another stage, a publication or a
+// sweep task.
 func isFrameKind(kind string) bool {
 	switch kind {
-	case KindBuild, KindPrepare, KindPublish, KindRun:
+	case KindBuild, KindPrepare, KindStage, KindPublish, KindRun:
 		return true
 	default:
 		return false
@@ -1018,6 +1019,11 @@ func (w *Worker) checkAssignment(assignment Assignment, tip ChainTip) RejectReas
 	}
 	if assignment.Kind == KindPublish && !assignment.Permits.Publish {
 		return ReasonPermit
+	}
+	if assignment.Kind == KindStage && !isStageName(assignment.Stage) {
+		// A frame whose stage has no name would run its hooks as `before` and
+		// `post`, which no configuration ever wrote.
+		return ReasonUnreadable
 	}
 	return ""
 }

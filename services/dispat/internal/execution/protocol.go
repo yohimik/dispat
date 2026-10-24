@@ -39,6 +39,12 @@ const (
 	KindProbe = "probe"
 	// KindBuild is one package's build stage.
 	KindBuild = "build"
+	// KindStage is one package's frame of any other delegable stage, such as
+	// the tests stage. The assignment names the stage, which is what its
+	// scripts read as DISPAT_STAGE and what its hooks are named after; the
+	// build and the publish keep kinds of their own, which every worker has
+	// always served.
+	KindStage = "stage"
 	// KindPublish is one package's publish stage, which is the only kind that
 	// waits for an explicit authorization before its command runs.
 	KindPublish = "publish"
@@ -276,6 +282,11 @@ type Assignment struct {
 	// `run:<script>`, which is how the same script names its stage when a
 	// sweep runs it on one machine.
 	Script string `json:"script,omitempty"`
+	// Stage is the stage a frame of the generic kind belongs to, which is what
+	// its scripts read as DISPAT_STAGE and what its hooks are named after.
+	// Every other kind leaves it out, so their assignments read exactly as
+	// they always have.
+	Stage string `json:"stage,omitempty"`
 	// Env are the computed DISPAT_* pairs of the stage, which are public
 	// metadata of the run and carry no secret.
 	Env []string `json:"env,omitempty"`

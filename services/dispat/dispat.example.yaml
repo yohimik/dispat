@@ -154,15 +154,20 @@ spaces:
       # Runs once per space, before the space's first publish; every other
       # publish of the space waits for it, and its failure fails them all.
       login: npm-login
+      # The optional tests stage, between the build and the publish: it
+      # checks what the build produced, so a package whose artefact fails
+      # its checks is never published. It reads the build's exports and
+      # hands its own to the publish.
+      tests: smoke-test
       # Hooks around the package stages (beforeAll, beforeSign, postSign,
-      # beforeVersion, postVersion, beforeBuild, postBuild, beforePublish,
-      # postPublish, beforeAnnounce, postAnnounce). The version entries may be
-      # spelled propagate, beforePropagate and postPropagate instead; `sign`
-      # names the optional sign stage's own scripts. Everything up to beforePublish gates
-      # the release, so a failure fails the package; postPublish and the
-      # announce hooks warn. onFail / onSkip run when a package fails or is
-      # skipped, warn-only.
-      postBuild: smoke-test
+      # beforeVersion, postVersion, beforeBuild, postBuild, beforeTests,
+      # postTests, beforePublish, postPublish, beforeAnnounce, postAnnounce).
+      # The version entries may be spelled propagate, beforePropagate and
+      # postPropagate instead, and the stage then runs and reports as
+      # `propagate`; `sign` names the optional sign stage's own scripts.
+      # Everything up to beforePublish gates the release, so a failure fails
+      # the package; postPublish and the announce hooks warn. onFail / onSkip
+      # run when a package fails or is skipped, warn-only.
       # A fourth stage after a successful publish: push the release out to
       # update channels. Receives DISPAT_BREAKING_CHANGES / DISPAT_FEATURES /
       # DISPAT_FIXES (the changelog's groupings) and only warns on failure.

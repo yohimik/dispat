@@ -68,6 +68,15 @@ type fakeRemote struct {
 	publishExports []plan.Output
 	// failPublishPart fails the delegated publication at this part.
 	failPublishPart string
+
+	// tests are the requests Tests was called with, in order. A tests frame
+	// of the package placeHere names takes the local path, every other one
+	// is delegated, reports testsExports and fails at failTestsPart when it
+	// belongs to failTests.
+	tests         []StageRequest
+	testsExports  []plan.Output
+	failTests     string
+	failTestsPart string
 }
 
 // buildHere is the placement that keeps the frame: it runs the executor's own
@@ -132,6 +141,37 @@ func (f *fakeRemote) Build(ctx context.Context, request StageRequest, here Local
 // Publish is the placement decision of a publish frame: the local path unless
 // the scenario delegated this package, which is exactly how the real one
 // behaves for everything but an explicit worker placement.
+// Stage is the one entry the executor calls, answered by the scenario's
+// build, tests or publish behaviour as the request's descriptor says.
+func (f *fakeRemote) Stage(ctx context.Context, request StageRequest, here LocalFrame,
+	authorize func(context.Context) error) (StageOutcome, error) {
+	switch {
+	case request.Descriptor.IsAuthorized:
+		return f.Publish(ctx, request, here, authorize)
+	case request.Descriptor.IsProducingOutputs:
+		return f.Build(ctx, request, here)
+	default:
+		return f.Tests(ctx, request, here)
+	}
+}
+
+func (f *fakeRemote) Tests(ctx context.Context, request StageRequest, here LocalFrame) (StageOutcome, error) {
+	f.mu.Lock()
+	isPlacedHere := f.placeHere == request.Release.Pkg.Name
+	f.tests = append(f.tests, request)
+	shouldFail := f.failTests == request.Release.Pkg.Name
+	f.mu.Unlock()
+	if isPlacedHere {
+		return f.buildHere(ctx, request, here)
+	}
+	outcome := StageOutcome{Node: "build-a", Exports: f.testsExports}
+	if shouldFail {
+		outcome.FailedPart = f.failTestsPart
+		return outcome, errors.New("the node reported a failed tests frame")
+	}
+	return outcome, nil
+}
+
 func (f *fakeRemote) Publish(ctx context.Context, request StageRequest, here LocalFrame,
 	authorize func(context.Context) error) (StageOutcome, error) {
 	f.mu.Lock()
@@ -295,7 +335,7 @@ func TestRemoteBuildFailureFailsThePackageLocally(t *testing.T) {
 			assert.Equal(t, StatusSkipped, results["b"].Status, "the consumer is blocked")
 			assert.Equal(t, "a", results["b"].BlockedBy)
 			assert.Equal(t, 1, runner.countPrefix("onfail"), "the outcome script ran on the orchestrator")
-			assert.Equal(t, tc.what, formatRemoteFailure(taskBuild, tc.part))
+			assert.Equal(t, tc.what, formatRemoteFailure(stageOf(taskBuild), tc.part))
 		})
 	}
 }
@@ -589,7 +629,7 @@ func TestRefusedAuthorizationNeverStartsTheCommand(t *testing.T) {
 	assert.Equal(t, []string{"hook done"}, remote.steps, "the command never started")
 	assert.Empty(t, tagger.tags, "and nothing was tagged")
 	assert.Equal(t, "pre-publish repository validation failed",
-		formatRemoteFailure(taskPublish, PartAuthorization),
+		formatRemoteFailure(stageOf(taskPublish), PartAuthorization),
 		"a withheld publication reads as the local path's own refusal")
 	assert.Equal(t, StatusSkipped, results["b"].Status, "the consumer is blocked")
 }
@@ -653,7 +693,7 @@ func TestRemotePublishFailureIsALocalFailure(t *testing.T) {
 			assert.Equal(t, "publish", results["a"].FailedStage)
 			assert.Equal(t, []string{"c@1.0.1"}, tagger.tags, "the other package still published")
 			assert.Equal(t, int32(0), lanes.Load(), "the publication lane was given back on every path")
-			assert.Equal(t, tc.what, formatRemoteFailure(taskPublish, tc.part))
+			assert.Equal(t, tc.what, formatRemoteFailure(stageOf(taskPublish), tc.part))
 		})
 	}
 }

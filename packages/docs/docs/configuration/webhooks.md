@@ -52,7 +52,7 @@ run refused before that (a blocked plan, failed verification, a failed `run.befo
 |---------------------|----------------------------------------------------------------------------------------------------|
 | `release.started`   | Once, when the task graph is about to start, carrying the whole plan.                             |
 | `release.finished`  | Once, when the run has settled, carrying the outcome counts and every package's status.           |
-| `stage.started`     | When one package's `sign`, `version`, `syncLock`, `build`, `publish`, or `announce` stage starts. |
+| `stage.started`     | When one package's `sign`, `version` or `propagate`, `syncLock`, `build`, `tests`, `publish`, or `announce` stage starts. |
 | `stage.succeeded`   | When that stage completes. A stage with no configured script still fires both.                    |
 | `package.published` | When one package's publish frame completes, carrying the release tag.                             |
 | `package.failed`    | When one package fails, naming the failed stage and the error.                                    |
@@ -63,8 +63,10 @@ run refused before that (a blocked plan, failed verification, a failed `run.befo
 
 The `announce` stage is observed only when an [announce script](./spaces.md#stages-and-hooks) is configured: it is a
 tail of the publish rather than a task of its own. The `sign` stage is observed only for a package that has one, which
-is a package whose space configures [`autoSign`](./autosign.md) or a sign flow entry. The version stage is named
-`version` whichever of its two keys configured it, `flow.version` or `flow.propagate`, and so is a `failedStage`. The
+is a package whose space configures [`autoSign`](./autosign.md) or a sign flow entry, and the `tests` stage only for a
+package whose space configures `flow.tests` or one of its hooks. The version stage is named after the key that
+configured it: `propagate` under `flow.propagate` or `autoPropagate`, `version` under the version keys, and a
+`failedStage` carries the same name (see [Two names for one block](./autoversion.md#two-names-for-one-block)). The
 `release.` / `stage.` / `package.` prefixes carry dispat's own events and only those; the `script.` prefix carries what
 a script said, so a listener tells the two apart by the prefix alone. Other prefixes are reserved for later commands.
 

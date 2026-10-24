@@ -93,6 +93,6 @@ packages:
 	r.Commit("feat(core): first release")
 	r.ReleaseOK()
 	require.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
-	assert.Equal(t, "version\n", readFile(t, r, "stage.txt"),
-		"the package's propagate entry ran, under the stage's runtime name")
+	assert.Equal(t, "propagate\n", readFile(t, r, "stage.txt"),
+		"the package's propagate entry ran, under the name it was configured with")
 }

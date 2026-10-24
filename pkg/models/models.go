@@ -1442,14 +1442,20 @@ func (c *AutoSignConfig) IsEnabled() bool {
 // decoding lifts the scalar into a one-element slice, the same way a scalar
 // concurrency becomes a pair).
 type SpaceFlowConfig struct {
-	Build   []string `json:"build,omitempty"`
+	Build []string `json:"build,omitempty"`
+	// Tests is the optional tests stage, run after the build and before the
+	// publish: its job is checking what the build produced, so a release
+	// whose artefact fails its tests never publishes it. Stating it, or either
+	// of its hooks, gives every releasing package of the level a tests stage;
+	// with none of them the package has no tests stage at all.
+	Tests   []string `json:"tests,omitempty"`
 	Publish []string `json:"publish,omitempty"`
 	Version []string `json:"version,omitempty"`
 	// Propagate is Version under the stage's other name: the stage that
 	// writes the versions a package takes from its providers. The two keys are
 	// one entry, so a level stating either replaces both inherited values, and
-	// one object stating both is refused. The stage keeps its runtime name,
-	// `version`, whichever key configured it.
+	// one object stating both is refused. The key that configured the stage
+	// names it at runtime: `propagate` here, `version` under Version.
 	Propagate []string `json:"propagate,omitempty"`
 	// Sign is the optional sign stage, the first stage of a package's
 	// release: it runs before the propagate stage and the build, and its job
@@ -1474,12 +1480,15 @@ type SpaceFlowConfig struct {
 	PostVersion   []string `json:"postVersion,omitempty"`
 	// BeforePropagate and PostPropagate are BeforeVersion and PostVersion
 	// under the stage's other name, one entry each with its sibling, like
-	// Propagate. The hooks keep their runtime names, `beforeVersion` and
-	// `postVersion`.
+	// Propagate. A hook runs under the name of the stage it brackets, so
+	// either spelling reports as beforePropagate when the stage is called
+	// propagate and as beforeVersion when it is called version.
 	BeforePropagate []string `json:"beforePropagate,omitempty"`
 	PostPropagate   []string `json:"postPropagate,omitempty"`
 	BeforeBuild     []string `json:"beforeBuild,omitempty"`
 	PostBuild       []string `json:"postBuild,omitempty"`
+	BeforeTests     []string `json:"beforeTests,omitempty"`
+	PostTests       []string `json:"postTests,omitempty"`
 	BeforePublish   []string `json:"beforePublish,omitempty"`
 	PostPublish     []string `json:"postPublish,omitempty"`
 	BeforeAnnounce  []string `json:"beforeAnnounce,omitempty"`

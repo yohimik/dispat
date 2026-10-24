@@ -43,31 +43,21 @@ type Remotex interface {
 	// for is the kind of write the frame makes, and a caller naming the stage
 	// cannot pass an implementation something it would have to interpret.
 	Guard(ctx context.Context, stage string) (func(), error)
-	// Build runs one package's build frame wherever this run places it and
-	// answers what came of it. The outcome is filled on both paths: a frame
-	// that failed still exported whatever ran before the failure, exactly as
-	// a local frame does.
+	// Stage runs one package's frame of a stage the run may place elsewhere,
+	// wherever this run places it, and answers what came of it. The request's
+	// descriptor is the whole of what the implementation needs to know about
+	// the stage: which runOnly value places it, what a node must be given
+	// before it runs, whether its outputs are admitted and whether its
+	// commands wait for authorize, which is called at the moment the
+	// irreversible command may start (§28.6) and is nil for every stage that
+	// has nothing irreversible about it. The outcome is filled on both paths:
+	// a frame that failed still exported whatever ran before the failure,
+	// exactly as a local frame does.
 	//
-	// A frame the run places on this machine is run by here, which is the
-	// executor's own gating sequence: the placement decides, and what it
-	// decided is then the same code running the same commands. Everything
-	// around that (the capacity the frame holds, the provider outputs it
-	// needs, the outputs it produced) is the implementation's, because a
-	// frame placed here has to be as usable by other nodes as a delegated
-	// one.
-	Build(ctx context.Context, request StageRequest, here LocalFrame) (StageOutcome, error)
-	// Publish runs one package's publish frame wherever this run places it,
-	// with authorize called at the moment the irreversible command may start
-	// (§28.6).
-	//
-	// It takes the local sequence for the same reason Build does, and the
-	// reason matters more here: a publication this run keeps has to be the
-	// publication a release without any of this performs, hook and
-	// revalidation and commands in one sequence in this checkout. Which of the
-	// two happens is the implementation's single placement decision, so the
-	// executor asks one question and gets one answer however the run is
-	// configured.
-	Publish(ctx context.Context, request StageRequest, here LocalFrame,
+	// A frame the run places on this machine is run by here, the executor's
+	// own gating sequence, so a publication this run keeps is the one a
+	// release without any of this performs.
+	Stage(ctx context.Context, request StageRequest, here LocalFrame,
 		authorize func(context.Context) error) (StageOutcome, error)
 }
 
@@ -91,9 +81,13 @@ type StageRequest struct {
 	// Release is the package's planned release, which names the package, its
 	// folder and the repository it belongs to.
 	Release *plan.Release
-	// Stage is the stage name the frame belongs to ("build"), which is what
-	// the task is identified by and what the failing part is reported against.
+	// Stage is the stage name the frame belongs to ("build", "tests",
+	// "publish"), which is what the task is identified by and what the failing
+	// part is reported against.
 	Stage string
+	// Descriptor is the stage the frame belongs to, which says where it may
+	// be placed, what it reads and what it produces.
+	Descriptor Stage
 	// Frame is the commands in execution order.
 	Frame StageFrame
 	// Env are the computed DISPAT_* pairs of the stage, carried as they are.
@@ -178,27 +172,20 @@ func (tc *taskCtx) runStage(ctx context.Context, s stage) (what string, err erro
 	if tc.Remote == nil {
 		return tc.stageFrame(ctx, s)
 	}
-	switch tc.t.kind {
-	case taskBuild:
-		return tc.placedStage(ctx, s)
-	case taskPublish:
-		return tc.placedPublication(ctx, s)
-	case taskSign, taskVersion, taskSyncLock:
+	if tc.stage.Placement == PlacementOrchestratorOnly {
 		// The sign and version stages and the lock-file preparation write the
 		// working tree every dispatched task is snapshotted from, so they stay
 		// here and they stay out of each other's way: every reconciliation of
 		// a manifest is an orchestrator task (§28.3).
 		return tc.guardedStage(ctx, s)
 	}
-	// A kind added later stays on the orchestrator until it says otherwise:
-	// running a frame here is never wrong, running one elsewhere can be.
-	return tc.guardedStage(ctx, s)
+	return tc.placedStage(ctx, s)
 }
 
 // guardedStage runs a frame the orchestrator keeps, under the guard that keeps
 // its writes out of a snapshot somebody is taking at the same moment.
 func (tc *taskCtx) guardedStage(ctx context.Context, s stage) (string, error) {
-	stage := tc.t.kind.String()
+	stage := tc.stage.Name
 	releaseGuard, err := tc.Remote.Guard(ctx, stage)
 	if err != nil {
 		return stage + " could not be guarded", err
@@ -213,21 +200,17 @@ func (tc *taskCtx) guardedStage(ctx context.Context, s stage) (string, error) {
 //
 // The exports are merged before the error is looked at, for the reason the
 // local path merges them before it returns one: what a frame exported before
-// it failed is what the outcome scripts and the summary have to see.
+// it failed is what the outcome scripts and the summary have to see. A stage
+// whose commands wait for authorization hands the placement the executor's
+// own revalidation, so whichever machine runs the commands, the check that
+// decides whether they may start is made here, on the node that owns the
+// locks and the records (§27.2, §28.6).
 func (tc *taskCtx) placedStage(ctx context.Context, s stage) (string, error) {
-	outcome, err := tc.Remote.Build(ctx, tc.stageRequest(s), tc.localFrame(s))
-	return tc.foldPlacement(outcome, err)
-}
-
-// placedPublication runs one package's publish frame wherever this run places
-// it, with the revalidation this run makes before the command may start.
-//
-// The callback is what the local path runs between the beforePublish hook and
-// the publish commands, handed over as one function: whichever machine runs
-// the commands, the check that decides whether the publication happens is made
-// here, on the node that owns the locks and the records (§27.2, §28.6).
-func (tc *taskCtx) placedPublication(ctx context.Context, s stage) (string, error) {
-	outcome, err := tc.Remote.Publish(ctx, tc.stageRequest(s), tc.localFrame(s), tc.revalidatePublication)
+	var authorize func(context.Context) error
+	if tc.stage.IsAuthorized {
+		authorize = tc.revalidatePublication
+	}
+	outcome, err := tc.Remote.Stage(ctx, tc.stageRequest(s), tc.localFrame(s), authorize)
 	return tc.foldPlacement(outcome, err)
 }
 
@@ -248,12 +231,13 @@ func (tc *taskCtx) revalidatePublication(ctx context.Context) error {
 // naming a secret expands on the node that runs the command.
 func (tc *taskCtx) stageRequest(s stage) StageRequest {
 	return StageRequest{
-		Release:   tc.rel,
-		Stage:     tc.t.kind.String(),
-		Frame:     StageFrame{Before: s.before, Commands: s.commands, After: s.after},
-		Env:       computedPackageEnv(tc.plan, tc.t.pkg, tc.wsVars, tc.updates, tc.t.kind.String()),
-		StaticEnv: tc.rel.Pkg.Space.Env,
-		Dir:       tc.rel.Pkg.Dir,
+		Release:    tc.rel,
+		Stage:      tc.stage.Name,
+		Descriptor: tc.stage,
+		Frame:      StageFrame{Before: s.before, Commands: s.commands, After: s.after},
+		Env:        computedPackageEnv(tc.plan, tc.t.pkg, tc.wsVars, tc.updates, tc.stage.Name),
+		StaticEnv:  tc.rel.Pkg.Space.Env,
+		Dir:        tc.rel.Pkg.Dir,
 	}
 }
 
@@ -282,13 +266,13 @@ func (tc *taskCtx) foldPlacement(outcome StageOutcome, err error) (string, error
 		if outcome.Node != "" {
 			event = event.Str("worker", outcome.Node)
 		}
-		event.Msg(tc.t.kind.String() + ": the frame finished where it was placed")
+		event.Msg(tc.stage.Name + ": the frame finished where it was placed")
 		return "", nil
 	}
 	if outcome.LocalFailure != "" {
 		return outcome.LocalFailure, err
 	}
-	return formatRemoteFailure(tc.t.kind, outcome.FailedPart), err
+	return formatRemoteFailure(tc.stage, outcome.FailedPart), err
 }
 
 // formatRemoteFailure names the failing piece of a remote frame in the words
@@ -296,24 +280,24 @@ func (tc *taskCtx) foldPlacement(outcome StageOutcome, err error) (string, error
 // means one thing whichever machine ran it. A node that could not say which
 // part failed, or that never got as far as running one, is reported as the
 // stage it was given.
-func formatRemoteFailure(kind taskKind, part string) string {
+func formatRemoteFailure(label Stage, part string) string {
 	switch part {
 	case PartBefore:
-		return "before" + stageTitle(kind) + " hook failed"
+		return "before" + label.Title + " hook failed"
 	case PartCommands:
-		return kind.String() + " script failed"
+		return label.Name + " script failed"
 	case PartAfter:
-		return "post" + stageTitle(kind) + " hook failed"
+		return "post" + label.Title + " hook failed"
 	case PartInputs:
-		return kind.String() + " inputs could not be installed"
+		return label.Name + " inputs could not be installed"
 	case PartOutputs:
-		return kind.String() + " outputs could not be carried"
+		return label.Name + " outputs could not be carried"
 	case PartAuthorization:
 		// The same sentence the local path prints when the callback between
 		// the hook and the command refuses: whichever machine asked, what
 		// failed is the check that decides whether the publication happens.
 		return "pre-publish repository validation failed"
 	default:
-		return "remote " + kind.String() + " failed"
+		return "remote " + label.Name + " failed"
 	}
 }

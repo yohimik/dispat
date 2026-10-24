@@ -453,10 +453,11 @@ func TestAutoVersionManifestsNoneFlag(t *testing.T) {
 }
 
 // TestAutoPropagateReleasesLikeAutoVersion: the same workspace released once
-// under `autoVersion` and once under `autoPropagate` leaves the same manifests,
-// the same tags and the same stage names behind. The hook written as
-// beforePropagate runs as the version stage's hook, and the syncLock script
-// the block names runs between it and the build.
+// under `autoVersion` and once under `autoPropagate` leaves the same manifests
+// and the same tags behind, and the stage runs under the name the block was
+// written with: the hook bracketing it reports beforePropagate under
+// autoPropagate and beforeVersion under autoVersion. The syncLock script the
+// block names runs between it and the build either way.
 func TestAutoPropagateReleasesLikeAutoVersion(t *testing.T) {
 	release := func(t *testing.T, isPropagate bool) (web, core, stages string, tags []string) {
 		t.Helper()
@@ -494,8 +495,10 @@ func TestAutoPropagateReleasesLikeAutoVersion(t *testing.T) {
 	assert.Equal(t, web, pWeb)
 	assert.Equal(t, core, pCore)
 	assert.Equal(t, tags, pTags)
-	assert.Equal(t, stages, pStages, "the stage and hook names are the version stage's either way")
-	assert.Equal(t, 2, strings.Count(pStages, "hook:beforeVersion\n"), "stages:\n%s", pStages)
+	assert.Equal(t, strings.ReplaceAll(stages, "hook:beforeVersion\n", "hook:beforePropagate\n"), pStages,
+		"the hook reports the name the stage was configured under, and nothing else differs")
+	assert.Equal(t, 2, strings.Count(stages, "hook:beforeVersion\n"), "stages:\n%s", stages)
+	assert.Equal(t, 2, strings.Count(pStages, "hook:beforePropagate\n"), "stages:\n%s", pStages)
 	assert.Equal(t, 2, strings.Count(pStages, "lock:syncLock\n"), "stages:\n%s", pStages)
 }
 
@@ -503,7 +506,8 @@ func TestAutoPropagateReleasesLikeAutoVersion(t *testing.T) {
 // autoPropagate the sign stage writes each package's own version and the
 // propagate stage after it writes the dependency ranges alone. A snapshot taken
 // by each stage's post hook shows which stage wrote what, and the lock script
-// still runs after a change the sign stage made.
+// still runs after a change the sign stage made. The reconciliation is logged
+// under the stage's configured name, propagate.
 func TestAutoSignWritesTheOwnVersionBeforePropagate(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
@@ -547,7 +551,8 @@ func TestAutoSignWritesTheOwnVersionBeforePropagate(t *testing.T) {
 			assert.Equal(t, "sign", ev.Str("stage"), "%v", ev)
 			written++
 		case "manifest reconciled":
-			assert.Equal(t, "version", ev.Str("stage"), "%v", ev)
+			assert.Equal(t, "propagate", ev.Str("stage"),
+				"the stage autoPropagate configured runs under its name: %v", ev)
 			assert.Equal(t, false, ev["versionWritten"], "the propagate stage writes no own version: %v", ev)
 		}
 	}

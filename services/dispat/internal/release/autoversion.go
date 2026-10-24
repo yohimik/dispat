@@ -343,8 +343,9 @@ func NewAutoVersioner(ctx context.Context, p *plan.Plan, sc scanner.Scannerx, lo
 // that has none.
 func (v *AutoVersioner) Package(ctx context.Context, rel *plan.Release, av *model.AutoVersion) error {
 	pkg := rel.Pkg.Name
-	tc := &taskCtx{run: v.run, t: task{pkg, taskVersion}, rel: rel,
-		log: v.log.With().Str("package", pkg).Str("stage", "version").Logger()}
+	label := resolveStage(rel, taskVersion)
+	tc := &taskCtx{run: v.run, t: task{pkg, taskVersion}, rel: rel, stage: label,
+		log: v.log.With().Str("package", pkg).Str("stage", label.Name).Logger()}
 	if err := tc.autoVersion(ctx, av); err != nil {
 		return fmt.Errorf("%s: %w", pkg, err)
 	}

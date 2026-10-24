@@ -759,6 +759,7 @@ func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 		}
 	}
 	pick(&out.Build, over.Build)
+	pick(&out.Tests, over.Tests)
 	pick(&out.Publish, over.Publish)
 	pickPair(&out.Version, &out.Propagate, over.Version, over.Propagate)
 	pick(&out.Sign, over.Sign)
@@ -771,6 +772,8 @@ func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 	pickPair(&out.PostVersion, &out.PostPropagate, over.PostVersion, over.PostPropagate)
 	pick(&out.BeforeBuild, over.BeforeBuild)
 	pick(&out.PostBuild, over.PostBuild)
+	pick(&out.BeforeTests, over.BeforeTests)
+	pick(&out.PostTests, over.PostTests)
 	pick(&out.BeforePublish, over.BeforePublish)
 	pick(&out.PostPublish, over.PostPublish)
 	pick(&out.BeforeAnnounce, over.BeforeAnnounce)

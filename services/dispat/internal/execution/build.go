@@ -136,35 +136,59 @@ func (c *Coordinator) Guard(ctx context.Context, stage string) (func(), error) {
 	}, nil
 }
 
-// Build places one package's build frame and runs it where it was placed.
+// Stage places one package's frame of a delegable stage and runs it where it
+// was placed. The request's descriptor decides what differs between stages:
+// the runOnly value that places the frame, what a node is given first, whether
+// its outputs are admitted, and whether its commands wait for authorize.
 //
-// The providers this run does not release come first, before a node slot is
-// taken: a preparation needs a slot of its own, and a consumer holding one
-// while it waits for a preparation would be a consumer waiting for capacity it
-// is itself occupying. What it does hold meanwhile is the run-wide build slot
-// the task graph gave it, which is what keeps the preparations inside the
-// build budget rather than beside it.
-//
-// The placement comes next because it decides what the rest of the work is.
-// A frame placed on this machine needs no input state prepared, nothing
-// offered to a mailbox and nothing fetched back: it runs against the checkout
-// the run was started in. A frame placed on a node needs all three.
-func (c *Coordinator) Build(ctx context.Context, request release.StageRequest,
-	here release.LocalFrame) (release.StageOutcome, error) {
+// A stage reading its providers' outputs has the providers this run does not
+// release prepared before a node slot is taken: a consumer holding a slot
+// while it waits for a preparation would wait for capacity it occupies. It
+// holds the run-wide slot the task graph gave it meanwhile, which keeps the
+// preparations inside the build budget. A frame placed here then runs against
+// this checkout; one placed on a node needs its input state prepared, offered
+// and fetched back. A stage reading the package's own outputs prefers the node
+// that produced them, whose cache already holds the objects.
+func (c *Coordinator) Stage(ctx context.Context, request release.StageRequest,
+	here release.LocalFrame, authorize func(context.Context) error) (release.StageOutcome, error) {
+	descriptor := request.Descriptor
 	task := request.Release.Pkg.Name + ":" + request.Stage
-	if err := c.prepareProviderOutputs(ctx, task, request); err != nil {
-		return release.StageOutcome{FailedPart: release.PartInputs}, err
+	if descriptor.Inputs == release.InputsProviderOutputs {
+		if err := c.prepareProviderOutputs(ctx, task, request); err != nil {
+			return release.StageOutcome{FailedPart: release.PartInputs}, err
+		}
 	}
 	space := request.Release.Pkg.Space
-	placement := ResolveStagePlacement(request.Stage,
-		space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0)
-	return c.placeTask(ctx, task, placement, space.BuildPlatforms, "",
+	placement := resolveDescriptorPlacement(descriptor, space)
+	if descriptor.Placement == release.PlacementByPublish && placement != PlacementWorker {
+		return c.publishHere(ctx, here)
+	}
+	preferred := ""
+	if descriptor.Inputs == release.InputsOwnOutputs {
+		preferred = c.producerOf(request)
+	}
+	return c.placeTask(ctx, task, placement, space.BuildPlatforms, preferred,
 		func(ctx context.Context, lease *Lease, attempt int) (release.StageOutcome, error) {
 			if lease.IsLocal {
-				return c.buildHere(ctx, lease, task, request, here)
+				return c.runHere(ctx, lease, task, request, here)
 			}
-			return c.dispatchBuild(ctx, lease, KindBuild, task, attempt, request)
+			return c.dispatchStage(ctx, lease, resolveStageKind(descriptor), task, attempt, request, authorize)
 		})
+}
+
+// resolveStageKind is the assignment kind a stage's frame travels under. The
+// build and the publish keep the kinds every worker has always served; any
+// other stage travels under the generic kind, which names the stage in the
+// assignment itself.
+func resolveStageKind(descriptor release.Stage) string {
+	switch descriptor.Name {
+	case StageBuild:
+		return KindBuild
+	case StagePublish:
+		return KindPublish
+	default:
+		return KindStage
+	}
 }
 
 // maxPlacementAttempts bounds how often one task is offered again after an
@@ -262,38 +286,67 @@ func splitTaskName(task string) (packageName, stage string) {
 	return task, ""
 }
 
-// dispatchBuild prepares one package's input state, offers its build frame to
-// the node the pool chose and waits for that node to report.
+// dispatchStage prepares one package's input state, offers its frame to the
+// node the pool chose and waits for that node to report, through the
+// authorization handshake when the stage's commands wait for one.
 //
 // The kind is the assignment's rather than the frame's: a build this run
 // releases and a build of a provider it does not are the same frame executed
 // under the same rules, and the word is what tells a reader of the mailbox,
 // of the branch names and of the log which of the two it is looking at.
-func (c *Coordinator) dispatchBuild(ctx context.Context, lease *Lease, kind, task string,
-	attempt int, request release.StageRequest) (release.StageOutcome, error) {
+func (c *Coordinator) dispatchStage(ctx context.Context, lease *Lease, kind, task string,
+	attempt int, request release.StageRequest,
+	authorize func(context.Context) error) (release.StageOutcome, error) {
+	frame, err := c.prepareFrame(ctx, lease.Node, request)
+	if err != nil {
+		lease.Release()
+		return release.StageOutcome{}, c.refuseTask(task, lease.Node, attempt, err)
+	}
+	if request.Descriptor.IsAuthorized {
+		return c.offerPublication(ctx, lease, task, attempt, frame, request, authorize)
+	}
+	return c.runTask(ctx, lease, kind, task, attempt, frame.dir, frame.repositories, frame.inputs, request)
+}
+
+// preparedFrame is what a node needs before one frame can be offered to it:
+// the package's folder in its checkout, the prepared input state of every
+// repository it reads, and the output sets to install.
+type preparedFrame struct {
+	dir          string
+	repositories []AssignmentRepository
+	inputs       []AssignmentInput
+}
+
+// prepareFrame captures the package's input state, offers it to the node's
+// mailbox and resolves the output sets the stage reads. The input state of a
+// frame that produces outputs is remembered as the package's consumed
+// snapshot, which is what a publication is revalidated against.
+func (c *Coordinator) prepareFrame(ctx context.Context, node string,
+	request release.StageRequest) (preparedFrame, error) {
+	frame := preparedFrame{}
 	sources := c.dispatch.Sources(request.Release.Pkg.Name)
 	dir, err := resolvePackageDir(sources, request)
 	if err != nil {
-		lease.Release()
-		return release.StageOutcome{}, c.refuseTask(task, lease.Node, attempt, err)
+		return frame, err
 	}
+	frame.dir = dir
 	commits, err := c.captureInputs(ctx, sources)
 	if err != nil {
-		lease.Release()
-		return release.StageOutcome{}, c.refuseTask(task, lease.Node, attempt, err)
+		return frame, err
 	}
-	c.rememberConsumedSnapshot(request.Release.Pkg.Name, request.Release.Pkg.Repository, sources, commits)
-	repositories, err := c.offerInputs(ctx, lease.Node, sources, commits)
-	if err != nil {
-		lease.Release()
-		return release.StageOutcome{}, c.refuseTask(task, lease.Node, attempt, err)
+	if request.Descriptor.IsProducingOutputs {
+		c.rememberConsumedSnapshot(request.Release.Pkg.Name, request.Release.Pkg.Repository, sources, commits)
 	}
-	inputs, err := c.resolveTaskInputs(ctx, lease.Node, request.Release.Pkg.Name)
-	if err != nil {
-		lease.Release()
-		return release.StageOutcome{}, c.refuseTask(task, lease.Node, attempt, err)
+	if frame.repositories, err = c.offerInputs(ctx, node, sources, commits); err != nil {
+		return frame, err
 	}
-	return c.runTask(ctx, lease, kind, task, attempt, dir, repositories, inputs, request)
+	switch request.Descriptor.Inputs {
+	case release.InputsOwnOutputs:
+		frame.inputs, err = c.resolvePublishInputs(ctx, node, request, sources, dir)
+	case release.InputsProviderOutputs:
+		frame.inputs, err = c.resolveTaskInputs(ctx, node, request.Release.Pkg.Name)
+	}
+	return frame, err
 }
 
 // runTask offers one assignment and waits for its terminal result, settling
@@ -509,6 +562,10 @@ func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, attempt 
 	outcome, err := c.readReportedOutcome(task, attempt, outcome, result)
 	if err != nil {
 		return outcome, err
+	}
+	if !request.Descriptor.IsProducingOutputs {
+		c.reportTaskFinished(task, result, outcome)
+		return outcome, nil
 	}
 	if err := c.admitOutputs(ctx, task, producedOutputs{
 		node: result.Node, store: c.dispatch.Store, endpoint: c.endpointOf(result.Node),
@@ -773,6 +830,7 @@ func (c *Coordinator) formatAssignment(node, kind, task string, attempt int, dir
 		},
 		Env:             request.Env,
 		StaticEnv:       request.StaticEnv,
+		Stage:           resolveAssignmentStage(kind, request),
 		Exports:         formatExports(request.Release.Outputs),
 		Shell:           c.dispatch.Shell(request.Dir),
 		Platforms:       request.Release.Pkg.Space.BuildPlatforms,
@@ -784,13 +842,22 @@ func (c *Coordinator) formatAssignment(node, kind, task string, attempt int, dir
 	}
 }
 
+// resolveAssignmentStage is the stage an assignment of the generic kind names,
+// and nothing for every other kind, whose kind already says what it runs.
+func resolveAssignmentStage(kind string, request release.StageRequest) string {
+	if kind != KindStage {
+		return ""
+	}
+	return request.Stage
+}
+
 // resolveDeclaredOutputs is what a task is expected to produce: a build's
-// declared roots, and nothing at all for a publication, which consumes the
-// bytes a build already produced and captures none of its own. A publisher
-// asked for them would be describing a second, later version of an output set
-// this run has already admitted.
+// declared roots, and nothing at all for a publication or a stage that
+// produces no output set, which consume the bytes a build already produced
+// and capture none of their own. A node asked for them would be describing a
+// second, later version of an output set this run has already admitted.
 func resolveDeclaredOutputs(kind string, request release.StageRequest) []string {
-	if kind == KindPublish {
+	if kind == KindPublish || (kind == KindStage && !request.Descriptor.IsProducingOutputs) {
 		return nil
 	}
 	return request.Release.Pkg.Space.BuildOutputs

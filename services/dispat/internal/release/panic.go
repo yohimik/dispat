@@ -71,7 +71,7 @@ func (tc *taskCtx) containPanic(ctx context.Context, res *Result) {
 		return
 	}
 	err := fmt.Errorf("internal error: %v", value)
-	tc.log.Error().Err(err).Msg(tc.t.kind.String() + " stopped by an internal error")
+	tc.log.Error().Err(err).Msg(tc.stage.Name + " stopped by an internal error")
 	tc.log.Debug().Str("stack", string(debug.Stack())).Msg("internal error stack")
 	tc.stop(errTaskPanicked)
 	switch tc.settlePanic(res, err) {
@@ -81,7 +81,7 @@ func (tc *taskCtx) containPanic(ctx context.Context, res *Result) {
 		tc.notify(ev)
 	case panicFailed:
 		ev := packageEvent(tc.t.pkg, tc.rel, EventPackageFailed)
-		ev.Status, ev.FailedStage, ev.Error = StatusFailed.String(), tc.t.kind.String(), err.Error()
+		ev.Status, ev.FailedStage, ev.Error = StatusFailed.String(), tc.stage.Name, err.Error()
 		ev.Worker = res.Worker
 		tc.notify(ev)
 		if tc.rel.Pkg.Space.RevertOnFail {
@@ -113,11 +113,11 @@ func (tc *taskCtx) settlePanic(res *Result, err error) panicOutcome {
 		return panicPublished
 	}
 	if res.Status != StatusPending {
-		res.Critical = append(res.Critical, fmt.Errorf("%s stopped by an internal error: %w", tc.t.kind, err))
+		res.Critical = append(res.Critical, fmt.Errorf("%s stopped by an internal error: %w", tc.stage.Name, err))
 		return panicSettled
 	}
 	res.Status = StatusFailed
-	res.FailedStage = tc.t.kind.String()
+	res.FailedStage = tc.stage.Name
 	res.Err = err
 	return panicFailed
 }
