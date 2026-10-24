@@ -1,5 +1,48 @@
 # Changelog
 
+## pkg/models/v1.11.0-rc.6 (2026-10-24)
+
+### Features
+
+- add an optional tests stage and name the version stage by its key ([45c5768](https://github.com/yohimik/dispat/commit/45c57689121e31c15e86746dba32edab5d299ca4)) (by yohimik, Claude Opus 5.5)
+  A release can run a tests stage between the build and the publish:
+  `flow.tests`, `flow.beforeTests` and `flow.postTests` name its scripts and
+  hooks on every level a flow is stated. Its job is checking what the build
+  produced, so a package whose artefact fails is never published: the
+  failure is the `tests` stage, revertOnFail and onFail apply, and its
+  consumers are blocked as after a failed build. The build's exports reach
+  it and its own reach the publish. It shares the build budget, and with
+  worker nodes it is placed under the build's runOnly value, preferring
+  the node that built the package, and given the package's admitted
+  outputs. A package that configures none of the three has no tests
+  stage, and its release runs exactly as before.
+
+  The stages are data: one ordered table of descriptors (sign, version,
+  syncLock, build, tests, publish) states each stage's name and hook
+  spelling, its budget, where its frame may run, what a node installs
+  first, whether its outputs are admitted and whether its commands wait
+  for authorization. The task graph chains the stages a package has in
+  that order, and the executor reaches a coordinator through one Stage
+  call carrying the descriptor in place of one method per stage. Build
+  and publish assignments keep their kinds and formats; any other stage
+  travels under the generic kind `stage`, whose assignment names it.
+
+  The version stage now runs under the name of the key that configured
+  it. Under flow.propagate or autoPropagate it is `propagate` in
+  DISPAT_STAGE, DISPAT_FAILED_STAGE, the failed stage, the events, the
+  webhooks, the log and its hooks' names (beforePropagate,
+  postPropagate); under the version keys it stays `version`. The stage's
+  entry decides first, then the native block, then the hooks.
+
+  The plan digest carries the tests commands and the stage's name, so its
+  schema is dispat-plan-digest/3.
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## pkg/models/v1.11.0-rc.5 (2026-09-25)
 
 ### Features
