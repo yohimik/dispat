@@ -28,10 +28,11 @@ Keep the configuration and API references from the installed binary's help pinne
 6. Run the repository's required full suite before starting a release, then retain release-time checks for rewritten inputs and built artifacts.
 7. Preserve command exit codes and inspect diagnostics, including warnings.
 8. Treat publishing as non-atomic. Some packages can publish before another package fails.
-9. Serialize normal releases, but interrupt a release immediately when an urgent correction invalidates its contents. The lock must not delay cancellation or local repairs. Verify remote outcomes before retrying.
-10. Report what ran, what published, what failed or was skipped, and what remains uncertain.
-11. Release through the repository's CI/CD workflow. Configure the release path instead of publishing by hand.
-12. When a release delegates work to worker nodes, start those nodes through the pipeline and never from your own shell, and read the per-task summary before reporting what a run did.
+9. Treat the publish stage as irreversible. A registry, store or bucket that accepted an upload keeps it; dispat never takes a publication back, and a retry cannot replace an immutable version.
+10. Serialize normal releases, but interrupt a release immediately when an urgent correction invalidates its contents. The lock must not delay cancellation or local repairs. Verify remote outcomes before retrying.
+11. Report what ran, what published, what failed or was skipped, and what remains uncertain.
+12. Release through the repository's CI/CD workflow. Configure the release path instead of publishing by hand.
+13. When a release delegates work to worker nodes, start those nodes through the pipeline and never from your own shell, and read the per-task summary before reporting what a run did.
 
 ## Release through CI/CD
 
@@ -398,6 +399,14 @@ registry read, integrity or version lookup, status gate, or channel mutation: a 
 immutable upload into a failed package leg before dispat can write its native records. After the publication command
 succeeds, return success immediately so dispat can write its native release records. Forward the command's stdout and
 stderr at their proper severity, and propagate a nonzero publication exit.
+
+The publish stage is irreversible: once the publication command succeeds, the version exists at its destination
+whatever happens next. Some registries also answer an upload before the version can be read back. npm reports a
+successful publish while the new version can still be missing from the registry's metadata and from `npm view` for a
+while. A lookup made right after the upload can therefore fail for a version that did ship. Put every check of the
+published result, such as reading the version back, installing it from the registry or verifying its integrity, in
+`flow.postPublish`, and make it wait with a bounded retry rather than one immediate read. A `postPublish` failure only
+warns, because the package is already published; report it, and never answer it by republishing.
 
 Recurring findings from the ecosystem review suggest these integration checks. Follow the references for evidence and case-specific limits.
 
