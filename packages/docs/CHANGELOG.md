@@ -1,5 +1,61 @@
 # Changelog
 
+## packages/docs/v1.11.0-rc.6 (2026-10-24)
+
+### Fixes
+
+- drop the announcement replay and experiments workflows ([65de790](https://github.com/yohimik/dispat/commit/65de7903ee58a925967636bbf2cd302c3bcdf6d9)) (by yohimik, Claude Opus 5.5)
+  Both workflows were manual-only: the announcement replay never ran, and
+  the experiments workflow ran twice, last in early September. A release
+  already runs the whole experiment campaign itself, and that campaign is
+  the only source of the records the site is built from.
+
+  The announcement recovery now replays the one destination by hand with
+  the pinned crier, and the experiments page, the comparison and the
+  harness README point a by-hand measurement at `dispat exec experiments`
+  instead of the removed workflow.
+
+- describe how every tool runs the further propagation cells ([0d80fbc](https://github.com/yohimik/dispat/commit/0d80fbc71a120bb96e563c1af91ed6cfda08e91f)) (by yohimik, Claude Opus 5.5)
+  The experiments page and the comparison said five propagation cells were
+  dispat's alone. They now say that lerna, nx and changesets run them too,
+  and through which mechanism: no self-hosted worker, the selection each
+  tool offers, the hold each tool commits, and the provider-only run of
+  the deferred cells. The outcomes stay on the page's tables, which are
+  built from the release campaign's records.
+
+- drop the neurodivergence search keywords ([9f30829](https://github.com/yohimik/dispat/commit/9f308298866778526fba1e641d57efabb7afe1fb)) (by yohimik, Claude Opus 5.5)
+  The tagline no longer speaks of ADHD or autism, so the site's search
+  keywords and the npm package keywords stop advertising them: the docs
+  site loses "ADHD developers", "autistic developers", "autism" and
+  "neurodivergent developers", and the CLI package loses "adhd",
+  "autism" and "neurodivergent".
+
+- state the project as a next generation CI/CD framework ([efe4cdf](https://github.com/yohimik/dispat/commit/efe4cdfc4858c3ebaf90a70e7cd699aa0a278aec)) (by yohimik, Claude Opus 5.5)
+  The tagline now opens with "Next generation CI/CD framework" in the
+  READMEs, the npm description, the landing page hero, the page title, the
+  structured data and social cards, and the announcement notes and
+  templates. The rest of the tagline, mathematical planning and saga
+  recovery, is unchanged.
+
+- reserve the navbar logo's box before the mark loads ([ee69936](https://github.com/yohimik/dispat/commit/ee699365160d3686a8ed7c0096c9dec1f443d7c9)) (by yohimik, Claude Opus 5.5)
+  Infima sizes the navbar logo by height alone, so until the SVG arrives
+  the image box takes the width of its alt text and the title beside it
+  moves when the mark loads. The logo box is now a fixed 32 by 32 square
+  that the image fills.
+
+- scroll the experiment tables inside the doc column ([2a966ea](https://github.com/yohimik/dispat/commit/2a966ea2d207bbd8f6f9cfef8774e303144bed7d)) (by yohimik, Claude Opus 5.5)
+  Each entry of an experiment table is kept whole, which makes the table
+  wider than the doc column, and above the mobile breakpoint a markdown
+  table is laid out as a table and cannot scroll. The table therefore ran
+  under the table of contents. Every experiment table now sits in its own
+  horizontal scroll container.
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## packages/docs/v1.11.0-rc.5 (2026-09-25)
 
 ### Features
