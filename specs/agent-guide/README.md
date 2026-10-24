@@ -447,6 +447,7 @@ dispat uses Conventional Commits: Monorepo Extension (CCME). Read the repository
 | `feat(api)^: add a consumer-facing field` | Release `api` and direct consumers. |
 | `feat(api)^^: update a shared protocol` | Reach transitive consumers. |
 | `feat(api)%beta: introduce an endpoint` | Put the addressed package on beta. |
+| `fix: handle an empty response` | In a repository with one configured package: patch that package. Never scope it. |
 
 Explicit scopes name configured packages. With no scope, ownership can derive from changed files. Propagation and channel syntax change release intent; do not add them as decorative prose. Accurate scopes matter for both releases and `--since` script sweeps.
 
@@ -484,6 +485,14 @@ When the edited files share the same release record (the same change description
 scope. This applies whether the files belong to one package or several: let file ownership select the packages.
 For example, use `fix: handle an empty response` when that record describes the change in every affected package.
 Check the configured package paths and `src` boundaries so the intended files resolve to their owners.
+
+In a repository with exactly one configured package, a commit that changes files the package owns MUST NOT carry a
+scope: file ownership already selects that package. Write `fix: handle an empty response`, not
+`fix(app): handle an empty response`. The breaking marker and the inline directives work without a scope:
+`feat!: replace the plugin API` and `feat%beta: introduce an endpoint` address the same package. The rule stops where
+file ownership has nothing to select. A commit whose changed files the package does not own, an empty commit
+included, derives no package, and an unscoped unit in it is inert (`W131`). Such a commit names the package, as the
+empty `release(app): pin the launch version` commit carrying a `Release-As: 3.0.0` footer does.
 
 When the task requires different release records for different packages, write explicitly scoped CCME units, one
 per distinct record, separated by a line containing `---`. One Git commit can carry all of them:
