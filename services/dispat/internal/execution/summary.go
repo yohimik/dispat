@@ -369,9 +369,9 @@ func (c *Coordinator) rememberTaskOutcome(record TaskRecord) {
 	if timing, isTimed := c.timings[record.Task]; isTimed {
 		record.Queued, record.Ran = timing.queued, timing.ran
 	}
-	if admitted := c.outputs.find(record.Package); admitted != nil && admitted.manifest != nil {
+	if admitted := c.outputs.find(record.Package); admitted != nil {
 		record.Outputs = OutputsAdmitted
-		record.Files, record.Bytes = admitted.manifest.Files, admitted.manifest.Bytes
+		record.Files, record.Bytes = admitted.manifest.files, admitted.manifest.bytes
 	}
 	c.taskRecords = append(c.taskRecords, record)
 }

@@ -163,8 +163,8 @@ func (c *Coordinator) formatLocalInputs(packageName string) []ManifestInput {
 			continue
 		}
 		inputs = append(inputs, ManifestInput{
-			Package: provider.Package, OutputTree: admitted.manifest.OutputTree,
-			Digest: admitted.manifest.Digest,
+			Package: provider.Package, OutputTree: admitted.manifest.outputTree,
+			Digest: admitted.manifest.digest,
 		})
 	}
 	return inputs

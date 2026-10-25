@@ -36,8 +36,8 @@ import (
 
 // admittedOutputs is one package's admitted output set as every consumer of it
 // has to be told about it: which node produced it, where that node's answer
-// can be fetched from, the exact object it is read at, and the manifest that
-// was admitted.
+// can be fetched from, the exact object it is read at, and what names the
+// manifest that was admitted.
 //
 // The endpoint is carried rather than looked up again because it is what
 // decides whether a consumer can reach the bytes at all: two nodes sharing one
@@ -48,13 +48,35 @@ type admittedOutputs struct {
 	endpoint string
 	branch   string
 	commit   string
-	manifest *OutputManifest
+	manifest admittedManifest
 	// store is the object store the bytes are in, which is what a relay is
 	// pushed out of. It is the run's own repository for a result that came
 	// back through a mailbox, and the repository that owns the package for a
 	// build this machine ran itself, and those are two stores in a composed
 	// workspace.
 	store *gitx.LocalGitx
+}
+
+// admittedManifest is what the run keeps of an admitted manifest. The entries
+// are left behind on purpose: they are checked and installed inside the
+// admission, every later reader only names the set or reports its totals, and
+// a record that kept them would hold every file of every package for the
+// whole run.
+type admittedManifest struct {
+	task        string
+	packageName string
+	digest      string
+	outputTree  string
+	files       int
+	bytes       int64
+}
+
+// newAdmittedManifest keeps the naming fields and totals of one manifest.
+func newAdmittedManifest(manifest *OutputManifest) admittedManifest {
+	return admittedManifest{
+		task: manifest.Task, packageName: manifest.Package, digest: manifest.Digest,
+		outputTree: manifest.OutputTree, files: manifest.Files, bytes: manifest.Bytes,
+	}
 }
 
 // outputRegistry is the run's record of what has been admitted and of what has
@@ -165,7 +187,7 @@ func (c *Coordinator) admitOutputs(ctx context.Context, task string, produced pr
 	}
 	c.outputs.remember(request.Release.Pkg.Name, &admittedOutputs{
 		node: produced.node, endpoint: produced.endpoint, branch: produced.branch,
-		commit: produced.commit, manifest: produced.manifest, store: produced.store,
+		commit: produced.commit, manifest: newAdmittedManifest(produced.manifest), store: produced.store,
 	})
 	verified := c.Log.Debug().Str("run", c.Run).Str("task", task).
 		Int("files", totals.Files).Int64("bytes", totals.Bytes).Dur("took", time.Since(took))
@@ -262,8 +284,8 @@ func (c *Coordinator) resolveTaskInputs(ctx context.Context, node, packageName s
 			return nil, err
 		}
 		inputs = append(inputs, AssignmentInput{
-			Task: admitted.manifest.Task, Package: provider.Package, Branch: branch,
-			Commit: admitted.commit, Digest: admitted.manifest.Digest, Path: provider.Path,
+			Task: admitted.manifest.task, Package: provider.Package, Branch: branch,
+			Commit: admitted.commit, Digest: admitted.manifest.digest, Path: provider.Path,
 		})
 	}
 	return inputs, nil
@@ -292,11 +314,11 @@ func (c *Coordinator) reachOutputs(ctx context.Context, node string, admitted *a
 	pushErr := admitted.store.PushCreate(ctx, endpoint, admitted.commit, branch)
 	if err := c.settleCreate(ctx, node, branch, admitted.commit, pushErr); err != nil {
 		return "", fmt.Errorf("execution: relaying the outputs of %s to %s: %w",
-			admitted.manifest.Package, node, err)
+			admitted.manifest.packageName, node, err)
 	}
 	c.outputs.rememberRelay(endpoint, admitted.commit, branch)
 	c.Log.Debug().Str("run", c.Run).Str("worker", node).Str("branch", branch).
-		Str("commit", admitted.commit).Str("package", admitted.manifest.Package).
+		Str("commit", admitted.commit).Str("package", admitted.manifest.packageName).
 		Msg("relay pushed")
 	return branch, nil
 }

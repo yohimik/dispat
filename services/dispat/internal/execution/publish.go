@@ -119,8 +119,8 @@ func (c *Coordinator) resolvePublishInputs(ctx context.Context, node string,
 		return nil, err
 	}
 	return append(inputs, AssignmentInput{
-		Task: own.manifest.Task, Package: packageName, Branch: branch,
-		Commit: own.commit, Digest: own.manifest.Digest,
+		Task: own.manifest.task, Package: packageName, Branch: branch,
+		Commit: own.commit, Digest: own.manifest.digest,
 		Path: resolveAnchoredPath(sources, request.Release.Pkg.Repository, dir),
 	}), nil
 }
