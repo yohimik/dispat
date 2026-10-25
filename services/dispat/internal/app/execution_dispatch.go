@@ -18,6 +18,7 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -65,13 +66,19 @@ func (a *App) openDispatch(ctx context.Context, coordinator *execution.Coordinat
 // leaves alone is a provider the run has to build anyway, and saying so here
 // is what lets the coordinator build it exactly once.
 func (a *App) resolveOutputProviders(pl *plan.Plan) func(string) []execution.InputPackage {
+	// Each closure is put in plan order by rank rather than by a pass over the
+	// whole order, so a task pays for its own closure and not for the plan.
+	rank := make(map[string]int, len(pl.Order))
+	for i, name := range pl.Order {
+		rank[name] = i
+	}
 	return func(packageName string) []execution.InputPackage {
 		closure := map[string]bool{}
 		collectProviderClosure(pl, packageName, closure)
 		providers := make([]execution.InputPackage, 0, len(closure))
-		for _, name := range pl.Order {
+		for name := range closure {
 			rel := pl.Releases[name]
-			if !closure[name] || rel == nil || len(rel.Pkg.Space.BuildOutputs) == 0 {
+			if _, planned := rank[name]; !planned || rel == nil || len(rel.Pkg.Space.BuildOutputs) == 0 {
 				continue
 			}
 			providers = append(providers, execution.InputPackage{
@@ -80,6 +87,9 @@ func (a *App) resolveOutputProviders(pl *plan.Plan) func(string) []execution.Inp
 				IsPrepared: !rel.IsReleasing(),
 			})
 		}
+		slices.SortFunc(providers, func(x, y execution.InputPackage) int {
+			return rank[x.Package] - rank[y.Package]
+		})
 		return providers
 	}
 }
