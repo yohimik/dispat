@@ -117,14 +117,16 @@ read it back as a release tag.
     repositories retain the ordinary concurrency budget. Exact source pins admitted by nested native records are shared
     through a private coordinator bound to the current run so already-running sibling commands can validate fresh state;
     this transient data is removed with the run and never becomes planning history.
-11. Three things run in order after each successful publish. The release recorders run first, writing the changelog
-    file and the GitHub release unless you are in release-commit mode. The annotated tag runs next. dispat defers this
-    tag in release-commit mode, and a `PACKAGE_<KEY>` script export pins it to the exported commit instead of HEAD. The
-    warn-only `postPublish` hook and the warn-only announce frame (`beforeAnnounce`, the announce stage,
-    `postAnnounce`) run last. Because the publish succeeded, none of this can fail the package anymore. A failure here
-    is a [critical](#after-the-point-of-no-return). The recorders and the tag run detached from the run's
-    cancellation and are bounded at five minutes, so an interrupt cannot cost a published package its record and a
-    remote that stops answering cannot hold the run.
+11. After a successful publish with `commit.push` on, dispat pushes a publication receipt under
+    `refs/dispat/receipts/<tag>` before optional recorders. In tag-only mode it then creates and pushes the local
+    annotated tag, removing the receipt after the remote accepts the tag. In release-commit mode the tag waits for
+    finalize. A failed required record leaves
+    the package published with an incomplete record, blocks dependent publications and skips optional recorders and
+    announce; it does not undo the publication. After a successful required record, changelog and GitHub recorders
+    run, followed by the warn-only `postPublish` and announce hooks. A failed publish command first asks
+    `publish.adoptPublished`: a verified matching artefact is adopted (`W196`), while a different or unverifiable
+    artefact is refused (`E198`) and no later publication starts. Recording uses a detached context bounded at five
+    minutes, so cancellation allows a record attempt to finish but cannot guarantee a remote will accept it.
 12. Run the warn-only `postAll` hook. It receives the run outcome through the `DISPAT_RESULT_*` variables. From here
     the durable records run on a context of their own: the run's cancellation does not reach them, and an interrupt
     gives them five minutes from the moment it arrives. An uninterrupted run is not bounded by it. The hooks stay on
@@ -136,11 +138,13 @@ read it back as a release tag.
     (`release.SettledEnvs`). A re-synchronization that does not finish restores the paths again and leaves them out of
     the commit, with `E223`. dispat then makes one release commit staging all published packages, then places tags on
     that commit or on a package's exported `PACKAGE_<KEY>` commit. The push follows when `commit.push` is enabled. It
-    pushes the branch first, then the run's tags, skipping and warning about any tag already on the remote. GitHub
-    releases referencing the pushed tags come last. The warn-only commit and push hooks bracket these operations
+    writes local prepared-finalization markers before creating tags, then atomically pushes the branch and required
+    release tags while deleting their receipts. A rejected atomic push retains all receipts; a lost response is
+    checked against the remote refs. Optional aliases are pushed separately afterward. GitHub releases referencing
+    the pushed tags come last. The warn-only commit and push hooks bracket these operations
     (`beforeCommit`/`afterCommit`, `postCommit` after tags, `beforePush`/`afterPush`). Every package here has
-    published, so nothing in this phase aborts it either. Each step runs, and each failure is a
-    [critical](#after-the-point-of-no-return). Every Git command of this phase runs on the recording context of step
+    published, so a required record failure leaves it published and reports a [critical](#after-the-point-of-no-return)
+    while withholding an unsafe push. Every Git command of this phase runs on the recording context of step
     12, so an interrupt that arrives during `beforeCommit` or during the push stops the hook and leaves the commit, the
     tags and the push to finish. Recording that outlasts the grace is a critical (`E223`).
 14. Print a per-package summary and the totals. dispat exits `1` if anything failed or if it recorded any critical.
@@ -714,10 +718,11 @@ An absent provider explicitly declared with `external: true` emits `W330` and le
 snapshot. The [diagnostic reference](../reference/plan-errors.md#polyrepository-snapshot-and-recording-diagnostics)
 gives the recovery for each code.
 
-In the other direction, forty codes are dispat's own. They sit outside the specification's registry, attached to
+In the other direction, forty-one codes are dispat's own. They sit outside the specification's registry, attached to
 features the specification predates or does not have. They are numbered from `W220` and `E215` upward. This clears the
-registry, which ends at `W215` and `E213`. It also clears `W195` and `W196`, which the specification reserves for the
-audit features above. The six codes of the distributed execution profile carry a second name beside the number, the
+registry, which ends at `W215` and `E213`. It also clears `W195`, which the specification reserves for the audit
+feature above. `W196` and `E198` are the specification's own publish/tag reconciliation codes, which dispat implements
+as `publish.adoptPublished`. The six codes of the distributed execution profile carry a second name beside the number, the
 outcome category the specification's §28.9 requires, so a reader can switch on the class without knowing the numbers.
 
 | Codes | Feature |
@@ -739,6 +744,7 @@ outcome category the specification's §28.9 requires, so a reader can switch on 
 | `W242`                 | The release push was refused because commits landed on the branch while the run was working, and the release recovered: it pulled them and merged them with its release commit rather than rewriting anything, so the tag still names the tree the run recorded. Warned rather than logged plainly because the branch the release went out on is not the one it was planned against, and the commits that arrived sit outside the tag's ancestry with no record of their own until the next run |
 | `W243`                 | The release push was refused because commits landed on the branch while the run was working, and those commits changed the same content the release did. The release still completes: this release's side of every conflicting file is what the branch keeps, the other side is pushed to a `release-conflicts/...` branch of its own, and the changelog and the GitHub release both name the files and that branch. Somebody has to reconcile the two sides |
 | `W245`                 | A GitHub release body over the API's limit of 125,000 characters. The recorder kept its whole entries up to 120,000 characters and closed the sections with a line naming the package's changelog at the tag. Warned rather than refused because GitHub's refusal would arrive after the tag is out, and the package would be failed for the length of its notes |
+| `W246`                 | A package an earlier run published and recorded with a [publication receipt](../reference/releasing/recovery.md#a-run-stopped-between-a-publication-and-its-record) only: this run finishes its record without publishing it again |
 | `E220`-`E224`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
 | `E215`-`E218`          | The [scanner command's gates](../editing/manifests.md): a local link still present under `--verify-unlinked`, none present under `--verify-linked`, a range `--forbid-range` matched, a range `--require-range` did not find |
 | `E225`-`E229`, `W244`  | [Distributed execution](../distributed-execution.md#diagnostics): a configuration no distributed run could be executed under (`E225`), work refused for who asked for it (`E226`), input or output data that cannot be used as it stands (`E227`), a publication whose outcome the run cannot establish (`E228`), transport state the run could not leave in a safe place (`E229`), and the harmless half of that subject, leftover refs and writes outside the declared outputs (`W244`) |

@@ -183,6 +183,24 @@ func stageRelation(dst **StageRelation) setter {
 	}
 }
 
+// adoptPublished fills `publish.adoptPublished`: the boolean that turns
+// adoption on or off, or the object naming its verify scripts. The scalar takes
+// the weak reading every boolean key of the language gets.
+func adoptPublished(dst **AdoptPublishedConfig) setter {
+	object := obj(dst, adoptPublishedFields)
+	return func(val any, at string) error {
+		if _, isObject := val.(map[string]any); isObject {
+			return object(val, at)
+		}
+		isEnabled, err := weakBool(val, at)
+		if err != nil {
+			return err
+		}
+		*dst = public.AdoptPublishedOf(isEnabled)
+		return nil
+	}
+}
+
 // versioningMode fills a `versioning` key anywhere else: the root file, a
 // space, a space folder's file, a package. Those four levels state which mode
 // a package versions under and never a sharing rule, which belongs to the

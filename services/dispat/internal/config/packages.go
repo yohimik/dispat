@@ -489,6 +489,7 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 	if po.RevertOnFail != nil {
 		sc.RevertOnFail = po.RevertOnFail
 	}
+	sc.Publish = mergePublish(sc.Publish, po.Publish)
 	if po.TagFormat != "" {
 		sc.TagFormat = po.TagFormat
 	}
@@ -573,6 +574,23 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 	return sc
 }
 
+// mergePublish overlays one level's publish object onto the inherited one
+// field by field. adoptPublished replaces whole: its verify list means nothing
+// beside an enabled flag some other level wrote.
+func mergePublish(base, over *PublishConfig) *PublishConfig {
+	if over == nil {
+		return base
+	}
+	var out PublishConfig
+	if base != nil {
+		out = *base
+	}
+	if over.AdoptPublished != nil {
+		out.AdoptPublished = over.AdoptPublished
+	}
+	return &out
+}
+
 // boolValue reads a tri-state option that has reached the bottom of the
 // ladder with nobody having set it: nil means the default, which for the
 // space-shaped boolean is false.
@@ -593,6 +611,7 @@ func rootDefaults(c *File) SpaceConfig {
 	return SpaceConfig{
 		IsBuildWaitingPublish: c.IsBuildWaitingPublish,
 		RevertOnFail:          c.RevertOnFail,
+		Publish:               c.Publish,
 		Flow:                  c.Flow,
 		TagFormat:             c.TagFormat,
 		AliasTags:             c.AliasTags,
@@ -619,6 +638,7 @@ func spaceAsOverride(sc SpaceConfig) PackageConfig {
 	return PackageConfig{
 		IsBuildWaitingPublish: sc.IsBuildWaitingPublish,
 		RevertOnFail:          sc.RevertOnFail,
+		Publish:               sc.Publish,
 		Flow:                  sc.Flow,
 		TagFormat:             sc.TagFormat,
 		AliasTags:             sc.AliasTags,
@@ -667,6 +687,7 @@ func spaceOverride(f SpaceFile) PackageConfig {
 	return PackageConfig{
 		IsBuildWaitingPublish: f.IsBuildWaitingPublish,
 		RevertOnFail:          f.RevertOnFail,
+		Publish:               f.Publish,
 		Flow:                  f.Flow,
 		TagFormat:             f.TagFormat,
 		AliasTags:             f.AliasTags,

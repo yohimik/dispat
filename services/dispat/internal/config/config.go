@@ -54,6 +54,8 @@ type (
 	SpaceFile                = public.SpaceFile
 	PathList                 = public.PathList
 	StageRelation            = public.StageRelation
+	PublishConfig            = public.PublishConfig
+	AdoptPublishedConfig     = public.AdoptPublishedConfig
 	SpaceFlowConfig          = public.SpaceFlowConfig
 	PackageConfig            = public.PackageConfig
 	VersionGroupConfig       = public.VersionGroupConfig
@@ -159,32 +161,42 @@ func DefaultNonPackageScopes() []string { return public.DefaultNonPackageScopes(
 // error messages, so validation and resolution never disagree about the list.
 func scriptRefs(s *SpaceConfig) map[string][]string {
 	return map[string][]string{
-		"flow.build":           s.Flow.Build,
-		"flow.tests":           s.Flow.Tests,
-		"flow.publish":         s.Flow.Publish,
-		"flow.version":         s.Flow.Version,
-		"flow.propagate":       s.Flow.Propagate,
-		"flow.sign":            s.Flow.Sign,
-		"flow.login":           s.Flow.Login,
-		"flow.announce":        s.Flow.Announce,
-		"flow.beforeAll":       s.Flow.BeforeAll,
-		"flow.beforeSign":      s.Flow.BeforeSign,
-		"flow.postSign":        s.Flow.PostSign,
-		"flow.beforeVersion":   s.Flow.BeforeVersion,
-		"flow.postVersion":     s.Flow.PostVersion,
-		"flow.beforePropagate": s.Flow.BeforePropagate,
-		"flow.postPropagate":   s.Flow.PostPropagate,
-		"flow.beforeBuild":     s.Flow.BeforeBuild,
-		"flow.postBuild":       s.Flow.PostBuild,
-		"flow.beforeTests":     s.Flow.BeforeTests,
-		"flow.postTests":       s.Flow.PostTests,
-		"flow.beforePublish":   s.Flow.BeforePublish,
-		"flow.postPublish":     s.Flow.PostPublish,
-		"flow.beforeAnnounce":  s.Flow.BeforeAnnounce,
-		"flow.postAnnounce":    s.Flow.PostAnnounce,
-		"flow.onFail":          s.Flow.OnFail,
-		"flow.onSkip":          s.Flow.OnSkip,
+		"flow.build":                    s.Flow.Build,
+		"flow.tests":                    s.Flow.Tests,
+		"flow.publish":                  s.Flow.Publish,
+		"flow.version":                  s.Flow.Version,
+		"flow.propagate":                s.Flow.Propagate,
+		"flow.sign":                     s.Flow.Sign,
+		"flow.login":                    s.Flow.Login,
+		"flow.announce":                 s.Flow.Announce,
+		"flow.beforeAll":                s.Flow.BeforeAll,
+		"flow.beforeSign":               s.Flow.BeforeSign,
+		"flow.postSign":                 s.Flow.PostSign,
+		"flow.beforeVersion":            s.Flow.BeforeVersion,
+		"flow.postVersion":              s.Flow.PostVersion,
+		"flow.beforePropagate":          s.Flow.BeforePropagate,
+		"flow.postPropagate":            s.Flow.PostPropagate,
+		"flow.beforeBuild":              s.Flow.BeforeBuild,
+		"flow.postBuild":                s.Flow.PostBuild,
+		"flow.beforeTests":              s.Flow.BeforeTests,
+		"flow.postTests":                s.Flow.PostTests,
+		"flow.beforePublish":            s.Flow.BeforePublish,
+		"flow.postPublish":              s.Flow.PostPublish,
+		"flow.beforeAnnounce":           s.Flow.BeforeAnnounce,
+		"flow.postAnnounce":             s.Flow.PostAnnounce,
+		"flow.onFail":                   s.Flow.OnFail,
+		"flow.onSkip":                   s.Flow.OnSkip,
+		"publish.adoptPublished.verify": adoptVerifyRefs(s.Publish),
 	}
+}
+
+// adoptVerifyRefs are the script names a level's publish.adoptPublished
+// names, nil when it names none.
+func adoptVerifyRefs(publish *PublishConfig) []string {
+	if publish == nil || publish.AdoptPublished == nil {
+		return nil
+	}
+	return publish.AdoptPublished.Verify
 }
 
 // runHookRefs returns the run-level hook references, labelled for error
@@ -2446,6 +2458,7 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		Env:                  EnvPairs(MergeEnv(c.Env, sc.Env)),
 		ProviderRelation:     model.NewStageRelation(sc.IsBuildWaitingPublish),
 		RevertOnFail:         boolValue(sc.RevertOnFail),
+		AdoptPublished:       resolveAdoptPublished(scope, sc.Publish),
 		Versioning:           model.Versioning(versioning.mode),
 		VersionGroup:         versioning.group,
 		CounterSharing:       versioning.counter,
@@ -2498,4 +2511,15 @@ func DepKind(s string) (model.DepKind, error) {
 		return model.KindOptionalDependencies, nil
 	}
 	return "", fmt.Errorf(`unknown dependency kind %q (one of "dependencies", "devDependencies", "peerDependencies", "optionalDependencies")`, s)
+}
+
+// resolveAdoptPublished is a package's §19.4 policy with its verify script
+// names resolved to the commands they bind. An unstated policy adopts, with
+// only the built-in npm check to establish identity.
+func resolveAdoptPublished(scope scriptScope, publish *PublishConfig) model.AdoptPublished {
+	if publish == nil || publish.AdoptPublished == nil {
+		return model.AdoptPublished{}
+	}
+	stated := publish.AdoptPublished
+	return model.AdoptPublished{IsDisabled: !stated.IsEnabled(), VerifyScript: scope.commands(stated.Verify)}
 }

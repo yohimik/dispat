@@ -251,13 +251,16 @@ func landAgainDuringTheRecovery(t *testing.T, bare, message string) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the hook is a POSIX shell script")
 	}
-	// The hook counts what reaches it and acts on the second. The first is the
-	// build script's own foreign push; the release's rejected push never gets
-	// here, because git refuses a non-fast-forward on the client side; so the
-	// second is the recovery's, which is the one to move the branch under.
+	// The hook counts the branch pushes that reach it and acts on the second.
+	// The first is the build script's own foreign push; the release's rejected
+	// push never gets here, because git refuses a non-fast-forward on the
+	// client side; so the second is the recovery's, which is the one to move
+	// the branch under. A push of anything else, a publication receipt among
+	// them, is not counted.
 	counter := harness.ShQuote(filepath.Join(bare, "received.count"))
 	hook := filepath.Join(bare, "hooks", "pre-receive")
 	script := "#!/bin/sh\n" +
+		"grep -q ' refs/heads/' || exit 0\n" +
 		"n=$(cat " + counter + " 2>/dev/null || echo 0)\n" +
 		"n=$((n + 1))\n" +
 		"echo \"$n\" > " + counter + "\n" +

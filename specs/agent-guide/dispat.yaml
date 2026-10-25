@@ -5,6 +5,13 @@ tagFormat: specs/agent-guide/v{version}
 # refuses release initiation by design (E226), so every stage of this package
 # stays on the machine that holds release authority.
 runOnly: orchestrator
+# The CLI's build reads nothing of the guide, so it does not wait; the CLI
+# publishes after the guide, and a guide that failed to publish holds the CLI
+# back rather than letting it release a help text naming a guide version
+# that does not exist.
+isBuildWaitingPublish:
+  build: none
+  isBlocking: true
 
 scripts:
   verify-guide: sh verify.sh

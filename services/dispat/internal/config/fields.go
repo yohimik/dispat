@@ -74,6 +74,7 @@ func fileFields(dst *File) fields {
 		"autosign":              obj(&dst.AutoSign, autoSignFields),
 		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
 		"revertonfail":          flagPtr(&dst.RevertOnFail),
+		"publish":               obj(&dst.Publish, publishFields),
 		"versioning":            versioningMode(&dst.Versioning),
 		"src":                   str(&dst.Src),
 		"ignore":                strs(&dst.Ignore),
@@ -94,6 +95,7 @@ func spaceConfigFields(dst *SpaceConfig) fields {
 		"path":                  pathList(&dst.Path),
 		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
 		"revertonfail":          flagPtr(&dst.RevertOnFail),
+		"publish":               obj(&dst.Publish, publishFields),
 		"flow":                  obj(&dst.Flow, spaceFlowFields),
 		"tagformat":             str(&dst.TagFormat),
 		"aliastags":             objList(&dst.AliasTags, aliasTagFields),
@@ -125,6 +127,7 @@ func spaceFileFields(dst *SpaceFile) fields {
 	return fields{
 		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
 		"revertonfail":          flagPtr(&dst.RevertOnFail),
+		"publish":               obj(&dst.Publish, publishFields),
 		"flow":                  obj(&dst.Flow, spaceFlowFields),
 		"tagformat":             str(&dst.TagFormat),
 		"aliastags":             objList(&dst.AliasTags, aliasTagFields),
@@ -166,6 +169,7 @@ func packageConfigFields(dst *PackageConfig) fields {
 		"ignore":                strs(&dst.Ignore),
 		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
 		"revertonfail":          flagPtr(&dst.RevertOnFail),
+		"publish":               obj(&dst.Publish, publishFields),
 		"flow":                  obj(&dst.Flow, spaceFlowFields),
 		"tagformat":             str(&dst.TagFormat),
 		"aliastags":             objList(&dst.AliasTags, aliasTagFields),
@@ -228,6 +232,22 @@ func spaceFlowFields(dst *SpaceFlowConfig) fields {
 		"postannounce":    strs(&dst.PostAnnounce),
 		"onfail":          strs(&dst.OnFail),
 		"onskip":          strs(&dst.OnSkip),
+	}
+}
+
+// publishFields is a `publish` object: the publish stage's policy beyond its
+// commands.
+func publishFields(dst *PublishConfig) fields {
+	return fields{
+		"adoptpublished": adoptPublished(&dst.AdoptPublished),
+	}
+}
+
+// adoptPublishedFields is the object form of `publish.adoptPublished`.
+func adoptPublishedFields(dst *AdoptPublishedConfig) fields {
+	return fields{
+		"enabled": flagPtr(&dst.Enabled),
+		"verify":  strs(&dst.Verify),
 	}
 }
 

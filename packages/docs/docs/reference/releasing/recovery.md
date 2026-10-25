@@ -8,9 +8,80 @@ A repeat `dispat` run plans from durable tags: it skips recorded packages and co
 consumers. Check which record failed before retrying, because a package can have its native tag while its separate
 GitHub release record is still missing.
 
-There is one interval a tag cannot describe: a publish command may succeed and the process may stop before dispat
-writes its tag. If a run is killed during that interval, inspect that package's registry or destination before you
-retry. dispat does not claim exactly-once delivery across an arbitrary shell command.
+With `commit.push` on, dispat attempts the remote tag or receipt before it runs optional recorders or lets a dependent
+publish. A stopped CI job can still leave a publication without a record if it stops during the publish command or
+before that remote write completes. A failed remote record write leaves the package published, blocks dependent
+publication, and makes the run exit nonzero.
+
+There is one interval no record can describe: a publish command may succeed and the process may stop before dispat
+hears of it. The next run meets that version at its destination, and adopts it when its identity matches what the run
+built (`W196`) or refuses it when it does not (`E198`). dispat does not claim exactly-once delivery across an arbitrary
+shell command, and that check is what stands in for it.
+
+## A run stopped between a publication and its record
+
+What the remote holds after a stop depends on the commit policy.
+
+| Policy | What reaches the remote after each publish | What a stopped run leaves |
+|--------|---------------------------------------------|---------------------------|
+| `commit.enabled` off, `commit.push` on | A receipt first, then the release tag and its aliases; a successful tag push consumes the receipt | Tags for packages whose record push completed; a rejected tag push retains its receipt for a retry |
+| `commit.enabled` on, `commit.push` on | A publication receipt, `refs/dispat/receipts/<tag>`, after a successful receipt push | Receipts for packages whose record push completed; a stop before it can leave a published package unrecorded |
+| `commit.push` off | Nothing; CI pushes | Tags in the runner's checkout only |
+
+A receipt names the planned head, any exported tag target, the package, the version and the `INTEGRITY` the package
+exported. It is not a release record, and no tag listing reads it. The next release reads the receipts under its lock,
+before anything runs, and settles each one:
+
+- **On the same commit, at the same version.** The run publishes nothing for it. If the new build exports the same
+  `INTEGRITY` as the receipt, it warns `W246` and finishes the release commit and tag. If that identity differs or is
+  absent, it refuses the record with `E198` and retains the receipt. If the receipt carried no identity, dispat tags
+  the receipt's original commit and replans, as with an earlier commit.
+- **On an earlier planned head.** Commits landed after the stopped run planned. The run writes the tag at the
+  receipt's tag target, pushes it, warns `W246`, and replans, so new commits can release as the next version. Without
+  an exported target, the tag names the planned head rather than a later release commit. A changelog entry the stopped
+  run never pushed may be missing.
+- **Its tag already exists.** In tag-only mode, local and remote peeled targets must match the receipt's tag target;
+  a matching local-only tag is pushed first. A conflicting tag retains the receipt. In release-commit mode, the final
+  branch, tags and receipt deletion are one atomic remote update. A same-checkout retry uses a local marker written
+  before the tag to prove its exact receipt and target; a local tag without that marker fails closed.
+- **On a commit the checkout's head does not reach.** It cannot affect this plan and is left alone, with a warning.
+
+In release-commit mode, finalize atomically pushes the branch and tags while deleting their receipts. An unsupported
+atomic push leaves the receipts and records untouched. A lost response is checked against the remote branch, tags and
+receipts. A prepared same-checkout retry can resume the exact atomic push, including a clean merge of remote work that
+landed meanwhile. Before any marker or tag exists, retry records the receipt's original target and replans. A fresh
+checkout also works: it rebuilds on the receipt's planned head or records the original target after the head moved.
+The stopped run's changelog and manifest edits may remain in its working tree; inspect them before unrelated edits.
+
+With `commit.push` off, the remote learns of a release only when CI pushes, and a run stopped before that push leaves
+its tags in the runner's checkout. The next run meets those publications at their destinations instead.
+
+### When the destination already holds the version
+
+A publication that no record describes, because the run stopped inside the publish command or the record was lost
+anyway, is planned again at the same version. The destination refuses the upload. dispat then asks whether what it
+holds is the artefact this run built, through the space's
+[`publish.adoptPublished`](../../configuration/spaces.md#publish) verify script, or for npm through the registry's
+`dist.integrity` when the build exported `INTEGRITY`:
+
+```console
+12:04:05 WRN the destination already held this version as this run's artefact; adopted it as published code=W196 package=ui tag=ui@0.1.0
+```
+
+The package is recorded as published and nothing is uploaded again. When the destination holds a different artefact,
+or its identity cannot be established, the package fails instead:
+
+```console
+12:04:05 ERR publish refused: the destination holds this version as another artefact code=E198 package=core
+```
+
+The run starts no further publication after `E198`, and packages waiting to publish are reported as cancelled. A
+mismatch means something other than this repository's release published that version: a hand publish, another branch,
+or a credential somebody else holds. Find out which before anything else. Do not tag the version by hand. Recover
+forward with a new version through the reviewed workflow, as the npm section below describes.
+
+A destination that does not hold the version, or that could not be asked, leaves the publish failure as it was. With
+`adoptPublished: false`, every refused upload is an ordinary publish failure.
 
 Removing a release page or Git tag does not recall artifacts already downloaded or cached by package proxies.
 After an authorized withdrawal, verify each publication destination separately and account for consumers that may
@@ -22,9 +93,11 @@ Treat npm's version and dispat's release tag as separate records. If npm accepts
 the Git tag reaches the remote, do not create the missing Git tag or npm dist-tag by hand. First inspect the exact npm
 version, the workflow revision, and the tarball integrity outside the publish script.
 
-If a workflow is interrupted after npm reports success and before Git records are written, inspect npm separately.
-A project whose publisher intentionally runs only `npm publish` leaves that decision to the workflow operator;
-rerunning the same publish command is unsafe. npm does not permit a name and version combination to be reused after
+If a workflow is interrupted after npm reports success and before Git records are written, and the build exported the
+tarball's `INTEGRITY`, the next run adopts the version when npm's `dist.integrity` matches the tarball it built
+(`W196`), and refuses it with `E198` when it does not. A build is reproducible only when the tarball's bytes are, so a
+rebuilt tarball whose integrity differs is refused. A project whose publisher runs only `npm publish` and exports no
+integrity leaves the decision to the workflow operator; rerunning the same publish command is unsafe. npm does not permit a name and version combination to be reused after
 publication, including after an unpublish. Recover forward with a new patch version through the reviewed workflow, while keeping any independent
 binary or provider pin unchanged when its bytes did not change. For example, reserve `1.10.0` and release `1.10.1`
 rather than trying to recreate `1.10.0`.

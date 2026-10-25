@@ -207,6 +207,17 @@ type AliasTag struct {
 	Force    bool
 }
 
+// AdoptPublished is a package's §19.4 policy, resolved. The zero value is
+// the default: adoption on, with identity established only by the built-in
+// npm check.
+type AdoptPublished struct {
+	// IsDisabled makes a publish the destination refuses an ordinary failure.
+	IsDisabled bool
+	// VerifyScript is the resolved commands that compare the destination's
+	// copy of the version with the artefact this run would have published.
+	VerifyScript []string
+}
+
 type Space struct {
 	Name string
 	// Repository identifies the owning repository in a composed workspace.
@@ -280,6 +291,9 @@ type Space struct {
 	// are rolled back (tracked files restored, untracked files removed) if
 	// the package fails during its version, build or publish stage.
 	RevertOnFail bool
+	// AdoptPublished is the space's CCME §19.4 policy for a publish the
+	// destination refuses because it already holds the version.
+	AdoptPublished AdoptPublished
 	// BuildScript, PublishScript and VersionScript are sequences of resolved
 	// shell commands (not script names) executed in order inside the package
 	// folder. Any of them may be empty: the corresponding pipeline stage still

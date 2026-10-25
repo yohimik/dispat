@@ -342,7 +342,7 @@ func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *wor
 	//
 	// commit.verify (default true) can switch the git check off for remotes
 	// that reject ls-remote but accept pushes.
-	if fleet == nil && a.cfg.Commit.IsPushEnabled() && a.cfg.Commit.IsVerifyEnabled() {
+	if fleet == nil && a.isRecordPushing() && a.cfg.Commit.IsVerifyEnabled() {
 		remote := a.pushRemote()
 		if err := a.git.VerifyRemote(ctx, remote); err != nil {
 			a.log.Error().Err(err).Str("remote", gitx.RedactURL(remote)).Msg("git remote verification failed")
@@ -352,8 +352,13 @@ func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *wor
 		// reason: this is another ls-remote, and commit.verify=false exists
 		// for remotes that reject one but accept pushes.
 		if err := a.checkNotBehind(ctx, remote); err != nil {
-			a.log.Error().Err(err).Str("remote", gitx.RedactURL(remote)).Msg("refusing to release")
-			return nil, err
+			isPrepared, preparedErr := a.hasPreparedRemoteReceipt(ctx, remote)
+			if preparedErr != nil || !isPrepared {
+				a.log.Error().Err(err).Str("remote", gitx.RedactURL(remote)).Msg("refusing to release")
+				return nil, errors.Join(err, preparedErr)
+			}
+			a.log.Warn().Str("remote", gitx.RedactURL(remote)).
+				Msg("the branch moved after a prepared release; receipt recovery must merge it before any new work")
 		}
 	}
 	if fleet != nil {
@@ -387,6 +392,12 @@ func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *wor
 	pl, err := a.selectedPlan(ctx, opts)
 	if err != nil {
 		return nil, err
+	}
+	if fleet == nil {
+		if pl, err = a.settleReceipts(ctx, opts, pl); err != nil {
+			a.log.Error().Err(err).Msg("publication receipts could not be settled")
+			return nil, err
+		}
 	}
 	if fleet != nil {
 		fleet.setSnapshotPlan(pl)
@@ -557,6 +568,8 @@ func (a *App) newReleaseExecutor(pl *plan.Plan, fleet *workspaceRecorder, gh *gh
 		// A single history asks whether it still holds its lock before every
 		// publication, and a distributed run adds its relevant-input check.
 		executor.BeforePublish = a.resolvePrePublishCheck(pl, nil, coordinator)
+		executor.Durable = a.newDurableRecorder()
+		executor.PendingRecord = a.receipts.pendingRecord
 		return executor
 	}
 	executor.Recorders = []release.ReleaseRecorderx{fleet}
@@ -750,12 +763,16 @@ func (a *App) checkBranchAllowed(ctx context.Context) error {
 // the remote branch it would push to. The plan was computed against the tags
 // this clone can see, so a stale checkout schedules versions another run may
 // already have released — and the push at the end would be rejected anyway,
-// after the work. A detached HEAD never reaches it: checkPushBranch refused
-// the run at its entry.
+// after the work. A run with a release commit never reaches it detached:
+// checkPushBranch refused that at its entry. One that pushes only its tags may
+// be detached, and has no branch to be behind.
 func (a *App) checkNotBehind(ctx context.Context, remote string) error {
 	branch, err := a.git.CurrentBranch(ctx)
 	if err != nil {
 		return err
+	}
+	if branch == "" {
+		return nil
 	}
 	behind, err := a.git.BehindRemote(ctx, remote, branch)
 	if err != nil {

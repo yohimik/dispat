@@ -279,8 +279,10 @@ release.
    providers' publishes. A space with a `flow.login`
    authenticates **once per space** before its first publish, failing all publishes on error, while successful login
    exports reach every package of the space. On success, the release recorders run (the changelog file, and a GitHub
-   release for packages that exported `DISPAT_EXPORT_GITHUB`) and the annotated tag is created, leaving pushing to CI
-   by default. The publish script succeeding is the point of no return: from there nothing can fail the package, and a
+   release for packages that exported `DISPAT_EXPORT_GITHUB`) and the annotated tag is created. With `commit.push`
+   on, the tag is pushed right away, or, in release-commit mode, a publication receipt stands in for it until the
+   release commit exists, so a run stopped anywhere after the publish leaves the package recorded on the remote. With
+   it off, pushing is left to CI. The publish script succeeding is the point of no return: from there nothing can fail the package, and a
    record or a tag that cannot be written is
    [reported instead](./internals/architecture.md#after-the-point-of-no-return).
 5. **announce**: runs after the publish frame, pushing the release out to update channels such as a Slack message, a

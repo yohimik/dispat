@@ -37,4 +37,8 @@ run_experiment() {
   assert "the recovery republished nothing" \
     observed after-recovery '.packages.core.registry == "1.1.0" and .packages.ui.registry == "1.0.1" and .packages.api.registry == "1.0.1" and (.packages.core.tags | keys == ["1.0.0", "1.1.0"])'
   assert "the next plan is empty" plan_is_empty status
+  assert "no publication receipt is left on origin after the refused run" \
+    observed after-refusal '.origin.receipts == []'
+  assert "no publication receipt is left on origin after the recovery" \
+    observed after-recovery '.origin.receipts == []'
 }

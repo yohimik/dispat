@@ -2239,7 +2239,8 @@ var ErrRejected = errors.New("the remote branch has commits this push does not b
 // rejectedPhrases are how git spells that refusal. The exact wording depends
 // on the version and on whether the remote ref was fetched, so the test is on
 // the phrases every spelling shares rather than on one sentence.
-var rejectedPhrases = []string{"non-fast-forward", "fetch first", "stale info", "cannot lock ref"}
+var rejectedPhrases = []string{"non-fast-forward", "fetch first", "stale info", "cannot lock ref",
+	"remote contains work that you do not"}
 
 // classifyPush turns a push failure into ErrRejected when the remote refused
 // it over a branch that moved, and leaves every other failure alone: a missing
@@ -2499,4 +2500,134 @@ func (c *LocalGitx) Push(ctx context.Context, remote string, refs []ReleaseRef) 
 		}
 	}
 	return report, err
+}
+
+// PushWithReceipts atomically publishes a release branch and its tags while
+// consuming the receipts they replace. An unsupported atomic push fails
+// closed: no tag can become visible while its receipt remains to be guessed
+// about by a later run.
+func (c *LocalGitx) PushWithReceipts(ctx context.Context, remote string, refs []ReleaseRef, receipts []Receipt) (PushReport, error) {
+	if len(receipts) == 0 {
+		return PushReport{}, errors.New("atomic release has no publication receipts")
+	}
+	if len(refs) != len(receipts) {
+		return PushReport{}, errors.New("atomic release requires one receipt per release tag")
+	}
+	seenTags := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		if seenTags[ref.Name] {
+			return PushReport{}, fmt.Errorf("atomic release repeats tag %s", ref.Name)
+		}
+		seenTags[ref.Name] = true
+	}
+	for _, receipt := range receipts {
+		if !seenTags[receipt.Tag] {
+			return PushReport{}, fmt.Errorf("atomic release deletes receipt %s without its tag", receipt.Tag)
+		}
+	}
+	branch, err := c.CurrentBranch(ctx)
+	if err != nil || branch == "" {
+		return PushReport{}, fmt.Errorf("atomic release needs a checked-out branch: %w", err)
+	}
+	head, err := c.HeadSHA(ctx)
+	if err != nil {
+		return PushReport{}, err
+	}
+	args := []string{"push", "--atomic", "--porcelain"}
+	specs := []string{head + ":refs/heads/" + branch}
+	pinned := make(map[string]string, len(refs))
+	targets := make(map[string]string, len(refs))
+	for _, ref := range refs {
+		name := "refs/tags/" + ref.Name
+		if err := ValidRefName(name); err != nil {
+			return PushReport{}, err
+		}
+		var receipt Receipt
+		isHeld := false
+		for _, candidate := range receipts {
+			if candidate.Tag == ref.Name {
+				receipt, isHeld = candidate, true
+				break
+			}
+		}
+		if !isHeld || ref.IsMoving {
+			return PushReport{}, fmt.Errorf("atomic release tag %s has no immutable receipt", ref.Name)
+		}
+		marker, isPrepared, err := c.ReadPreparedRelease(ctx, ref.Name)
+		if err != nil || !isPrepared || marker.ReceiptObject != receipt.Object {
+			return PushReport{}, fmt.Errorf("atomic release tag %s has no matching prepared target: %w", ref.Name, err)
+		}
+		object, err := c.TagObject(ctx, ref.Name)
+		if err != nil {
+			return PushReport{}, err
+		}
+		target, err := c.ResolveCommit(ctx, object)
+		if err != nil || target != marker.TagTarget {
+			return PushReport{}, fmt.Errorf("atomic release tag %s differs from its prepared target: %w", ref.Name, err)
+		}
+		pinned[ref.Name], targets[ref.Name] = object, target
+		args = append(args, "--force-with-lease="+name+":")
+		specs = append(specs, object+":"+name)
+	}
+	for _, receipt := range receipts {
+		if err := ValidRefName(receipt.Ref()); err != nil {
+			return PushReport{}, err
+		}
+		if receipt.Object == "" {
+			return PushReport{}, fmt.Errorf("receipt %s has no object to lease", receipt.Tag)
+		}
+		args = append(args, "--force-with-lease="+receipt.Ref()+":"+receipt.Object)
+		specs = append(specs, ":"+receipt.Ref())
+	}
+	args = append(args, "--", remote)
+	_, err = c.run(ctx, append(args, specs...)...)
+	if err == nil {
+		return PushReport{}, nil
+	}
+	if isComplete, verifyErr := c.atomicReleaseReached(ctx, remote, branch, head, pinned, receipts); verifyErr == nil && isComplete {
+		return PushReport{}, nil
+	}
+	var report PushReport
+	for _, ref := range refs {
+		if ref.IsMoving {
+			continue
+		}
+		stored, readErr := c.RemoteTagCommit(ctx, remote, ref.Name)
+		if readErr != nil {
+			return report, fmt.Errorf("atomic push failed and %s could not be checked: %w", ref.Name, errors.Join(err, readErr))
+		}
+		if stored == "" {
+			continue
+		}
+		if stored != targets[ref.Name] {
+			report.Conflicts = append(report.Conflicts, RefOutcome{Name: ref.Name, Result: RefAtOtherCommit, Commit: stored})
+		}
+	}
+	if len(report.Conflicts) > 0 {
+		return report, fmt.Errorf("atomic release push refused a foreign tag: %w", err)
+	}
+	return report, classifyPush(err)
+}
+
+// atomicReleaseReached resolves a lost response by reading every durable ref.
+// One missing or different ref means the caller must retain the receipts.
+func (c *LocalGitx) atomicReleaseReached(ctx context.Context, remote, branch, head string,
+	pinned map[string]string, receipts []Receipt) (bool, error) {
+	storedBranch, err := c.remoteRefObject(ctx, remote, "refs/heads/"+branch)
+	if err != nil || storedBranch != head {
+		return false, err
+	}
+	for tag, object := range pinned {
+		stored, err := c.remoteRefObject(ctx, remote, "refs/tags/"+tag)
+		if err != nil || stored != object {
+			return false, err
+		}
+	}
+	for _, receipt := range receipts {
+		stored, err := c.remoteRefObject(ctx, remote, receipt.Ref())
+		if err != nil || stored != "" {
+			return false, err
+		}
+	}
+	return true, nil
 }

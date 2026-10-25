@@ -117,7 +117,7 @@ func (a *App) releaseStores(fleet *workspaceRecorder) []releaseStore {
 func comparingStores(stores []releaseStore) []releaseStore {
 	comparing := make([]releaseStore, 0, len(stores))
 	for _, store := range stores {
-		if !store.commit.IsPushEnabled() {
+		if !store.isPushing() {
 			store.log.Debug().Msg("release records are not compared: this run pushes nothing, so its own repository is its store")
 			continue
 		}
@@ -133,6 +133,13 @@ func comparingStores(stores []releaseStore) []releaseStore {
 		comparing = append(comparing, store)
 	}
 	return comparing
+}
+
+// isPushing reports whether this store receives the run's release records: a
+// release commit's push, or, in a single history with no release commit, each
+// tag pushed as it is written.
+func (s releaseStore) isPushing() bool {
+	return s.commit.IsPushEnabled() || (s.repository == "" && s.commit.IsTagPushEnabled())
 }
 
 // packagesByRepository groups the workspace's packages by the repository whose

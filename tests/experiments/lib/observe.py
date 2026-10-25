@@ -29,6 +29,9 @@ Per package the three answers are joined into one state:
   dangling     the tag is on origin but outside origin/main's ancestry
   unrecorded   the registry serves a version no tag names
   baseline     nothing beyond the fixture's baseline version
+
+The origin's publication receipts, the refs dispat pushes in place of a
+release tag that waits for the release commit, are listed beside its tags.
 """
 import json
 import os
@@ -98,7 +101,8 @@ def observer(repo):
     origin = repo + "-origin.git"
     if os.path.isdir(origin):
         git(path, "fetch", "-q", "--no-tags", origin,
-            f"+refs/heads/*:{ORIGIN_NS}/heads/*", f"+refs/tags/*:{ORIGIN_NS}/tags/*")
+            f"+refs/heads/*:{ORIGIN_NS}/heads/*", f"+refs/tags/*:{ORIGIN_NS}/tags/*",
+            f"+refs/dispat/receipts/*:{ORIGIN_NS}/receipts/*")
     git(path, "fetch", "-q", "--no-tags", os.path.join(repo, ".git"),
         f"+refs/heads/*:{CLONE_NS}/heads/*", f"+refs/tags/*:{CLONE_NS}/tags/*",
         f"+HEAD:{CLONE_NS}/HEAD")
@@ -230,7 +234,11 @@ def main():
                   "dirty": bool(git(repo, "status", "--porcelain"))},
         "origin": {"main": commit(obs, remote_main),
                    "heads": {h: s[:12] for h, s in sorted(origin_heads.items())},
-                   "tags": {t: s[:12] for t, s in sorted(origin_tags.items())}},
+                   "tags": {t: s[:12] for t, s in sorted(origin_tags.items())},
+                   # dispat's publication receipts: a publication whose release
+                   # tag waits for the release commit. A finished release
+                   # leaves none.
+                   "receipts": sorted(refs(obs, f"{ORIGIN_NS}/receipts"))},
         "marks": {},
         "packages": packages,
     }

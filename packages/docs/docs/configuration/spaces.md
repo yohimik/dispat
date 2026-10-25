@@ -20,6 +20,7 @@ every package.
 | `path`                  | string or `[string, ...]` | yes        | One folder, or a list of folders, relative to the root, `.` included. Every direct sub-folder of every listed folder is a package named after it (hidden folders are skipped, and [`.dispatexclude`](#dispatexclude) excludes more). Package names must be unique across all spaces and across the folders of one space. Listed folders must not repeat or contain one another, so a space rooted at the repository lists nothing beside it. The first folder is the space's primary one. The [login script](#flowlogin) runs there, and [`dispat exec --in space:`](../cli/exec.md) resolves there.                                                    |
 | `isBuildWaitingPublish` | bool or object           | no (false) | What the consumers of this space's packages wait for, and what a failed package of this space does to them. `false` (the default) lets a consumer build as soon as the provider is built; `true` holds its version and build stages until the provider is *published*. The object form adds a third relation and lets the failure rule be stated separately. See [The provider relation](#the-provider-relation). Under all three a consumer's own publish waits for the provider's publish. |
 | `revertOnFail`          | bool                     | no (false) | When `true`, dispat rolls back all local changes inside the package folder if the package fails at any stage, or is skipped after its version stage already modified files. Tracked files are restored from HEAD, and untracked files are removed. With [release commits](./records.md#commit) enabled, a skipped package's folder is restored this way whether or not the setting is on, unless the folder is the repository root or holds another package's folder. A failed package keeps this setting's rule, except that its tracked files are restored when the release commit's shared `commit.include` paths are re-synchronized. See [What a failed run leaves in the working tree](../reference/releasing/recovery.md#what-a-failed-run-leaves-in-the-working-tree). |
+| `publish`               | object                   | no         | What a release does beyond running the publish stage: whether a version the destination already holds is adopted as this release, and how its identity is checked. See [`publish`](#publish). |
 | `flow`                  | object                   | no         | What the space runs at which stage. See the table below.                                                                                                                                                                                                                                                                                                                                |
 | `tagFormat`             | string                   | no         | Overrides the repository-wide [`tagFormat`](./versions.md#tagformat) for this space.                                                                                                                                                                                                                                                                                                    |
 | `versioning`            | string                   | no         | How much of the version the space's packages hold in common. Valid values are `independent` (default), `fixed`, `fixedSparse`, `fixedMajorMinor`, `fixedMajorMinorSparse`, `fixedMajor`, `fixedMajorSparse` or `none`. See [`versioning`](#versioning). This is mutually exclusive with `versionGroup`.                                                                                                                  |
@@ -184,6 +185,91 @@ is `onFail` / `onSkip`) plus the specifics:
 Neither runs for a package that published. That job belongs to `flow.postPublish` and the announce frame. The run-level
 [run outcome listing](../reference/environment.md#run-outcome-data) carries the same information for every package at
 once.
+
+## `publish`
+
+A publication and its release tag are two writes to two systems, and a run can stop between them. The next run plans
+the same version, and a registry that keeps every version it accepted refuses the upload. Without a rule, every run
+after that fails the same way. `publish.adoptPublished` is that rule.
+
+When a package's publish command fails, dispat asks whether the destination already holds the planned version, and
+whether what it holds is the artefact this run would have published:
+
+- **It is this run's artefact.** The version is adopted: dispat warns `W196`, records the package as published and
+  writes its tag. Nothing is uploaded again.
+- **It is another artefact, or its identity cannot be established.** The package fails with `E198`, its tag is not
+  written, and the run starts no further publication. Tagging it would enrol an artefact this repository may not have
+  produced. Packages already published keep their records.
+- **The destination does not hold the version, or cannot be asked.** The publish failure stands as it is.
+
+| Value | Effect |
+|-------|--------|
+| absent or `true` | Adoption is on. With no verify script, only the built-in npm check below can establish identity. |
+| `false` | Adoption is off: a refused publish is an ordinary publish failure. Use it for a destination that cannot answer the question. |
+| `{verify: <script> or [<script>, ...]}` | The named scripts answer the question. |
+| `{enabled: false, verify: ...}` | Off, with the scripts named. |
+
+A level states `adoptPublished` whole, so a package can turn adoption off for itself with `publish: {adoptPublished:
+false}`.
+
+### The verify script
+
+A verify script runs in the package folder with the environment the publish had: every `DISPAT_*` variable, the
+`DISPAT_OUTPUT_*` values the build and the publish exported, and `DISPAT_STAGE=adoptPublished`. Its exit status is the
+answer:
+
+| Exit | Means |
+|------|-------|
+| `0` | The destination holds this version, and it is this run's artefact. |
+| `3` | The destination does not hold this version. |
+| anything else | The destination holds this version, and it is another artefact or its identity cannot be established. |
+
+Make the script compare a content identity, never a name. A digest the build exported is the usual one:
+
+```yaml
+spaces:
+  images:
+    path: images
+    scripts:
+      verify-image: |
+        set -eu
+        held=$(crane digest "$IMAGE:$DISPAT_NEW_VERSION") || exit 3
+        [ "$held" = "$DISPAT_OUTPUT_INTEGRITY" ]
+    publish:
+      adoptPublished:
+        verify: verify-image
+```
+
+This example answers `3` for every failure of `crane digest`. A script that can tell a missing image from an
+unreachable registry should answer any other non-zero exit for the second, which refuses rather than reports an
+ordinary failure.
+
+### The built-in npm check
+
+With no verify script, dispat checks an npm package itself when two things hold: the package's scripts exported an
+`INTEGRITY` value in npm's Subresource Integrity spelling (`sha512-…`), and the folder's `package.json` names the
+package. It runs `npm view <name>@<version> dist.integrity` in the package folder, so npm's own configuration chooses
+the registry and the credentials, and compares the answer with the exported value. An explicit `E404` means the
+version is not held. A successful empty answer cannot prove absence or identity and is refused with `E198`. An npm
+that cannot reach the registry leaves the publish failure as it is, with a warning.
+
+Export the integrity from the tarball the publish uploads, so the value is the identity of the bytes that left:
+
+```yaml
+scripts:
+  build: |
+    set -eu
+    npm pack --json > pack.json
+    printf 'INTEGRITY=%s\n' "$(jq -r '.[0].integrity' pack.json)" >> "$DISPAT_OUTPUT"
+  publish: npm publish "$(jq -r '.[0].filename' pack.json)"
+```
+
+Export `INTEGRITY` from build or another repeatable stage before publish when receipt recovery is needed. A retry of
+a pending receipt skips the publish script, so an identity exported only by that script cannot be recomputed for the
+same-head receipt check and the record is refused rather than guessed.
+
+See [A run stopped between a publication and its record](../reference/releasing/recovery.md#a-run-stopped-between-a-publication-and-its-record)
+for when this check runs and what it recovers.
 
 ## The provider relation
 

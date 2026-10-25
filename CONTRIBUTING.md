@@ -160,8 +160,9 @@ How a level combines with the one below it is a property of the setting, and eac
 - **Merged entry by entry.** `flow`, `scripts` and `env`. A level replaces the entries it names and keeps the rest.
 - **Replaced whole.** `autoVersion`, `aliasTags`, `webhooks`, `buildOutputs`, `buildPlatforms`, `runOnly` and `manifestNames`. Their empty fields carry meaning
   against their siblings, so a partial overlay cannot express what they mean. An empty list is how a level opts out.
-- **Overlaid field by field.** `changelog` and `github`, including their nested `authors` object. Their `include` and
-  `exclude` lists still replace whole, because adding to an inherited list could never take a pattern away again.
+- **Overlaid field by field.** `changelog` and `github`, including their nested `authors` object, and `publish`. Their
+  `include` and `exclude` lists still replace whole, because adding to an inherited list could never take a pattern
+  away again, and so does `publish.adoptPublished`.
 - **Merged, never overridden.** `dependencies`. Every declaration at every level adds to one graph.
 - **Concatenated.** `ignore`. Later levels add patterns, and a `!` pattern re-includes what an earlier level excluded.
 

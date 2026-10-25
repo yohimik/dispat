@@ -5,14 +5,28 @@
 #
 # A colleague pushes to origin/main while dispat is releasing. The push lands
 # right before dispat's own push of the release commit, after every package
-# has published, so the release exists on the registry and only in this
-# clone when the branch refuses it.
+# has published, so the release exists on the registry, in this clone, and as
+# one publication receipt per package on origin when the branch refuses it.
 
 # The packages a correct next plan holds once the colleague's commit is on
 # main and this run's release is recorded. dispat moves a dependent when a
 # provider's change reaches it, so the colleague's patch of core reaches
 # nothing beyond core, and the clean scenario's patch of api is api's alone.
 # Sorted, space-ended, the way the transcript renders a plan's package list.
+# receipts_before_branch: every package the run published pushed its receipt
+# to origin before the required atomic branch/tag push, read from the git calls
+# the run made. Receipt creation has ref:ref; atomic finalization has a pinned
+# object:refs/heads/branch and deletes receipts with :ref in the same call.
+# A deletion is not another receipt creation.
+receipts_before_branch() {
+  jq -se '
+    [.[] | select(.kind == "call") | .args | select(any(.[]; . == "push"))] as $pushes
+    | [$pushes | to_entries[] | select(.value | any(.[]; test("^refs/dispat/receipts/[^:]+:refs/dispat/receipts/[^:]+$"))) | .key] as $receipts
+    | [$pushes | to_entries[] | select(.value | any(.[]; test("^[0-9a-fA-F]{40,64}:refs/heads/[^:]+$")) and any(.[]; test("^:refs/dispat/receipts/[^:]+$"))) | .key] as $branch
+    | ($receipts | length) == 4 and ($branch | length) > 0 and ($receipts | max) < ($branch | min)' \
+    "$OUT/git-calls.log" > /dev/null
+}
+
 next_plan() {
   case "$SCENARIO" in
     conflict) echo 'core ' ;;
@@ -68,6 +82,9 @@ run_experiment() {
     _ "$RELEASE"
   assert "the clone is level with origin, nothing in progress" \
     observed after '.local.aheadOfOrigin == 0 and .local.behindOrigin == 0 and .local.mergeInProgress == false'
+  assert "each published package's receipt reached origin before the branch push" receipts_before_branch
+  assert "no publication receipt is left on origin once the tags are there" \
+    observed after '.origin.receipts == []'
   assert "the release lock was returned" \
     bash -c '[ "$(git ls-remote --tags origin dispat-release-lock | wc -l)" = 0 ]'
   case "$SCENARIO" in
