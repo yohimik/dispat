@@ -69,12 +69,7 @@ func resolveFirstTaskWaits(relation model.StageRelation, provider string) []task
 // it orders.
 type stageGaps struct {
 	stageEdges
-	// isCarriedThrough is the question this ordering asks of every hop: does it
-	// travel through a provider under this relation.
-	isCarriedThrough func(model.StageRelation) bool
-	// stage is the task of a changed provider the ordering waits for, and
-	// passThrough the kind of the gaps' nodes.
-	stage, passThrough taskKind
+	gapKinds
 	// gaps lists the packages the ordering passes through, in the order the
 	// consumers, in name order, first reach them.
 	gaps  []string
@@ -106,7 +101,11 @@ func newPublishGaps(edges stageEdges, consumers []string) *stageGaps {
 
 // gapKinds is what one ordering asks of a hop and which tasks it orders.
 type gapKinds struct {
-	isCarriedThrough   func(model.StageRelation) bool
+	// isCarriedThrough is the question the ordering asks of every hop: does
+	// it travel through a provider under this relation.
+	isCarriedThrough func(model.StageRelation) bool
+	// stage is the task of a changed provider the ordering waits for, and
+	// passThrough the kind of the gaps' nodes.
 	stage, passThrough taskKind
 }
 
@@ -119,12 +118,10 @@ var (
 // every gap once.
 func newStageGaps(edges stageEdges, consumers []string, kinds gapKinds) *stageGaps {
 	g := &stageGaps{
-		stageEdges:       edges,
-		isCarriedThrough: kinds.isCarriedThrough,
-		stage:            kinds.stage,
-		passThrough:      kinds.passThrough,
-		isGap:            make(map[string]bool),
-		firstReached:     make(map[string][]string),
+		stageEdges:   edges,
+		gapKinds:     kinds,
+		isGap:        make(map[string]bool),
+		firstReached: make(map[string][]string),
 	}
 	isReached := make(map[string]bool)
 	for _, consumer := range consumers {
