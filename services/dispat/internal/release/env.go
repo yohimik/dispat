@@ -314,29 +314,35 @@ func workspaceVersions(p *plan.Plan) []workspaceVersion {
 	return out
 }
 
-// SettledEnvRequest names one package script that runs once the task graph
-// has settled, and what the run came to.
-type SettledEnvRequest struct {
-	Plan    *plan.Plan
-	Results map[string]*Result
-	Package string
-	// Stage is what DISPAT_STAGE carries.
-	Stage string
+// SettledEnvs builds the DISPAT_* environments of the package scripts that
+// run after the task graph has settled, such as the closing phase's second
+// run of a published package's syncLock scripts. Each carries every variable
+// a stage script receives, and its listings read what the run published
+// rather than what it planned: a package that did not publish is listed at
+// its previous version with _RELEASING=false, and a provider that did not
+// publish is not among the updates. A script regenerating a file shared by
+// the whole workspace from it records only versions that exist.
+type SettledEnvs struct {
+	plan    *plan.Plan
+	results map[string]*Result
+	// workspace is rendered once because it names no package: every script
+	// of the closing phase reads the same listing.
+	workspace []string
 }
 
-// SettledEnv builds the DISPAT_* environment of a package script that runs
-// after the task graph has settled, such as the closing phase's second run of
-// a published package's syncLock scripts. It carries every variable a stage
-// script receives, and its listings read what the run published rather than
-// what it planned: a package that did not publish is listed at its previous
-// version with _RELEASING=false, and a provider that did not publish is not
-// among the updates. A script regenerating a file shared by the whole
-// workspace from it records only versions that exist.
-func SettledEnv(request SettledEnvRequest) []string {
+// NewSettledEnvs renders the settled workspace listing of a run that has
+// finished with results.
+func NewSettledEnvs(p *plan.Plan, results map[string]*Result) *SettledEnvs {
 	// The listing's key collisions were warned about when the run built it.
-	wsVars := renderWorkspaceEnv(request.Plan, settledWorkspaceVersions(request.Plan, request.Results), zerolog.Nop())
-	updates := settledProviderUpdates(request.Package, request.Plan, request.Results)
-	return packageEnv(request.Plan, request.Package, wsVars, updates, request.Stage)
+	workspace := renderWorkspaceEnv(p, settledWorkspaceVersions(p, results), zerolog.Nop())
+	return &SettledEnvs{plan: p, results: results, workspace: workspace}
+}
+
+// Render builds the environment of one package's script; stage is what
+// DISPAT_STAGE carries.
+func (s *SettledEnvs) Render(pkg, stage string) []string {
+	updates := settledProviderUpdates(pkg, s.plan, s.results)
+	return packageEnv(s.plan, pkg, s.workspace, updates, stage)
 }
 
 // settledWorkspaceVersions is the workspace listing once the run has settled:

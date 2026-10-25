@@ -22,8 +22,9 @@ func BenchmarkSettledEnv(b *testing.B) {
 	p := mkPlan(planSpec{Names: names})
 	b.ReportAllocs()
 	for b.Loop() {
+		settled := NewSettledEnvs(p, results)
 		for _, name := range names {
-			SettledEnv(SettledEnvRequest{Plan: p, Results: results, Package: name, Stage: "syncLock"})
+			settled.Render(name, "syncLock")
 		}
 	}
 }

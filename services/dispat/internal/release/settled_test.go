@@ -16,12 +16,12 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
-// TestSettledEnvNamesOnlyWhatPublished: once the run has settled, a package
+// TestSettledEnvsNameOnlyWhatPublished: once the run has settled, a package
 // that did not publish, whether it failed or was cancelled, is listed at the
 // version it had before the run with _RELEASING=false and is no provider
 // update, while what published keeps its new version. The stage and the
 // package's own release variables are the ordinary ones.
-func TestSettledEnvNamesOnlyWhatPublished(t *testing.T) {
+func TestSettledEnvsNameOnlyWhatPublished(t *testing.T) {
 	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a", "c", "d"}}, Names: []string{"a", "b", "c", "d"}})
 	results := map[string]*Result{
 		"a": {Name: "a", Status: StatusFailed},
@@ -30,7 +30,7 @@ func TestSettledEnvNamesOnlyWhatPublished(t *testing.T) {
 		"d": {Name: "d", Status: StatusPublished},
 	}
 
-	env := SettledEnv(SettledEnvRequest{Plan: p, Results: results, Package: "b", Stage: "syncLock"})
+	env := NewSettledEnvs(p, results).Render("b", "syncLock")
 
 	assert.Equal(t, "syncLock", envValue(t, env, "DISPAT_STAGE"))
 	assert.Equal(t, "b", envValue(t, env, plan.PackageEnvVar))

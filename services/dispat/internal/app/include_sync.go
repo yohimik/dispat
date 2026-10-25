@@ -114,7 +114,7 @@ func (a *App) resyncIncludes(ctx, recordCtx context.Context, closing closingReco
 // rerunSyncLocks runs the syncLock scripts of every published package whose
 // syncLock stage ran commands during the run, one package at a time in plan
 // order, which keeps within any syncLock budget. Each runs with the settled
-// environment (release.SettledEnv). It answers the first failure, and the
+// environment (release.SettledEnvs). It answers the first failure, and the
 // run's cancellation before it starts a package.
 func (a *App) rerunSyncLocks(ctx context.Context, closing closingRecord) error {
 	names := resolveSyncLockRuns(closing)
@@ -124,16 +124,15 @@ func (a *App) rerunSyncLocks(ctx context.Context, closing closingRecord) error {
 		return nil
 	}
 	runner := a.packageRunner()
+	settled := release.NewSettledEnvs(closing.plan, closing.results)
 	for _, name := range names {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("re-running syncLock scripts: %w", err)
 		}
 		rel := closing.plan.Releases[name]
 		log := a.log.With().Str("package", name).Str("stage", "syncLock").Logger()
-		env := release.SettledEnv(release.SettledEnvRequest{Plan: closing.plan, Results: closing.results,
-			Package: name, Stage: "syncLock"})
 		seq := release.Sequence{Runner: runner, Dir: rel.Pkg.Dir, Stage: "syncLock",
-			Commands: rel.Pkg.Space.AutoVersion.SyncLock, Env: env, Log: log, FailFast: true}
+			Commands: rel.Pkg.Space.AutoVersion.SyncLock, Env: settled.Render(name, "syncLock"), Log: log, FailFast: true}
 		if err := seq.Run(ctx); err != nil {
 			return fmt.Errorf("re-running the syncLock scripts of %s: %w", name, err)
 		}
