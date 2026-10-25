@@ -1295,7 +1295,10 @@ type computation struct {
 	// windowCommits, controlCommits and authorCandidates are the composed
 	// window attribution's sets of ranks (windowCandidates): each shared
 	// window's commits by its key, the control repository's commits, and the
-	// scratch one attribution merges them into.
+	// scratch one attribution merges them into. authorCandidates is the one
+	// commitSet that is written after it is built: every attribution clears
+	// and refills it, so it is never handed to anything that keeps it.
+	// dropAuthorScratch releases all three once the releases are attributed.
 	windowCommits    map[string]*commitSet
 	controlCommits   *commitSet
 	authorCandidates commitSet

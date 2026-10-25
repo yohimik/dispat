@@ -181,6 +181,20 @@ func (cp *computation) collectReleaseAuthors() {
 				Int("fresh", len(rel.FreshWindowAuthors)).Msg("release authors collected")
 		}
 	}
+	cp.dropAuthorScratch()
+}
+
+// dropAuthorScratch releases what the attribution keeps from one window to
+// the next. Nothing reads it once every release is attributed, and the rank
+// sets alone are a bitset of the union per shared window, which would
+// otherwise stay live for the rest of the plan.
+func (cp *computation) dropAuthorScratch() {
+	cp.windowCommits = nil
+	cp.controlCommits = nil
+	cp.authorCandidates = commitSet{}
+	cp.authorMarks = authorMarks{}
+	cp.authorIDs = nil
+	cp.commitAuthors = nil
 }
 
 // collectWindowAuthors aggregates the authors of every commit in a package's

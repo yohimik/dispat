@@ -511,3 +511,24 @@ func TestAuthorMarksSurviveAWrappedGeneration(t *testing.T) {
 	assert.True(t, marks.markListed(&marks.fresh, 1))
 	assert.False(t, marks.markListed(&marks.window, 2))
 }
+
+// TestReleaseAuthorsDropTheirScratch: the rank sets, the merge scratch and
+// the author ids serve the attribution alone, and nothing keeps them live
+// once every release is attributed.
+func TestReleaseAuthorsDropTheirScratch(t *testing.T) {
+	cp := &computation{
+		windowCommits:    map[string]*commitSet{"w": {bits: []uint64{1}, size: 1}},
+		controlCommits:   &commitSet{bits: []uint64{2}, size: 1},
+		authorCandidates: commitSet{bits: []uint64{3}, size: 2},
+		authorMarks:      authorMarks{window: []uint32{1}, fresh: []uint32{1}, generation: 1},
+		authorIDs:        map[string]int32{"ada": 0},
+		commitAuthors:    []int32{1},
+	}
+	cp.collectReleaseAuthors()
+	assert.Nil(t, cp.windowCommits)
+	assert.Nil(t, cp.controlCommits)
+	assert.Zero(t, cp.authorCandidates)
+	assert.Zero(t, cp.authorMarks)
+	assert.Nil(t, cp.authorIDs)
+	assert.Nil(t, cp.commitAuthors)
+}
