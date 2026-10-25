@@ -22,6 +22,21 @@ publishes nothing and exits with `0`.
 The command covers packages one at a time. A repository has one index and one HEAD, and a clear release order is worth
 reading.
 
+## When a release cannot be created
+
+A GitHub release follows a publication: by the time `dispat github` runs, `dispat commit --tag --push` has already
+pushed the tag that records the version. So a release that cannot be created does not fail the command. dispat logs
+it as an error under `E222`, closes with a warning that names every package whose release is missing, and exits `0`.
+The stage script that called the command succeeds, the package stays published, and its consumers release.
+
+Create what is missing afterwards with `dispat github --since all`, which skips every release that already exists
+(`W224`); [repair GitHub metadata](../reference/releasing/recovery.md#repair-github-metadata-after-the-package-was-recorded)
+describes the repair job. Pass `--ignore-errors=false` when a missing release must fail the command instead.
+
+The flag covers a release that could not be created, for whatever reason: a refused request, a token that cannot be
+read, or a verification GitHub rejected. A flag value, a selection or a plan that refuses the command before anything
+is written, and an interrupted command, still exit non-zero.
+
 ## The shape of the body
 
 The body is rendered exactly as the release stage's recorder renders it, so a release created from a stage script and
@@ -100,7 +115,15 @@ selected one; see [the run command](./run.md).
 
 The default is `skip`. Decide what a failed package does to its dependents for every sweeping command (`run`,
 `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Set this to `skip` (transitive) or
-`continue`. The command exits `1` on any failure regardless of this setting.
+`continue`. This setting decides only what a failure does to the dependents. For `github` and `changelog`,
+`--ignore-errors` below decides whether a failure exits `1`; every other sweeping command exits `1` on any failure.
+
+### `--ignore-errors`
+
+The default is `true`. Exit `0` when a GitHub release could not be created, after logging it as an error (`E222`) and
+naming it in the closing summary; see [When a release cannot be created](#when-a-release-cannot-be-created).
+`--ignore-errors=false` exits `1` instead. `dispat changelog` takes the same flag. `dispat commit` does not: a tag it
+could not create or push always fails it.
 
 ### `--owner`, `--repo`, `--api-url`, `--token-env`
 

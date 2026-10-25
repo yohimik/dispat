@@ -402,6 +402,14 @@ immutable upload into a failed package leg before dispat can write its native re
 succeeds, return success immediately so dispat can write its native release records. Forward the command's stdout and
 stderr at their proper severity, and propagate a nonzero publication exit.
 
+dispat's record commands may follow the publication command in the same stage, because they cannot fail it by
+default. `dispat changelog` and `dispat github` exit 0 when they cannot write their record: they log it as an error
+under `E222` and close with a warning naming every package whose record is missing, which a later
+`dispat github --since all` or `dispat changelog --since all` writes. Do not pass `--ignore-errors=false` after a
+publication. `dispat commit --tag --push` is the one record that still exits 1, because a version without its tag is
+released again by the next run. Run `dispat changelog` before it when the entry belongs in the tagged commit, and
+`dispat github` after it.
+
 The publish stage is irreversible: once the publication command succeeds, the version exists at its destination
 whatever happens next. Some registries also answer an upload before the version can be read back. npm reports a
 successful publish while the new version can still be missing from the registry's metadata and from `npm view` for a

@@ -25,6 +25,10 @@ type ChangelogOptions struct {
 	ReleaseName string
 	// Authors overrides the changelog.authors object, field by field.
 	Authors AuthorOptions
+	// IgnoreErrors keeps an entry that could not be written from failing the
+	// command: it is logged with E222 and named in the summary, and the
+	// command still succeeds.
+	IgnoreErrors bool
 }
 
 // AuthorOptions are the authors entry-format overrides the `changelog` and
@@ -96,7 +100,7 @@ func (a *App) Changelog(ctx context.Context, opts ChangelogOptions) error {
 		return err
 	}
 	_, err = a.sweepStep(ctx, pl, covered, &changelogWork{app: a, opts: opts}, opts.OnError, "changelog")
-	return err
+	return a.forgiveRecordFailures(err, opts.IgnoreErrors, "changelog")
 }
 
 // changelogWork is `dispat changelog`'s share of a sweep: one package's
@@ -143,7 +147,7 @@ func (w *changelogWork) resolve(_ context.Context, rel *plan.Release) (task, err
 	return func(ctx context.Context) error {
 		written, err := fw.RecordEntry(ctx, rel)
 		if err != nil {
-			return fmt.Errorf("changelog write failed: %w", err)
+			return config.WithDiagnostic(plan.CodeRecordFailed, fmt.Errorf("changelog write failed: %w", err))
 		}
 		if written { // RecordEntry logged the W226 skip itself otherwise
 			w.app.log.Info().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).

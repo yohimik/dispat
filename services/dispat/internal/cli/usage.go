@@ -227,10 +227,15 @@ JSON event per diagnostic.`,
 		long: `Write each covered package's pending changelog entry now, so a custom
 flow can land it inside the release commit instead of after it. An entry
 the file already carries is skipped (W226), which is also what makes the
-release stage skip the entries written here.`,
+release stage skip the entries written here.
+
+An entry that could not be written is logged as an error (E222) and named
+in the summary, and the command still exits 0, so a flow never reports a
+published package as failed over its changelog. --ignore-errors=false exits
+1 instead.`,
 		flags: append([]string{"file", "file-title", "date-format", "release-name",
 			"authors", "authors-format", "authors-commits", "authors-include",
-			"authors-exclude", "authors-title"}, windowFlags...),
+			"authors-exclude", "authors-title", "ignore-errors"}, windowFlags...),
 	},
 	{
 		name:  cmdAutoversion,
@@ -321,10 +326,15 @@ github.allPackages is the configuration-level opt-in for everything else.
 --draft overrides github.draft: the release is created for a human to
 publish, and carries no tag ref until they do, so nothing that resolves a
 release by its tag sees it meanwhile. --draft=false publishes straight
-away over a configured draft.`,
+away over a configured draft.
+
+A release that could not be created is logged as an error (E222) and named
+in the summary, and the command still exits 0: the tag dispat commit pushed
+is what records the version, so consumers go on. --ignore-errors=false exits
+1 instead, and dispat github --since all creates what is missing later.`,
 		flags: append([]string{"owner", "repo", "api-url", "token-env", "target", "draft", "release-name",
 			"authors", "authors-format", "authors-commits", "authors-include",
-			"authors-exclude", "authors-title"}, windowFlags...),
+			"authors-exclude", "authors-title", "ignore-errors"}, windowFlags...),
 	},
 	{
 		name:  cmdTrigger,

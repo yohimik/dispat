@@ -247,6 +247,9 @@ var foreignFlagHints = map[foreignFlag]string{
 	// own way of asking for one version is --release.
 	{cmd: cmdInstall, flag: "tag"}:    "; pin a version with --release",
 	{cmd: cmdSelfUpdate, flag: "tag"}: "; pin a version with --release",
+	// A tag is what records the version, so commit has no way to pass over
+	// one it could not create or push.
+	{cmd: cmdCommit, flag: "ignore-errors"}: "; a tag commit could not create or push always fails it",
 }
 
 // validateFlags is everything the flags alone decide, before any config is
@@ -1253,7 +1256,8 @@ func (r *runner) dispatchStep(ctx context.Context, a *app.App, cfg *config.File,
 	case cmdChangelog:
 		if a.Changelog(ctx, app.ChangelogOptions{Window: window, OnError: *o.onError,
 			File: *o.clFile, FileTitle: *o.clFileTitle, DateFormat: *o.clDateFormat,
-			ReleaseName: *o.releaseName, Authors: o.authorOptions()}) != nil {
+			ReleaseName: *o.releaseName, Authors: o.authorOptions(),
+			IgnoreErrors: *o.ignoreErrors}) != nil {
 			return 1
 		}
 	case cmdAutoversion:
@@ -1298,7 +1302,8 @@ func (r *runner) dispatchStep(ctx context.Context, a *app.App, cfg *config.File,
 		ghOpts := app.GitHubOptions{Window: window, OnError: *o.onError,
 			Owner: *o.ghOwner, Repo: *o.ghRepo,
 			APIURL: *o.ghAPIURL, TokenEnv: *o.ghTokenEnv, Target: *o.ghTarget,
-			ReleaseName: *o.releaseName, Authors: o.authorOptions()}
+			ReleaseName: *o.releaseName, Authors: o.authorOptions(),
+			IgnoreErrors: *o.ignoreErrors}
 		// Only a flag actually passed overrides the configured policy: the
 		// default of a bool flag says nothing about what the configuration
 		// holds, and --draft=false has to be able to mean it.

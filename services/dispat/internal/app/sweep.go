@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/yohimik/dispat/services/dispat/internal/graph"
@@ -56,10 +57,12 @@ type sweepOptions struct {
 // which is what tells a sweep that covered only packages with nothing to do
 // apart from one that genuinely did nothing. SkippedBy names, for every package
 // the cascade skipped, the provider that blocked it, which is what a sweep's
-// distributed summary lists beside the tasks that ran.
+// distributed summary lists beside the tasks that ran. FailedPackages names the
+// packages that failed, sorted, so a summary can say what is left to repair.
 type sweepReport struct {
 	Ran, Failed, Skipped, Resolved int
 	SkippedBy                      map[string]string
+	FailedPackages                 []string
 }
 
 // outcome is one package's terminal state within a sweep, and the provider
@@ -195,12 +198,14 @@ func (s *sweep) report() sweepReport {
 		switch {
 		case res.failed:
 			rep.Failed++
+			rep.FailedPackages = append(rep.FailedPackages, pkg)
 		case res.skipped:
 			rep.Skipped++
 		case res.ran:
 			rep.Ran++
 		}
 	}
+	slices.Sort(rep.FailedPackages)
 	return rep
 }
 
@@ -247,7 +252,7 @@ func (s *sweep) execute(ctx context.Context, pkg string) {
 	t, err := s.work.resolve(ctx, s.covered[pkg])
 	if err != nil {
 		res.failed = true
-		log.Error().Err(err).Msg("package failed")
+		annotateError(log.Error().Err(err), err).Msg("package failed")
 		return
 	}
 	res.defined = t != nil

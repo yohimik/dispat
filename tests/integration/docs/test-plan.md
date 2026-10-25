@@ -264,7 +264,8 @@ integration suite itself.
 19. **The standalone step commands** (`standalone_test.go`): `dispat changelog`, `dispat autoversion`, `dispat commit`
     and `dispat github` through the binary: the shared package selection, changelog idempotence (W226), the in-flow
     scenario where nested step commands land the changelog inside the tagged commit, the `--tag`/`--push` committer
-    identity and remote delivery, and the window flags the steps share with `dispat run`.
+    identity and remote delivery, the window flags the steps share with `dispat run`, and the record commands exiting 0
+    over a record they could not write while the tag still fails `dispat commit` (`record_ignore_errors_test.go`).
 20. **The `--package` / `--space` / `--group` selection** (`filter_test.go`): the one selection every package command
     shares: the term spellings and their globs, the invocation folder standing in for the terms nobody typed, the
     filter narrowing a window and never widening it, and partial releases, where publish order withholds a consumer
@@ -537,6 +538,7 @@ tests/integration/
   run_test.go               goal 18
   selection_depth_test.go   goal 18
   standalone_test.go        goal 19
+  record_ignore_errors_test.go goal 19
   filter_test.go            goal 20
   if_test.go                goal 21 (dispat if)
   if_changed_test.go        goal 21 (dispat if --changed)
@@ -1287,7 +1289,7 @@ release moves only because a provider's bump travelled down an edge the space de
 | Test | Claim proven |
 |------|--------------|
 | `TestDraftReleasesWaitForAHumanToPublish` | `github.draft` creates the release as a draft, and every later pass over it skips (W224) instead of leaving a second draft: the by-tag lookup cannot see a draft, so the skip is the release listing's answer, end to end through the binary. |
-| `TestDraftSearchReadsTheListingItCanTrust` | The draft search walks the listing page by page within a bound: a draft on the second page is found and skipped (W224) rather than created again, a listing that does not parse fails the record with exit 1 instead of reading as "no draft yet", and a listing that carries no draft in the three searched pages says so and creates the release once. |
+| `TestDraftSearchReadsTheListingItCanTrust` | The draft search walks the listing page by page within a bound: a draft on the second page is found and skipped (W224) rather than created again, a listing that does not parse fails the record with exit 1 under `--ignore-errors=false` instead of reading as "no draft yet", and a listing that carries no draft in the three searched pages says so and creates the release once. |
 | `TestDraftFlagHoldsBackAndTheFlipAbandonsTheDraft` | `--draft` drafts a release the configuration would have published; turning drafting off again creates the published release beside the stale draft rather than searching for it, which is what keeps the calls of everybody who does not draft exactly as they were. |
 | `TestDraftFlagPublishesOverAConfiguredDraft` | `--draft=false` publishes over `github.draft`, and the release it created is what the run's own drafting recorder finds through the ordinary by-tag lookup. |
 
@@ -1403,7 +1405,7 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestRunSceneFixtureSelection` | The checked-in demo graph is bound to the real CLI: the selection a run makes over it is the one the demo shows. |
 | `TestCITestModuleSelectionRunsAffectedOnceAndAllRunsEveryModule` | The module selection the repository's CI sweep relies on runs each affected module once, and `all` runs every module. |
 
-### Goal 19: the standalone step commands (`standalone_test.go`, `command_plan_failures_test.go`, `final_command_faults_test.go`, `final_github_step_boundaries_test.go`, `final_remaining_commands_test.go`, `standalone_interruption_edges_test.go`, `standalone_release_edges_test.go`)
+### Goal 19: the standalone step commands (`standalone_test.go`, `record_ignore_errors_test.go`, `command_plan_failures_test.go`, `final_command_faults_test.go`, `final_github_step_boundaries_test.go`, `final_remaining_commands_test.go`, `standalone_interruption_edges_test.go`, `standalone_release_edges_test.go`)
 
 | Test                                            | Claim proven                                                                                                                                                                                                                                                 |
 |-------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1423,7 +1425,11 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestStandaloneCommitMessageAndIncludeFlags`    | `--message-format` renders `{packages}`/`{tags}` into the subject and `--include` stages an extra path outside the package folder alongside the folder's own changes.                                                                                        |
 | `TestStandaloneGithubPublishesFromAStageScript` | The github step inside an announce stage: the build's `DISPAT_EXPORT_GITHUB` reaches the command through the stage environment, one release is created for the package `DISPAT_PACKAGE` names, and the exported file is attached. The run's own recorder finds that release already there (W224) and creates no second one. |
 | `TestStandaloneGithubSelection`                 | The github command selects like every other step command: no opt-in publishes nothing (exit 0), the exported opt-in publishes, a non-releasing package is a logged no-op, an unknown term exits 1 and a positional argument exits 2. |
-| `TestStandaloneGithubFailures`                  | The error paths: a release on a channel `github.channels` does not name publishes nothing and states why; an unresolvable token and a refused verification both exit 1 before any release is created; an API that rejects the creation exits 1. |
+| `TestStandaloneGithubFailures`                  | The error paths: a release on a channel `github.channels` does not name publishes nothing and states why; an unresolvable token is an `E222` record failure that exits 0 by default, and under `--ignore-errors=false` it and a refused verification both exit 1 before any release is created and an API that rejects the creation exits 1. |
+| `TestRecordGitHubRefusalExitsZeroByDefault` | A release GitHub refuses is logged at error level under `E222` with GitHub's refusal, and the closing warning names the package in `failedPackages`; the command exits 0 by default and 1 under `--ignore-errors=false`, and the next invocation creates the release. |
+| `TestRecordChangelogUnwritableExitsZeroByDefault` | The same shape for a changelog entry whose file is a folder: `E222` at error level and the package named in the closing warning, exit 0 by default and 1 under `--ignore-errors=false`; a flag value refused before anything is written still exits 1. |
+| `TestRecordCommitPushRefusalStillFails` | `dispat commit --tag --push` against a remote whose hook refuses the push still exits 1 with `E224` and leaves the tag off the remote, and commit refuses `--ignore-errors` as a flag it does not take, saying why. |
+| `TestRecordGitHubFailureInAReleaseKeepsTheConsumers` | The publish stage `dispat commit --tag` then `dispat github`, with GitHub refusing the provider's release once: the provider is reported published, its consumer still releases, the step's `E222` reaches the run's log, and the run's own recorder creates the missing release, each release exactly once. |
 | `TestStandaloneCommitPushWithoutRemoteFails`    | `--push` without a remote exits 1, while the local commit and tag it had already made survive.                                                                                                                                                               |
 | `TestStandaloneCommitTagRefusesAProviderAtItsConsumersCommit` | E201 on the standalone path (SPEC 19.3): after the consumer proceeded past its failed provider (vector 80d), `dispat commit --tag --package core` at the consumer's release commit exits 1 naming the consumer, the provider and both remedies, with no tag and no commit; covering both packages tags the provider and then the consumer. A nested `dispat commit --tag` in the provider's publish, inside a run that releases both, is left to that run and succeeds. |
 | `TestStandaloneStepsTakeTheWindowFlags`         | The steps take `dispat run`'s window: `--since` picks what a revision addressed, `--consumers` pulls the dependents in, `--on-error` is validated on every sweeping command, and a package tagged by `dispat commit --tag` falls off the recomputed window until `--since all` puts it back. |

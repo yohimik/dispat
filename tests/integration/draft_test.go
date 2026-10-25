@@ -162,7 +162,7 @@ func TestDraftSearchReadsTheListingItCanTrust(t *testing.T) {
 			r.SeedPackage("packages", "core")
 			r.Commit("feat(core): bootstrap")
 
-			res := r.Command("github", "--package", "core", "--log-level", "debug")
+			res := r.Command("github", "--package", "core", "--log-level", "debug", "--ignore-errors=false")
 			assert.Equal(t, row.code, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.Contains(t, res.Stdout+res.Stderr, row.want)
 			assert.Equal(t, row.skipped, harness.IsCodePresent(res.Events, "W224"), "stdout:\n%s", res.Stdout)

@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -44,16 +47,53 @@ func (a *App) stepPlan(ctx context.Context) (*plan.Plan, error) {
 func (a *App) sweepStep(ctx context.Context, pl *plan.Plan, covered []string,
 	work packageWork, onError, headline string) (sweepReport, error) {
 	rep, drainErr := a.runSweep(ctx, pl, covered, work, sweepOptions{OnError: onError})
-	a.log.Info().Str("stage", work.stage()).Int("ran", rep.Ran).
-		Int("failed", rep.Failed).Int("skipped", rep.Skipped).Msg(headline + " finished")
+	a.logStepSummary(work.stage(), headline, rep)
 	if drainErr != nil {
 		a.log.Warn().Err(drainErr).Msg(headline + " interrupted")
 		return rep, drainErr
 	}
 	if rep.Failed > 0 {
-		return rep, fmt.Errorf("%s failed for %d package(s)", headline, rep.Failed)
+		return rep, fmt.Errorf("%s failed for %d package(s): %w", headline, rep.Failed, errPackagesFailed)
 	}
 	return rep, nil
+}
+
+// errPackagesFailed marks a step sweep that ran to its end with failed
+// packages, as against one that was interrupted or never started; it is the
+// only failure a record command's --ignore-errors forgives.
+var errPackagesFailed = errors.New("package work failed")
+
+// logStepSummary closes a step sweep. A failure raises it to a warning that
+// names every package left failed or skipped, because those are the records
+// an operator repairs later, and the per-package errors may be far above.
+func (a *App) logStepSummary(stage, headline string, rep sweepReport) {
+	if rep.Failed == 0 {
+		a.log.Info().Str("stage", stage).Int("ran", rep.Ran).
+			Int("failed", rep.Failed).Int("skipped", rep.Skipped).Msg(headline + " finished")
+		return
+	}
+	event := a.log.Warn().Str("stage", stage).Int("ran", rep.Ran).
+		Int("failed", rep.Failed).Int("skipped", rep.Skipped).
+		Strs("failedPackages", rep.FailedPackages)
+	if len(rep.SkippedBy) > 0 {
+		event = event.Strs("skippedPackages", slices.Sorted(maps.Keys(rep.SkippedBy)))
+	}
+	event.Msg(headline + " finished with failures")
+}
+
+// forgiveRecordFailures applies a record command's --ignore-errors. A
+// changelog entry or a GitHub release that could not be written must not turn
+// a package that already published into a failed one, which would skip every
+// consumer of a release that is out: the failure has been logged with its
+// diagnostic and named in the summary, and a later `--since all` writes what
+// is missing. A sweep that was interrupted, or a command refused before it
+// wrote anything, is not such a failure and still fails.
+func (a *App) forgiveRecordFailures(err error, isIgnoringErrors bool, headline string) error {
+	if !isIgnoringErrors || !errors.Is(err, errPackagesFailed) {
+		return err
+	}
+	a.log.Info().Msg(headline + ": exiting 0 under --ignore-errors; --ignore-errors=false fails the command instead")
+	return nil
 }
 
 // syncLock runs the named packages' syncLock scripts, serially and in the

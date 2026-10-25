@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
@@ -37,6 +38,10 @@ type GitHubOptions struct {
 	ReleaseName string
 	// Authors overrides the github.authors object, field by field.
 	Authors AuthorOptions
+	// IgnoreErrors keeps a release that could not be created from failing
+	// the command: it is logged with E222 and named in the summary, and the
+	// command still succeeds.
+	IgnoreErrors bool
 }
 
 // GitHub creates each covered package's release now — the same release the
@@ -91,7 +96,7 @@ func (a *App) GitHub(ctx context.Context, opts GitHubOptions) error {
 	work := &githubWork{app: a, opts: opts, export: a.readExport(covered),
 		releasers: make(map[string]*github.Releaser)}
 	_, err = a.sweepStep(ctx, pl, covered, work, opts.OnError, "github release")
-	return err
+	return a.forgiveRecordFailures(err, opts.IgnoreErrors, "github release")
 }
 
 // githubWork is `dispat github`'s share of a sweep: one package's release
@@ -126,10 +131,10 @@ func (w *githubWork) resolve(ctx context.Context, rel *plan.Release) (task, erro
 	if !seen {
 		var err error
 		if gh, err = githubReleaser(spec, w.app.log); err != nil {
-			return nil, err
+			return nil, config.WithDiagnostic(plan.CodeRecordFailed, err)
 		}
 		if err := gh.Verify(ctx); err != nil {
-			return nil, fmt.Errorf("github verification failed: %w", err)
+			return nil, config.WithDiagnostic(plan.CodeRecordFailed, fmt.Errorf("github verification failed: %w", err))
 		}
 		gh.TargetCommitish = w.opts.Target
 		gh.Root = w.app.root
@@ -148,7 +153,7 @@ func (w *githubWork) resolve(ctx context.Context, rel *plan.Release) (task, erro
 		// its reason — so every path through it reads the same in the log,
 		// whether a run or this command drove it.
 		if err := gh.Record(ctx, rel); err != nil {
-			return fmt.Errorf("github release failed: %w", err)
+			return config.WithDiagnostic(plan.CodeRecordFailed, fmt.Errorf("github release failed: %w", err))
 		}
 		return nil
 	}, nil

@@ -240,6 +240,15 @@ A GitHub API error can happen after a successful publish, source tag, and (in a 
 recreate the missing GitHub release. Verify the exact published version and source tag, the control checkpoint if one
 was required, and the absence of the GitHub release before repairing only the metadata.
 
+A flow that creates the release from its own publish stage, with `dispat github` after `dispat commit --tag --push`,
+reaches the same state without failing. The tag is already pushed when the release is refused, so `dispat github`
+logs the refusal as `E222`, closes with a warning naming the package in `failedPackages`, and exits `0`: the package
+is reported published and its consumers release. A `dispat changelog` in the same stage treats an entry it cannot write
+the same way. Search the run's log for `E222` or `finished with failures` to find what to repair. Only a tag that
+`dispat commit` could not create or push fails the stage and skips the consumers, because without it the next run
+cannot tell that the version shipped. A flow that wants a missing record to fail the package passes
+`--ignore-errors=false`; see [the github command](../../cli/github.md#when-a-release-cannot-be-created).
+
 Run the standalone GitHub step in a reviewed CI repair job using the original run's configuration, credentials,
 `DISPAT_PACKAGE`, `DISPAT_NEW_VERSION`, and `DISPAT_TAG`. The `--since all` window includes the already-tagged package.
 For a package covered by `github.allPackages`, the CI command can be:

@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -263,4 +265,34 @@ func TestAuthorOptionsValidateRejectsBadEnums(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), tc.want)
 	}
+}
+
+// TestStepSweepNamesWhatFailed: a step sweep that failed closes on a warning
+// naming every package left failed or skipped, which are the records an
+// operator repairs, and only that ending is what --ignore-errors forgives.
+func TestStepSweepNamesWhatFailed(t *testing.T) {
+	a, pl, buf := stepApp(t)
+	pl.Providers["c"] = []string{"a"}
+	w := &fakeWork{fail: map[string]bool{"a": true}}
+	_, err := a.sweepStep(context.Background(), pl, []string{"a", "c"}, w, "", "github release")
+	require.ErrorIs(t, err, errPackagesFailed)
+	assert.Contains(t, buf.String(), `"level":"warn"`)
+	assert.Contains(t, buf.String(), `"failedPackages":["a"]`)
+	assert.Contains(t, buf.String(), `"skippedPackages":["c"]`)
+	assert.Contains(t, buf.String(), "github release finished with failures")
+}
+
+func TestForgiveRecordFailures(t *testing.T) {
+	a, _, _ := stepApp(t)
+	failed := fmt.Errorf("github release failed for 1 package(s): %w", errPackagesFailed)
+	refused := errors.New("no correct plan exists")
+	assert.NoError(t, a.forgiveRecordFailures(failed, true, "github release"),
+		"a record that could not be written is forgiven")
+	assert.ErrorIs(t, a.forgiveRecordFailures(failed, false, "github release"), errPackagesFailed,
+		"--ignore-errors=false keeps the failure")
+	assert.Equal(t, refused, a.forgiveRecordFailures(refused, true, "github release"),
+		"a command refused before it wrote anything still fails")
+	assert.ErrorIs(t, a.forgiveRecordFailures(context.Canceled, true, "github release"), context.Canceled,
+		"an interrupted sweep still fails")
+	assert.NoError(t, a.forgiveRecordFailures(nil, true, "github release"))
 }

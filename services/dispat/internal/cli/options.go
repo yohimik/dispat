@@ -73,6 +73,8 @@ type options struct {
 	// the authors entry-format options, shared by the same two commands
 	authors, authorsFormat, authorsCommits, authorsTitle *string
 	authorsInclude, authorsExclude                       *[]string
+	// whether a record the same two commands could not write fails them
+	ignoreErrors *bool
 
 	// autoversion and autowriter
 	avRange, avManifests                    *string
@@ -283,6 +285,11 @@ func (o *options) declareEntryFlags(fs *pflag.FlagSet) {
 		"override authors.exclude: authors matching one of these globs are dropped, after --authors-include has been applied")
 	o.authorsTitle = fs.String("authors-title", "",
 		"override authors.title, the heading of the authors section")
+	// On by default because these records follow a publication: a flow that
+	// forgot the flag would otherwise report a published package as failed
+	// and skip its consumers. A tag stays dispat commit's, and still fails.
+	o.ignoreErrors = fs.Bool("ignore-errors", true,
+		"changelog and github: exit 0 when a record could not be written, which is still logged as an error (E222) and named in the summary; --ignore-errors=false exits 1")
 }
 
 // declareAutoVersionFlags declares the flags of autoversion and autowriter.

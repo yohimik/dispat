@@ -535,10 +535,11 @@ func TestStandaloneGithubSelection(t *testing.T) {
 
 // TestStandaloneGithubFailures: the github step's error paths. A release on a
 // channel the policy does not record on publishes nothing and says so; a
-// package whose token cannot be resolved fails the command outright rather
-// than silently publishing nothing, because a step the flow asked for must not
-// pass quietly when it could not run; and an API that rejects the up-front
-// verification fails before any release is created.
+// package whose token cannot be resolved is a logged record failure rather
+// than a quiet nothing, because a step the flow asked for must not pass
+// unnoticed when it could not run; and an API that rejects the up-front
+// verification fails before any release is created. Each failure is E222 and
+// exits 0 by default; --ignore-errors=false makes it exit 1.
 func TestStandaloneGithubFailures(t *testing.T) {
 	t.Run("a channel that records nothing", func(t *testing.T) {
 		srv, bodies := githubFake(t)
@@ -573,6 +574,10 @@ func TestStandaloneGithubFailures(t *testing.T) {
 		r.Commit("feat(core): first release")
 
 		res := r.Command("github", "--package", "core")
+		assert.Equal(t, 0, res.Code, "stdout:\n%s", res.Stdout)
+		assert.True(t, harness.IsCodePresentForPackage(res.Events, "E222", "core"),
+			"an unresolvable target is a record failure, stdout:\n%s", res.Stdout)
+		res = r.Command("github", "--package", "core", "--ignore-errors=false")
 		assert.Equal(t, 1, res.Code, "an unresolvable target fails the step it was asked for")
 		assert.Contains(t, res.Stdout+res.Stderr, "DISPAT_IT_MISSING_TOKEN")
 		assert.Empty(t, bodies())
@@ -600,7 +605,7 @@ func TestStandaloneGithubFailures(t *testing.T) {
 		r.SeedPackage("packages", "core")
 		r.Commit("feat(core): first release")
 
-		res := r.Command("github", "--package", "core")
+		res := r.Command("github", "--package", "core", "--ignore-errors=false")
 		assert.Equal(t, 1, res.Code)
 		assert.Contains(t, res.Stdout+res.Stderr, "github verification failed")
 		assert.Zero(t, created, "verification fails before any release is created")
@@ -630,7 +635,7 @@ func TestStandaloneGithubFailures(t *testing.T) {
 		r.SeedPackage("packages", "core")
 		r.Commit("feat(core): first release")
 
-		res := r.Command("github", "--package", "core")
+		res := r.Command("github", "--package", "core", "--ignore-errors=false")
 		assert.Equal(t, 1, res.Code)
 		assert.Contains(t, res.Stdout+res.Stderr, "github release failed")
 	})

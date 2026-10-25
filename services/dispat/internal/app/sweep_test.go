@@ -105,7 +105,7 @@ func TestSweepSkipCascade(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a", "d"}, w.order(), "b and c never ran")
 	assert.Equal(t, sweepReport{Ran: 1, Failed: 1, Skipped: 2, Resolved: 4,
-		SkippedBy: map[string]string{"b": "a", "c": "b"}}, rep,
+		SkippedBy: map[string]string{"b": "a", "c": "b"}, FailedPackages: []string{"a"}}, rep,
 		"each skipped package names the provider that blocked it")
 }
 
@@ -116,7 +116,7 @@ func TestSweepOnErrorContinueRunsTheDependents(t *testing.T) {
 		sweepOptions{OnError: OnErrorContinue})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a", "d", "b", "c"}, w.order(), "the failure stopped nothing")
-	assert.Equal(t, sweepReport{Ran: 3, Failed: 1, Resolved: 4}, rep)
+	assert.Equal(t, sweepReport{Ran: 3, Failed: 1, Resolved: 4, FailedPackages: []string{"a"}}, rep)
 }
 
 // TestSweepCountsAPackageWithNothingToDo: a nil task is a no-op that still
@@ -142,7 +142,7 @@ func TestSweepResolveFailureIsAPackageFailure(t *testing.T) {
 	// a never resolved, so it had nothing to do that anyone could see; b and d
 	// both did.
 	assert.Equal(t, sweepReport{Ran: 1, Failed: 1, Skipped: 1, Resolved: 2,
-		SkippedBy: map[string]string{"b": "a"}}, rep)
+		SkippedBy: map[string]string{"b": "a"}, FailedPackages: []string{"a"}}, rep)
 }
 
 // TestSweepSkipIsDecidedAfterResolving: a package the cascade skips still

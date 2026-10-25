@@ -7,6 +7,13 @@ script, before `dispat commit`, lands inside the tagged commit.
 
 dispat writes these entries inside each package's own folder. The command rides your build concurrency budget.
 
+An entry that cannot be written does not fail the command. dispat logs it as an error under `E222`, closes with a
+warning that names every package whose entry is missing, and exits `0`, so a flow that writes its changelog inside the
+publish stage never reports a published package as failed over it. Write what is missing with a later
+`dispat changelog --since all`, which skips the entries that already exist (`W226`). Pass `--ignore-errors=false` when
+a missing entry must fail the command instead. A flag value, a selection or a plan that refuses the command before
+anything is written, and an interrupted command, still exit non-zero.
+
 ## The shape of what it writes
 
 One entry has one shape, whichever door writes it. Items inside a section are separated by a single blank line, a
@@ -81,7 +88,15 @@ Tell the same seven commands to additionally cover every package that transitive
 
 The default is `skip`. Decide what a failed package does to its dependents during every sweeping command (`run`,
 `autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Set this to `skip` for transitive
-skipping or `continue`. The command always exits `1` on any failure.
+skipping or `continue`. This setting decides only what a failure does to the dependents. For `changelog` and
+`github`, `--ignore-errors` below decides whether a failure exits `1`; every other sweeping command exits `1` on any
+failure.
+
+### `--ignore-errors`
+
+The default is `true`. Exit `0` when an entry could not be written, after logging it as an error (`E222`) and naming it
+in the closing summary. `--ignore-errors=false` exits `1` instead. `dispat github` takes the same flag. `dispat commit`
+does not: a tag it could not create or push always fails it.
 
 ### `--file`, `-f`, `--file-title`, `--date-format`
 

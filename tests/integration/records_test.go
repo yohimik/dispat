@@ -1737,7 +1737,7 @@ func TestRecordsChangelogRefusesToReplaceASymlink(t *testing.T) {
 			r.Path("packages", "core", "CHANGELOG.md")))
 		r.Commit("feat(core): first feature")
 
-		res := r.Command("changelog", "--package", "core")
+		res := r.Command("changelog", "--package", "core", "--ignore-errors=false")
 		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		assert.Contains(t, res.Stdout+res.Stderr, "refusing to replace symlink")
 
@@ -1776,7 +1776,7 @@ func TestRecordsChangelogStopsWhenTheFolderTakesNoTemporaryFile(t *testing.T) {
 		require.NoError(t, os.Chmod(dir, 0o555))
 		t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
-		res := r.Command("changelog", "--package", "core")
+		res := r.Command("changelog", "--package", "core", "--ignore-errors=false")
 		assert.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		assert.Contains(t, res.Stdout+res.Stderr, "permission denied")
 		_, err := os.Stat(filepath.Join(dir, "CHANGELOG.md"))
@@ -1810,7 +1810,7 @@ func TestRecordsChangelogSurvivesAPartialDiskWrite(t *testing.T) {
 	path := r.Path("packages", "core", "CHANGELOG.md")
 	require.NoError(t, os.Chmod(path, 0o640))
 
-	failed := r.Shell("trap '' XFSZ; ulimit -f 2048; dispat changelog --package core")
+	failed := r.Shell("trap '' XFSZ; ulimit -f 2048; dispat changelog --package core --ignore-errors=false")
 
 	require.Equal(t, 1, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
 	assert.Regexp(t, `file too large|short write`, failed.Stdout+failed.Stderr)
@@ -2001,7 +2001,7 @@ func TestRecordsGithubHeadersWithoutBodyRespectTheRequestTimeout(t *testing.T) {
 	r.Commit("feat(core): bootstrap")
 
 	start := time.Now()
-	res := r.Command("github", "--package", "core")
+	res := r.Command("github", "--package", "core", "--ignore-errors=false")
 	assert.Less(t, time.Since(start), 45*time.Second)
 	assert.NotEqual(t, 0, res.Code, "a partial GitHub response cannot complete the command")
 	assert.Contains(t, res.Stdout+res.Stderr, "deadline exceeded")
@@ -2049,7 +2049,7 @@ func TestRecordsGithubRefusesALookupItCannotRead(t *testing.T) {
 			srv := lookupGitHub(t, tc.lookup)
 			r := githubRecorderRepo(t, srv.URL, nil)
 
-			res := r.Command("github", "--package", "core")
+			res := r.Command("github", "--package", "core", "--ignore-errors=false")
 			assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.Contains(t, res.Stdout+res.Stderr, tc.want,
 				"the refusal names the call that produced it")
