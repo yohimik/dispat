@@ -117,7 +117,7 @@ func cleanRunOutput(label, declared string) (string, error) {
 // against the entry's alone, because that is where a sweep task writes them:
 // a source of a composed workspace has a `coverage/` of its own.
 func checkRunOutputRoots(runOutputs map[string][]string, pkgs []*model.Package, fallbackRoot string) error {
-	if len(runOutputs) == 0 {
+	if !isAnySweepRootDeclared(runOutputs) {
 		return nil
 	}
 	checks := sweepRootChecks{
@@ -135,6 +135,18 @@ func checkRunOutputRoots(runOutputs map[string][]string, pkgs []*model.Package, 
 		}
 	}
 	return nil
+}
+
+// isAnySweepRootDeclared reports whether any script declares a root. A script
+// listed with no roots asks nothing, and answering it would cost the package
+// folder index and every package's build output roots.
+func isAnySweepRootDeclared(runOutputs map[string][]string) bool {
+	for _, declared := range runOutputs {
+		if len(declared) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // runOutputRoot is one declared sweep root resolved against one repository:

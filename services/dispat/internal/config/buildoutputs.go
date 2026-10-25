@@ -16,9 +16,11 @@ package config
 // what they describe is how a run is executed rather than what it releases.
 
 import (
+	"cmp"
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -221,11 +223,8 @@ type outputRootClaim struct {
 // caller's own order, so a collision is always reported the same way round.
 func findOverlappingClaim(claims []outputRootClaim) (int, int, bool) {
 	sorted := append([]outputRootClaim(nil), claims...)
-	sort.Slice(sorted, func(a, b int) bool {
-		if sorted[a].folded != sorted[b].folded {
-			return sorted[a].folded < sorted[b].folded
-		}
-		return sorted[a].index < sorted[b].index
+	slices.SortFunc(sorted, func(a, b outputRootClaim) int {
+		return cmp.Or(strings.Compare(a.folded, b.folded), cmp.Compare(a.index, b.index))
 	})
 	owners := make(map[string]int, len(sorted))
 	for _, claim := range sorted {
@@ -303,6 +302,11 @@ func (d *discovery) checkBuildOutputRoots() error {
 // node would replace the nested package's checkout with whatever the outer
 // build left there, whether or not the nested package declares anything.
 func (d *discovery) checkBuildOutputRootsHoldNoPackage(roots []declaredOutputRoot) error {
+	// The index folds every package folder, which a workspace declaring no
+	// output, the common one, would pay for nothing.
+	if len(roots) == 0 {
+		return nil
+	}
 	folders := newPackageFolderIndex(d.pkgs)
 	for _, root := range roots {
 		isOwnPackage := func(i int) bool { return d.pkgs[i].Name == root.packageName }
@@ -343,7 +347,7 @@ func newPackageFolderIndex(pkgs []*model.Package) packageFolderIndex {
 	for i, p := range pkgs {
 		folders[i] = indexedFolder{folded: lib.Fold(p.Dir), position: i}
 	}
-	sort.Slice(folders, func(a, b int) bool { return folders[a].folded < folders[b].folded })
+	slices.SortFunc(folders, func(a, b indexedFolder) int { return strings.Compare(a.folded, b.folded) })
 	return folders
 }
 

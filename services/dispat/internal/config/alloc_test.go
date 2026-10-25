@@ -21,6 +21,7 @@ func TestDiscoveryCheckAllocationBudget(t *testing.T) {
 		AliasTags: []model.AliasTag{{Format: "{name}-v{major}", Moving: true}},
 	})
 	building := &discovery{pkgs: benchWorkspacePackages(packages, &model.Space{BuildOutputs: []string{"dist"}})}
+	undeclared := &discovery{pkgs: benchWorkspacePackages(packages, &model.Space{})}
 	sweeps := map[string][]string{"test": {"coverage", "reports/junit"}}
 	cases := []struct {
 		name   string
@@ -34,14 +35,26 @@ func TestDiscoveryCheckAllocationBudget(t *testing.T) {
 		},
 		{
 			name:   "checkBuildOutputRoots",
-			budget: 3200, // measured 2922: the roots, the overlap sort and one fold per package
+			budget: 3200, // measured 2916: the roots, the overlap sort and one fold per package
 			run:    building.checkBuildOutputRoots,
 		},
 		{
 			name:   "checkRunOutputRoots",
-			budget: 2700, // measured 2420: the build roots and one fold per package, shared by every sweep root
+			budget: 2700, // measured 2417: the build roots and one fold per package, shared by every sweep root
 			run: func() error {
 				return checkRunOutputRoots(sweeps, building.pkgs, "/Users/Bench/Repo")
+			},
+		},
+		{
+			name:   "checkBuildOutputRoots with no root declared",
+			budget: 0, // the common workspace: no root, so nothing to index the packages for
+			run:    undeclared.checkBuildOutputRoots,
+		},
+		{
+			name:   "checkRunOutputRoots with no root declared",
+			budget: 0,
+			run: func() error {
+				return checkRunOutputRoots(map[string][]string{"test": {}}, undeclared.pkgs, "/Users/Bench/Repo")
 			},
 		},
 	}
