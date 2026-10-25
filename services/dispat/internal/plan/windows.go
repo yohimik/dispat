@@ -6,6 +6,7 @@ package plan
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 	"sort"
 	"strings"
 
@@ -292,36 +293,12 @@ func (cp *computation) readUnionWindow(boundaries []windowBoundary, windows map[
 		sizes[i] = len(all) - behind(i).len()
 	}
 
-	// The union is ranked exactly as buildUnion ranks per-boundary listings:
-	// the longest window first, then whatever each shorter one adds, in its own
-	// order. A window's order is its order in the union (gitx.UnionHistoryx),
-	// so nested boundaries, which is nearly every history, rank as read.
-	byLength := make([]int, len(boundaries))
-	for i := range byLength {
-		byLength[i] = i
-	}
-	sort.SliceStable(byLength, func(a, b int) bool { return sizes[byLength[a]] > sizes[byLength[b]] })
-	ranked, placed := all, make([]bool, len(all))
-	if sizes[byLength[0]] != len(all) {
-		ranked = make([]gitx.Commit, 0, len(all))
-		for _, i := range byLength {
-			excluded := behind(i)
-			for pos, c := range all {
-				if !placed[pos] && !excluded.has(pos) {
-					placed[pos] = true
-					ranked = append(ranked, c)
-				}
-			}
-			if len(ranked) == len(all) {
-				break
-			}
-		}
-	}
+	ranked, isAsRead := rankByWindows(all, sizes, behind)
 	cp.buildUnion([][]gitx.Commit{ranked})
 
 	// In rank space. Positions are ranks when the union ranked as read, and
 	// the pass is cheap enough to repeat when it did not.
-	if sizes[byLength[0]] != len(all) {
+	if !isAsRead {
 		if index = cp.newUnionAncestry(); index == nil {
 			return nil, fmt.Errorf("plan: %s: the union history is not a DAG", boundaries[0].pkg)
 		}
@@ -341,15 +318,44 @@ func (cp *computation) readUnionWindow(boundaries []windowBoundary, windows map[
 				return nil, fmt.Errorf("plan: %s: window boundary %s was not indexed", b.pkg, b.key)
 			}
 		}
-		windows[b.key] = commitSetOf(len(cp.commits), func(yield func(int)) {
-			for rank := range cp.commits {
-				if !excluded.has(rank) {
-					yield(rank)
-				}
-			}
-		})
+		windows[b.key] = commitSetWithout(len(cp.commits), excluded)
 	}
 	return sizes, nil
+}
+
+// rankByWindows ranks a union walk exactly as buildUnion ranks the windows'
+// own listings: the longest window first, then whatever each shorter one
+// adds, each in walk order, ties in boundary order. A window's order is its
+// order in the walk (gitx.UnionHistoryx), so when the longest window is the
+// whole walk, which nested boundaries make it in nearly every history, the
+// walk is the ranking as read. sizes are the windows' lengths and excluded(i)
+// what window i leaves out of the walk; each window is visited a word of
+// commits at a time.
+func rankByWindows(all []gitx.Commit, sizes []int, excluded func(int) *commitSet) (ranked []gitx.Commit, isAsRead bool) {
+	byLength := make([]int, len(sizes))
+	for i := range byLength {
+		byLength[i] = i
+	}
+	sort.SliceStable(byLength, func(a, b int) bool { return sizes[byLength[a]] > sizes[byLength[b]] })
+	if sizes[byLength[0]] == len(all) {
+		return all, true
+	}
+	ranked = make([]gitx.Commit, 0, len(all))
+	placed := make([]uint64, (len(all)+63)/64)
+	for _, i := range byLength {
+		behind := excluded(i)
+		for w := range placed {
+			adds := ^placed[w] &^ behind.word(w) & wordBelow(len(all), w)
+			placed[w] |= adds
+			for ; adds != 0; adds &= adds - 1 {
+				ranked = append(ranked, all[w<<6+bits.TrailingZeros64(adds)])
+			}
+		}
+		if len(ranked) == len(all) {
+			break
+		}
+	}
+	return ranked, false
 }
 
 // commitWindowCacheKey identifies the history boundary independently of the

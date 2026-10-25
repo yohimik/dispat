@@ -407,16 +407,16 @@ func (cp *computation) loadOwedWindows(ordinary []windowBoundary) error {
 		return nil
 	}
 
-	lists, err := cp.readOwedWindows(owed)
+	lists, sizes, err := cp.readOwedWindows(owed)
 	if err != nil {
 		return err
 	}
 	for i, b := range owed {
 		if cp.stats != nil {
 			cp.stats.CommitWindows.Add(1)
-			cp.stats.WindowCommitRefs.Add(int64(len(lists[i])))
+			cp.stats.WindowCommitRefs.Add(int64(sizes[i]))
 		}
-		cp.log.Debug().Str("boundary", b.key).Str("consumer", b.pkg).Int("commits", len(lists[i])).
+		cp.log.Debug().Str("boundary", b.key).Str("consumer", b.pkg).Int("commits", sizes[i]).
 			Msg("plan: owed window indexed")
 	}
 	cp.buildUnion(lists)
@@ -425,71 +425,73 @@ func (cp *computation) loadOwedWindows(ordinary []windowBoundary) error {
 	return nil
 }
 
-// readOwedWindows reads the owed windows' listings, each exactly the listing
-// Commits gives for its boundary. A Git implementation with a union walk
-// (gitx.UnionHistoryx) reads them all at once and each is recovered from the
-// walk by the marker pass, as the ordinary windows are (readUnionWindow); any
-// other reads one per boundary.
-func (cp *computation) readOwedWindows(owed []windowBoundary) ([][]gitx.Commit, error) {
-	if lists, err := cp.readUnionLists(owed); lists != nil || err != nil {
-		return lists, err
+// readOwedWindows reads the owed windows' listings for buildUnion, and each
+// window's length in boundary order. A Git implementation with a union walk
+// (gitx.UnionHistoryx) reads them all at once, each recovered from the walk
+// by the marker pass and the walk ranked as the windows' own listings would
+// rank it, as the ordinary windows are (readUnionWindow); any other reads one
+// listing per boundary, exactly the listing Commits gives for it.
+func (cp *computation) readOwedWindows(owed []windowBoundary) ([][]gitx.Commit, []int, error) {
+	ranked, sizes, err := cp.readUnionLists(owed)
+	if err != nil {
+		return nil, nil, err
+	}
+	if sizes != nil {
+		return [][]gitx.Commit{ranked}, sizes, nil
 	}
 	lists := make([][]gitx.Commit, 0, len(owed))
+	sizes = make([]int, 0, len(owed))
 	for _, b := range owed {
 		if err := cp.ctx.Err(); err != nil {
-			return nil, fmt.Errorf("plan: loading owed windows: %w", err)
+			return nil, nil, fmt.Errorf("plan: loading owed windows: %w", err)
 		}
 		commits, err := cp.git.Commits(cp.ctx, b.since)
 		if err != nil {
-			return nil, fmt.Errorf("plan: owed window for %s: %w", b.pkg, err)
+			return nil, nil, fmt.Errorf("plan: owed window for %s: %w", b.pkg, err)
 		}
 		lists = append(lists, commits)
+		sizes = append(sizes, len(commits))
 	}
-	return lists, nil
+	return lists, sizes, nil
 }
 
 // readUnionLists reads every boundary's window in one union walk and answers
-// each window's listing, in the walk's order, which is the order Commits
-// lists it in (gitx.UnionHistoryx). It answers nil when the walk does not
-// apply: no capability, a single boundary, a boundary with no commit id, a
-// boundary off HEAD's line, or an index past its budget.
-func (cp *computation) readUnionLists(boundaries []windowBoundary) ([][]gitx.Commit, error) {
+// the walk ranked as buildUnion would rank the windows' listings, with each
+// window's length. It answers nil sizes when the walk does not apply: no
+// capability, a single boundary, a boundary with no commit id, a boundary off
+// HEAD's line, or an index past its budget.
+func (cp *computation) readUnionLists(boundaries []windowBoundary) (ranked []gitx.Commit, sizes []int, err error) {
 	union, ok := cp.git.(gitx.UnionHistoryx)
 	if !ok || len(boundaries) < 2 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	ids := make([]string, len(boundaries))
 	for i, b := range boundaries {
 		if b.commit == "" && b.since != "" {
-			return nil, nil
+			return nil, nil, nil
 		}
 		ids[i] = b.commit // "" is the whole history
 	}
 	if err := cp.ctx.Err(); err != nil {
-		return nil, fmt.Errorf("plan: loading owed windows: %w", err)
+		return nil, nil, fmt.Errorf("plan: loading owed windows: %w", err)
 	}
 	all, err := union.CommitsSinceAny(cp.ctx, ids)
 	if errors.Is(err, gitx.ErrBoundaryNotBehindHead) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("plan: owed window for %s: %w", boundaries[0].pkg, err)
+		return nil, nil, fmt.Errorf("plan: owed window for %s: %w", boundaries[0].pkg, err)
 	}
 	excluded, isIndexed := excludedByBoundaries(all, ids)
 	if !isIndexed {
-		return nil, nil
+		return nil, nil, nil
 	}
-	lists := make([][]gitx.Commit, len(boundaries))
+	sizes = make([]int, len(boundaries))
 	for i := range boundaries {
-		list := make([]gitx.Commit, 0, len(all)-excluded[i].len())
-		for pos, commit := range all {
-			if !excluded[i].has(pos) {
-				list = append(list, commit)
-			}
-		}
-		lists[i] = list
+		sizes[i] = len(all) - excluded[i].len()
 	}
-	return lists, nil
+	ranked, _ = rankByWindows(all, sizes, func(i int) *commitSet { return excluded[i] })
+	return ranked, sizes, nil
 }
 
 // excludedByBoundaries is, for each boundary, the commits of a union walk it

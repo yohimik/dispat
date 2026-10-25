@@ -40,6 +40,34 @@ func (s *commitSet) each(yield func(rank int)) {
 	}
 }
 
+// word is the set's w-th word, zero past its end.
+func (s *commitSet) word(w int) uint64 {
+	if s == nil || w >= len(s.bits) {
+		return 0
+	}
+	return s.bits[w]
+}
+
+// commitSetWithout is every one of n commits but the excluded ones, built a
+// word at a time: a window is the union minus one marker's bits (CCME
+// §13.11), and a test per commit would cost a word's worth of steps for each.
+func commitSetWithout(n int, excluded *commitSet) *commitSet {
+	s := &commitSet{bits: make([]uint64, (n+63)/64)}
+	for w := range s.bits {
+		s.bits[w] = ^excluded.word(w) & wordBelow(n, w)
+		s.size += bits.OnesCount64(s.bits[w])
+	}
+	return s
+}
+
+// wordBelow is the bits of word w that stand for ranks below n.
+func wordBelow(n, w int) uint64 {
+	if rest := n - w<<6; rest < 64 {
+		return 1<<uint(rest) - 1
+	}
+	return ^uint64(0)
+}
+
 // commitSetOf builds the set holding exactly the given ranks, of n commits.
 func commitSetOf(n int, ranks func(yield func(int))) *commitSet {
 	s := &commitSet{bits: make([]uint64, (n+63)/64)}
