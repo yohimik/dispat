@@ -266,23 +266,21 @@ func kindsCacheKey(kinds map[model.DepKind]bool) string {
 }
 
 // walkLiteral is reach() written as §9.2 writes it, uncached.
+//
+// The queue is the sources followed by out itself: everything the walk
+// discovers is queued in the order it is output, and carries the source it
+// was reached from.
 func (cp *computation) walkLiteral(sources map[string]bool, depth int, kinds map[model.DepKind]bool) []target {
-	seen := make(map[string]bool, len(sources))
-	origin := make(map[string]string, len(sources))
-	var out []target
-
-	queue := make([]target, 0, len(sources))
-	for _, s := range sortedKeys(sources) {
+	seeds := sortedKeys(sources)
+	seen := make(map[string]bool, len(seeds))
+	for _, s := range seeds {
 		seen[s] = true
-		origin[s] = s
-		queue = append(queue, target{name: s, from: s, level: 0})
 	}
+	var out []target
 	tracing := cp.log.Trace().Enabled()
-	for len(queue) > 0 {
-		cur := queue[0]
-		queue = queue[1:]
+	expand := func(cur target) {
 		if depth != depthUnbounded && cur.level >= depth {
-			continue
+			return
 		}
 		for _, e := range cp.edges[cur.name] {
 			if kinds != nil && !kinds[e.kind] {
@@ -292,16 +290,20 @@ func (cp *computation) walkLiteral(sources map[string]bool, depth int, kinds map
 				continue
 			}
 			seen[e.to] = true
-			origin[e.to] = origin[cur.name]
-			next := target{name: e.to, from: origin[cur.name], level: cur.level + 1}
+			next := target{name: e.to, from: cur.from, level: cur.level + 1}
 			if tracing {
 				cp.log.Trace().Str("from", cur.name).Str("to", e.to).
 					Str("origin", next.from).Int("level", next.level).Str("kind", string(e.kind)).
 					Msg("plan: propagation edge")
 			}
 			out = append(out, next)
-			queue = append(queue, next)
 		}
+	}
+	for _, s := range seeds {
+		expand(target{name: s, from: s})
+	}
+	for i := 0; i < len(out); i++ {
+		expand(out[i])
 	}
 	if cp.stats != nil {
 		cp.stats.WalkTargets.Add(int64(len(out)))

@@ -139,6 +139,20 @@ func TestBoundedWalkWalksItsOwnDepth(t *testing.T) {
 	require.EqualValues(t, 2, cp.stats.WalkTargets.Load(), "a composed walk reads its sources' bounded walks")
 }
 
+// TestLiteralWalkAllocatesItsOutputAndSeenSet pins the walk's own heap: the
+// targets it returns and the set of packages it has seen, grown as the walk
+// grows, and no second queue or per-target origin beside them. A 63-target
+// chain measured 16 allocations; the queue and origin map took it to 89.
+func TestLiteralWalkAllocatesItsOutputAndSeenSet(t *testing.T) {
+	cp := &computation{log: zerolog.Nop(), edges: map[string][]edge{}}
+	for i := 0; i < 63; i++ {
+		cp.edges[fmt.Sprintf("p%02d", i)] = []edge{{to: fmt.Sprintf("p%02d", i+1), kind: model.KindDependencies}}
+	}
+	source := map[string]bool{"p00": true}
+	allocations := testing.AllocsPerRun(100, func() { cp.walkLiteral(source, depthUnbounded, nil) })
+	require.LessOrEqual(t, allocations, 20.0)
+}
+
 // TestGlobMatchesIsTheScan checks the indexed glob against the definition it
 // replaced, a fold and a match of every package for every term: over the
 // sorted-run shortcut for a trailing "*", the general matcher for an interior
