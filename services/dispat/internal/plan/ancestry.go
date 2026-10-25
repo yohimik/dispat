@@ -186,22 +186,56 @@ func (ai *ancestryIndex) pass(batch []int32) {
 	}
 	// Transposed into one set per marker: a window is read by rank in order,
 	// and a closure is handed around whole, so both want the marker's column.
+	// A block of 64 rows by 64 markers at a time, since enumerating every set
+	// bit costs a step per (commit, marker) ancestor pair (CCME §13.11).
 	sets := make([]*commitSet, len(batch))
 	for j := range batch {
 		sets[j] = &commitSet{bits: make([]uint64, (n+63)/64)}
 	}
-	for r := 0; r < n; r++ {
-		for w, word := range masks[r*words : r*words+words] {
-			for ; word != 0; word &= word - 1 {
-				s := sets[w<<6+bits.TrailingZeros64(word)]
-				s.bits[r>>6] |= 1 << (uint(r) & 63)
-				s.size++
+	var block [64]uint64
+	for rows := 0; rows < n; rows += 64 {
+		for w := 0; w < words; w++ {
+			if !loadBlock(&block, masks, rows, w, words) {
+				continue
+			}
+			transposeBlock(&block)
+			for i, column := range block[:min(64, len(batch)-w<<6)] {
+				s := sets[w<<6+i]
+				s.bits[rows>>6] = column
+				s.size += bits.OnesCount64(column)
 			}
 		}
 	}
 	for j, m := range batch {
 		ai.reach[m] = sets[j]
 		ai.held += n
+	}
+}
+
+// loadBlock copies word w of the 64 rows from the given one into block,
+// rows past the masks being zero, and reports whether any bit is set.
+func loadBlock(block *[64]uint64, masks []uint64, rows, w, words int) bool {
+	isSet := false
+	for i := range block {
+		block[i] = 0
+		if at := (rows+i)*words + w; at < len(masks) {
+			block[i] = masks[at]
+		}
+		isSet = isSet || block[i] != 0
+	}
+	return isSet
+}
+
+// transposeBlock transposes a 64×64 bit matrix in place: bit j of word i
+// becomes bit i of word j. Six rounds swap ever smaller off-diagonal blocks.
+func transposeBlock(block *[64]uint64) {
+	mask := uint64(0x00000000ffffffff)
+	for width := 32; width != 0; width, mask = width>>1, mask^mask<<(width>>1) {
+		for i := 0; i < 64; i = (i + width + 1) &^ width {
+			swap := (block[i]>>width ^ block[i+width]) & mask
+			block[i] ^= swap << width
+			block[i+width] ^= swap
+		}
 	}
 }
 

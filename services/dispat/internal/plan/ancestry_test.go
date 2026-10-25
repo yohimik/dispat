@@ -88,6 +88,34 @@ func TestAncestryIndexAgreesWithAWalk(t *testing.T) {
 		"two commits naming each other as parent are not a history")
 }
 
+// TestTransposeBlockSwapsRowsAndColumns: bit j of row i is bit i of column
+// j after the transpose, for sparse, dense and single-bit blocks.
+func TestTransposeBlockSwapsRowsAndColumns(t *testing.T) {
+	rng := rand.New(rand.NewSource(3))
+	for round := 0; round < 200; round++ {
+		var rows [64]uint64
+		for i := range rows {
+			switch round % 3 {
+			case 0:
+				rows[i] = rng.Uint64() & rng.Uint64() & rng.Uint64()
+			case 1:
+				rows[i] = rng.Uint64() | rng.Uint64()
+			default:
+				if rng.Intn(8) == 0 {
+					rows[i] = 1 << uint(rng.Intn(64))
+				}
+			}
+		}
+		columns := rows
+		transposeBlock(&columns)
+		for i := range rows {
+			for j := range columns {
+				require.Equalf(t, rows[i]>>uint(j)&1, columns[j]>>uint(i)&1, "round %d: row %d, marker %d", round, i, j)
+			}
+		}
+	}
+}
+
 // perBoundaryGit is the real Git implementation with the union read hidden,
 // so the planner reads one window per boundary and asks git every ancestry
 // question, as it did before the marker pass existed. Every other capability
