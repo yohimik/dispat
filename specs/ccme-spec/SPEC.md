@@ -3137,6 +3137,9 @@ can have `m + 1` distinct masks. Interning stores an identifier per commit in ad
 its construction costs. A direct chain representation can instead store commit positions and answer ancestry by
 comparing positions, using `O(H + m)` words and `O(H + A + m)` preprocessing without constructing dense masks.
 Such a shortcut requires verifying that the reachable history is a chain; it is invalid for a general DAG.
+The single-history implementation verifies that each union rank's sole in-union parent is the next older rank
+before representing its marker ancestry and pending windows as intervals. Its general DAG path still uses dense
+marker sets and nontrivial windows; a composed history does not use the single-history author-prefix shortcut.
 An OR-result cache MAY reuse equal mask pairs, but its keys and values also need a memory budget. The pass MAY also stop early when its visiting order is known to be child-before-parent without a full
 walk, as decreasing commit-graph generation number is. A window is closed under descendants, so its complement is
 closed under ancestors. Once every unvisited commit that has a visited child carries all `k` boundary bits, every
@@ -3341,8 +3344,9 @@ separately if it is not already present. `Au` counts all parent entries of union
 outside the union. It can use rank intervals on such a chain and a general DAG method otherwise. If the
 fallback already scans those same parent lists, verification adds only a linear pass to its bound.
 The strict saving above is for the chain family's window and author subphases with the shared aggregate.
-The implementation dated in DESIGN-HISTORY.md does not yet use this rank fast path.
-No workload distribution is specified,
+The implementation dated in DESIGN-HISTORY.md did not use this rank fast path. The subsequent single-history
+implementation uses verified rank intervals and a shared author-prefix scan; the stated full-planner limits still
+apply, and composed histories retain their general path. No workload distribution is specified,
 so these worst-case and family comparisons make no average-case planner claim.
 
 **The dispat theorem (bounds for a compiled plan).** A compiled plan is a finite directed acyclic graph of tasks.
@@ -3365,7 +3369,11 @@ have separate costs and no global minimum claim here.
 1. **Lower bounds.** Suppose every positive-duration task consumes one of `s` identical slots throughout its
    execution, where `s` is a positive integer. Every schedule has makespan at least
    `B = max(Lk, Wk / s)`: a chain is sequential, and `s` slots complete at most `s` units of work per unit
-   time. If records instead use a separate positive integer capacity `m_rec`, take no node slot, and hold an
+   time. More explicitly, assign each task's whole duration to the one slot it occupies. By the pigeonhole
+   principle, some slot receives at least `Wk / s` work; that slot executes its assigned tasks serially, so
+   `T >= Wk / s`. Independently, precedence forces `T >= Lk`. These are lower bounds: a scheduler can delay a
+   ready task arbitrarily, so the graph alone gives no finite upper bound without dispatch assumptions.
+   If records instead use a separate positive integer capacity `m_rec`, take no node slot, and hold an
    owner's lane through each publication and record (§28.2, §28.6), let `Wslot` be slot-task work, `Wrec` record
    work, and `p_i`, `r_i` the publication and record durations for one owner's packages. When these are the only
    positive-duration task types, every schedule has makespan at least
