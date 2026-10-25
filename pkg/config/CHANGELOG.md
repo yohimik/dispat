@@ -1,5 +1,30 @@
 # Changelog
 
+## pkg/config/v1.1.0-rc.0 (2026-10-25)
+
+### Features
+
+- hand back the tree the ascent parsed for the file it chose ([5788b48](https://github.com/yohimik/dispat/commit/5788b48478bba4b7d9e1a45a53e05cc21ee9c34a)) (by yohimik, Claude Opus 5.5)
+  Loader.ResolveTree is Loader.Resolve returning a Resolution: the path,
+  the root, and the tree the ascent already parsed the chosen file into,
+  references included, or no tree for a file that could not be read. A
+  program that loads the resolved file next no longer reads it and every
+  file it refers to a second time. Resolve is ResolveTree with the tree
+  dropped and answers exactly as before.
+
+  It is the library half of the minimality finding that the root
+  configuration is read and parsed twice per command (dispat
+  config.go:453). TestResolveTreeHandsBackTheTreeItParsed holds the tree
+  to what ReadTree builds for the root, a remembered candidate and the
+  nearest fallback, counts one read per file through Options.ReadFile,
+  and checks that an unreadable file comes back without a tree.
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## pkg/config/v1.0.2-rc.1 (2026-09-25)
 
 ### Fixes
