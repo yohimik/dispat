@@ -48,7 +48,7 @@ func (r scopeResult) inert() bool { return r.empty() && len(r.nonPackage) == 0 }
 func (cp *computation) resolveScopeSet(scopes ccme.ScopeSet, written bool, rec *commitRec) scopeResult {
 	res := scopeResult{packages: make(map[string]bool)}
 
-	if !written || len(scopes.Includes()) == 0 {
+	if !written || !hasInclusion(scopes) {
 		// No parentheses, or a set consisting only of exclusions: the base is
 		// the set of packages the commit's files belong to (§6.2).
 		for name := range cp.derived(rec) {
@@ -56,15 +56,21 @@ func (cp *computation) resolveScopeSet(scopes ccme.ScopeSet, written bool, rec *
 		}
 		res.derived = true
 	} else {
-		for _, t := range scopes.Includes() {
-			cp.expandTerm(t, rec, res.packages, &res, true)
+		for _, t := range scopes {
+			if !t.Exclude {
+				cp.expandTerm(t, rec, res.packages, &res, true)
+			}
 		}
 	}
 
+	// Every exclusion is expanded after every inclusion, whatever order they
+	// were written in, so that W134 lists the inclusions' empty globs first.
 	if len(scopes) > 0 {
 		excluded := make(map[string]bool)
-		for _, t := range scopes.Excludes() {
-			cp.expandTerm(t, rec, excluded, &res, false)
+		for _, t := range scopes {
+			if t.Exclude {
+				cp.expandTerm(t, rec, excluded, &res, false)
+			}
 		}
 		for name := range excluded {
 			delete(res.packages, name)
@@ -78,6 +84,15 @@ func (cp *computation) resolveScopeSet(scopes ccme.ScopeSet, written bool, rec *
 			Msg("plan: scope resolved")
 	}
 	return res
+}
+
+func hasInclusion(scopes ccme.ScopeSet) bool {
+	for _, t := range scopes {
+		if !t.Exclude {
+			return true
+		}
+	}
+	return false
 }
 
 // expandTerm adds the packages one term addresses to out.
@@ -231,6 +246,9 @@ func (cp *computation) commitCanDerive(rec *commitRec, p *model.Package) bool {
 // reportScope raises the diagnostics a resolution collected. where names the
 // footer the scope-set came from, or is empty for a header scope-set.
 func (cp *computation) reportScope(res scopeResult, rec *commitRec, where string) {
+	if len(res.unknownIncludes) == 0 && len(res.unknownExcludes) == 0 && len(res.emptyGlobs) == 0 {
+		return
+	}
 	prefix := ""
 	if where != "" {
 		prefix = where + ": "
