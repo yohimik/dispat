@@ -18,9 +18,15 @@ log line says which of the two happened.
 
 Every request is logged, with the decision and the status it ended in. A proxy
 that silently drops something is a fault the experiment did not inject.
+
+When EXPERIMENT_TIMING names a file, every upload the proxy forwards is also
+appended to it as one JSON line, {package, task: "upload", start, end,
+status}: the timing experiment's record of a publication no npm process
+carried, which is how lerna publishes, in-process.
 """
 import http.client
 import http.server
+import json
 import os
 import sys
 import time
@@ -31,6 +37,7 @@ DENY_DIR = os.environ.get("DENY_DIR", "/deny")
 PORT = int(os.environ.get("PORT", "4873"))
 GATE_TIMEOUT = float(os.environ.get("GATE_TIMEOUT", "120"))
 GATE_POLL = 0.1
+TIMING = os.environ.get("EXPERIMENT_TIMING", "")
 
 # Hop-by-hop headers, which belong to one connection rather than to the
 # message, plus the length this proxy recomputes for the body it holds.
@@ -80,6 +87,16 @@ def wait_for_gate(path, timeout, poll=GATE_POLL, clock=time.monotonic, sleep=tim
             return f"gate {path} timed out after {timeout:g}s"
         sleep(poll)
     return f"after {path}"
+
+
+def record_upload(path, package, start, end, status):
+    """One forwarded upload's interval, appended as a line of its own. A
+    single write of a short line in append mode lands whole beside the
+    builds' and the npm shim's lines in the same file."""
+    line = json.dumps({"package": package, "task": "upload", "start": round(start, 6),
+                       "end": round(end, 6), "status": status})
+    with open(path, "a") as f:
+        f.write(line + "\n")
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -136,6 +153,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _forward(self):
+        started = time.time()
         name = package_of(self.path)
         try:
             body = self._read_body()
@@ -177,6 +195,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             upstream_length = resp.getheader("Content-Length")
             length = int(upstream_length) if upstream_length is not None else 0
         self.log(f"{self.command} {self.path} (package {name}) -> {resp.status}")
+        # Recorded once the registry has answered and before the tool hears
+        # it, so the line is in the file by the time the tool goes on. A path
+        # whose first segment is `-` is the registry's own API, a login rather
+        # than a package.
+        if TIMING and self.command == "PUT" and not name.startswith("-"):
+            record_upload(TIMING, name, started, time.time(), resp.status)
         self._respond(resp.status, data, kept, length)
 
     do_GET = do_PUT = do_POST = do_DELETE = do_HEAD = do_PATCH = do_OPTIONS = _forward

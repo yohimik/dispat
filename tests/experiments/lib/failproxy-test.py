@@ -10,6 +10,7 @@ import http.client
 import http.server
 import importlib.util
 import io
+import json
 import os
 import pathlib
 import tempfile
@@ -119,9 +120,8 @@ class Upstream(http.server.BaseHTTPRequestHandler):
         pass
 
 
-class HandlerTest(unittest.TestCase):
-    """The proxy as a tool meets it: a PUT through it, refused or forwarded,
-    and the decision line the harness counts uploads from."""
+class ProxyCase(unittest.TestCase):
+    """A proxy in front of an accepting registry, and a PUT through it."""
 
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -155,6 +155,11 @@ class HandlerTest(unittest.TestCase):
         response.read()
         return response.status
 
+
+class HandlerTest(ProxyCase):
+    """The proxy as a tool meets it: a PUT through it, refused or forwarded,
+    and the decision line the harness counts uploads from."""
+
     def test_an_allowed_upload_is_forwarded(self):
         self.assertEqual(self.put("core"), 201)
         self.assertIn("failproxy: PUT /core (package core) -> 201", self.log.getvalue())
@@ -177,6 +182,35 @@ class HandlerTest(unittest.TestCase):
         self.assertEqual(self.put("core"), 502)
         builder.join()
         self.assertIn(f"failproxy: DENY PUT /core (package core) after {gate} -> 502", self.log.getvalue())
+
+
+class UploadTimingTest(ProxyCase):
+    """The timing experiment's record of an upload no npm process carried:
+    lerna publishes in-process, so the registry's side is all there is to
+    time."""
+
+    def setUp(self):
+        super().setUp()
+        self.timing = os.path.join(self.dir.name, "timing.jsonl")
+        saved = failproxy.TIMING
+        failproxy.TIMING = self.timing
+        self.addCleanup(lambda: setattr(failproxy, "TIMING", saved))
+
+    def records(self):
+        return [json.loads(line) for line in pathlib.Path(self.timing).read_text().splitlines()]
+
+    def test_a_forwarded_upload_is_timed(self):
+        before = time.time()
+        self.assertEqual(self.put("core"), 201)
+        [record] = self.records()
+        self.assertEqual((record["package"], record["task"], record["status"]), ("core", "upload", 201))
+        self.assertLessEqual(before - 0.001, record["start"])
+        self.assertLessEqual(record["start"], record["end"])
+
+    def test_a_refused_upload_is_not(self):
+        pathlib.Path(self.deny_dir, "cli").write_text("")
+        self.assertEqual(self.put("cli"), 502)
+        self.assertFalse(os.path.exists(self.timing))
 
 
 if __name__ == "__main__":

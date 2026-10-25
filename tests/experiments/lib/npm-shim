@@ -1,0 +1,48 @@
+#!/bin/sh
+# An npm in front of npm. Placed first on PATH for the duration of one tool's
+# release command, it times every `npm publish` it forwards and appends one
+# JSON line to the file EXPERIMENT_TIMING names:
+#
+#   {"package": ..., "task": "publish", "start": ..., "end": ..., "exit": ...}
+#
+# Every other call, and every call while EXPERIMENT_TIMING is unset, is
+# forwarded untouched. The package is read from the manifest of the folder the
+# publish names, or of the working directory when it names none: nx runs
+# `npm publish <root>` from the workspace, the others publish from the package.
+# The record is the fixture's rather than any tool's log, so four tools are
+# timed by one clock.
+set -eu
+
+shim_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+real_path=$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF -- "$shim_dir" | paste -sd: -)
+real=$(PATH=$real_path command -v npm) || { echo "npm-shim: no npm on PATH beside $shim_dir" >&2; exit 127; }
+
+subcommand=""
+for argument in "$@"; do
+  case $argument in -*) continue ;; esac
+  subcommand=$argument
+  break
+done
+if [ "$subcommand" != publish ] || [ -z "${EXPERIMENT_TIMING:-}" ]; then
+  exec "$real" "$@"
+fi
+
+folder=.
+for argument in "$@"; do
+  case $argument in -*|publish) continue ;; esac
+  if [ -f "$argument/package.json" ]; then folder=$argument; break; fi
+done
+package=$(jq -er .name "$folder/package.json")
+
+# python's clock rather than date's: `date +%N` is GNU's, and the shim's own
+# tests run wherever the harness's do.
+now() { python3 -c 'import time; print("%.6f" % time.time())'; }
+
+start=$(now)
+rc=0
+"$real" "$@" || rc=$?
+end=$(now)
+# `end` is a jq keyword, so the variables are named apart from the fields.
+jq -nc --arg package "$package" --argjson began "$start" --argjson ended "$end" --argjson code "$rc" \
+  '{package: $package, task: "publish", start: $began, end: $ended, exit: $code}' >> "$EXPERIMENT_TIMING"
+exit "$rc"
