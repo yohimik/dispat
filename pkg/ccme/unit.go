@@ -196,7 +196,7 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 					"footer key %q is not %q: case is significant, so this is NOT a breaking change",
 					f.Key, FooterBreakingChange)
 			case !f.IssueReference:
-				b.warnf(CodeW150, f.Position, "unknown footer key %q ignored", f.Key)
+				b.warnf(CodeW150, f.Position, quoteMessage("unknown footer key ", f.Key, " ignored"))
 			}
 			continue
 		}
@@ -540,10 +540,10 @@ func (p *Parser) applyBumps(b *unitBuilder) {
 		bump, known := p.cfg.Types[u.Header.Type]
 		if !known {
 			if p.cfg.StrictTypes {
-				b.errf(CodeE140, u.Header.Position, "unknown type %q", u.Header.Type)
+				b.errf(CodeE140, u.Header.Position, quoteMessage("unknown type ", u.Header.Type, ""))
 			} else {
 				b.warnf(CodeW140, u.Header.Position,
-					"unknown type %q mapped to bump none", u.Header.Type)
+					quoteMessage("unknown type ", u.Header.Type, " mapped to bump none"))
 			}
 			bump = BumpNone
 		}

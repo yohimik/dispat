@@ -2,6 +2,7 @@ package ccme
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -176,15 +177,33 @@ func formatMessage(format string, args []any) string {
 	return fmt.Sprintf(format, args...)
 }
 
+// quoteMessage renders prefix, then value as the %q verb renders a string,
+// then suffix: fmt.Sprintf(prefix+"%q"+suffix, value) for a prefix and suffix
+// free of '%'. It is for the diagnostics a history without the convention
+// raises on most commits: fmt boxes its argument on the heap before
+// formatting, and this builds the text on the stack and copies it once.
+func quoteMessage(prefix, value, suffix string) string {
+	var space [128]byte
+	text := append(space[:0], prefix...)
+	text = strconv.AppendQuote(text, value)
+	text = append(text, suffix...)
+	return string(text)
+}
+
 // fail builds an error-severity diagnostic wrapped as an error.
 func fail(code string, pos Position, format string, args ...any) error {
-	return &fatalError{diag: Diagnostic{
+	return &fatalError{diag: newErrorDiagnostic(code, pos, format, args...)}
+}
+
+// newErrorDiagnostic builds an error-severity diagnostic.
+func newErrorDiagnostic(code string, pos Position, format string, args ...any) Diagnostic {
+	return Diagnostic{
 		Code:      code,
 		Severity:  SeverityError,
 		Message:   formatMessage(format, args),
 		Position:  pos,
 		UnitIndex: -1,
-	}}
+	}
 }
 
 // warn builds a warning-severity diagnostic.
@@ -213,7 +232,8 @@ func asDiagnostic(err error) Diagnostic {
 
 // ParseError aggregates every error-severity diagnostic produced by a parse.
 // A non-nil ParseError does not mean the Result is unusable: units without
-// errors are still populated and still apply (§16).
+// errors are still populated and still apply (§16). Its Diagnostics may share
+// storage with the Result's, so treat them as read-only.
 type ParseError struct {
 	Diagnostics []Diagnostic
 }

@@ -45,6 +45,16 @@ func TestAllocationBudget(t *testing.T) {
 			run:    func() { allocSink, _ = p.Parse("fix(a,b,c): x") },
 		},
 		{
+			name:   "Parse/headerFailure",
+			budget: 5, // measured 4: buffer, message text, the one diagnostic slice, the ParseError
+			run:    func() { allocSink, _ = p.Parse("Merge branch main into feature/x") },
+		},
+		{
+			name:   "Parse/unknownType",
+			budget: 5, // measured 4: buffer, scope slice, message text, the one diagnostic slice
+			run:    func() { allocSink, _ = p.Parse("wip(core): half done") },
+		},
+		{
 			name:   "Parse/directives",
 			budget: 13, // measured 12 (go1.26, two-axis grammar with a footer)
 			run:    func() { allocSink, _ = p.Parse(benchDirectives) },

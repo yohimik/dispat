@@ -94,6 +94,7 @@
 package ccme
 
 import (
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -163,7 +164,9 @@ type Result struct {
 	// Units are every unit in written order, including units that failed to
 	// parse. Check Unit.Valid, or use ValidUnits.
 	Units []*Unit
-	// Diagnostics are every diagnostic raised.
+	// Diagnostics are every diagnostic raised. Each one is stored once, so
+	// a unit's Diagnostics and this slice share storage: treat both as
+	// read-only.
 	//
 	// The order is deterministic and is a pure function of the input, as §17.2
 	// requires: unit-level diagnostics are grouped by unit in unit order, and
@@ -202,15 +205,25 @@ func (r *Result) Errors() []Diagnostic { return r.filter(SeverityError) }
 func (r *Result) Warnings() []Diagnostic { return r.filter(SeverityWarning) }
 
 func (r *Result) filter(s Severity) []Diagnostic {
+	n := r.countSeverity(s)
+	if n == 0 {
+		return nil
+	}
+	return r.collectSeverity(s, n)
+}
+
+func (r *Result) countSeverity(s Severity) int {
 	n := 0
 	for _, d := range r.Diagnostics {
 		if d.Severity == s {
 			n++
 		}
 	}
-	if n == 0 {
-		return nil
-	}
+	return n
+}
+
+// collectSeverity copies out the n diagnostics of severity s.
+func (r *Result) collectSeverity(s Severity, n int) []Diagnostic {
 	out := make([]Diagnostic, 0, n)
 	for _, d := range r.Diagnostics {
 		if d.Severity == s {
@@ -255,13 +268,18 @@ func (r *Result) Bump() Bump {
 }
 
 // err builds the aggregate error, or nil when nothing failed. It allocates
-// only when there is something to report.
+// only when there is something to report, and when every diagnostic is an
+// error, the usual shape of a failed message, it shares the Result's slice
+// rather than copying it.
 func (r *Result) err() error {
-	errs := r.filter(SeverityError)
-	if errs == nil {
+	n := r.countSeverity(SeverityError)
+	if n == 0 {
 		return nil
 	}
-	return &ParseError{Diagnostics: errs}
+	if n == len(r.Diagnostics) {
+		return &ParseError{Diagnostics: slices.Clip(r.Diagnostics)}
+	}
+	return &ParseError{Diagnostics: r.collectSeverity(SeverityError, n)}
 }
 
 // Parse parses a complete commit message: normalisation (§4.1), splitting into
@@ -310,15 +328,14 @@ func (p *Parser) Parse(message string) (*Result, error) {
 		res = &buf.res
 		res.Message = normalised
 		res.Units = buf.ptrs[:]
-		res.Diagnostics = dropped
 		p.parseUnit(&buf.unit, sources[0], lines)
-		res.Diagnostics = append(res.Diagnostics, buf.unit.Diagnostics...)
+		res.Diagnostics = gatherDiagnostics(dropped, res.Units, 0)
 		p.checkMultiUnitScoping(res) // a no-op below two units, kept for symmetry
 		res.propagateMessageScopedErrors()
 		return res, res.err()
 	}
 
-	res = &Result{Message: normalised, Diagnostics: dropped}
+	res = &Result{Message: normalised}
 	if n := len(sources); n > 0 {
 		// One backing array for every unit rather than n separate allocations.
 		backing := make([]Unit, n)
@@ -327,13 +344,42 @@ func (p *Parser) Parse(message string) (*Result, error) {
 			u := &backing[i]
 			p.parseUnit(u, sources[i], lines)
 			res.Units[i] = u
-			res.Diagnostics = append(res.Diagnostics, u.Diagnostics...)
 		}
 	}
-
+	// The spare slot is for W132, which checkMultiUnitScoping may append.
+	res.Diagnostics = gatherDiagnostics(dropped, res.Units, 1)
 	p.checkMultiUnitScoping(res)
 	res.propagateMessageScopedErrors()
 	return res, res.err()
+}
+
+// gatherDiagnostics returns the message-level diagnostics followed by every
+// unit's, in unit order, storing each diagnostic once: each unit's slice is
+// re-pointed into the shared array, capped so that appending to it copies
+// rather than overwriting the next unit's. spare is room for diagnostics the
+// caller appends afterwards.
+func gatherDiagnostics(messageLevel []Diagnostic, units []*Unit, spare int) []Diagnostic {
+	total := len(messageLevel)
+	for _, u := range units {
+		total += len(u.Diagnostics)
+	}
+	if total == len(messageLevel) {
+		return messageLevel
+	}
+	if len(messageLevel) == 0 && len(units) == 1 && spare == 0 {
+		return slices.Clip(units[0].Diagnostics)
+	}
+	all := make([]Diagnostic, 0, total+spare)
+	all = append(all, messageLevel...)
+	for _, u := range units {
+		if len(u.Diagnostics) == 0 {
+			continue
+		}
+		start := len(all)
+		all = append(all, u.Diagnostics...)
+		u.Diagnostics = all[start:len(all):len(all)]
+	}
+	return all
 }
 
 // propagateMessageScopedErrors applies the blast radius §16 assigns to E158.
@@ -439,7 +485,7 @@ func (p *Parser) ParseSubject(subject string) (*Result, error) {
 	res.Message = normalised
 	res.Units = buf.ptrs[:]
 	p.parseUnit(&buf.unit, unitSource{raw: normalised, end: 1}, lines[:])
-	res.Diagnostics = buf.unit.Diagnostics
+	res.Diagnostics = gatherDiagnostics(nil, res.Units, 0)
 	res.propagateMessageScopedErrors()
 	return res, res.err()
 }
@@ -541,14 +587,14 @@ func (p *Parser) parseUnit(u *Unit, src unitSource, messageLines []string) {
 	u.Raw = src.raw
 	u.Valid = true
 
-	header, warns, err := p.parseHeader(lines[0], u.Start)
+	header, warns, failure := p.parseHeader(lines[0], u.Start)
 	u.Header = header
 	for _, w := range warns {
 		w.UnitIndex = index
 		u.Diagnostics = append(u.Diagnostics, w)
 	}
-	if err != nil {
-		u.addError(asDiagnostic(err))
+	if failure.Code != "" {
+		u.addError(failure)
 		return
 	}
 
@@ -556,9 +602,9 @@ func (p *Parser) parseUnit(u *Unit, src unitSource, messageLines []string) {
 	const restStart = 2
 	if len(lines) > 1 {
 		if lines[1] != "" {
-			u.addError(asDiagnostic(fail(CodeE100,
+			u.addError(newErrorDiagnostic(CodeE100,
 				Position{Line: startLine + 1, Column: 1},
-				"a blank line is required between the header and the body")))
+				"a blank line is required between the header and the body"))
 			return
 		}
 	}

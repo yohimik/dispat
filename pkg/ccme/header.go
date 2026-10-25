@@ -29,9 +29,11 @@ type Header struct {
 }
 
 // parseHeader implements §20.3: five phases, one pass, one byte of lookahead.
-// The returned diagnostics are warnings only; a violation is returned as an
-// error carrying the offending position.
-func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, error) {
+// The returned diagnostics are warnings only. A violation is returned as the
+// third value, which is the zero Diagnostic when the header parsed; it is a
+// value rather than an error because a header failure is the commonest
+// diagnostic in a history, and an error would box it on the heap.
+func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, Diagnostic) {
 	sc := &scanner{s: line}
 	h := Header{Raw: line, Position: pos}
 	var warns []Diagnostic
@@ -45,7 +47,7 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 	// enough mistake that §5.1 requires a dedicated diagnostic rather than the
 	// generic "type must be lowercase".
 	if strings.HasPrefix(line, FooterBreakingChange) || strings.HasPrefix(line, footerBreakingHyphen) {
-		return h, warns, fail(CodeE100, pos,
+		return h, warns, newErrorDiagnostic(CodeE100, pos,
 			"%s is a footer, not a type: write %q on the header, or put the footer in the unit's final paragraph",
 			FooterBreakingChange, "!")
 	}
@@ -58,10 +60,10 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 	typ := sc.readWhile(typePred)
 	if typ == "" {
 		if !sc.eof() && isUpperASCII(sc.peek()) {
-			return h, warns, fail(CodeE101, at(sc.i),
-				"type must be lowercase a-z, found %q", string(sc.peek()))
+			return h, warns, newErrorDiagnostic(CodeE101, at(sc.i),
+				quoteMessage("type must be lowercase a-z, found ", string(sc.peek()), ""))
 		}
-		return h, warns, fail(CodeE100, at(sc.i), "header must begin with a type")
+		return h, warns, newErrorDiagnostic(CodeE100, at(sc.i), "header must begin with a type")
 	}
 	if lowered := toLowerASCII(typ); lowered != typ {
 		warns = append(warns, warn(CodeW101, at(typeStart),
@@ -71,11 +73,11 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 	h.Type = typ
 	if !sc.eof() && !isTypeTerminator(sc.peek()) {
 		if isUpperASCII(sc.peek()) {
-			return h, warns, fail(CodeE101, at(sc.i),
-				"type must be lowercase a-z, found %q", string(sc.peek()))
+			return h, warns, newErrorDiagnostic(CodeE101, at(sc.i),
+				quoteMessage("type must be lowercase a-z, found ", string(sc.peek()), ""))
 		}
-		return h, warns, fail(CodeE101, at(sc.i),
-			"illegal character %q in type", string(sc.peek()))
+		return h, warns, newErrorDiagnostic(CodeE101, at(sc.i),
+			quoteMessage("illegal character ", string(sc.peek()), " in type"))
 	}
 
 	// --- 2. optional scope-set -------------------------------------------
@@ -89,19 +91,19 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 	scopeLoop:
 		for {
 			if sc.eof() {
-				return h, warns, fail(CodeE103, at(sc.i),
+				return h, warns, newErrorDiagnostic(CodeE103, at(sc.i),
 					"unterminated scope-set: missing ')'")
 			}
 			ci := sc.i
 			switch sc.next() {
 			case ')':
 				if ci == termStart {
-					return h, warns, fail(CodeE104, at(ci), "empty scope term")
+					return h, warns, newErrorDiagnostic(CodeE104, at(ci), "empty scope term")
 				}
 				// The closing term counts against the cap too; checking only
 				// at commas would quietly admit limit+1 terms.
 				if n := p.cfg.Limits.ScopeTermsPerUnit; n > 0 && len(h.Scopes) >= n {
-					return h, warns, fail(CodeE158, at(ci),
+					return h, warns, newErrorDiagnostic(CodeE158, at(ci),
 						"scope-set has more than %d terms", n)
 				}
 				if h.Scopes == nil {
@@ -111,10 +113,10 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 				break scopeLoop
 			case ',':
 				if ci == termStart {
-					return h, warns, fail(CodeE104, at(ci), "empty scope term")
+					return h, warns, newErrorDiagnostic(CodeE104, at(ci), "empty scope term")
 				}
 				if n := p.cfg.Limits.ScopeTermsPerUnit; n > 0 && len(h.Scopes) >= n {
-					return h, warns, fail(CodeE158, at(ci),
+					return h, warns, newErrorDiagnostic(CodeE158, at(ci),
 						"scope-set has more than %d terms", n)
 				}
 				if h.Scopes == nil {
@@ -127,19 +129,19 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 				}
 				termStart = sc.i
 			case ' ', '\t':
-				return h, warns, fail(CodeE102, at(ci),
+				return h, warns, newErrorDiagnostic(CodeE102, at(ci),
 					"whitespace inside a scope-set is only allowed after a comma")
 			case '(':
-				return h, warns, fail(CodeE103, at(ci),
+				return h, warns, newErrorDiagnostic(CodeE103, at(ci),
 					"parentheses must not nest inside a scope-set")
 			case ':':
-				return h, warns, fail(CodeE103, at(ci),
+				return h, warns, newErrorDiagnostic(CodeE103, at(ci),
 					"unbalanced scope-set: ':' reached before ')'")
 			default:
 				// §5.2's scope-char excludes the ASCII control range as a
 				// whole, not just space and tab.
 				if !isScopeChar(line[ci]) {
-					return h, warns, fail(CodeE102, at(ci),
+					return h, warns, newErrorDiagnostic(CodeE102, at(ci),
 						"control character inside a scope-set")
 				}
 			}
@@ -174,11 +176,11 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 		if sigil == '^' && doubled {
 			sc.next()
 			if sawCaret {
-				return h, warns, fail(CodeE110, at(sigilPos),
+				return h, warns, newErrorDiagnostic(CodeE110, at(sigilPos),
 					"duplicate propagation sigil: '^' and '^^' are the same sigil")
 			}
 			if !sc.eof() && sc.peek() == '^' {
-				return h, warns, fail(CodeE110, at(sc.i),
+				return h, warns, newErrorDiagnostic(CodeE110, at(sc.i),
 					"'^^^' is not a token: carets are not a repetition count")
 			}
 			sawCaret = true
@@ -187,7 +189,7 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 			if value := sc.readUntilAny(inlineStopChars); value != "" {
 				pv, err := parsePropagateValue(value, at(valPos))
 				if err != nil {
-					return h, warns, err
+					return h, warns, asDiagnostic(err)
 				}
 				h.Inline.Propagate = &pv
 			}
@@ -195,7 +197,7 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 			// an error rather than a silent override.
 			if h.Inline.depthFrom == depthFromPlus {
 				if !h.Inline.Depth.IsAll() {
-					return h, warns, fail(CodeE113, at(sigilPos),
+					return h, warns, newErrorDiagnostic(CodeE113, at(sigilPos),
 						"'^^' asserts a depth of all but '+%s' already set it", h.Inline.Depth)
 				}
 				warns = append(warns, warn(CodeW110, at(sigilPos),
@@ -210,21 +212,21 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 		if sigil == '%' && doubled {
 			sc.next()
 			if !sc.eof() && sc.peek() == '%' {
-				return h, warns, fail(CodeE110, at(sc.i),
+				return h, warns, newErrorDiagnostic(CodeE110, at(sc.i),
 					"'%%%' is not a token: percent signs are not a repetition count")
 			}
 			if h.Inline.PropagateChannel != nil {
-				return h, warns, fail(CodeE110, at(sigilPos), "duplicate '%%' directive")
+				return h, warns, newErrorDiagnostic(CodeE110, at(sigilPos), "duplicate '%%' directive")
 			}
 			valPos := sc.i
 			value := sc.readUntilAny(inlineStopChars)
 			if value == "" {
-				return h, warns, fail(CodeE111, at(valPos),
+				return h, warns, newErrorDiagnostic(CodeE111, at(valPos),
 					"'%%' requires a channel: a channel with no name carries no default")
 			}
 			cv, err := p.parseChannelValue(value, at(valPos), true)
 			if err != nil {
-				return h, warns, err
+				return h, warns, asDiagnostic(err)
 			}
 			h.Inline.PropagateChannel = &cv
 			// "%%" is itself the opt-in and supplies a depth of 1, but only if
@@ -240,21 +242,21 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 		if sigil == '+' && doubled {
 			sc.next()
 			if !sc.eof() && sc.peek() == '+' {
-				return h, warns, fail(CodeE110, at(sc.i),
+				return h, warns, newErrorDiagnostic(CodeE110, at(sc.i),
 					"'+++' is not a token: pluses are not a repetition count")
 			}
 			if h.Inline.channelDepthFrom == depthFromDoublePlus {
-				return h, warns, fail(CodeE110, at(sigilPos), "duplicate '++' directive")
+				return h, warns, newErrorDiagnostic(CodeE110, at(sigilPos), "duplicate '++' directive")
 			}
 			valPos := sc.i
 			value := sc.readUntilAny(inlineStopChars)
 			if value == "" {
-				return h, warns, fail(CodeE111, at(valPos),
+				return h, warns, newErrorDiagnostic(CodeE111, at(valPos),
 					"'++' requires a depth: it carries no default")
 			}
 			dv, err := parseDepthValue(value, at(valPos))
 			if err != nil {
-				return h, warns, err
+				return h, warns, asDiagnostic(err)
 			}
 			// An explicit ++N wins over the 1 that "%%" implies, silently.
 			h.Inline.ChannelDepth = &dv
@@ -268,21 +270,21 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 		// bumps have a default. A channel with no name and a depth with no
 		// number carry nothing worth guessing (§5.3).
 		if value == "" && sigil != '^' {
-			return h, warns, fail(CodeE111, at(valPos),
+			return h, warns, newErrorDiagnostic(CodeE111, at(valPos),
 				"empty value after '%s'", string(sigil))
 		}
 
 		switch sigil {
 		case '^':
 			if sawCaret {
-				return h, warns, fail(CodeE110, at(sigilPos),
+				return h, warns, newErrorDiagnostic(CodeE110, at(sigilPos),
 					"duplicate propagation sigil: '^' and '^^' are the same sigil")
 			}
 			sawCaret = true
 			if value != "" {
 				pv, err := parsePropagateValue(value, at(valPos))
 				if err != nil {
-					return h, warns, err
+					return h, warns, asDiagnostic(err)
 				}
 				h.Inline.Propagate = &pv
 			}
@@ -296,16 +298,16 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 
 		case '+':
 			if sawPlus {
-				return h, warns, fail(CodeE110, at(sigilPos), "duplicate '+' directive")
+				return h, warns, newErrorDiagnostic(CodeE110, at(sigilPos), "duplicate '+' directive")
 			}
 			sawPlus = true
 			dv, err := parseDepthValue(value, at(valPos))
 			if err != nil {
-				return h, warns, err
+				return h, warns, asDiagnostic(err)
 			}
 			if h.Inline.depthFrom == depthFromDoubleCaret {
 				if !dv.IsAll() {
-					return h, warns, fail(CodeE113, at(sigilPos),
+					return h, warns, newErrorDiagnostic(CodeE113, at(sigilPos),
 						"'+%s' contradicts the depth of all asserted by '^^'", value)
 				}
 				warns = append(warns, warn(CodeW110, at(sigilPos),
@@ -318,11 +320,11 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 
 		case '%':
 			if h.Inline.Channel != nil {
-				return h, warns, fail(CodeE110, at(sigilPos), "duplicate '%' directive")
+				return h, warns, newErrorDiagnostic(CodeE110, at(sigilPos), "duplicate '%' directive")
 			}
 			cv, err := p.parseChannelValue(value, at(valPos), false)
 			if err != nil {
-				return h, warns, err
+				return h, warns, asDiagnostic(err)
 			}
 			h.Inline.Channel = &cv
 		}
@@ -338,39 +340,39 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 	// A second scope-set is a parenthesis problem, not a separator problem, so
 	// "feat(a)(b): x" is E103 rather than the generic E120 (§20.3).
 	if !sc.eof() && sc.peek() == '(' {
-		return h, warns, fail(CodeE103, at(sc.i),
+		return h, warns, newErrorDiagnostic(CodeE103, at(sc.i),
 			"a header carries at most one scope-set")
 	}
 	if !sc.accept(':') {
 		if sc.eof() {
-			return h, warns, fail(CodeE120, at(sc.i), "missing ': ' before the description")
+			return h, warns, newErrorDiagnostic(CodeE120, at(sc.i), "missing ': ' before the description")
 		}
-		return h, warns, fail(CodeE120, at(sc.i),
+		return h, warns, newErrorDiagnostic(CodeE120, at(sc.i),
 			"expected ':' but found %q", string(sc.peek()))
 	}
 	if sc.eof() {
 		// Trailing whitespace has already been stripped (§4.1), so "feat: "
 		// arrives here as "feat:", an empty description rather than a bad separator.
-		return h, warns, fail(CodeE121, at(sc.i), "empty description")
+		return h, warns, newErrorDiagnostic(CodeE121, at(sc.i), "empty description")
 	}
 	if !sc.accept(' ') {
 		// Lenient mode accepts a *missing* space (§5.5).
 		if !p.cfg.Lenient {
-			return h, warns, fail(CodeE120, at(sc.i), "':' must be followed by exactly one space")
+			return h, warns, newErrorDiagnostic(CodeE120, at(sc.i), "':' must be followed by exactly one space")
 		}
 		warns = append(warns, warn(CodeW121, at(sc.i),
 			"missing space after ':' accepted under lenient mode"))
 	} else if !sc.eof() && sc.peek() == ' ' {
 		// Two or more spaces stay E120 even under lenient mode, because the
 		// intended description cannot be recovered from them (§5.5).
-		return h, warns, fail(CodeE120, at(sc.i),
+		return h, warns, newErrorDiagnostic(CodeE120, at(sc.i),
 			"':' must be followed by exactly one space")
 	}
 
 	descPos := sc.i
 	h.Description = sc.rest()
 	if h.Description == "" {
-		return h, warns, fail(CodeE121, at(descPos), "empty description")
+		return h, warns, newErrorDiagnostic(CodeE121, at(descPos), "empty description")
 	}
 	if p.cfg.MaxDescriptionLength > 0 {
 		if n := utf8.RuneCountInString(h.Description); n > p.cfg.MaxDescriptionLength {
@@ -378,7 +380,7 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 				"description is %d characters, limit is %d", n, p.cfg.MaxDescriptionLength))
 		}
 	}
-	return h, warns, nil
+	return h, warns, Diagnostic{}
 }
 
 // newScopeStorage returns empty storage for the terms of the scope-set whose

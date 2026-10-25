@@ -1,6 +1,7 @@
 package ccme
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -560,6 +561,55 @@ func TestEveryDeclaredCodeIsInTheSet(t *testing.T) {
 	for _, code := range SilentFailureCodes() {
 		if !IsDiagnosticCode(code) {
 			t.Errorf("silent-failure code %s is missing from the diagnostic set", code)
+		}
+	}
+}
+
+// TestQuoteMessageMatchesFmt holds quoteMessage to the %q verb it replaces on
+// the hot diagnostics, over every byte, invalid UTF-8, escapes and a value
+// longer than its stack buffer.
+func TestQuoteMessageMatchesFmt(t *testing.T) {
+	t.Parallel()
+
+	values := []string{"", "M", "Merge", `"`, `\`, "é", "\u2028", "\xff\xfe", "tab\there", strings.Repeat("long-value ", 20)}
+	for c := 0; c < 256; c++ {
+		values = append(values, string(byte(c)), string(rune(c)))
+	}
+	affixes := [][2]string{{"", ""}, {"type must be lowercase a-z, found ", ""}, {"illegal character ", " in type"},
+		{"unknown type ", " mapped to bump none"}, {"unknown footer key ", " ignored"}}
+	for _, affix := range affixes {
+		for _, v := range values {
+			want := fmt.Sprintf(affix[0]+"%q"+affix[1], v)
+			if got := quoteMessage(affix[0], v, affix[1]); got != want {
+				t.Errorf("quoteMessage(%q, %q, %q) = %q, want %q", affix[0], v, affix[1], got, want)
+			}
+		}
+	}
+}
+
+// TestQuotedDiagnosticTexts pins the texts of the diagnostics quoteMessage
+// renders, as Parse reports them.
+func TestQuotedDiagnosticTexts(t *testing.T) {
+	t.Parallel()
+
+	strict := MustNewParser(Config{StrictTypes: true})
+	cases := []struct {
+		parser  *Parser
+		message string
+		want    string
+	}{
+		{DefaultParser(), "Merge branch main into feature/x", `type must be lowercase a-z, found "M"`},
+		{DefaultParser(), "fiX: a", `type must be lowercase a-z, found "X"`},
+		{DefaultParser(), "fix typo in readme", `illegal character " " in type`},
+		{DefaultParser(), "fix\xc3\xa9: a", "illegal character \"\u00c3\" in type"},
+		{DefaultParser(), "wip(core): half done", `unknown type "wip" mapped to bump none`},
+		{strict, "wip(core): half done", `unknown type "wip"`},
+		{DefaultParser(), "fix(core): typo\n\nTested-on: staging", `unknown footer key "Tested-on" ignored`},
+	}
+	for _, tc := range cases {
+		res, _ := tc.parser.Parse(tc.message)
+		if len(res.Diagnostics) != 1 || res.Diagnostics[0].Message != tc.want {
+			t.Errorf("Parse(%q) diagnostics = %+v, want one with message %q", tc.message, res.Diagnostics, tc.want)
 		}
 	}
 }
