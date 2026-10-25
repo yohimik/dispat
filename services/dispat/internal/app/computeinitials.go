@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/yohimik/dispat/pkg/ccme"
 
@@ -31,11 +30,6 @@ import (
 // actually be read, which the planner decides by the tags (§12.3): a package
 // with a parseable stable release tag takes its baseline from that tag and
 // ignores initials entirely.
-
-// tagConcurrency bounds the tag queries, the way the planner bounds its own:
-// they are independent per-package git reads, and a monorepo with hundreds of
-// packages must not fork hundreds of gits at once.
-const tagConcurrency = 16
 
 // initialSuggestion is one proposed initials entry.
 type initialSuggestion struct {
@@ -205,21 +199,61 @@ func (a *App) unreleased(ctx context.Context, candidates []manifestBaseline) []i
 // baselineReasons says, per candidate, why the package still needs an entry
 // written down, or "" when its tags already answer.
 //
-// The tag queries are independent per-package git reads, so they run
-// concurrently and are read back strictly in candidate order. A package whose
-// tags cannot be read loses its suggestion and nothing else: the dependency
-// half of the command has no business failing over a git error.
+// A package whose tags cannot be read loses its suggestion and nothing else:
+// the dependency half of the command has no business failing over a git
+// error.
 func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline) ([]string, []error) {
 	reasons := make([]string, len(candidates))
 	errs := make([]error, len(candidates))
-
-	// Shared repository state is resolved once. Packages in one repository
-	// reuse its HEAD check and alias filter instead of rescanning the fleet.
-	type repositoryBaseline struct {
-		git     *gitx.LocalGitx
-		aliases plan.AliasFilter
-		empty   bool
+	repositories := a.baselineRepositories(ctx, candidates)
+	for i, c := range candidates {
+		if err := ctx.Err(); err != nil {
+			errs[i] = err
+			continue
+		}
+		repo := repositories[c.pkg.Repository]
+		switch {
+		case repo.empty:
+			reasons[i] = "the repository has no commits yet"
+		case repo.err != nil:
+			errs[i] = repo.err
+		default:
+			// A moving alias must never become a stable baseline.
+			reasons[i] = baselineReason(repo.aliases.Without(repo.tags[c.pkg.Name], c.pkg.Name, a.log))
+		}
 	}
+	return reasons, errs
+}
+
+// baselineReason says why a package with these reachable tags still needs an
+// entry, or "" when its newest stable tag is a readable baseline.
+func baselineReason(tags gitx.Tags) string {
+	stable, ok := tags.StableBaseline()
+	switch {
+	case !ok:
+		return "no release tag yet"
+	case !stable.Parsed:
+		return fmt.Sprintf("newest tag %s is not a version", stable.Name)
+	default:
+		return ""
+	}
+}
+
+// repositoryBaseline is the state compute reads once per repository: its
+// HEAD check, its alias filter, and every candidate's reachable tags.
+type repositoryBaseline struct {
+	git     *gitx.LocalGitx
+	aliases plan.AliasFilter
+	empty   bool
+	formats map[string]gitx.TagFormat
+	tags    map[string]gitx.Tags
+	err     error
+}
+
+// baselineRepositories reads each candidate repository's tags from one
+// inventory (§13.2), which gives every package the list a per-package
+// `git tag --list` would, in the same order.
+func (a *App) baselineRepositories(ctx context.Context, candidates []manifestBaseline) map[string]*repositoryBaseline {
 	owned := make(map[string][]*model.Package)
 	if pkgs, err := a.packages(); err != nil {
 		a.log.Debug().Err(err).Msg("cannot read the workspace's alias tags; reading every tag as a release")
@@ -228,62 +262,37 @@ func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline
 			owned[p.Repository] = append(owned[p.Repository], p)
 		}
 	}
-	repositories := make(map[string]repositoryBaseline)
+	repositories := make(map[string]*repositoryBaseline)
+	var order []*repositoryBaseline
 	for _, c := range candidates {
 		name := c.pkg.Repository
-		if _, exists := repositories[name]; exists {
+		repo, exists := repositories[name]
+		if !exists {
+			git := a.git
+			if a.workspace != nil {
+				git = &gitx.LocalGitx{Dir: c.pkg.RepoRoot, Log: a.log}
+			}
+			_, headErr := git.HeadSHA(ctx)
+			if headErr != nil {
+				a.log.Debug().Err(headErr).Str("repository", name).
+					Msg("no commit to read release tags from; every package is a first release")
+			}
+			repo = &repositoryBaseline{
+				git: git, aliases: plan.NewAliasFilter(owned[name]), empty: headErr != nil,
+				formats: make(map[string]gitx.TagFormat),
+			}
+			repositories[name] = repo
+			order = append(order, repo)
+		}
+		repo.formats[c.pkg.Name] = plan.TagFormatFor(c.pkg)
+	}
+	for _, repo := range order {
+		if repo.empty || ctx.Err() != nil {
 			continue
 		}
-		git := a.git
-		if a.workspace != nil {
-			git = &gitx.LocalGitx{Dir: c.pkg.RepoRoot, Log: a.log}
-		}
-		_, headErr := git.HeadSHA(ctx)
-		if headErr != nil {
-			a.log.Debug().Err(headErr).Str("repository", name).
-				Msg("no commit to read release tags from; every package is a first release")
-		}
-		repositories[name] = repositoryBaseline{
-			git: git, aliases: plan.NewAliasFilter(owned[name]), empty: headErr != nil,
-		}
+		repo.tags, repo.err = repo.git.TagsForPackages(ctx, repo.formats)
 	}
-
-	// A fixed worker set bounds both Git children and goroutine memory.
-	workers := min(tagConcurrency, len(candidates))
-	var wg sync.WaitGroup
-	for worker := range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := worker; i < len(candidates); i += workers {
-				if err := ctx.Err(); err != nil {
-					errs[i] = err
-					continue
-				}
-				c := candidates[i]
-				repo := repositories[c.pkg.Repository]
-				if repo.empty {
-					reasons[i] = "the repository has no commits yet"
-					continue
-				}
-				tags, err := repo.git.Tags(ctx, c.pkg.Name, plan.TagFormatFor(c.pkg))
-				if err != nil {
-					errs[i] = err
-					continue
-				}
-				// A moving alias must never become a stable baseline.
-				stable, ok := repo.aliases.Without(tags, c.pkg.Name, a.log).StableBaseline()
-				switch {
-				case !ok:
-					reasons[i] = "no release tag yet"
-				case !stable.Parsed:
-					reasons[i] = fmt.Sprintf("newest tag %s is not a version", stable.Name)
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	return reasons, errs
+	return repositories
 }
 
 // collectInitialEdits adds the accepted baselines to the config's initials
