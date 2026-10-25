@@ -243,3 +243,24 @@ func BenchmarkComputeMergedHistory(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkComputeCancelledHistory is BenchmarkComputeMergedHistory's single
+// history with a cancel every 64 commits among the newest 4,096, each naming
+// one package: the shape where every admission question asks which live
+// cancel, if any, reaches the commit for the package (§13.5).
+func BenchmarkComputeCancelledHistory(b *testing.B) {
+	pkgs, deps, git := mergedHistoryWorkspace(20_000, 128)
+	cancels := 0
+	for i := len(git.history) - 4096; i < len(git.history); i += 64 {
+		git.history[i].message = fmt.Sprintf("cancel(%s): drop the pending work", pkgs[i%len(pkgs)].Name)
+		cancels++
+	}
+	opts := Options{Packages: pkgs, Dependencies: deps, Root: "/r"}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := Compute(context.Background(), git, opts); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportMetric(float64(cancels), "cancels")
+}
