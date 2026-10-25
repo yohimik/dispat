@@ -1,5 +1,75 @@
 # Changelog
 
+## specs/ccme-spec/v3.1.0-rc.6 (2026-10-25)
+
+### Fixes
+
+- state the dispat algorithm as the theorem's executor ([477c928](https://github.com/yohimik/dispat/commit/477c928212d10867f969b57ca637c6b5a3d21bc2)) (by yohimik, Claude Fable 5.1)
+  Section 13.11 now states the dispat algorithm beside the dispat theorem:
+  a distributed, saga-style executor of a compiled plan whose tasks,
+  dependencies and unrecoverable set are known before the first task
+  starts, with only durations learned by running. Its six steps are fixing
+  the inputs under the locks, compiling the plan and its task graph,
+  work-conserving execution with a deterministic order among ready tasks,
+  durable records as a saga, resumption by recomputation with adoption,
+  and joining a moved branch, each with its cost from the table.
+
+  It is minimal in time in two senses: no execution beats the theorem's
+  bound, and no algorithm that learns durations by running tasks can
+  guarantee a better factor than the one step 3 attains, shown by the
+  adversary that starts the one long task last. It is minimal in memory
+  in the ledger's sense: what it retains is the graph, its counters, one
+  lease per in-flight task, an output set while a consumer needs it, and
+  one record per completed unrecoverable task, each of which the theorem
+  shows necessary. Tasks discovered during execution and destinations
+  whose irreversibility is not declared are outside the premise.
+
+- state the dispat theorem over compiled plans with unrecoverable tasks ([c7b14d3](https://github.com/yohimik/dispat/commit/c7b14d320d53580a00d7ba04612e52b180f9e961)) (by yohimik, Claude Fable 5.1)
+  The theorem's object is now the compiled plan: a finite set of tasks
+  with known dependencies and durations, an acyclic precedence relation,
+  and a subset of tasks with potential unrecovery, whose effect no later
+  action restores. A release plan of section 13 compiles to exactly one
+  such plan, with its publications, records and withdrawals in that
+  subset; a command sweep and a configured stage compile to one as well.
+  The saga clause distinguishes the two kinds of task: a record is
+  mandatory for an unrecoverable task, because losing it is the double
+  publication, and economical for a recoverable one, whose loss costs its
+  own duration again and no more.
+
+- state the dispat theorem on the one fastest release plan ([94591bd](https://github.com/yohimik/dispat/commit/94591bd98b06cf84fd42a17d094f9e57964bc103)) (by yohimik, Claude Fable 5.1)
+  Section 13.11 said in passing what any execution of a plan can achieve.
+  Those statements are now one named theorem, the dispat theorem. For a
+  fixed history, configuration and inventory there is one release plan,
+  and no execution of it finishes before the longer of its longest
+  precedence chain and its total work divided by the usable slots; a
+  placement that never idles a usable slot while a task is ready stays
+  within Graham's factor of that bound when slots are interchangeable and
+  transfers cost nothing.
+
+  Only a saga reaches the bound across a failure, proved by contradiction:
+  an execution that keeps the bound records each completed task durably
+  the instant it completes, blocks the consumers of a failure and resumes
+  by recomputing from the records. Each other way of executing a release
+  ends in a named anomaly (the double publication, the orphan record, the
+  unrecorded publication, the dangling record, the stale plan, destination
+  lag), and each repeats paid work, never converges or needs a further
+  release to repair. The publication-to-record window is the one no record
+  closes, and 19.4's reconciliation is the saga's answer to it. A branch
+  that moves mid-release is covered the same way: the only execution that
+  keeps the bound joins, recording on the planned commit and merging what
+  arrived on top; a rebase, an overwrite, a refused push, a replan or a
+  rewritten release commit each end in one of those anomalies. These are
+  the rules 19.1, 19.3, 19.4 and 17.2 already state. The build readiness
+  and distributed placement passages cite the theorem instead of restating
+  it, and 19.2a points at it. The theorem is informative and explicitly
+  not a conformance obligation.
+
+### Authors
+
+- yohimik
+- Claude Fable 5.1
+
+
 ## specs/ccme-spec/v3.1.0-rc.5 (2026-09-25)
 
 ### Fixes
