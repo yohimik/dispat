@@ -74,8 +74,8 @@ each one keeps a task's inputs or an output set on disk. Git's automatic mainten
 fetch would otherwise start it in the middle of a poll. Instead, after a minute with nothing claimed and nothing in
 flight, the worker compacts the cache once before it polls again: it deletes every object no open coordination
 branch reaches, at most once per idle stretch and never while a task runs. A worker killed while it records a claim
-can leave `seen.json` without its closing brace. The next worker reads it, forgets the claim that never finished and
-repairs the file, but an older dispat refuses to start on it.
+can leave `seen.json` without its closing brace. The next worker reads the claims before the cut, drops a member
+whose value was cut, and rewrites the file on its first claim; until then an older dispat refuses to start on it.
 
 Two processes must not serve one node name from one state folder. The second one to start refuses, because two nodes
 sharing a folder would each hold half the record of what has been answered. `worker.lock` holds the serving process's
