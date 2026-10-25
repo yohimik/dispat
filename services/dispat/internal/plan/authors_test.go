@@ -364,3 +364,33 @@ func TestAllAuthorsIsNilSafeOnAHandBuiltRelease(t *testing.T) {
 	assert.Nil(t, rel.AllAuthors())
 	assert.Nil(t, rel.AuthorsFor(nil))
 }
+
+// TestWindowAttributionFoldsEachCommitsAuthorOnce: a commit is attributed
+// once per window identity that holds it, and the person behind it is
+// identified the first time only, so a later window's visit folds nothing and
+// allocates nothing. Two spellings of one address are one person.
+func TestWindowAttributionFoldsEachCommitsAuthorOnce(t *testing.T) {
+	first := &commitRec{rank: 0, commit: gitx.Commit{AuthorName: "Ada", AuthorEmail: "ADA@Example.com"}}
+	second := &commitRec{rank: 1, commit: gitx.Commit{AuthorName: "A. Lovelace", AuthorEmail: "ada@example.com"}}
+	other := &commitRec{rank: 2, commit: gitx.Commit{AuthorName: "Grace", AuthorEmail: "grace@example.com"}}
+	nobody := &commitRec{rank: 3}
+	cp := &computation{commits: []*commitRec{first, second, other, nobody}}
+
+	a, id := cp.authorOf(first)
+	assert.Equal(t, Author{Name: "Ada", Email: "ADA@Example.com"}, a, "the commit's own spelling")
+	_, same := cp.authorOf(second)
+	_, different := cp.authorOf(other)
+	_, none := cp.authorOf(nobody)
+	assert.Equal(t, id, same)
+	assert.NotEqual(t, id, different)
+	assert.Equal(t, -1, none)
+	assert.Zero(t, testing.AllocsPerRun(100, func() { cp.authorOf(first) }), "the id is the commit's from now on")
+
+	marks := &cp.authorMarks
+	marks.generation++
+	assert.True(t, marks.isFirst(&marks.window, id))
+	assert.False(t, marks.isFirst(&marks.window, same))
+	assert.True(t, marks.isFirst(&marks.fresh, id), "the fresh list is listed apart")
+	marks.generation++
+	assert.True(t, marks.isFirst(&marks.window, id), "a new attribution starts with nobody listed")
+}

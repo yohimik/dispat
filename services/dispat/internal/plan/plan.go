@@ -1287,6 +1287,9 @@ type computation struct {
 	closures        map[string]func(string) bool // cancel commit -> its closure, built once
 	walks           *walkCache                   // §9.2 traversals, shared between units
 	kindSets        map[kindSetKey]map[model.DepKind]bool
+	authorIDs       map[string]int32 // Author.key -> plan-wide id (authorOf)
+	commitAuthors   []int32          // by commit rank: one more than its author's id, 0 until asked
+	authorMarks     authorMarks
 	globs           *globIndex                   // §6.1 glob terms, resolved once each
 	windowRefs      map[string][]map[string]bool // composed package -> shared repository windows
 	// windowKeys names the history views a composed package's window was

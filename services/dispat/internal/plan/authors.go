@@ -211,16 +211,18 @@ func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author
 			return cached.window, cached.fresh
 		}
 	}
-	windowSeen := make(map[string]bool)
-	freshSeen := make(map[string]bool)
+	marks := &cp.authorMarks
+	marks.generation++
 	attribute := func(rec *commitRec) {
-		a := Author{Name: rec.commit.AuthorName, Email: rec.commit.AuthorEmail}
-		if a.empty() {
+		a, id := cp.authorOf(rec)
+		if id < 0 {
 			return
 		}
-		window = appendUniqueAuthor(window, windowSeen, a)
-		if !cp.containedInBaseline(name, rec.key) {
-			fresh = appendUniqueAuthor(fresh, freshSeen, a)
+		if marks.isFirst(&marks.window, id) {
+			window = append(window, a)
+		}
+		if !cp.containedInBaseline(name, rec.key) && marks.isFirst(&marks.fresh, id) {
+			fresh = append(fresh, a)
 		}
 	}
 	if len(cp.histories) == 0 {
@@ -255,6 +257,55 @@ func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author
 		cp.windowAuthors[identity] = windowAuthorSet{window: window, fresh: fresh}
 	}
 	return window, fresh
+}
+
+// authorOf is a commit's primary author and the plan-wide id of that person,
+// -1 for a commit with no author. The id is interned once per commit, because
+// a commit is attributed once for every window identity that holds it and the
+// person behind it is the same every time: the dedup key, Author.key, is
+// folded once per commit rather than once per visit.
+func (cp *computation) authorOf(rec *commitRec) (Author, int) {
+	a := Author{Name: rec.commit.AuthorName, Email: rec.commit.AuthorEmail}
+	if a.empty() {
+		return a, -1
+	}
+	if len(cp.commitAuthors) <= rec.rank {
+		cp.commitAuthors = append(cp.commitAuthors, make([]int32, max(len(cp.commits), rec.rank+1)-len(cp.commitAuthors))...)
+	}
+	if cp.commitAuthors[rec.rank] == 0 {
+		key := a.key()
+		id, ok := cp.authorIDs[key]
+		if !ok {
+			if cp.authorIDs == nil {
+				cp.authorIDs = make(map[string]int32)
+			}
+			id = int32(len(cp.authorIDs))
+			cp.authorIDs[key] = id
+		}
+		cp.commitAuthors[rec.rank] = id + 1
+	}
+	return a, int(cp.commitAuthors[rec.rank] - 1)
+}
+
+// authorMarks records which authors one window attribution has listed,
+// indexed by author id and stamped with the attribution's generation, so that
+// each attribution starts empty without clearing or allocating a set.
+type authorMarks struct {
+	window, fresh []uint32
+	generation    uint32
+}
+
+// isFirst marks the author as listed in this generation and reports whether
+// it was not yet.
+func (m *authorMarks) isFirst(listed *[]uint32, id int) bool {
+	if id >= len(*listed) {
+		*listed = append(*listed, make([]uint32, id+1-len(*listed))...)
+	}
+	if (*listed)[id] == m.generation {
+		return false
+	}
+	(*listed)[id] = m.generation
+	return true
 }
 
 // windowAuthorSharingMinimum is the union length from which one window's
