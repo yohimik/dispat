@@ -250,10 +250,21 @@ func TestComputeWithholdsBaselinesWhenReleaseTagsCannotBeRead(t *testing.T) {
 	repository.Commit("feat(core,web): bootstrap")
 	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*tag --list*", Code: 128})
 
-	result := repository.CommandEnv(fault.Env(), "compute", "--write")
+	result := repository.CommandEnv(fault.Env(), "compute", "--write", "--log-format", "json")
 	require.Zero(t, result.Code, "stdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
-	assert.Contains(t, result.Stdout+result.Stderr, "cannot read the release tags; no baseline suggested")
-	assert.Equal(t, 2, fault.Matches(), "both packages must consult their release history")
+	// The repository's tag inventory fails first; each package then asks its
+	// own listing, so the warning names that package's glob as it always did.
+	assert.Equal(t, 3, fault.Matches(), "one inventory, then each package's own release history")
+	withheld := map[string]string{}
+	for _, e := range harness.ParseEvents(result.Stdout + "\n" + result.Stderr) {
+		if e.Str("message") == "cannot read the release tags; no baseline suggested" {
+			withheld[e.Package()] = e.Str("error")
+		}
+	}
+	require.Len(t, withheld, 2, "both packages are withheld:\n%s", result.Stderr)
+	for _, pkg := range []string{"core", "web"} {
+		assert.Contains(t, withheld[pkg], pkg+"@*", "%s: the error is its own listing's", pkg)
+	}
 	config, err := os.ReadFile(repository.Path("dispat.json"))
 	require.NoError(t, err)
 	assert.Contains(t, string(config), `"web": [`)

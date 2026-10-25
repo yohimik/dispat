@@ -212,15 +212,17 @@ func (a *App) baselineReasons(ctx context.Context, candidates []manifestBaseline
 			continue
 		}
 		repo := repositories[c.pkg.Repository]
-		switch {
-		case repo.empty:
+		if repo.empty {
 			reasons[i] = "the repository has no commits yet"
-		case repo.err != nil:
-			errs[i] = repo.err
-		default:
-			// A moving alias must never become a stable baseline.
-			reasons[i] = baselineReason(repo.aliases.Without(repo.tags[c.pkg.Name], c.pkg.Name, a.log))
+			continue
 		}
+		tags, err := repo.tagsFor(ctx, c.pkg)
+		if err != nil {
+			errs[i] = err
+			continue
+		}
+		// A moving alias must never become a stable baseline.
+		reasons[i] = baselineReason(repo.aliases.Without(tags, c.pkg.Name, a.log))
 	}
 	return reasons, errs
 }
@@ -242,12 +244,23 @@ func baselineReason(tags gitx.Tags) string {
 // repositoryBaseline is the state compute reads once per repository: its
 // HEAD check, its alias filter, and every candidate's reachable tags.
 type repositoryBaseline struct {
-	git     *gitx.LocalGitx
-	aliases plan.AliasFilter
-	empty   bool
-	formats map[string]gitx.TagFormat
-	tags    map[string]gitx.Tags
-	err     error
+	git          *gitx.LocalGitx
+	aliases      plan.AliasFilter
+	empty        bool
+	formats      map[string]gitx.TagFormat
+	tags         map[string]gitx.Tags
+	inventoryErr error
+}
+
+// tagsFor answers from the repository's inventory. When the inventory could
+// not be read, the package's own listing is asked instead: a failed listing
+// or a malformed record then withholds only the packages whose glob reaches
+// it, each with the error naming its own glob, as before the inventory.
+func (r *repositoryBaseline) tagsFor(ctx context.Context, pkg *model.Package) (gitx.Tags, error) {
+	if r.inventoryErr == nil {
+		return r.tags[pkg.Name], nil
+	}
+	return r.git.Tags(ctx, pkg.Name, plan.TagFormatFor(pkg))
 }
 
 // baselineRepositories reads each candidate repository's tags from one
@@ -290,7 +303,7 @@ func (a *App) baselineRepositories(ctx context.Context, candidates []manifestBas
 		if repo.empty || ctx.Err() != nil {
 			continue
 		}
-		repo.tags, repo.err = repo.git.TagsForPackages(ctx, repo.formats)
+		repo.tags, repo.inventoryErr = repo.git.TagsForPackages(ctx, repo.formats)
 	}
 	return repositories
 }
