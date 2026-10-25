@@ -541,3 +541,11 @@ An ambiguous publication without a receipt is adopted only after an explicitly c
 with `E198`. A same-head receipt retry requires the rebuilt pre-publish identity to match and restores an exported
 package commit target from the receipt. These are scoped single-history release capabilities. Arbitrary shell
 publish commands and post-record tasks do not acquire general exactly-once or crash-safe behavior from them.
+
+## 2026-10-25: Optional WolframScript checks for the task-time theorem
+
+The optional `verify-math.wls` checks the algebra in §13.11, exhaustively evaluates 9,826 small
+duration/slot/priority schedules on all 75 topologically numbered DAGs with one to four vertices, and
+compares the chain-window scan formulas with measured `AuthorScans/op` counts for 64, 128 and 256 packages.
+Its finite enumeration is a computational check of the written proof, not a proof for arbitrary DAGs or a
+claim of unique or globally optimal scheduling. The regular test suite does not require WolframScript.

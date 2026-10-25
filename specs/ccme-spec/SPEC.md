@@ -3457,6 +3457,12 @@ have separate costs and no global minimum claim here.
    release semantics, but the work-span proof neither makes a saga the unique executor nor proves a bound on
    recovery time or durable history size.
 
+The optional [WolframScript checks](./verify-math.wls) verify the displayed capacity and scaling algebra,
+enumerate one-pool DAG/list schedules with one to four vertices, and check the stated sharp and packing examples.
+They also compare the chain-window scan formulas with measured counts recorded on 2026-10-25. The finite cases
+supplement the proofs above; they do not prove the claims for arbitrary DAGs or establish uniqueness or
+global planner optimality. WolframScript is not required for dispat's regular build or test suite.
+
 **Forward-recovery necessity (the saga class).** Here a saga-style protocol means one that preserves completed
 irreversible effects, obtains durable evidence of their verified outcomes, gates work on the effects it actually
 requires, and derives later work from that evidence. Assume a publication can commit at an independent destination
