@@ -468,7 +468,10 @@ and is trusted only if the lock still names its process. A serving worker reads 
 stops with `E225` when another process's id is there, and release removes the lock only while it names the releasing
 process. The answered-work tuples remain for 48 hours after acceptance, covering the full validity of a message
 accepted with an issue time up to 24 hours ahead of the worker's clock. Loading and recording both prune only older
-tuples.
+tuples. A claim appends its tuple to `seen.json` in place, and the file is rewritten whole once it holds twice the live
+tuples or whenever it is not the file the serving process last wrote. A process killed while appending leaves the
+object without its closing brace; the next worker reads the tuples before the cut, drops the one whose claim never
+returned, and rewrites the file on its first claim. A dispat release older than the append cannot read such a file.
 
 The HTTP calls used for GitHub records, webhooks and self-update keep their request deadline through response-body
 reads and `Close`, not just through the response headers. TinyGo's transport can ignore cancellation; a timed-out

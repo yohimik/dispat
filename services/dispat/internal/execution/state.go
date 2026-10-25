@@ -16,6 +16,7 @@ package execution
 // it.
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -419,7 +420,9 @@ func writeNodeLockClaim(file *os.File, path string) error {
 // drops on reading; without that, a wall clock stepped back before a restart
 // would bring back a triple this process had already forgotten. The file is
 // rewritten whole once it holds twice the records still live, so it stays
-// within a constant factor of the acceptance horizon.
+// within a constant factor of the acceptance horizon, and whenever it is not
+// the file this process last left, so that a change from outside is repaired
+// by the next claim as it was when every claim rewrote it.
 type SeenSet struct {
 	path    string
 	entries map[string]seenEntry
@@ -432,14 +435,13 @@ type SeenSet struct {
 	// forgotten are the triples dropped from memory since the file last
 	// caught up with it.
 	forgotten []string
-	// stored is how many records the file holds, live or expired, and size
-	// is its length; its last byte is the closing brace.
+	// stored is how many records the file holds, live or expired.
 	stored int
-	size   int64
-	// isRewriteDue says the file is not known to hold every live entry in
-	// that layout: it was read rather than written by this process, or a
-	// write failed.
-	isRewriteDue bool
+	// written is the file as this process last left it, its last byte the
+	// closing brace. It is nil when the file is not known to hold every live
+	// entry in that layout: it was read rather than written by this process,
+	// or a write failed.
+	written os.FileInfo
 }
 
 // seenEntry is one remembered triple: when it was accepted, and which
@@ -466,7 +468,7 @@ const seenRetentionWindow = 2 * replayWindow
 // LoadSeenSet reads one node's record, pruned to the acceptance horizon, and
 // answers an empty one for a node that has answered nothing yet.
 func LoadSeenSet(path string, now time.Time) (*SeenSet, error) {
-	set := &SeenSet{path: path, entries: map[string]seenEntry{}, isRewriteDue: true}
+	set := &SeenSet{path: path, entries: map[string]seenEntry{}}
 	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return set, nil
@@ -474,8 +476,8 @@ func LoadSeenSet(path string, now time.Time) (*SeenSet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("execution: reading the answered-work record %s: %w", path, err)
 	}
-	stored := map[string]time.Time{}
-	if err := json.Unmarshal(content, &stored); err != nil {
+	stored, err := decodeSeenRecord(content)
+	if err != nil {
 		return nil, fmt.Errorf("execution: reading the answered-work record %s: %w", path, err)
 	}
 	cutoff := now.Add(-seenRetentionWindow)
@@ -493,6 +495,63 @@ func LoadSeenSet(path string, now time.Time) (*SeenSet, error) {
 		set.remember(recording.triple, recording.at)
 	}
 	return set, nil
+}
+
+// decodeSeenRecord reads the file's object, or what an append that did not
+// finish left of it.
+func decodeSeenRecord(content []byte) (map[string]time.Time, error) {
+	stored := map[string]time.Time{}
+	err := json.Unmarshal(content, &stored)
+	if err == nil {
+		return stored, nil
+	}
+	if cut, isCut := decodeCutSeenRecord(content); isCut {
+		return cut, nil
+	}
+	return nil, err
+}
+
+// decodeCutSeenRecord reads a file that ends inside its object with nothing
+// before the end that a reader would refuse. An append overwrites the closing
+// brace with its first byte, so a process killed partway through leaves
+// exactly that. The members before the cut are kept and the unfinished one is
+// dropped, which is safe because the Record writing it never returned, so its
+// attempt was never run.
+func decodeCutSeenRecord(content []byte) (map[string]time.Time, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	if open, err := decoder.Token(); err != nil || open != json.Delim('{') {
+		return nil, false
+	}
+	// An append writes at least one byte where the closing brace was, so a
+	// file that ends at its opening brace was not cut by one.
+	if decoder.InputOffset() == int64(len(content)) {
+		return nil, false
+	}
+	stored := map[string]time.Time{}
+	for {
+		name, err := decoder.Token()
+		if isCutShort(err) {
+			return stored, true
+		}
+		triple, isName := name.(string)
+		if err != nil || !isName {
+			return nil, false
+		}
+		var at time.Time
+		err = decoder.Decode(&at)
+		if isCutShort(err) {
+			return stored, true
+		}
+		if err != nil {
+			return nil, false
+		}
+		stored[triple] = at
+	}
+}
+
+// isCutShort reports whether a decoder stopped because its input ended.
+func isCutShort(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // compareSeenExpiry orders recordings by acceptance time, then by triple.
@@ -515,9 +574,10 @@ func (s *SeenSet) IsSeen(run, task string, attempt int) bool {
 // question the record answers is "did this node already take this on", and a
 // node that crashed between claiming and reporting must not take the same
 // attempt on again. A record is appended by one positioned write, and a write
-// that fails puts the closing brace back and falls back to replacing the file
-// through a temporary file and a rename, so a record that is being written is
-// never a record that is half there.
+// that fails falls back to replacing the file through a temporary file and a
+// rename. A process killed during the positioned write leaves the object
+// without its closing brace, which LoadSeenSet reads as the members before
+// the cut.
 func (s *SeenSet) Record(run, task string, attempt int, now time.Time) error {
 	// A worker may serve for days without reloading this file. Prune at each
 	// write so its memory stays within the full acceptance horizon, while
@@ -573,9 +633,12 @@ func (s *SeenSet) forget(expired seenExpiry) {
 // and the recording just made, if any. It rewrites the file instead when that
 // is due.
 func (s *SeenSet) store(recorded *seenExpiry) error {
-	if s.isRewriteDue {
+	if s.written == nil {
 		return s.rewrite()
 	}
+	// The file already reads as memory does, so a write here could change
+	// nothing a reload answers, only fail; and every caller asks IsSeen
+	// before it records.
 	if len(s.forgotten) == 0 && recorded == nil {
 		return nil
 	}
@@ -605,20 +668,11 @@ func (s *SeenSet) append(recorded *seenExpiry) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.OpenFile(s.path, os.O_WRONLY, 0)
+	file, err := os.OpenFile(s.path, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}
-	written, err := file.WriteAt(records, s.size-1)
-	if err == nil && written != len(records) {
-		err = io.ErrShortWrite
-	}
-	if err != nil {
-		// The rewrite that follows replaces the file whatever this leaves; it
-		// only keeps the file readable should the process die before that.
-		_ = file.Truncate(s.size)
-		_, _ = file.WriteAt([]byte{'}'}, s.size-1)
-	}
+	err = s.writeRecords(file, records)
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
@@ -626,8 +680,56 @@ func (s *SeenSet) append(recorded *seenExpiry) error {
 		return err
 	}
 	s.stored += len(pending)
-	s.size += int64(len(records)) - 1
 	s.forgotten = s.forgotten[:0]
+	return nil
+}
+
+// errSeenRecordChanged refuses an append to a file that is not the one this
+// process last left: only a rewrite puts every live record back into it.
+var errSeenRecordChanged = errors.New("execution: the answered-work record was changed by another writer")
+
+// writeRecords writes the records over the closing brace of the opened file.
+func (s *SeenSet) writeRecords(file *os.File, records []byte) error {
+	brace := s.written.Size() - 1
+	if err := s.verifyUnchanged(file, brace); err != nil {
+		return err
+	}
+	written, err := file.WriteAt(records, brace)
+	if err == nil && written != len(records) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		// The rewrite that follows replaces the file whatever this leaves; it
+		// only keeps the file readable should the process die before that.
+		_ = file.Truncate(brace + 1)
+		_, _ = file.WriteAt([]byte{'}'}, brace)
+		return err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	s.written = info
+	return nil
+}
+
+// verifyUnchanged refuses the opened file unless it is the file this process
+// last left and still ends in the closing brace the append overwrites.
+func (s *SeenSet) verifyUnchanged(file *os.File, brace int64) error {
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(info, s.written) || info.Size() != s.written.Size() || !info.ModTime().Equal(s.written.ModTime()) {
+		return errSeenRecordChanged
+	}
+	var last [1]byte
+	if _, err := file.ReadAt(last[:], brace); err != nil {
+		return err
+	}
+	if last[0] != '}' {
+		return errSeenRecordChanged
+	}
 	return nil
 }
 
@@ -652,7 +754,7 @@ func formatSeenRecords(pending []seenExpiry, isAfterAMember bool) ([]byte, error
 // rewrite replaces the file with every live entry, through a temporary file
 // and a rename.
 func (s *SeenSet) rewrite() error {
-	s.isRewriteDue = true
+	s.written = nil
 	content, err := s.formatRecord()
 	if err != nil {
 		return fmt.Errorf("execution: writing the answered-work record: %w", err)
@@ -665,8 +767,13 @@ func (s *SeenSet) rewrite() error {
 	if err := os.Rename(temporary, s.path); err != nil {
 		return fmt.Errorf("execution: replacing the answered-work record %s: %w", s.path, err)
 	}
-	s.stored, s.size, s.isRewriteDue = len(s.entries), int64(len(content)), false
+	s.stored = len(s.entries)
 	s.forgotten = s.forgotten[:0]
+	// A file this process cannot look at is still written; the next claim
+	// rewrites it rather than append to a file it cannot vouch for.
+	if info, err := os.Stat(s.path); err == nil {
+		s.written = info
+	}
 	return nil
 }
 

@@ -4,6 +4,7 @@
 package execution
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -275,6 +276,114 @@ func TestSeenSetRecordAppendsInPlace(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, reopened.IsSeen("run-1", "core", 5))
 		assert.True(t, reopened.IsSeen("run-1", "core", 4))
+	})
+}
+
+// TestSeenSetRecordRepairsAFileChangedOutside: a claim used to replace the
+// whole file, so whatever else had written it was repaired by the next claim.
+// Appending in place must keep that, or a change from outside leaves a file
+// the next worker start refuses to read.
+func TestSeenSetRecordRepairsAFileChangedOutside(t *testing.T) {
+	now := time.Now()
+	for name, change := range map[string]func(t *testing.T, path string){
+		"emptied in place": func(t *testing.T, path string) {
+			require.NoError(t, os.WriteFile(path, []byte("{}"), 0o644))
+		},
+		"replaced by another file of its size": func(t *testing.T, path string) {
+			content, err := os.ReadFile(path)
+			require.NoError(t, err)
+			other := path + ".other"
+			require.NoError(t, os.WriteFile(other, emptySeenRecordOfSize(len(content)), 0o644))
+			require.NoError(t, os.Rename(other, path))
+		},
+		"edited in place to its own size": func(t *testing.T, path string) {
+			content, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(path, emptySeenRecordOfSize(len(content)), 0o644))
+			require.NoError(t, os.Chtimes(path, now.Add(-time.Hour), now.Add(-time.Hour)))
+		},
+		"cut short of its closing brace": func(t *testing.T, path string) {
+			content, err := os.ReadFile(path)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(path, content[:len(content)-1], 0o644))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "seen.json")
+			set, err := LoadSeenSet(path, now)
+			require.NoError(t, err)
+			for attempt := 1; attempt <= 5; attempt++ {
+				require.NoError(t, set.Record("run-1", "core", attempt, now))
+			}
+			change(t, path)
+
+			require.NoError(t, set.Record("run-1", "core", 6, now))
+
+			content, err := os.ReadFile(path)
+			require.NoError(t, err)
+			stored := map[string]time.Time{}
+			require.NoError(t, json.Unmarshal(content, &stored), "the file is one JSON object again")
+			assert.Len(t, stored, 6, "with every live record in it")
+		})
+	}
+}
+
+// emptySeenRecordOfSize is an answered-work record with no members, padded to
+// a given length.
+func emptySeenRecordOfSize(size int) []byte {
+	return append(append([]byte("{"), bytes.Repeat([]byte(" "), size-2)...), '}')
+}
+
+// TestSeenSetLoadReadsARecordCutByACrash: a process killed while it appends
+// leaves the members before the cut and no closing brace. The next start must
+// read them rather than refuse to serve, because the only way out of that
+// refusal is deleting the record. It drops only the member that was being
+// written, whose Record never returned.
+func TestSeenSetLoadReadsARecordCutByACrash(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "seen.json")
+	now := time.Now()
+	set, err := LoadSeenSet(path, now)
+	require.NoError(t, err)
+	for attempt := 1; attempt <= 3; attempt++ {
+		require.NoError(t, set.Record("run-1", "core", attempt, now))
+	}
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NoError(t, set.Record("run-1", "core", 4, now))
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, before[:len(before)-1], after[:len(before)-1], "the record was appended")
+
+	for cut := len(before); cut < len(after); cut++ {
+		require.NoError(t, os.WriteFile(path, after[:cut], 0o644))
+
+		reopened, err := LoadSeenSet(path, now)
+
+		require.NoError(t, err, "cut at %d of %d", cut, len(after))
+		for attempt := 1; attempt <= 3; attempt++ {
+			assert.True(t, reopened.IsSeen("run-1", "core", attempt), "cut at %d", cut)
+		}
+		assert.Equal(t, cut == len(after)-1, reopened.IsSeen("run-1", "core", 4),
+			"only a member whose value is whole is read, cut at %d", cut)
+		require.NoError(t, reopened.Record("run-1", "core", 5, now))
+		repaired, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.True(t, json.Valid(repaired), "the next claim rewrites it whole")
+	}
+
+	t.Run("a record broken anywhere but at its end is still refused", func(t *testing.T) {
+		for _, broken := range [][]byte{
+			[]byte("{"),
+			append(after[:len(before)+3:len(before)+3], 0, 0, 0),
+			append(append([]byte{}, after[:len(after)-1]...), '}', '}'),
+			[]byte(`{"run-1 core 1":"not a time"`),
+		} {
+			require.NoError(t, os.WriteFile(path, broken, 0o644))
+
+			_, err := LoadSeenSet(path, now)
+
+			assert.Error(t, err, "%q", broken)
+		}
 	})
 }
 

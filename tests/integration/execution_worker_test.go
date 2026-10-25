@@ -404,6 +404,48 @@ func TestExecutionWorkerKeepsFutureIssuedReplayKnowledge(t *testing.T) {
 	assert.NotContains(t, stored, expiredKey)
 }
 
+// TestExecutionWorkerReadsAnAnsweredWorkRecordACrashCut: a worker killed
+// while it appends a claim to seen.json leaves the object without its closing
+// brace. The next worker must start on it, refuse a replay of what it holds,
+// and leave a whole record behind, because refusing to start would leave
+// deleting the record, and with it the replay protection, as the only way out.
+func TestExecutionWorkerReadsAnAnsweredWorkRecordACrashCut(t *testing.T) {
+	rig := newExecutionRig(t)
+	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+	root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
+	state := t.TempDir()
+	nodeState := filepath.Join(state, executionNode)
+	require.NoError(t, os.MkdirAll(nodeState, 0o755))
+	seenPath := filepath.Join(nodeState, "seen.json")
+	liveKey := orchestrator.run + " cut-live 1"
+	cutKey := orchestrator.run + " cut-unfinished 1"
+	whole, err := json.Marshal(map[string]time.Time{liveKey: time.Now().Add(-time.Hour)})
+	require.NoError(t, err)
+	cut := append(whole[:len(whole)-1:len(whole)-1], []byte(`,"`+cutKey+`":"20`)...)
+	require.NoError(t, os.WriteFile(seenPath, cut, 0o644))
+
+	replay := executionBranchName("aaa-cut-replay")
+	orchestrator.offer(replay, orchestrator.probe(replay, "cut-live"))
+	control := executionBranchName("zzz-cut-control")
+	orchestrator.offer(control, orchestrator.probe(control, "control"))
+	proc := rig.repo.StartCommandEnv([]string{executionSecretEnv + "=" + executionSecret},
+		"worker", "--root", root, "--state-dir", state, "--idle-timeout", "10")
+	worker := &executionWorker{t: t, proc: proc, stateDir: state, root: root}
+	executionAwaitMessage(t, rig.mailbox, control, "result")
+	reply := worker.stop(t)
+
+	assert.Contains(t, executionRejections(reply), "replay")
+	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, replay),
+		"an answer held before the cut is not answered again")
+	content, err := os.ReadFile(seenPath)
+	require.NoError(t, err)
+	stored := map[string]time.Time{}
+	require.NoError(t, json.Unmarshal(content, &stored), "the first claim repairs the record")
+	assert.Contains(t, stored, liveKey)
+	assert.Contains(t, stored, orchestrator.run+" control 1")
+	assert.NotContains(t, stored, cutKey, "the claim that never finished is forgotten")
+}
+
 // TestExecutionWorkerAcceptsAModestClockSkew: an issue time bounds replay and
 // nothing else, and it is the writer's clock rather than the reader's, so two
 // machines whose clocks disagree by minutes still coordinate. Probes issued a
