@@ -210,7 +210,7 @@ refused at the same point:
   `DISPAT_UNSAFE_DISABLE_LOCK`;
 - `workers` on a release where any participating repository sets `commit.verify: false`, because such a release
   reads its lock back before every assignment and publication (a sweep, which takes no lock, is not refused for it);
-- a package whose `runOnly` pins a stage to `worker` while the run has no worker links, once the plan is fixed;
+- a package whose build is pinned to `worker` while the run has no worker links, once the plan is fixed;
 - a package whose `buildPlatforms` no configured worker satisfies, once the nodes have answered;
 - two packages whose `buildOutputs` claim one folder, or a declared root holding another package's folder, which
   `dispat status` reports as well;

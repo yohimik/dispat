@@ -260,10 +260,9 @@ func TestExecutionBothPrefersAFreeWorker(t *testing.T) {
 	stopAll(t, workers)
 }
 
-// TestExecutionRunOnlyPerStagePair: a pair states the two stages apart, and
-// both halves are obeyed end to end. One package's build goes to the node
-// while its publish stays here; the other's does the opposite; and what the
-// ladder resolved is what `dispat status` prints for each of them.
+// TestExecutionRunOnlyPerStagePair: a pair delegates the build while keeping
+// publication on the orchestrator. A package pinned here for build also
+// publishes here.
 func TestExecutionRunOnlyPerStagePair(t *testing.T) {
 	rig := newExecutionPlacementRig(t, executionPlacementPackages,
 		func(repo *harness.Repo) string {
@@ -275,7 +274,7 @@ func TestExecutionRunOnlyPerStagePair(t *testing.T) {
 		},
 		pinPackages(map[string]*models.RunOnly{
 			"alpha": placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
-			"beta":  placedOn(models.RunOnlyOrchestrator, models.RunOnlyWorker),
+			"beta":  placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator),
 		}))
 	workers := rig.startWorkers([]string{executionNode}, 2)
 
@@ -285,7 +284,7 @@ func TestExecutionRunOnlyPerStagePair(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	for name, want := range map[string][]string{
 		"alpha": {models.RunOnlyWorker, models.RunOnlyOrchestrator},
-		"beta":  {models.RunOnlyOrchestrator, models.RunOnlyWorker},
+		"beta":  {models.RunOnlyOrchestrator, models.RunOnlyOrchestrator},
 	} {
 		assert.Equal(t, want,
 			executionResolvedList(t, executionResolvedPackage(t, status, name), "runOnly"),
@@ -298,7 +297,7 @@ func TestExecutionRunOnlyPerStagePair(t *testing.T) {
 		"and published here: %v", rig.runs())
 	assert.Equal(t, executionOrchestratorLabel, placed["beta"],
 		"beta built here: %v", rig.runs())
-	assert.Equal(t, executionNode, published["beta"], "and published on the node: %v", rig.runs())
+	assert.Equal(t, executionOrchestratorLabel, published["beta"], "and published here: %v", rig.runs())
 	assert.Len(t, rig.repo.TagList(), len(executionPlacementPackages),
 		"and every package was recorded by the orchestrator")
 	stopAll(t, workers)
@@ -314,12 +313,8 @@ func TestExecutionWorkerOnlyWithoutWorkersRefusesTheRelease(t *testing.T) {
 		placement *models.RunOnly
 		stage     string
 	}{
-		"both stages pinned to a worker": {
-			placement: placedOn(models.RunOnlyWorker, models.RunOnlyWorker), stage: "build"},
 		"the build alone": {
 			placement: placedOn(models.RunOnlyWorker, models.RunOnlyBoth), stage: "build"},
-		"the publish alone": {
-			placement: placedOn(models.RunOnlyBoth, models.RunOnlyWorker), stage: "publish"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := harness.New(t)
@@ -355,11 +350,13 @@ func TestExecutionRunOnlyRefusals(t *testing.T) {
 		stated any
 		want   string
 	}{
-		"a misspelled value":       {stated: "orchestartor", want: "is not a placement"},
-		"a value of another key":   {stated: "any", want: "is not a placement"},
-		"a list of one":            {stated: []any{"worker"}, want: "states both stages"},
-		"a list of three":          {stated: []any{"worker", "worker", "worker"}, want: "states both stages"},
-		"a misspelled stage value": {stated: []any{"worker", "nowhere"}, want: "is not a placement"},
+		"a misspelled value":           {stated: "orchestartor", want: "is not a placement"},
+		"a value of another key":       {stated: "any", want: "is not a placement"},
+		"a list of one":                {stated: []any{"worker"}, want: "states both stages"},
+		"a list of three":              {stated: []any{"worker", "worker", "worker"}, want: "states both stages"},
+		"a misspelled stage value":     {stated: []any{"worker", "nowhere"}, want: "is not a placement"},
+		"a scalar worker placement":    {stated: "worker", want: "[worker, orchestrator]"},
+		"worker publication in a pair": {stated: []any{"both", "worker"}, want: "[worker, orchestrator]"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := harness.New(t)
@@ -380,25 +377,6 @@ func TestExecutionRunOnlyRefusals(t *testing.T) {
 		})
 	}
 
-	t.Run("a publish on a worker beside a login script", func(t *testing.T) {
-		r := harness.New(t)
-		cfg := libsConfig(echoBuild, 1)
-		cfg.Scripts["login"] = models.Script{"echo logging in"}
-		libs := cfg.Spaces["libs"]
-		libs.Flow.Login = []string{"login"}
-		libs.RunOnly = placedOn(models.RunOnlyBoth, models.RunOnlyWorker)
-		cfg.Spaces["libs"] = libs
-		r.WriteConfigModel(cfg)
-		r.SeedPackage("packages", "core")
-		r.Commit("feat(core): bootstrap")
-
-		res := r.Status("--log-format", "json")
-
-		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Contains(t, diagnosticText(res), "flow.login")
-		assert.True(t, harness.IsCodePresent(executionEvents(res), executionRefusalCode))
-		assert.Empty(t, r.TagList())
-	})
 }
 
 // TestExecutionRunOnlyLadder: the key rides the ordinary ladder and replaces
@@ -412,7 +390,7 @@ func TestExecutionRunOnlyLadder(t *testing.T) {
 	cfg := libsConfig(echoBuild, 1)
 	cfg.RunOnly = placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator)
 	libs := cfg.Spaces["libs"]
-	libs.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyWorker)
+	libs.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
 	cfg.Spaces["libs"] = libs
 	cfg.Packages = map[string]models.PackageConfig{"tool": {Path: "tools/tool"}}
 	r.WriteConfigModel(cfg)

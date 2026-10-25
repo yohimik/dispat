@@ -49,10 +49,10 @@ type Remotex interface {
 	// wherever this run places it, and answers what came of it. The request's
 	// descriptor is the whole of what the implementation needs to know about
 	// the stage: which runOnly value places it, what a node must be given
-	// before it runs, whether its outputs are admitted and whether its
-	// commands wait for authorize, which is called at the moment the
-	// irreversible command may start (§28.6) and is nil for every stage that
-	// has nothing irreversible about it. The outcome is filled on both paths:
+	// before it runs, and whether its outputs are admitted. Publication stays
+	// on the orchestrator; authorize is retained in the interface for callers
+	// that still provide it and is not a worker permission. The outcome is
+	// filled on both paths:
 	// a frame that failed still exported whatever ran before the failure,
 	// exactly as a local frame does.
 	//

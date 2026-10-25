@@ -34,6 +34,8 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
+const executionPublicationUnknownCode = "E228"
+
 // executionLostPushReply is what the stand-in answers a push with in place of
 // git's own report: a line that names no ref, which is how a push whose
 // response was lost reads to the process that made it.
@@ -65,12 +67,8 @@ func executionBuildsOf(rig *executionRig, name string) int {
 }
 
 // TestExecutionLostClaimResponseRunsTheTaskOnce: the node's claim push applies
-// and its answer is lost, on a build branch and on a publish branch alike. The
-// node reads the branch, finds its own claim there and runs the task; it
-// neither leaves the work for the orchestrator to wait out nor claims it a
-// second time. A publication whose claim answer was lost is no unknown
-// outcome: the node goes on to its ready, the run authorizes it once, and the
-// command runs once.
+// and its answer is lost. The
+// node reads the branch, finds its own claim there and runs the build exactly once.
 func TestExecutionLostClaimResponseRunsTheTaskOnce(t *testing.T) {
 	for _, row := range []struct {
 		name    string
@@ -82,18 +80,6 @@ func TestExecutionLostClaimResponseRunsTheTaskOnce(t *testing.T) {
 			name:    "a build claim",
 			pattern: "*push*[0-9]-build-*",
 			ranOnce: func(rig *executionRig) bool { return executionBuildsOf(rig, "core") == 1 },
-		},
-		{
-			name: "a publish claim",
-			adjust: func(cfg *models.File) {
-				cfg.RunOnly = placedOn(models.RunOnlyBoth, models.RunOnlyWorker)
-				cfg.Scripts["publish"] = models.Script{executionPublishProbe}
-			},
-			// The node's first push onto the publish branch is its claim.
-			pattern: "*push*[0-9]-publish-*",
-			ranOnce: func(rig *executionRig) bool {
-				return slices.Equal([]string{"core"}, executionProbedPackagesOn(rig, executionNode))
-			},
 		},
 	} {
 		t.Run(row.name, func(t *testing.T) {
@@ -250,34 +236,6 @@ func TestExecutionLostAcknowledgementResponseSettlesTheWithdrawal(t *testing.T) 
 	assert.Contains(t, served.Stdout, `"message":"cancellation acknowledged"`)
 	assert.Empty(t, executionReleaseTags(rig), "nothing was recorded")
 	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock went back")
-}
-
-// TestExecutionLostReadyResponsePublishes: a publishing node's ready push
-// applies and its answer is lost. The node reads its ready on the branch and
-// waits for the authorization as it would have, so the package publishes and
-// is recorded, no unknown outcome is reported and the lock goes back.
-func TestExecutionLostReadyResponsePublishes(t *testing.T) {
-	rig := newExecutionPushOutcomeRig(t, func(cfg *models.File) {
-		cfg.RunOnly = placedOn(models.RunOnlyBoth, models.RunOnlyWorker)
-		cfg.Scripts["publish"] = models.Script{executionPublishProbe}
-	})
-	// The node's first push onto the publish branch is its claim and the
-	// second is its ready.
-	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*push*[0-9]-publish-*", Nth: 2, After: true, Output: executionLostPushReply})
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
-
-	res := rig.release()
-	stopAll(t, []*executionWorker{worker})
-
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Positive(t, fault.Matches(), "the fault reached the ready push")
-	assert.False(t, harness.IsCodePresent(executionEvents(res), executionPublicationUnknownCode),
-		"a ready that landed is no unknown publication\nstdout:\n%s", res.Stdout)
-	assert.Equal(t, []string{"core"}, executionProbedPackages(rig, "publish"), "the command ran once")
-	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "the publication is recorded: %v", rig.repo.TagList())
-	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock goes back")
-	assert.Empty(t, rig.branches())
 }
 
 // TestExecutionRefusedResultFailsTheTaskPromptly: the mailbox refuses the
@@ -481,100 +439,6 @@ func TestExecutionUnknownAssignmentGoesOnOnceTheNodeClaimedIt(t *testing.T) {
 	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")
 	assert.Empty(t, rig.branches(), "no coordination branch outlives the run")
 }
-
-// TestExecutionSlowResultPushDoesNotStarveAnAuthorization: a node of capacity
-// two pushes one task's result slowly, the way a large output set travels,
-// while it waits for another task's publication authorization. The mailbox is
-// not held across the transfer, so the publisher reads its authorization and
-// runs its command while the first push is still in flight.
-//
-// The first push is held until the publication has run, so a node that
-// serialized its mailbox behind the transfer would never get there.
-func TestExecutionSlowResultPushDoesNotStarveAnAuthorization(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the held-push fixture uses a POSIX shell")
-	}
-	repo := harness.New(t)
-	repo.SeedPackage("packages", "api")
-	repo.SeedPackage("packages", "core")
-	mailbox := executionMailbox(t)
-	cfg := libsConfig(executionRecordingScript, 2)
-	cfg.LogLevel = "debug"
-	cfg.Scripts["publish"] = models.Script{executionPublishProbe}
-	cfg.Execution = &models.ExecutionConfig{
-		SecretEnv: executionSecretEnv,
-		Workers:   []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
-		Timeouts:  &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 300, Cancel: 20},
-	}
-	pinPackages(map[string]*models.RunOnly{
-		"api":  placedOn(models.RunOnlyOrchestrator, models.RunOnlyWorker),
-		"core": placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
-	})(&cfg)
-	repo.WriteConfigModel(cfg)
-	repo.Commit("feat(api,core): bootstrap")
-	rig := newExecutionRigOver(t, repo, mailbox)
-
-	shim := t.TempDir()
-	realGit, err := exec.LookPath("git")
-	require.NoError(t, err)
-	release := filepath.Join(shim, "release")
-	require.NoError(t, os.Mkdir(filepath.Join(shim, "pushes"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(shim, "git"), []byte(executionHeldResultScript), 0o755))
-	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
-		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(2) }), 0,
-		"PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"DISPAT_IT_HELD_GIT="+realGit, "DISPAT_IT_HELD_DIR="+shim)
-	started := rig.repo.StartReleaseEnv(rig.env(), "release")
-
-	executionAwaitProbe(t, rig, "probe-publish")
-	_, err = os.Stat(filepath.Join(shim, "held"))
-	require.NoError(t, err, "the result push was in flight when the publication ran")
-	require.NoError(t, os.WriteFile(release, nil, 0o600))
-	res := started.Wait()
-	stopAll(t, []*executionWorker{worker})
-
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Equal(t, executionNode, rig.nodesByPackage()["core"], "core was built on the node: %v", rig.runs())
-	assert.Equal(t, []string{"api"}, executionProbedPackagesOn(rig, executionNode),
-		"api was published on the node while core's result push was held")
-	assert.ElementsMatch(t, []string{"api@0.1.0", "core@0.1.0"}, executionReleaseTags(rig))
-	assert.Empty(t, rig.branches())
-}
-
-// executionProbedPackagesOn is every package whose publish probe fired on one
-// node.
-func executionProbedPackagesOn(rig *executionRig, node string) []string {
-	var names []string
-	for _, run := range rig.runs() {
-		if run.Node == executionProbePrefix+"publish" && run.Dir == node {
-			names = append(names, run.Package)
-		}
-	}
-	return names
-}
-
-// The node's second push onto a build branch is its result, after its claim.
-// This shim holds it until the test says so, marking that it is holding, and
-// then runs it. Only the worker receives this shim.
-const executionHeldResultScript = `#!/bin/sh
-set -eu
-case "$*" in
-*push*[0-9]-build-*)
- ordinal=1
- while ! mkdir "$DISPAT_IT_HELD_DIR/pushes/$ordinal" 2>/dev/null; do ordinal=$((ordinal + 1)); done
- if [ "$ordinal" -eq 2 ]; then
-  : > "$DISPAT_IT_HELD_DIR/held"
-  ticks=0
-  while [ ! -f "$DISPAT_IT_HELD_DIR/release" ] && [ "$ticks" -lt 3000 ]; do
-   ticks=$((ticks + 1))
-   sleep 0.1
-  done
- fi
- ;;
-esac
-exec "$DISPAT_IT_HELD_GIT" "$@"
-`
 
 // TestExecutionHungMailboxStillGivesTheLockBack: the mailbox stops answering
 // after preflight, while a node is building, and the release is interrupted.

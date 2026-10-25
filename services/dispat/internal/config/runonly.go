@@ -1,7 +1,7 @@
 package config
 
-// The `runOnly` key: which machines a package's build and its publish may be
-// placed on.
+// The `runOnly` key: which machines may run a package's build and related
+// computation. Publication always stays on the orchestrator.
 //
 // It rides the same ladder as `buildOutputs` and `buildPlatforms` beside it
 // (root, space, space folder file, package, package folder file) and replaces
@@ -11,12 +11,8 @@ package config
 // here" has said something about its build as well and silence about half a
 // pair is not a thing the reader could resolve.
 //
-// Two rules are enforced, and only the second one needs a ladder to ask. The
-// shape and the vocabulary are pkg/models', so a config file and the public
-// type cannot come to disagree about what the key accepts. The one rule that
-// belongs here is the contradiction: a space that logs in publishes on the
-// orchestrator, so a package of that space whose publish is pinned to a
-// worker is two statements that cannot both hold.
+// The public parser refuses worker publication in files. The resolved-space
+// check below also refuses typed configurations assembled without that parser.
 //
 // Every refusal carries DiagnosticExecution, because what the key describes
 // is how a run is executed rather than what it releases.
@@ -46,22 +42,13 @@ func runOnly(dst **RunOnly) setter {
 	}
 }
 
-// checkRunOnlyAgainstLogin refuses a package whose publish is pinned to a
-// worker while its space configures a login.
-//
-// A login is authentication, and authentication is the one thing that must
-// not travel: a space that logs in publishes on the orchestrator, in the
-// checkout its verified build outputs were installed into, so that no login
-// command, export or credential ever enters a mailbox. A package of such a
-// space stating `publish: worker` is therefore not a placement the run could
-// honour, and the two statements are refused together rather than one of them
-// being quietly preferred, because either of them may be the mistake.
-func checkRunOnlyAgainstLogin(label string, placement *RunOnly, login []string) error {
-	if len(login) == 0 || placement.ResolvePublish() != public.RunOnlyWorker {
+// checkRunOnlyPublishPlacement refuses a typed configuration whose publication
+// is pinned to a worker, including one constructed without parsing a file.
+func checkRunOnlyPublishPlacement(label string, placement *RunOnly) error {
+	if placement.ResolvePublish() != public.RunOnlyWorker {
 		return nil
 	}
 	return WithDiagnostic(DiagnosticExecution, fmt.Errorf(
-		"%s: runOnly publishes on a worker while the space configures flow.login; "+
-			"a space that logs in publishes on the orchestrator, so drop the login or publish on %q or %q",
-		label, public.RunOnlyBoth, public.RunOnlyOrchestrator))
+		"%s: publication runs on the orchestrator; set publish to orchestrator or both "+
+			"(use [worker, orchestrator] for worker builds)", label))
 }

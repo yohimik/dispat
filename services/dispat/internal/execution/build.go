@@ -176,7 +176,7 @@ func (c *Coordinator) cleanPreparationRoots(ctx context.Context, packageName str
 // Stage places one package's frame of a delegable stage and runs it where it
 // was placed. The request's descriptor decides what differs between stages:
 // the runOnly value that places the frame, what a node is given first, whether
-// its outputs are admitted, and whether its commands wait for authorize.
+// its outputs are admitted, and which local authority runs its commands.
 //
 // A stage reading its providers' outputs has the providers this run does not
 // release prepared before a node slot is taken: a consumer holding a slot
@@ -187,7 +187,7 @@ func (c *Coordinator) cleanPreparationRoots(ctx context.Context, packageName str
 // and fetched back. A stage reading the package's own outputs prefers the node
 // that produced them, whose cache already holds the objects.
 func (c *Coordinator) Stage(ctx context.Context, request release.StageRequest,
-	here release.LocalFrame, authorize func(context.Context) error) (release.StageOutcome, error) {
+	here release.LocalFrame, _ func(context.Context) error) (release.StageOutcome, error) {
 	descriptor := request.Descriptor
 	task := request.Release.Pkg.Name + ":" + request.Stage
 	if !descriptor.IsPreparing {
@@ -202,7 +202,7 @@ func (c *Coordinator) Stage(ctx context.Context, request release.StageRequest,
 	}
 	space := request.Release.Pkg.Space
 	placement := resolveDescriptorPlacement(descriptor, space)
-	if descriptor.Placement == release.PlacementByPublish && placement != PlacementWorker {
+	if descriptor.Placement == release.PlacementByPublish || request.Stage == StagePublish {
 		if len(space.BuildOutputs) > 0 {
 			if err := c.prepareLocalPublishInputs(ctx, request); err != nil {
 				return release.StageOutcome{FailedPart: release.PartInputs}, err
@@ -223,7 +223,7 @@ func (c *Coordinator) Stage(ctx context.Context, request release.StageRequest,
 				}
 				return c.runHere(ctx, lease, task, request, here)
 			}
-			return c.dispatchStage(ctx, lease, resolveStageKind(descriptor), task, attempt, request, authorize)
+			return c.dispatchStage(ctx, lease, resolveStageKind(descriptor), task, attempt, request)
 		})
 }
 
@@ -359,23 +359,23 @@ func splitTaskName(task string) (packageName, stage string) {
 }
 
 // dispatchStage prepares one package's input state, offers its frame to the
-// node the pool chose and waits for that node to report, through the
-// authorization handshake when the stage's commands wait for one.
+// node the pool chose and waits for that node to report.
 //
 // The kind is the assignment's rather than the frame's: a build this run
 // releases and a build of a provider it does not are the same frame executed
 // under the same rules, and the word is what tells a reader of the mailbox,
 // of the branch names and of the log which of the two it is looking at.
 func (c *Coordinator) dispatchStage(ctx context.Context, lease *Lease, kind, task string,
-	attempt int, request release.StageRequest,
-	authorize func(context.Context) error) (release.StageOutcome, error) {
+	attempt int, request release.StageRequest) (release.StageOutcome, error) {
+	if kind == KindPublish || request.Descriptor.IsAuthorized {
+		lease.Release()
+		return release.StageOutcome{}, NewDiagnostic(CodeAuthority, CategoryAuthority,
+			"publication cannot be delegated to a worker")
+	}
 	frame, err := c.prepareFrame(ctx, lease.Node, request)
 	if err != nil {
 		lease.Release()
 		return release.StageOutcome{}, c.refuseTask(task, lease.Node, attempt, err)
-	}
-	if request.Descriptor.IsAuthorized {
-		return c.offerPublication(ctx, lease, task, attempt, frame, request, authorize)
 	}
 	return c.runTask(ctx, lease, kind, task, attempt, frame.dir, frame.repositories, frame.inputs, request)
 }
@@ -910,7 +910,7 @@ func (c *Coordinator) formatAssignment(node, kind, task string, attempt int, dir
 		Platforms:       request.Release.Pkg.Space.BuildPlatforms,
 		Inputs:          inputs,
 		Outputs:         resolveDeclaredOutputs(kind, request),
-		Permits:         AssignmentPermits{Publish: kind == KindPublish},
+		Permits:         AssignmentPermits{},
 		DeadlineSeconds: resolveTaskDeadlineSeconds(c.Timeouts.Task),
 		Limits:          c.Limits,
 	}
@@ -1001,18 +1001,6 @@ type attemptState struct {
 	offered    string
 	assignment *Assignment
 	replies    chan taskReply
-	// isAuthorized marks a publication this run has already answered, and is
-	// what makes the authorization single use: it is set before the message is
-	// written, so a second ready on the same attempt is refused whatever
-	// became of the first push. Written and read by the task that owns the
-	// attempt, which is the only party that authorizes anything.
-	isAuthorized bool
-	// isReadyAccepted marks a ready this run has already handed on, so that
-	// reading the chain under a moved tip cannot offer the same ready twice:
-	// the second offer would be refused as a request to authorize an attempt
-	// this run has already answered, and the publication would fail for a
-	// reason that has nothing to do with the package.
-	isReadyAccepted bool
 	// isTipForeign marks an attempt whose branch tip was not written by either
 	// party, so the line saying so is written once rather than once per poll.
 	isTipForeign bool
@@ -1020,9 +1008,6 @@ type attemptState struct {
 	// work on, so that reading the chain under a moved tip does not start the
 	// run-time clock a second time.
 	isClaimAccepted bool
-	// authorizedTip is the authorization commit this run wrote, which is what
-	// a withdrawal of a running publisher is leased against.
-	authorizedTip string
 }
 
 // taskReply is one accepted message of an attempt together with the object it
@@ -1034,13 +1019,10 @@ type attemptState struct {
 // admitted at an object a node named would be a set admitted at whatever that
 // node pointed to.
 //
-// The kind is carried because two messages answer a publication and they mean
-// opposite things: a ready is the node asking to be let through, and a result
-// is the node saying it is over.
+// The kind distinguishes a claim, which starts the task clock, from its result.
 type taskReply struct {
 	kind   MessageKind
 	result Result
-	ready  Ready
 	tip    ChainTip
 	commit string
 }
@@ -1048,17 +1030,12 @@ type taskReply struct {
 // watch registers one branch before it is created, so that a node quick
 // enough to answer between the push and the registration is still heard.
 //
-// Two slots, because a publication answers twice: the ready that waits for an
-// authorization and the result that ends the attempt. The poller must never
-// block on handing one over, since the goroutine that would be blocked is the
-// one every other attempt on that endpoint is waiting for.
+// The poller must never block on a claim or result while another task on the
+// same endpoint waits for its own reply.
 func (w *watcher) watch(branch string) <-chan taskReply {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	// Three messages can reach one attempt before it ends: the claim that
-	// starts its run-time clock, the ready of a publication, and the terminal
-	// result. The poller must never block on handing one over.
-	waiting := &attemptState{replies: make(chan taskReply, 3)}
+	waiting := &attemptState{replies: make(chan taskReply, 2)}
 	w.attempts[branch] = waiting
 	return waiting.replies
 }
@@ -1101,18 +1078,6 @@ func (w *watcher) isWatched(branch string) bool {
 	defer w.mu.Unlock()
 	_, isWatched := w.attempts[branch]
 	return isWatched
-}
-
-// readAuthorizedTip answers the authorization commit this run wrote on one
-// branch, and the empty string for an attempt it has not authorized.
-func (w *watcher) readAuthorizedTip(branch string) string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	waiting := w.attempts[branch]
-	if waiting == nil {
-		return ""
-	}
-	return waiting.authorizedTip
 }
 
 // isIdle reports whether this endpoint has nothing in flight, which is what
@@ -1240,12 +1205,6 @@ func (w *watcher) acceptReply(ctx context.Context, tip ChainTip, waiting *attemp
 		}
 		return w.offerClaim(ctx, tip, waiting)
 	}
-	if tip.Kind == MessageReady {
-		if waiting.isReadyAccepted {
-			return false
-		}
-		return w.offerReady(ctx, tip, waiting)
-	}
 	if tip.Kind != MessageResult {
 		w.coordinator.Log.Debug().Str("worker", w.link.Name).Str("branch", tip.Branch).
 			Str("message", string(tip.Kind)).Msg("the attempt moved on")
@@ -1293,22 +1252,6 @@ func (w *watcher) searchChainForReply(ctx context.Context, head gitx.RemoteHead,
 		return true
 	}
 	return false
-}
-
-// offerReady hands one publisher's ready message to the task waiting to
-// authorize it, and leaves the attempt registered: the branch has one more
-// message to come, and the result of it is what ends the attempt.
-func (w *watcher) offerReady(ctx context.Context, tip ChainTip, waiting *attemptState) bool {
-	ready, reason := w.readReady(ctx, tip, waiting)
-	if reason != "" {
-		w.reportRejectedReply(tip, reason)
-		return false
-	}
-	waiting.isReadyAccepted = true
-	w.coordinator.recordOwnedRef(ctx, ownedRefStep{node: w.link.Name, branch: tip.Branch,
-		oid: tip.OID, parent: tip.PreviousOID})
-	waiting.replies <- taskReply{kind: MessageReady, ready: ready, tip: tip, commit: tip.OID}
-	return true
 }
 
 // offerClaim tells the task waiting on a branch that its node has taken the

@@ -2440,11 +2440,10 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 			Force: a.IsForceEnabled(force),
 		})
 	}
-	// The one runOnly rule that needs the whole ladder: the placement and the
-	// login reach a package from different levels, so whether they contradict
-	// each other is only knowable once both have been resolved onto it.
+	// A typed caller may bypass the file parser, so the resolved package still
+	// has to refuse a worker publication placement before any release starts.
 	login := scope.commands(sc.Flow.Login)
-	if err := checkRunOnlyAgainstLogin(label, sc.RunOnly, login); err != nil {
+	if err := checkRunOnlyPublishPlacement(label, sc.RunOnly); err != nil {
 		return nil, err
 	}
 	autoVersion, err := resolveSpaceAutoVersion(label, scope, sc)

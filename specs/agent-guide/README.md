@@ -699,7 +699,25 @@ After `publish` succeeds, failure to write a tag, changelog, GitHub record, rele
 
 ## Run a distributed release
 
-A repository whose root configuration carries an `execution` object with a non-empty `workers` list runs its build stages, and sometimes its publish stages, on other machines. The machine the release is started on keeps the release locks, the plan, every publication authorization and every release record. Read [distributed execution](../../packages/docs/docs/distributed-execution.md) before working on such a repository, and its security section before touching the signing secret or the repository's branch and tag rules. The mailbox is the repository being released: a worker link with no `endpoint` reaches the remote the release takes its lock on, a worker started in a checkout of the repository with no `endpoint` of its own polls the same remote, and an `endpoint` names another mailbox.
+A repository whose root configuration carries an `execution` object with a non-empty `workers` list can run eligible build, test and custom stages on other machines. One orchestrator owns the compiled run: it keeps the release locks and plan, runs the publish stage and writes every release record. Read [distributed execution](../../packages/docs/docs/distributed-execution.md) before working on such a repository, and its security section before touching the signing secret or the repository's branch and tag rules. The mailbox is the repository being released: a worker link with no `endpoint` reaches the remote the release takes its lock on, a worker started in a checkout of the repository with no `endpoint` of its own polls the same remote, and an `endpoint` names another mailbox.
+
+For a distributed release, use one orchestrator release job for its compiled plan and a worker pool for eligible
+build, test, and custom stages before the records. Set root `runOnly: [worker, orchestrator]` when those stages
+should always use workers. Scalar `runOnly: worker` and any worker publish position are refused. Keep worker
+scripts to build or validation work if workers must have no publication credentials. The orchestrator runs the
+publish stage, computes the plan, prepares inputs, checks locks and outputs, and writes native records and Git refs.
+Keep registry and release-write credentials there. Workers still need the shared execution signing secret and
+restricted Git coordination access. Build commands may need separate credentials for private inputs. Run-level hooks
+and stages after the records run on the orchestrator. This layout does not guarantee a faster run. See
+[stage placement](../../packages/docs/docs/distributed-execution.md#where-a-stage-runs).
+
+Workers verify signed assignments against the fixed plan digest and exact source snapshot object IDs, then run the
+assigned commands. They do not compute or revise the release plan. The number or timing of coordination branches is
+an execution detail; it is not a plan file or a second planning process.
+
+For a custom mailbox, a supported self-hosted Git server in the same data center as the orchestrator and
+workers can reduce transport latency. Set the worker link and worker `endpoint` to that server and measure actual
+transfer time; the mailbox is coordination storage, not a release record.
 
 Before a release:
 
@@ -711,18 +729,16 @@ Before a release:
 
 After a release, read the per-task summary rather than the last line of the log. One line per task states where it ran, and keeps four outcomes apart: computation, outputs, publication and recording. A completed task is not a released package. The `execution metrics` line beside it is measurement only and is not a claim about speed.
 
-An unknown publication outcome is the one result that needs a person:
-
-1. `E228` with the category `publication-unknown` means the run authorized a publication on a node and cannot establish what became of it. The package failed at its publish stage, its dependents are blocked, and no second attempt is made in that run.
-2. Report it as unknown. Never describe it as published or as failed, and never retry the publish by hand.
-3. The run retains the uncertain publication's authorization ref, even if the node acknowledged after starting publish. It may also retain that repository's release lock when the node never acknowledged. Do not delete a retained lock. Clearing it is an operator's decision and needs the documented order: read the run id from the lock tag's `run` line, list the `dispat-worker-*` refs of the repository (`git ls-remote --heads origin 'dispat-worker-*'`) and take the ones whose messages carry that run, find the authorization with no result beside it, confirm on that node that the publisher has stopped, check the registry for the version, delete the run's refs, and only then delete the lock tag.
-4. A run may end with a lock retained and no release record at all, so check the registry rather than the tags.
+If the orchestrator's publication has an uncertain destination outcome, reconcile the exact package, version and
+artifact identity under §19.4 before retrying. A worker task receipt or missing tag cannot settle it. Keep the
+release workflow in control and follow [recovery](../../packages/docs/docs/reference/releasing/recovery.md); do not
+retry a publish by hand.
 
 Before deleting a coordination ref, verify that its current tip still belongs to that run's authenticated chain. Investigate a changed or unauthenticated tip instead of treating it as cleanup residue.
 
 `dispat run` uses the same pool when the invocation has links: each package's task runs where its `runOnly` places a build, and the folders the entry configuration's `runOutputs` names for the script are carried back and merged into the orchestrator's checkout. A sweep takes no release lock and records nothing, so it neither waits for a release nor stops one; a sweep with no link runs every task locally, as it always has.
 
-Leftover `dispat-worker-*` branches on the repository, or on a mailbox a link names, are coordination state, not release records. A completed run deletes its own; an uncertain publication retains its authorization as evidence until the operator follows the recovery order above. They carry full source and command text, so report other leftovers for cleanup after checking that their current tips still belong to the run's authenticated chain and no process uses them. Investigate a changed or unauthenticated tip instead of deleting it as residue. Never write a `dispat-worker-*` branch yourself, and never run a release from a node whose `execution.role` is `worker`: a node refuses a message nobody signed, and a worker refuses the release with `E226`.
+Leftover `dispat-worker-*` branches on the repository, or on a mailbox a link names, are coordination state, not release records. A completed run deletes its own. They carry full source and command text, so report other leftovers for cleanup after checking that their current tips still belong to the run's authenticated chain and no process uses them. Investigate a changed or unauthenticated tip instead of deleting it as residue. Never write a `dispat-worker-*` branch yourself, and never run a release from a node whose `execution.role` is `worker`: a node refuses a message nobody signed, and a worker refuses the release with `E226`.
 
 A worker state folder has one serving process, and its `worker.lock` holds that process's id. A crashed worker's
 successor takes the folder over from the id of a process that is gone, or from its own id left by an earlier process

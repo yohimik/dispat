@@ -32,6 +32,9 @@ A receipt names the planned head, any exported tag target, the package, the vers
 exported. It is not a release record, and no tag listing reads it. The next release reads the receipts under its lock,
 before anything runs, and settles each one:
 
+`commit.verify: false` skips the optional remote release-record comparison, not this receipt read. With `commit.push`
+on, an unreadable authoritative store refuses the run before it can start another publication.
+
 - **On the same commit, at the same version.** The run publishes nothing for it. If the new build exports the same
   `INTEGRITY` as the receipt, it warns `W246` and finishes the release commit and tag. If that identity differs or is
   absent, it refuses the record with `E198` and retains the receipt. If the receipt carried no identity, dispat tags

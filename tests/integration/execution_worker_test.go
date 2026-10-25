@@ -104,44 +104,26 @@ func TestExecutionWorkerRefusesWorkWhenItsReplayRecordCannotBeSaved(t *testing.T
 	assert.Contains(t, reply.Stdout, "the mailbox could not be served")
 }
 
-// A correctly signed assignment can still describe no executable frame.
-// The worker claims it, reports failure, and never reaches a hook or publish
-// command; a malformed assignment must not stop it serving unrelated work.
-func TestExecutionWorkerFailsIncompletePublicationFrames(t *testing.T) {
+// A correctly signed legacy publish assignment still grants no publication
+// authority. The worker refuses it before claim and continues serving builds.
+func TestExecutionWorkerRefusesLegacyPublication(t *testing.T) {
 	rig := newExecutionRig(t)
 	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	state := orchestrator.prepareInputState("incomplete-frames")
-	for label, change := range map[string]func(map[string]any){
-		"missing-package":     func(message map[string]any) { delete(message, "package") },
-		"missing-frame":       func(message map[string]any) { delete(message, "frame") },
-		"empty-input-closure": func(message map[string]any) { message["repositories"] = []any{} },
-	} {
-		branch := executionCraftedBranchName("publish", label)
-		orchestrator.offer(branch, orchestrator.publication(branch, label, state, change))
-	}
-	noPermit := executionCraftedBranchName("publish", "no-permit")
-	orchestrator.offer(noPermit, orchestrator.publication(noPermit, "no-permit", state,
-		func(message map[string]any) { message["permits"] = map[string]any{} }))
+	state := orchestrator.prepareInputState("legacy-publish")
+	legacy := executionCraftedBranchName("publish", "legacy")
+	orchestrator.offer(legacy, orchestrator.publication(legacy, "legacy", state))
 	control := executionCraftedBranchName("probe", "incomplete-control")
 	orchestrator.offer(control, orchestrator.probe(control, "incomplete-control"))
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
-		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(4) }), 4)
+		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(2) }), 4)
 
-	for _, label := range []string{"missing-package", "missing-frame", "empty-input-closure"} {
-		branch := executionCraftedBranchName("publish", label)
-		result := executionAwaitMessage(t, rig.mailbox, branch, "result")
-		assert.Equal(t, "failed", result["status"], label)
-		assert.Equal(t, []string{"assignment", "claim", "result"},
-			executionChain(t, rig.mailbox, branch), label)
-	}
 	executionAwaitMessage(t, rig.mailbox, control, "result")
 	reply := worker.proc.Wait()
 	require.Equal(t, 0, reply.Code, "stdout:\n%s\nstderr:\n%s", reply.Stdout, reply.Stderr)
 	assert.Empty(t, rig.runs(), "neither hooks nor publication commands may run")
-	assert.Contains(t, reply.Stdout, "the assignment describes no frame to run")
 	assert.Contains(t, executionRejections(reply), "permit")
-	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, noPermit),
-		"a signed assignment without a publish permit is refused before claim")
+	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, legacy),
+		"a signed publish assignment is refused before claim")
 	assert.Equal(t, []string{"assignment", "claim", "result"},
 		executionChain(t, rig.mailbox, control), "the worker kept serving")
 }

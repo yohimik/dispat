@@ -253,7 +253,7 @@ func (c *Coordinator) prepareProvider(ctx context.Context, packageName string) (
 				return c.runHere(ctx, lease, task, prepared.Request, prepared.Here)
 			}
 			node = lease.Node
-			return c.dispatchStage(ctx, lease, KindPrepare, task, attempt, prepared.Request, nil)
+			return c.dispatchStage(ctx, lease, KindPrepare, task, attempt, prepared.Request)
 		})
 	return node, err
 }

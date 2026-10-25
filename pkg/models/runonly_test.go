@@ -35,8 +35,8 @@ func TestRunOnlyReadsBothShapes(t *testing.T) {
 			want:     RunOnly{Build: RunOnlyWorker, Publish: RunOnlyOrchestrator},
 		},
 		"a pair whose halves agree": {
-			document: `["worker", "worker"]`,
-			want:     RunOnly{Build: RunOnlyWorker, Publish: RunOnlyWorker},
+			document: `["both", "both"]`,
+			want:     RunOnly{Build: RunOnlyBoth, Publish: RunOnlyBoth},
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -67,6 +67,8 @@ func TestRunOnlyRefusesWhatTheKeyDoesNotSay(t *testing.T) {
 		"a misspelled stage value":  {raw: []any{"worker", "orchestartor"}, want: "is not a placement"},
 		"a number where a word is":  {raw: []any{"worker", 3}, want: "wants"},
 		"an object where a word is": {raw: map[string]any{"build": "worker"}, want: "wants"},
+		"worker for both stages":    {raw: "worker", want: "[worker, orchestrator]"},
+		"worker publish in a pair":  {raw: []any{"both", "worker"}, want: "publication runs on the orchestrator"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := NormalizeRunOnly(row.raw, `packages["core"].runOnly`)
@@ -92,8 +94,8 @@ func TestRunOnlyWritesTheShortestShape(t *testing.T) {
 		want  string
 	}{
 		"both stages agree": {
-			value: RunOnly{Build: RunOnlyWorker, Publish: RunOnlyWorker},
-			want:  `"worker"`,
+			value: RunOnly{Build: RunOnlyBoth, Publish: RunOnlyBoth},
+			want:  `"both"`,
 		},
 		"the stages differ": {
 			value: RunOnly{Build: RunOnlyWorker, Publish: RunOnlyOrchestrator},
@@ -161,18 +163,18 @@ func TestRunOnlyLevelsTellAStatementFromSilence(t *testing.T) {
 			if stated := runOnlyOf(level); stated != nil {
 				t.Fatalf("%s read silence as %+v", name, stated)
 			}
-			if err := json.Unmarshal([]byte(`{"runOnly": "worker"}`), level); err != nil {
+			if err := json.Unmarshal([]byte(`{"runOnly": ["worker", "orchestrator"]}`), level); err != nil {
 				t.Fatalf("reading %s: %v", name, err)
 			}
 			stated := runOnlyOf(level)
-			if stated == nil || stated.Build != RunOnlyWorker || stated.Publish != RunOnlyWorker {
+			if stated == nil || stated.Build != RunOnlyWorker || stated.Publish != RunOnlyOrchestrator {
 				t.Fatalf("%s read a stated runOnly as %+v", name, stated)
 			}
 			written, err := json.Marshal(level)
 			if err != nil {
 				t.Fatalf("writing %s: %v", name, err)
 			}
-			if !strings.Contains(string(written), `"runOnly":"worker"`) {
+			if !strings.Contains(string(written), `"runOnly":["worker","orchestrator"]`) {
 				t.Fatalf("%s wrote the stated value back as %s", name, written)
 			}
 		})

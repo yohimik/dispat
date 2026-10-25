@@ -131,8 +131,7 @@ func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Log
 			Str("category", CategoryIntegrity).Msg("the task's inputs could not be installed")
 		return taskOutcome{status: StatusFailed, failedPart: release.PartInputs, reason: reason}
 	}
-	gate := w.resolvePublicationGate(task, log)
-	outcome := w.runFrame(ctx, task, checkout.Dir(owner, assignment.Package.Dir), gate, log)
+	outcome := w.runFrame(ctx, task, checkout.Dir(owner, assignment.Package.Dir), log)
 	outcome.strayWrites = checkout.CountStrayWrites(ctx, owner, formatDeclaredPaths(assignment))
 	if outcome.status != StatusSucceeded {
 		return outcome
@@ -173,16 +172,6 @@ func ownerPathOf(assignment Assignment) string {
 	return "."
 }
 
-// framePermitx is what a node waits for between the part of a frame that only
-// prepares and the part that has an effect nobody can take back.
-//
-// It is declared at the consumer, the frame runner, because that is the whole
-// of what the frame needs to know about authorization: one call, made at one
-// point, that either lets the commands start or says what became of the
-// attempt instead. What it does with the branch is the publication's own, and
-// a build hands in no gate at all.
-type framePermitx func(ctx context.Context, exports []plan.Output) taskOutcome
-
 // runFrame runs the three sequences of one stage frame in order, each
 // fail-fast, and answers at the first one that did not succeed.
 //
@@ -190,14 +179,8 @@ type framePermitx func(ctx context.Context, exports []plan.Output) taskOutcome
 // that exported a value before the stage's own script ran is a hook whose
 // value that script reads, so the environment is rebuilt for each sequence
 // from what the ones before it produced.
-//
-// The gate sits between the frame's hook and its own commands, which is where
-// §27.2 and §28.6 both put it: after everything that may still be abandoned
-// for free, immediately before the thing that may not. It is asked even when
-// the stage configured no command, because the question it asks is whether the
-// package may be published at all and not whether a script exists.
 func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
-	permit framePermitx, log zerolog.Logger) taskOutcome {
+	log zerolog.Logger) taskOutcome {
 	assignment := task.assignment
 	mappings := workerOutputPathMappings(assignment, dir)
 	// carried is everything the run had exported before this frame plus
@@ -206,7 +189,6 @@ func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
 	carried := &plan.Release{Outputs: formatOutputs(assignment.Exports)}
 	produced := &plan.Release{}
 	stage := resolveFrameStage(assignment)
-	expectedTip := ""
 	for _, part := range []struct {
 		name     string
 		stage    string
@@ -217,20 +199,11 @@ func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
 		{release.PartAfter, "post" + formatStageTitle(stage), assignment.Frame.After},
 	} {
 		task.reportPhase(part.name, false)
-		if part.name == release.PartCommands && permit != nil {
-			permitted := permit(ctx, produced.Outputs)
-			expectedTip = permitted.expectedTip
-			if permitted.status != "" {
-				permitted.exports = produced.Outputs
-				return permitted
-			}
-		}
 		if len(part.commands) == 0 {
 			continue
 		}
-		// The stage's own command sequence is what makes a publication's
-		// outcome unknown once it has begun, so the fact is recorded before the
-		// first process starts rather than after it ends.
+		// Cancellation reports whether commands actually started, so the
+		// phase is recorded before the first process begins.
 		task.reportPhase(part.name, part.name == release.PartCommands)
 		sequence := release.Sequence{
 			Runner:   &script.ShellRunner{Shell: assignment.Shell, Log: log},
@@ -251,9 +224,9 @@ func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
 		}
 		log.Warn().Err(err).Str("stage", part.stage).Str("part", part.name).Msg("stage failed")
 		return taskOutcome{status: StatusFailed, failedPart: part.name, exit: resolveExitStatus(err),
-			exports: produced.Outputs, expectedTip: expectedTip}
+			exports: produced.Outputs}
 	}
-	return taskOutcome{status: StatusSucceeded, exports: produced.Outputs, expectedTip: expectedTip}
+	return taskOutcome{status: StatusSucceeded, exports: produced.Outputs}
 }
 
 // resolveExitStatus is the exit status of the command behind a frame failure,

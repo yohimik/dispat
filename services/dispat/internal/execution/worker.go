@@ -586,10 +586,8 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 		return true, w.answerProbe(ctx, tip, assignment)
 	}
 	// A preparation is a build frame and is executed as one: the kind says why
-	// the run asked for it, not what the node does with it. A publication is
-	// the same frame machinery with one step inserted in the middle, which is
-	// where its own file picks it up, and a sweep task is the same machinery
-	// with nothing around its commands.
+	// the run asked for it, not what the node does with it. A sweep task uses
+	// the same machinery with nothing around its commands.
 	if isFrameKind(assignment.Kind) {
 		return w.takeTask(ctx, tip, assignment)
 	}
@@ -626,11 +624,10 @@ func (w *Worker) isStateOwned() bool {
 }
 
 // isFrameKind reports whether an assignment of this kind is a frame this node
-// runs: a build, a preparation, the frame of another stage, a publication or a
-// sweep task.
+// runs: a build, a preparation, a configured stage or a sweep task.
 func isFrameKind(kind string) bool {
 	switch kind {
-	case KindBuild, KindPrepare, KindStage, KindPublish, KindRun:
+	case KindBuild, KindPrepare, KindStage, KindRun:
 		return true
 	default:
 		return false
@@ -944,10 +941,8 @@ func (w *Worker) reportRefusedResult(ctx context.Context, task *claimedTask, rep
 		Msg("the mailbox refused the task result; a result without it is reported instead")
 	fallback := report
 	fallback.Outputs, fallback.Exports = nil, nil
-	if task.assignment.Kind != KindPublish {
-		fallback.Status, fallback.FailedPart = StatusFailed, release.PartOutputs
-		fallback.Reason, fallback.Exit = string(ReasonTransferRefused), 0
-	}
+	fallback.Status, fallback.FailedPart = StatusFailed, release.PartOutputs
+	fallback.Reason, fallback.Exit = string(ReasonTransferRefused), 0
 	return w.advance(ctx, task.tip, lease, MessageResult, fallback, nil)
 }
 
@@ -1017,7 +1012,8 @@ func (w *Worker) checkAssignment(assignment Assignment, tip ChainTip) RejectReas
 	if w.Seen.IsSeen(assignment.Run, assignment.Task, assignment.Attempt) {
 		return ReasonReplay
 	}
-	if assignment.Kind == KindPublish && !assignment.Permits.Publish {
+	if assignment.Kind == KindPublish || assignment.Permits.Publish || assignment.Permits.NativeRefs ||
+		(assignment.Kind == KindStage && assignment.Stage == StagePublish) {
 		return ReasonPermit
 	}
 	if assignment.Kind == KindStage && !isStageName(assignment.Stage) {

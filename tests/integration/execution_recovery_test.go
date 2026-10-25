@@ -239,80 +239,6 @@ func TestExecutionForgedClaimsAreRejectedBeforeWork(t *testing.T) {
 	}
 }
 
-// A ready message is the last worker reply before a publish authorization.
-// Invalid ready messages must not let a mailbox writer start an irreversible
-// command, even when the worker's earlier claim was valid.
-func TestExecutionForgedReadyCannotAuthorizePublication(t *testing.T) {
-	for name, row := range map[string]struct {
-		mangle func(executionOrderedJSON) executionOrderedJSON
-		secret string
-		reason string
-	}{
-		"signed with another secret": {
-			secret: "not-the-runs-secret", reason: "signature",
-		},
-		"unparseable header": {
-			mangle: executionRebind("issuedAt", []any{"not a time"}), reason: "unreadable",
-		},
-		"unsupported protocol": {
-			mangle: executionRebind("protocol", executionProtocolVersion+1), reason: "protocol",
-		},
-		"names another claim": {
-			mangle: executionRebind("claim", strings.Repeat("0", 40)), reason: "replay",
-		},
-		"readies another kind of work": {
-			mangle: executionRebind("kind", "build"), reason: "replay",
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			rig := newExecutionRig(t, func(cfg *models.File) {
-				cfg.RunOnly = placedOn(models.RunOnlyOrchestrator, models.RunOnlyWorker)
-				cfg.Scripts["build"] = models.Script{executionRecordingScript}
-				cfg.Scripts["publish"] = models.Script{executionRecordingScript}
-				wait := 6
-				if harness.IsTinyGo() {
-					wait = 30
-				}
-				cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{
-					Preflight: 30, Task: wait, Cancel: 5}
-			})
-			worker := newExecutionFakeWorker(t, rig.mailbox, executionNode, nil)
-			worker.readyMangle, worker.readySecret, worker.isReadyOnly = row.mangle, row.secret, true
-			worker.serve()
-			t.Cleanup(worker.close)
-
-			res := rig.release()
-			executionAwaitAnswered(t, worker.answered)
-
-			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.Contains(t, executionRefusedReplies(res), row.reason,
-				"the forged ready cannot authorize publication")
-			assert.Len(t, rig.runs(), 1, "only the local build ran: %v", rig.runs())
-			assert.Equal(t, executionOrchestratorLabel, rig.runs()[0].Node)
-			assert.Empty(t, rig.repo.TagList(), "no publication was recorded")
-			_, authorized := executionLine(res, "publication authorized")
-			assert.False(t, authorized, "the coordinator never sent Go")
-			assertRejectedTipRetained(t, rig, res)
-		})
-	}
-}
-
-// A refused message is not cleanup authority, even when cancellation runs
-// after the refusal. Keep exactly the rejected commit for investigation.
-func assertRejectedTipRetained(t *testing.T, rig *executionRig, result harness.RunResult) {
-	t.Helper()
-	rejected, isRejected := executionLine(result, "result rejected")
-	require.True(t, isRejected, "stdout:\n%s", result.Stdout)
-	branch := "refs/heads/" + rejected.Str("branch")
-	require.Equal(t, []string{branch}, rig.branches(), "only the rejected branch remains")
-	assert.Equal(t, rejected.Str("commit"), strings.TrimSpace(bareGit(t, rig.mailbox,
-		"rev-parse", branch)), "cancellation and cleanup leave the rejected tip untouched")
-	assert.True(t, harness.IsCodePresent(executionEvents(result), executionRetainedCode),
-		"retained coordination content needs investigation\nstdout:\n%s", result.Stdout)
-	assert.NotContains(t, result.Stdout, "the attempt is fenced by revoking its coordination ref",
-		"a refused deletion cannot be reported as a completed fence")
-}
-
 // TestExecutionOldRunReceiptGrantsNothing (spec vector 20): a receipt of an
 // earlier run, complete and correctly signed, replayed onto this run's branch.
 //
@@ -451,13 +377,13 @@ const executionUnknownCode = "E228"
 // lock is deleted while the run's first build is executing.
 //
 // After that loss the run starts nothing: no further assignment is written, no
-// publication is authorized, and no publish command runs anywhere. The lock
+// local publication starts, and no publish command runs anywhere. The lock
 // the run lost is neither re-created nor deleted by it, because a lock on a
 // remote after a loss is somebody else's or nobody's and never this run's to
 // tidy. The run fails with the lock code.
 func TestExecutionLockLossStopsNewEffects(t *testing.T) {
 	rig := newExecutionRig(t, func(cfg *models.File) {
-		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyWorker)
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
 		cfg.Scripts["build"] = models.Script{executionRecordingScript + " && " +
 			`git -C "$DISPAT_IT_EXECUTION_ORIGIN" tag -d dispat-release-lock`}
 		cfg.Scripts["publish"] = models.Script{executionRecordingScript}
@@ -472,9 +398,9 @@ func TestExecutionLockLossStopsNewEffects(t *testing.T) {
 	assert.True(t, harness.IsCodePresent(executionEvents(res), executionLockCode),
 		"the run reports the lock it no longer holds\nstdout:\n%s", res.Stdout)
 	// The run revalidates ownership before placing the next task. Since the
-	// build deleted the lock, no publish assignment can be offered at all.
+	// build deleted the lock, no local publish stage can start.
 	assert.Empty(t, executionPlacements(res, "core:publish"),
-		"no publish assignment was offered after the lock disappeared")
+		"no publish task was placed after the lock disappeared")
 	assert.Empty(t, rig.repo.TagList(), "no version was recorded")
 	assert.False(t, remoteHoldsLock(t, rig.origin),
 		"the lock this run lost is not re-created by it")
@@ -483,100 +409,6 @@ func TestExecutionLockLossStopsNewEffects(t *testing.T) {
 	assert.NotContains(t, served.Stdout, `"message":"publication authorized"`)
 	assert.Len(t, rig.runs(), 1,
 		"the build that deleted the lock ran, and nothing after it did: %v", rig.runs())
-}
-
-// TestExecutionLostPublishReplyIsNeverRepublished (spec vector 13): a node
-// publishes and then stops existing before it can say so.
-//
-// This is the one outcome the profile exists for. The publish command ran once
-// and the registry may well hold the version, but nothing available to this
-// run says whether it does: §28.6 allows neither a missing reply nor a missing
-// tag to be read as failure. So the package fails at its publish stage with
-// E228 and no tag, no second attempt is authorized under that authorization,
-// the run exits non-zero, and the exclusion covering the repository the
-// publisher was writing into is left on the remote for an operator, with a
-// remedy that names the order of recovery rather than telling them to delete a
-// tag.
-//
-// The node is killed outright rather than asked to stop, which is what makes
-// the reply lost: a node that was signalled would acknowledge, and an
-// acknowledged publisher is a known outcome.
-func TestExecutionLostPublishReplyIsNeverRepublished(t *testing.T) {
-	wait, cancel := 6, 3
-	if harness.IsTinyGo() {
-		wait, cancel = 30, 15
-	}
-	rig := newExecutionRig(t, func(cfg *models.File) {
-		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyWorker)
-		cfg.Scripts["build"] = models.Script{executionRecordingScript}
-		// The marker first, then a sleep longer than every wait of the run:
-		// the effect has happened and the node will never report it.
-		cfg.Scripts["publish"] = models.Script{executionPublishProbe + " && sleep 600"}
-		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{
-			Preflight: 30, Task: wait, Cancel: cancel}
-	})
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
-	started := rig.repo.StartReleaseEnv(rig.env(), "release")
-
-	// The publish command has run: from here on nobody can say what the
-	// registry holds, which is the state this scenario is about.
-	executionAwaitProbe(t, rig, "probe-publish")
-	worker.proc.Signal(syscall.SIGKILL)
-	res := started.Wait()
-
-	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.IsCodePresent(executionEvents(res), executionUnknownCode),
-		"the outcome is reported as one nobody can establish\nstdout:\n%s", res.Stdout)
-	unknown, isUnknown := executionLine(res,
-		"the outcome of an authorized publication cannot be established")
-	require.True(t, isUnknown, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, "publication-unknown", unknown.Str("category"))
-	assert.Equal(t, "core:publish", unknown.Str("task"))
-	assert.Equal(t, executionNode, unknown.Str("worker"))
-	assert.Equal(t, false, unknown["quiesced"], "the publisher never said it had stopped")
-
-	retained, isRetained := executionLine(res, "release lock retained")
-	require.True(t, isRetained, "stdout:\n%s", res.Stdout)
-	assert.Contains(t, retained.Str("remedy"), "release-lock.md",
-		"the remedy names the page that describes clearing a lock left behind")
-	assert.Contains(t, retained.Str("error"), "only then delete the lock tag",
-		"and states the order of recovery rather than the deletion alone")
-	assert.True(t, remoteHoldsLock(t, rig.origin),
-		"the exclusion covering the unaccounted publication is left for an operator")
-	assert.Empty(t, executionReleaseTags(rig),
-		"and nothing is recorded for a publication nobody can vouch for")
-
-	published := 0
-	for _, run := range rig.runs() {
-		if run.Node == "probe-publish" {
-			published++
-		}
-	}
-	assert.Equal(t, 1, published, "the publish command ran exactly once: %v", rig.runs())
-	// The summary tells this outcome from a failure, which is the whole point
-	// of §28.9's last paragraph.
-	summary, isSummarized := executionLine(res, "distributed execution summary")
-	require.True(t, isSummarized)
-	assert.Equal(t, float64(1), summary["unknown"])
-	assert.Equal(t, float64(0), summary["published"])
-	_ = worker.proc.Wait()
-}
-
-// executionAwaitProbe waits for one of the fixture's probe markers to appear,
-// which is how a scenario synchronises with a command that has actually run
-// rather than with a duration.
-func executionAwaitProbe(t *testing.T, rig *executionRig, probe string) {
-	t.Helper()
-	deadline := time.Now().Add(90 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, run := range rig.runs() {
-			if run.Node == probe {
-				return
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatalf("no %s marker appeared within the deadline: %v", probe, rig.runs())
 }
 
 // TestExecutionInterruptCancelsRemoteTasks: the release is interrupted while a
@@ -850,4 +682,33 @@ func executionPlannedVersions(t *testing.T, rig *executionRig) map[string]string
 		}
 	}
 	return planned
+}
+
+// executionAwaitProbe waits for a fixture script to record its stage start.
+func executionAwaitProbe(t *testing.T, rig *executionRig, probe string) {
+	t.Helper()
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, run := range rig.runs() {
+			if run.Node == probe {
+				return
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("no %s marker appeared within the deadline: %v", probe, rig.runs())
+}
+
+func assertRejectedTipRetained(t *testing.T, rig *executionRig, result harness.RunResult) {
+	t.Helper()
+	rejected, isRejected := executionLine(result, "result rejected")
+	require.True(t, isRejected, "stdout:\n%s", result.Stdout)
+	branch := "refs/heads/" + rejected.Str("branch")
+	require.Equal(t, []string{branch}, rig.branches(), "only the rejected branch remains")
+	assert.Equal(t, rejected.Str("commit"), strings.TrimSpace(bareGit(t, rig.mailbox,
+		"rev-parse", branch)), "cancellation and cleanup leave the rejected tip untouched")
+	assert.True(t, harness.IsCodePresent(executionEvents(result), executionRetainedCode),
+		"retained coordination content needs investigation\nstdout:\n%s", result.Stdout)
+	assert.NotContains(t, result.Stdout, "the attempt is fenced by revoking its coordination ref",
+		"a refused deletion cannot be reported as a completed fence")
 }

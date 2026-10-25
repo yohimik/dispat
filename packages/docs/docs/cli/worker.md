@@ -1,8 +1,8 @@
 # The worker command
 
-Run `dispat worker` on a machine that should accept build and publish tasks from an orchestrator. It waits for work
-addressed to its node name, runs the assigned commands, and reports the results. The orchestrator remains responsible
-for planning the release and writing release records.
+Run `dispat worker` on a machine that should accept build, test and other eligible prepublication stages from an
+orchestrator. It waits for work addressed to its node name, runs the assigned commands, and reports the results. The
+orchestrator plans the release, publishes and writes release records.
 
 ```
 dispat worker [--state-dir <dir>] [--idle-timeout <seconds>]

@@ -43,10 +43,8 @@ A HorizontalPodAutoscaler watching worker CPU cannot expand the active release's
 - **The reaction is slower than the work.** A metric window, a pod start, an image pull and often a new machine take
   minutes. Most releases are over by then.
 - **Scaling down is destructive.** An autoscaler removes whichever pod it chooses. A build lost that way fails its
-  package for this run, and the run waits out `execution.timeouts.task` before saying so, because a task is never
-  retried on another node. A publish lost that way has an unknown outcome (`E228`), and the run
-  [retains that repository's release lock](../reference/releasing/release-lock.md#a-lock-a-distributed-run-retained)
-  until a person has looked.
+  package for this run, and the run waits out `execution.timeouts.task` before saying so, because a claimed task is
+  not retried on another node within the same run. Publication remains on the orchestrator.
 
 A demand signal exists for anyone who wants to start workers from zero without a pipeline step: the number of
 branches under `refs/heads/dispat-worker-*` in the repository being released. It is never CPU.
@@ -197,11 +195,9 @@ What a cluster adds to that:
   sources; the host's ref rules keep it away from everything else.
 - A pool sharing one secret is one trust zone. Two namespaces that should not be able to run each other's commands
   need two secrets.
-- Keep publishing credentials off the workers. A space with a `login` script always publishes on the orchestrator, and
-  `runOnly: orchestrator` keeps a package's build and publish there.
-- Do not run a worker that publishes on preemptible machines. A publish that was authorized and never reported back
-  leaves that repository's release lock held on purpose, and a preempted pod's task stays assigned until the task
-  deadline rather than moving to another pod.
+- Keep publishing credentials off the workers. The publish stage always runs on the orchestrator, with or without a
+  space login. Use `runOnly: [worker, orchestrator]` to keep eligible build work on workers.
+- A preempted pod's claimed task stays assigned until its deadline rather than moving to another pod in that run.
 
 ## What dispat does not do
 

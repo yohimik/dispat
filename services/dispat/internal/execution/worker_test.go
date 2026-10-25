@@ -314,13 +314,12 @@ func TestWorkerAdoptsAClaimWhosePushHadNoAnswer(t *testing.T) {
 
 // TestWorkerReportsAResultTheMailboxRefused: a result a server rule refused is
 // reported once more without what the mailbox would not take, so the run
-// hears an answer instead of waiting out its deadline. A build reports a
-// failure with no outputs, naming the stable reason; a publication keeps its
-// status and drops its exports.
+// hears an answer instead of waiting out its deadline. The build reports a
+// failure with no outputs, naming the stable reason.
 func TestWorkerReportsAResultTheMailboxRefused(t *testing.T) {
 	refused := &messagePushError{cause: fmt.Errorf("refused: %w", gitx.ErrRemoteRefused),
 		resolution: pushNotLanded, oid: "result-oid"}
-	for _, kind := range []string{KindBuild, KindPublish} {
+	for _, kind := range []string{KindBuild} {
 		t.Run(kind, func(t *testing.T) {
 			branch := "dispat-worker-build-a-20260921-" + kind + "-abc"
 			tip := ChainTip{Branch: branch, OID: "assignment-oid", Kind: MessageAssignment}
@@ -341,10 +340,6 @@ func TestWorkerReportsAResultTheMailboxRefused(t *testing.T) {
 			require.NoError(t, json.Unmarshal(mailbox.documents[branch+"/result"], &sent))
 			assert.Nil(t, sent.Outputs)
 			assert.Empty(t, sent.Exports)
-			if kind == KindPublish {
-				assert.Equal(t, StatusSucceeded, sent.Status, "a publication's status is never lost")
-				return
-			}
 			assert.Equal(t, StatusFailed, sent.Status)
 			assert.Equal(t, string(ReasonTransferRefused), sent.Reason)
 		})

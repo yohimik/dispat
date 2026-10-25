@@ -376,8 +376,7 @@ func TestStandaloneCommitTagRefusesAProviderAtItsConsumersCommit(t *testing.T) {
 			cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true),
 				Name: "admission-test", Email: "admission@example.com"}
 			publish := cfg.Scripts["core-publish"]
-			cfg.Scripts["core-publish"] = models.Script{publish[0],
-				`[ -n "$` + admissionProviderOK + `" ] || exit 1`, bin + " commit --tag", publish[1]}
+			cfg.Scripts["core-publish"] = append(publish, bin+" commit --tag")
 		})
 		res := r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
 		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)

@@ -5,8 +5,8 @@ import (
 	"fmt"
 )
 
-// This file is the `runOnly` key: which machines a package's build and its
-// publish are allowed to run on.
+// This file is the `runOnly` key: where a package's build may run. Publication
+// stays on the orchestrator, so the second value cannot name a worker.
 //
 // Some work must never leave the machine that holds the trust. A build whose
 // artefact is signed, a publish that logs in, a stage that reads a credential
@@ -14,7 +14,7 @@ import (
 // rather than hoping the scheduler happens to place it here. The key says it
 // once and the placement obeys it.
 //
-// It carries one value for both delegable stages, or one per stage, exactly
+// It carries one value for both placements, or one per stage, exactly
 // as `concurrency` does:
 //
 //	runOnly: orchestrator          # build and publish stay here
@@ -32,8 +32,8 @@ import (
 // than guessed at: a value read as the default would place signing work on a
 // machine the operator meant to exclude.
 const (
-	// RunOnlyBoth is the default: the stage may run on the orchestrator or on
-	// a worker node, and the run places it wherever there is room.
+	// RunOnlyBoth is the default: builds may run on either node type, while
+	// publication remains on the orchestrator.
 	RunOnlyBoth = "both"
 	// RunOnlyWorker pins the stage to a worker node. A run with no worker
 	// links cannot execute such a stage at all and is refused before it
@@ -46,14 +46,13 @@ const (
 	RunOnlyOrchestrator = "orchestrator"
 )
 
-// RunOnly is where one package's two delegable stages may run: the resolved
-// value for its build and the resolved value for its publish.
+// RunOnly retains the two-part configuration shape. Build may be delegated;
+// Publish may state `both` or `orchestrator`, which both run here.
 //
 // Two named fields rather than a list, because the pair is what every reader
 // wants and the list is only how a file may write it. A level that states one
-// value states it for both stages, which is the common case and the shortest
-// thing to write; a level that states two is saying the stages differ, which
-// is the whole reason the pair form exists.
+// value states it for both stages, while a worker build needs the explicit
+// pair `[worker, orchestrator]` because worker publication is refused.
 type RunOnly struct {
 	Build   string
 	Publish string
@@ -123,12 +122,13 @@ func (r *RunOnly) ResolvePublish() string {
 // would be two syntaxes eventually, and this is a key whose misreading places
 // a signing build on the wrong machine.
 func NormalizeRunOnly(raw any, where string) (RunOnly, error) {
+	var out RunOnly
 	switch x := raw.(type) {
 	case string:
 		if err := checkRunOnlyValue(where, x); err != nil {
 			return RunOnly{}, err
 		}
-		return RunOnly{Build: x, Publish: x}, nil
+		out = RunOnly{Build: x, Publish: x}
 	case []any:
 		stated := make([]string, 0, len(x))
 		for i, item := range x {
@@ -138,12 +138,27 @@ func NormalizeRunOnly(raw any, where string) (RunOnly, error) {
 			}
 			stated = append(stated, text)
 		}
-		return normalizeRunOnlyPair(where, stated)
+		var err error
+		out, err = normalizeRunOnlyPair(where, stated)
+		if err != nil {
+			return RunOnly{}, err
+		}
 	case []string:
-		return normalizeRunOnlyPair(where, x)
+		var err error
+		out, err = normalizeRunOnlyPair(where, x)
+		if err != nil {
+			return RunOnly{}, err
+		}
+	default:
+		return RunOnly{}, fmt.Errorf(
+			"%s: wants %s, or a [build, publish] pair of them", where, runOnlyVocabulary)
 	}
-	return RunOnly{}, fmt.Errorf(
-		"%s: wants %s, or a [build, publish] pair of them", where, runOnlyVocabulary)
+	if out.Publish == RunOnlyWorker {
+		return RunOnly{}, fmt.Errorf(
+			"%s: publication runs on the orchestrator; set publish to orchestrator or both "+
+				"(use [worker, orchestrator] for worker builds)", where)
+	}
+	return out, nil
 }
 
 // normalizeRunOnlyPair reads the list form, which says the two stages differ

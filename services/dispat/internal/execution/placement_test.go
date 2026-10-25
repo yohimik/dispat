@@ -41,8 +41,8 @@ func TestResolveStagePlacement(t *testing.T) {
 			stage: StageBuild, value: public.RunOnlyBoth, isSpaceLoggingIn: true, want: PlacementAnyNode},
 		"a publish nobody placed": {
 			stage: StagePublish, value: public.RunOnlyBoth, want: PlacementOrchestrator},
-		"a publish pinned to a worker": {
-			stage: StagePublish, value: public.RunOnlyWorker, want: PlacementWorker},
+		"even a legacy publish pin cannot delegate": {
+			stage: StagePublish, value: public.RunOnlyWorker, want: PlacementOrchestrator},
 		"a publish pinned to this machine": {
 			stage: StagePublish, value: public.RunOnlyOrchestrator, want: PlacementOrchestrator},
 		"a publish of a space that logs in": {

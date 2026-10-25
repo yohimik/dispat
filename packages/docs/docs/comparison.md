@@ -175,6 +175,6 @@ consumers returned at the versions planned for them under those unchanged inputs
 dispat also coordinates concurrent runs through Git. Before planning, it claims a reserved annotated lock tag on each
 participating remote. If another run owns a required lock, the new run stops rather than planning a competing release.
 
-Normal cleanup removes the locks the run owns. If an authorized worker may still be publishing and its outcome is
-uncertain, a lock can remain for operator recovery. See [The release lock](./reference/releasing/release-lock.md) for
-that procedure and [Recovery](./reference/releasing/recovery.md) for partially completed releases.
+Normal cleanup removes the locks the run owns. The orchestrator publishes and writes release records; an uncertain
+destination outcome must be reconciled before a retry. See [The release lock](./reference/releasing/release-lock.md)
+and [Recovery](./reference/releasing/recovery.md) for partially completed releases.

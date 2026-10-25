@@ -42,7 +42,7 @@ dispat [command] [flags]
 | `if [cond]` | Choose a shell command based on a variable, file, or changed packages. [Options](./if.md). |
 | `for [item]...` | Run a shell command for each item, package, space, or group. [Options](./for.md). |
 | `trigger <event>` | Send a `script.<event>` webhook event. [Options](./trigger.md). |
-| `worker` | Accept assigned build and publish tasks. [Options](./worker.md) and [distributed execution](../distributed-execution.md). |
+| `worker` | Accept assigned build and validation tasks. [Options](./worker.md) and [distributed execution](../distributed-execution.md). |
 
 ### Read and edit files
 

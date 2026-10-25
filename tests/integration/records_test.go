@@ -447,21 +447,24 @@ func TestRecordsExportedCommitPinsTagOutsideCommitMode(t *testing.T) {
 	assert.Equal(t, head, r.Git("rev-parse", "HEAD"), "no commit mode: HEAD does not move")
 }
 
-// TestRecordsPushVerifyDisabled: commit.verify=false switches the upfront
-// ls-remote check off, so the release work happens and only the push itself
-// fails — where the default (verify on) fails fast before any work.
+// TestRecordsPushVerifyDisabled: commit.verify=false switches off the upfront
+// remote verification, but a later push failure is still reported. The
+// authoritative receipt read remains required before publication.
 func TestRecordsPushVerifyDisabled(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true, Verify: models.Bool(false)}
-	r.WriteConfigModel(cfg) // note: no remote configured at all
+	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
+	r.AddBareRemote()
 	r.Commit("feat(core): released, push fails later")
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*push --atomic --porcelain*"})
 
-	res := r.Release()
+	res := r.CommandEnv(fault.Env())
 	require.Equal(t, 1, res.Code, "the push itself still fails\nstdout:\n%s", res.Stdout)
 	assert.True(t, harness.IsCodePresent(res.Events, "E224"),
 		"the push failure is reported under its own code, events:\n%s", res.Stdout)
+	assert.Equal(t, 1, fault.Matches(), "only the final atomic push is refused")
 	assert.True(t, r.IsTagged("core@0.1.0"), "release work happened before the failing push; tags: %v", r.TagList())
 	assert.Equal(t, "chore(release): core@0.1.0", r.Git("log", "-1", "--format=%s"),
 		"the release commit exists")
@@ -480,6 +483,21 @@ func TestRecordsPushVerifyDisabled(t *testing.T) {
 	assert.Empty(t, rd.TagList(), "the default fails fast before any work")
 	assert.NoFileExists(t, rd.Path("packages", "core", "CHANGELOG.md"),
 		"no release work may run before verification passes")
+
+	// Disabling verification does not turn an unreadable authoritative receipt
+	// store into proof that no earlier publication needs settlement.
+	rn := harness.New(t)
+	cfg = libsConfig(echoBuild, 1)
+	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Push: true, Verify: models.Bool(false)}
+	rn.WriteConfigModel(cfg) // no remote configured
+	rn.SeedPackage("packages", "core")
+	rn.Commit("feat(core): no authoritative receipt read")
+	res = rn.Release()
+	require.Equal(t, 1, res.Code, "the required receipt read fails\nstdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "publication receipts could not be settled")
+	assert.Empty(t, rn.TagList(), "no publication is recorded after an unreadable receipt store")
+	assert.NoFileExists(t, rn.Path("packages", "core", "CHANGELOG.md"),
+		"release work never starts without the receipt read")
 }
 
 // TestRecordsChangelogDisabled: changelog.enabled=false switches the file

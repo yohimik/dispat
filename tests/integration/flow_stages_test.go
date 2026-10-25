@@ -282,7 +282,7 @@ printf '%s %s %s\n' probe-tested "$DISPAT_PACKAGE" "$DISPAT_OUTPUT_TESTED_ON" >>
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	produced := executionProbeValues(rig, "inputs")
-	verified := executionProbeValues(rig, "test")
+	verified := executionProbeValues(rig, "tests")
 	nodes := executionProbeValues(rig, "tests-node")
 	published := executionProbeValues(rig, "tested")
 	for _, name := range executionWorkspacePackages {

@@ -585,3 +585,18 @@ spelling and hooks are refused at configuration load with migration guidance, so
 become a user stage. Stable 1.10.0 exposed `scripts.tests` and `dispat run tests` as an ordinary script name;
 those remain valid. User-defined stage names are recommended verbs such as `scan`, `lint` and `deploy`, without
 an English-language validity check. The 2026-10-25 entries above retain the stage names used by those designs.
+
+## 2026-10-26: Centralized publication in distributed runs
+
+One orchestrator fixes each release plan, owns its lock set, admits worker results and performs the publish stage,
+native release Git writes and record finalization. Workers verify assigned plan and snapshot identities, execute
+eligible build, test and user stages, and return outputs; they do not replan or receive publication authority.
+`runOnly: [worker, orchestrator]` delegates build-side work. Scalar `runOnly: worker` and any pair placing publish on a
+worker are refused with `E225`; current workers also refuse signed legacy publish assignments before claim. Existing
+mailbox refs remain coordination data rather than release records.
+
+This changes the earlier worker-publisher design recorded above. The worker Ready/Go gate, worker publication
+authorization, `E228` outcome and publisher-specific retained-lock path are not active release behavior. An
+orchestrator's local publish command can still fail after a destination accepted an artifact. A command error does not
+retain the lock or prove absence at the destination; verified adoption or a demonstrably safe repeatable publisher is
+needed before retry under §19.4. Opaque publishers without that evidence require operator reconciliation.

@@ -471,7 +471,7 @@ command that covers packages requires only one small file rather than a copy of 
 
 ### The stage seam: where a frame may leave this machine
 
-The task graph stays the same when work moves to other machines. Only build, test and publish frames, and the
+The task graph stays the same when work moves to other machines. Only build and test frames, and the
 frames of the stages the flow defines before the records, can leave this machine: the sign, version and syncLock frames write the working tree every delegated frame is
 snapshotted from, so they run on the orchestrator under the snapshot guard, as every manifest reconciliation must
 (§28.3 of the specification). [Distributed
@@ -480,9 +480,9 @@ the coordinator whether to run it locally or place it on another node.
 
 The stages are data. One ordered table describes sign, version, syncLock, build, test, publish and announce: each
 stage's name and hook spelling, the budget its tasks hold, whether its frame stays on the orchestrator or is placed by
-the build's or the publish's `runOnly` value, what a node must install before it runs (nothing, the providers'
-outputs, or the package's own outputs), whether its outputs are admitted, and whether its commands wait for the run's
-authorization. A stage the flow defines gets a descriptor of the same shape, placed like the build, and every
+the build's `runOnly` value, what a node must install before it runs (nothing, the providers' outputs, or the package's
+own outputs), and whether its outputs are admitted. A stage the flow defines gets a descriptor of the same shape,
+placed like the build, and every
 position-dependent answer (whether the stage gates or observes, what a node installs for it) is decided once per
 package in its stage plan, off the package graph. The seam is one call carrying the descriptor, so a stage added to
 the table or defined by a flow is placed, transported, reported and gated the way the stages beside it are.
@@ -717,9 +717,9 @@ registry half is delegated to the version and publish scripts. This keeps dispat
 | `requireCodeownerFor`, the CODEOWNER gate on directives     | (nothing; the specification's own configuration for it is unmodelled, so no directive can be gated on approval)                                                                       |
 | Rolling a published release back (§26)                      | (nothing; a release is corrected by releasing again, and a record is restated with [`Edits` or `Deletes`](../reference/corrections.md))                                                |
 | Reusing a build output across runs                          | (nothing; every [distributed](../distributed-execution.md) run builds what it needs, and an output set is bound to the run, the plan and the attempt that produced it)                 |
-| Registry reconciliation after an unknown publication (§19.4) | the next ordinary run, which plans what is still owed. A publication whose outcome is unknown is reported as `E228` and never re-authorized inside the run that lost it               |
+| Registry reconciliation after an unknown publication (§19.4) | a later run can adopt a matching existing artifact when its destination provides identity evidence; an opaque local publish command cannot by itself prove its prior effect, and a worker task receipt cannot settle a publication |
 | A bundle service beside the Git transport                   | (nothing; a coordination branch in a Git repository is the whole transport)                                                                                                          |
-| Distributing the package sweeps other than `dispat run`       | (nothing; only a release's build and publish frames and a `dispat run` sweep's tasks are delegated)                                                                                                                   |
+| Distributing the package sweeps other than `dispat run`       | (nothing; only eligible build and validation frames and a `dispat run` sweep's tasks are delegated)                                                                                                                   |
 
 This has a consequence for the diagnostics registry. dispat never emits the specification codes that belong to these
 registry-aware and audit-aware features. Errors like `E197` (publish-order violation), `E198` (registry identity
@@ -776,7 +776,7 @@ outcome category the specification's §28.9 requires, so a reader can switch on 
 | `W246`                 | A package an earlier run published and recorded with a [publication receipt](../reference/releasing/recovery.md#a-run-stopped-between-a-publication-and-its-record) only: this run finishes its record without publishing it again |
 | `E220`-`E224`          | [After the point of no return](#after-the-point-of-no-return): a tag, a record, the release commit or the push failing once a release is already out |
 | `E215`-`E218`          | The [scanner command's gates](../editing/manifests.md): a local link still present under `--verify-unlinked`, none present under `--verify-linked`, a range `--forbid-range` matched, a range `--require-range` did not find |
-| `E225`-`E229`, `W244`  | [Distributed execution](../distributed-execution.md#diagnostics): a configuration no distributed run could be executed under (`E225`), work refused for who asked for it (`E226`), input or output data that cannot be used as it stands (`E227`), a publication whose outcome the run cannot establish (`E228`), transport state the run could not leave in a safe place (`E229`), and the harmless half of that subject, leftover refs and writes outside the declared outputs (`W244`) |
+| `E225`-`E227`, `E229`, `W244`  | [Distributed execution](../distributed-execution.md#diagnostics): a configuration no distributed run could be executed under (`E225`), work refused for who asked for it (`E226`), input or output data that cannot be used as it stands (`E227`), transport state the run could not leave in a safe place (`E229`), and the harmless half of that subject, leftover refs and writes outside the declared outputs (`W244`) |
 
 All of these codes follow the registry's numbering conventions and blast-radius rules. dispat documents them where
 their features are. The auto-versioning narrations `W192`, `W197`, and `W203` are the specification's own §9.4/§12.4

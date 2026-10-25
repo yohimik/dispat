@@ -130,9 +130,9 @@ func (a *App) refuseDispatchWithoutLock(started runKind) error {
 // `commit.verify: false` is the setting for a remote that rejects `ls-remote`
 // and accepts pushes, and a release that runs everything here honours it by
 // skipping that read, with a warning. A release that delegates work cannot:
-// it reads every lock back before each assignment and each authorization,
-// because a worker it reaches may publish, and a remote it may not read cannot
-// show that this run still owns what it took. A sweep takes no lock and reads
+// it reads every lock back before dispatch and orchestrator publication;
+// workers still exchange coordination refs, and an unreadable remote cannot
+// show that this run still owns its exclusion. A sweep takes no lock and reads
 // none back, so it is not refused here.
 func (a *App) refuseDispatchWithoutLockRead(started runKind) error {
 	if started != runRelease {
@@ -144,7 +144,7 @@ func (a *App) refuseDispatchWithoutLockRead(started runKind) error {
 	}
 	return a.reportExecutionRefusal(started, execution.NewDiagnostic(
 		execution.CodeConfiguration, execution.CategoryConfiguration,
-		"execution.workers dispatches work to other machines, and commit.verify is off for %s: a release that delegates work reads its release lock back before every assignment and publication, and a remote it may not read cannot show that this run still owns the lock",
+		"execution.workers dispatches work to other machines, and commit.verify is off for %s: a release that delegates work reads its release lock back before dispatch and orchestrator publication, and a remote it may not read cannot show that this run still owns the lock",
 		strings.Join(repositories, ", ")), repositories, []string{"commit.verify"})
 }
 

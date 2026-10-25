@@ -102,36 +102,6 @@ func TestWorkerContainsAPanicToItsTask(t *testing.T) {
 	}
 }
 
-// TestPublicationPanicAfterAuthorizationIsUnknown: a panic in a publication's
-// coordination after the run authorized it is never a failure: the run asks
-// the node as it asks one that never answered, and with no answer the outcome
-// is unknown. Before the authorization it is an abandoned attempt.
-func TestPublicationPanicAfterAuthorizationIsUnknown(t *testing.T) {
-	for name, isAuthorized := range map[string]bool{"after the authorization": true, "before it": false} {
-		t.Run(name, func(t *testing.T) {
-			chain := newPublishChain(t, isAuthorized)
-			pub := publicationAttempt{lease: chain.lease, task: chain.assignment.Task, attempt: 1,
-				repository: "web", offer: taskOffer{branch: chain.branch, kind: KindPublish, offered: chain.offered,
-					observer: &watcher{attempts: map[string]*attemptState{}}}}
-			state := publicationState{tip: chain.ready, isAuthorized: isAuthorized}
-			if isAuthorized {
-				state.tip = chain.authorized
-			}
-
-			_, err := chain.fixture.coordinator.recoverPublication(t.Context(), pub, release.StageOutcome{},
-				state, "a bug")
-
-			require.Error(t, err)
-			if isAuthorized {
-				assert.Equal(t, CodePublicationUnknown, config.DiagnosticCode(err))
-				return
-			}
-			assert.Equal(t, CodeIntegrity, config.DiagnosticCode(err))
-			assert.Empty(t, chain.fixture.coordinator.UnknownPublications())
-		})
-	}
-}
-
 // TestCloseEndsWithinItsBound: a mailbox that hangs on every delete still lets
 // the run's close return within its bound, reporting what it could not close,
 // and the fetched refs go regardless.

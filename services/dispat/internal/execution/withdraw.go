@@ -23,7 +23,9 @@ package execution
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -232,4 +234,32 @@ func resolveCancelledPhase(phase string) string {
 		return release.PartInputs
 	}
 	return phase
+}
+
+// checkWithdrawal verifies a signed cancellation against this exact attempt.
+func (w *Worker) checkWithdrawal(ctx context.Context, answer ChainTip, tip ChainTip,
+	withdrawn string, assignment Assignment) RejectReason {
+	document, err := w.Mailbox.Read(ctx, answer, assignment.Limits.MaxManifestBytes)
+	if err != nil {
+		if reason := RejectionReason(err); reason != "" {
+			return reason
+		}
+		return ReasonUnreadable
+	}
+	var message Withdrawal
+	if err := json.Unmarshal(document, &message); err != nil {
+		return ReasonUnreadable
+	}
+	if reason := CheckHeader(message.Header, Binding{Node: w.Node, Branch: tip.Branch}, time.Now()); reason != "" {
+		return reason
+	}
+	if !IsTransitionLegal(answer.Previous, MessageCancel, PartyOrchestrator) ||
+		answer.PreviousOID != withdrawn || message.Tip != withdrawn || message.Assignment != tip.OID ||
+		message.Kind != assignment.Kind ||
+		message.Run != assignment.Run || message.Task != assignment.Task ||
+		message.Attempt != assignment.Attempt || message.Generation != assignment.Generation ||
+		message.PlanDigest != assignment.PlanDigest {
+		return ReasonReplay
+	}
+	return ""
 }

@@ -33,7 +33,7 @@ func runOnlyLadderConfig() File {
 			"libs": {
 				Path:    PathList{"packages/libs"},
 				Flow:    &SpaceFlowConfig{Build: []string{"build"}},
-				RunOnly: placementAt(public.RunOnlyWorker, public.RunOnlyWorker),
+				RunOnly: placementAt(public.RunOnlyWorker, public.RunOnlyOrchestrator),
 			},
 			"apps": {
 				Path: PathList{"packages/apps"},
@@ -132,11 +132,9 @@ func TestRunOnlyRefusals(t *testing.T) {
 	}
 }
 
-// TestRunOnlyRefusesAPublishOnAWorkerBesideALogin: a space that logs in
-// publishes on the orchestrator, so a package of it pinning its publish to a
-// worker is two statements that cannot both hold, and the refusal says which
-// two.
-func TestRunOnlyRefusesAPublishOnAWorkerBesideALogin(t *testing.T) {
+// TestRunOnlyRefusesWorkerPublication: a login cannot make worker publication
+// valid, and neither can the absence of a login or a typed model value.
+func TestRunOnlyRefusesWorkerPublication(t *testing.T) {
 	for name, row := range map[string]struct {
 		stated    *RunOnly
 		isRefused bool
@@ -156,17 +154,22 @@ func TestRunOnlyRefusesAPublishOnAWorkerBesideALogin(t *testing.T) {
 			})
 			root := writeModelRepo(t, cfg, "pkgs/core")
 			loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
-			require.NoError(t, err)
-			_, _, _, err = DiscoverPackages(loaded, root)
+			if err == nil {
+				_, _, _, err = DiscoverPackages(loaded, root)
+			}
 			if !row.isRefused {
 				require.NoError(t, err)
 				return
 			}
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "flow.login")
+			assert.Contains(t, err.Error(), "[worker, orchestrator]")
+			assert.Error(t, checkRunOnlyPublishPlacement("libs", row.stated),
+				"typed placement bypassing file parsing is also refused")
 			assert.Equal(t, DiagnosticExecution, DiagnosticCode(err))
 		})
 	}
+	assert.Error(t, checkRunOnlyPublishPlacement("libs", placementAt(public.RunOnlyBoth, public.RunOnlyWorker)),
+		"a space without a login also cannot delegate publication")
 }
 
 // TestRunOnlyIsNotANodeStartupSetting: the key is a package's, so a level
@@ -178,7 +181,7 @@ func TestRunOnlyIsNotANodeStartupSetting(t *testing.T) {
 	cfg := runOnlyLadderConfig()
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/tool")
 	writeSpaceRaw(t, root, "packages/libs", map[string]any{
-		"runOnly":  "worker",
+		"runOnly":  []any{"worker", "orchestrator"},
 		"packages": map[string]any{"core": map[string]any{"runOnly": []any{"worker", "both"}}},
 	})
 

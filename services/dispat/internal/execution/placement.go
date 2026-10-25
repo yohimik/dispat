@@ -10,13 +10,9 @@ package execution
 // hook observing a folder some other node wrote. So there is exactly one
 // placement question per frame, and it is answered here.
 //
-// Two things decide it. `runOnly` is what the operator said, and it is a
-// filter over the pool exactly as `buildPlatforms` is one. The space's login
-// is what the operator implied: a login is authentication, authentication
-// must not travel, so a space that logs in publishes on the orchestrator
-// whatever else is stated. The configuration refuses the pair that would
-// contradict that, so the rule here never overrules a statement the operator
-// was allowed to make.
+// `runOnly` filters build and test placement over the pool, as
+// `buildPlatforms` does. Publication stays with the orchestrator and its
+// credentials regardless of available worker capacity.
 
 import (
 	public "github.com/yohimik/dispat/pkg/models"
@@ -50,26 +46,13 @@ const (
 
 // ResolveStagePlacement answers where one stage frame runs.
 //
-// The publish stage is not the build stage and the difference is deliberate.
-// A publication is serialized per repository anyway, so delegating one buys a
-// run nothing and spreads the registry credentials over one more machine;
-// therefore publication is delegated only where the operator asked for it in
-// so many words, and `both` keeps it here. A build is the opposite: it is the
-// work a pool exists for, so `both` offers it to the pool.
-func ResolveStagePlacement(stage, value string, isSpaceLoggingIn bool) Placement {
-	if stage != StagePublish {
-		return resolveBuildPlacement(value)
-	}
-	if isSpaceLoggingIn {
-		// The configuration refused `publish: worker` beside a login, so this
-		// overrules nothing an operator was allowed to state: it is what
-		// `both` means for a space whose publish needs credentials.
+// Publication and release records stay on the orchestrator. Build and test
+// frames may use the worker pool under the package's build placement.
+func ResolveStagePlacement(stage, value string, _ bool) Placement {
+	if stage == StagePublish {
 		return PlacementOrchestrator
 	}
-	if value == public.RunOnlyWorker {
-		return PlacementWorker
-	}
-	return PlacementOrchestrator
+	return resolveBuildPlacement(value)
 }
 
 // resolveBuildPlacement is the build stage's own reading of the key, which is
@@ -85,23 +68,19 @@ func resolveBuildPlacement(value string) Placement {
 	}
 }
 
-// The two stages whose runOnly values place a delegable frame, under the names
-// the executor gives them. Every other delegable stage is placed by one of the
-// two, as its descriptor says. Everything else a release does (the sign and
-// version stages, the lock-file preparation, the login, the records, the tags
-// and every run-level hook) is the orchestrator's and is not configurable, so
-// it is not named here.
+// StageBuild names the placement shared by build, test and configured
+// computation stages. StagePublish is retained as an assignment identity for
+// refusing old worker publication requests; current releases execute it here.
 const (
 	StageBuild   = "build"
 	StagePublish = "publish"
 )
 
-// resolveDescriptorPlacement answers where one stage's frame of one package
-// runs: under the build's runOnly value and meaning, or the publish's, as the
-// stage's descriptor says.
+// resolveDescriptorPlacement places a publication here and uses the build
+// preference only for other delegable frames.
 func resolveDescriptorPlacement(descriptor release.Stage, space *model.Space) Placement {
 	if descriptor.Placement == release.PlacementByPublish {
-		return ResolveStagePlacement(StagePublish, space.RunOnly.ResolvePublish(), len(space.LoginScript) > 0)
+		return PlacementOrchestrator
 	}
 	return ResolveStagePlacement(StageBuild, space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0)
 }

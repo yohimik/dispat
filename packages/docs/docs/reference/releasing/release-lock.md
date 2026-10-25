@@ -117,8 +117,9 @@ which ended holding its lock can be found from the lock. A later run refused by 
 including the run.
 
 Confirm that the named run has stopped. A lock that names a run is cleared in the order
-[a lock a distributed run retained](#a-lock-a-distributed-run-retained) gives, because a worker of that run may hold
-a publication it was authorized to start. Any other lock is cleared by deleting the tag and releasing again:
+[a lock a distributed run retained](#a-lock-a-distributed-run-retained) gives, because its orchestrator may have
+completed a publication whose record is still pending. Any other lock is cleared by deleting the tag and releasing
+again:
 
 ```sh
 git push origin --delete dispat-release-lock
@@ -187,42 +188,28 @@ and the lock is the only thing that stops a second run authorizing the same publ
 
 ## A lock a distributed run retained
 
-If a worker was authorized to publish but never reports a result, dispat cannot tell whether the version reached the
-registry or whether the publisher is still running. The run reports `E228`, fails that package, blocks its
-dependents and exits non-zero. If the node never acknowledged the withdrawal either, the release lock of the
-repository it was publishing into is **retained** rather than given back, to prevent another run from publishing while the first
-publisher may still be active.
+A distributed release has one orchestrator for its compiled plan. Workers cannot run its publish stage or write
+release refs. A retained lock can mark an orchestrator process that stopped before lock cleanup. A publish-script
+error returned by a live process does not by itself retain that lock. Confirm that the owning release process has
+stopped before clearing a retained lock. If the registry may hold a
+version whose native record is missing, reconcile the exact package, version and artifact identity as
+[recovery](./recovery.md) describes. A missing release tag alone is not proof that publication failed.
 
-The log line says so, names the run and points here:
-
-```
-ERR release lock retained code=E228 category=publication-unknown run=6f1a9f0d2b90c8f96f1a9f0d2b90c8f9 tag=dispat-release-lock
-```
-
-The uncertain publication's authorization ref is retained even when its node acknowledged after starting publish.
-Other coordination refs may already have been cleaned up. The evidence is in the remaining run refs, which live on the
-repository's own remote unless a worker link named another endpoint, and the order of the steps matters:
+A distributed lock names its run in the `run` line. Inspect that run and its coordination refs:
 
 ```sh
-git fetch origin tag dispat-release-lock && git show dispat-release-lock   # the `run` line names the run
-git ls-remote --heads origin 'dispat-worker-*'                             # the coordination refs
+git fetch origin tag dispat-release-lock && git show dispat-release-lock
+git ls-remote --heads origin 'dispat-worker-*'
 ```
 
-1. Find the branches of the run: the messages on each one (`dispat/assignment.json` and the ones after it) carry the
-   run id in their `run` field. Among them, find the branch of the publication: it carries an authorization (`go`)
-   with no result beside it.
-2. Confirm on that node that the publisher has stopped. A machine that is gone is confirmation; a machine still
-   running the publish command is not.
-3. Check the registry for the version the package was publishing. That, and not the tags, is what says whether the
-   publication happened.
-4. Delete the run's coordination refs, after verifying that their current tips still belong to that run's
-   authenticated chain. Investigate a changed or unauthenticated tip instead of deleting it as residue.
-5. Only then delete the lock tag, exactly as for an abandoned lock:
+The branches carry assignments and results for build and validation work, not publication authority or release
+records. Confirm no worker task from the run is still using them. Before deleting any owned coordination ref, verify
+its current tip still belongs to the run's authenticated chain; investigate a changed or unauthenticated tip. Once
+the orchestrator is stopped, any uncertain external publication is reconciled, and the run's refs are safe to clear,
+remove the lock tag and retry through the release workflow:
 
 ```sh
 git push origin --delete dispat-release-lock
 ```
 
-Then run the release again. A run may end with a lock retained and no release record at all, so the next run plans
-whatever is still owed and publishes it, which is the supported recovery. dispat never clears this lock for you and
-never retries the publication inside the run that lost it.
+Locks do not expire automatically, and deleting one does not settle a publication or a missing native record.

@@ -125,41 +125,11 @@ func TestWithdrawalRereadOnlyOwnsItsTerminalMessage(t *testing.T) {
 				return
 			}
 			assert.False(t, settled.isAcknowledged, "an unbound terminal message does not settle this attempt")
-			assert.False(t, isPublicationOutcomeKnown(settled),
-				"a publisher with this answer would retain its unknown-outcome lock")
 			assert.Equal(t, claimed, fixture.coordinator.owned["build-a"][0].ExpectedOld,
 				"a foreign terminal tip never becomes this run's cleanup lease")
 			require.Error(t, fixture.coordinator.Close(t.Context()),
 				"the foreign tip must remain available for investigation")
 			assert.Equal(t, []string{branch}, fixture.orchestrator.remoteBranches(t))
-		})
-	}
-}
-
-// TestWhatAnAcknowledgementSaysAboutAPublication: the decision table of
-// §28.6, as the one sentence it is. An authorized publisher leaves a knowable
-// outcome under exactly one condition, and every other row is a package that
-// fails at publish with nothing inferred about the registry.
-func TestWhatAnAcknowledgementSaysAboutAPublication(t *testing.T) {
-	for name, tc := range map[string]struct {
-		settled cancellation
-		isKnown bool
-	}{
-		"acknowledged before its own command": {
-			settled: cancellation{isAcknowledged: true, phase: PhaseAuthorizationWait},
-			isKnown: true},
-		"acknowledged before the command of a frame it had started": {
-			settled: cancellation{isAcknowledged: true, phase: "before"},
-			isKnown: true},
-		"acknowledged after its command started": {
-			settled: cancellation{isAcknowledged: true, phase: "commands", isCommandStarted: true}},
-		"never acknowledged": {
-			settled: cancellation{}},
-		"never acknowledged, whatever it had reached before": {
-			settled: cancellation{phase: "commands", isCommandStarted: true}},
-	} {
-		t.Run(name, func(t *testing.T) {
-			assert.Equal(t, tc.isKnown, isPublicationOutcomeKnown(tc.settled))
 		})
 	}
 }

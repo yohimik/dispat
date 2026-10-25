@@ -36,8 +36,8 @@ const (
 // StagePlacement is where a stage's frame may run: on the orchestrator alone,
 // under the snapshot guard, because it writes the working tree delegated
 // frames are snapshotted from or observes a release the orchestrator
-// recorded; or where the package's runOnly value for the build or for the
-// publish places it.
+// recorded; or where the package's build placement allows computation.
+// Publication is always an orchestrator frame.
 type StagePlacement uint8
 
 const (

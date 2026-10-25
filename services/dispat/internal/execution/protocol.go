@@ -42,11 +42,9 @@ const (
 	// KindStage is one package's frame of any other delegable stage, such as
 	// the test stage. The assignment names the stage, which is what its
 	// scripts read as DISPAT_STAGE and what its hooks are named after; the
-	// build and the publish keep kinds of their own, which every worker has
-	// always served.
+	// build keeps a kind of its own. Publish runs on the orchestrator.
 	KindStage = "stage"
-	// KindPublish is one package's publish stage, which is the only kind that
-	// waits for an explicit authorization before its command runs.
+	// KindPublish is retained to recognize and refuse legacy assignments.
 	KindPublish = "publish"
 	// KindPrepare is a build of a provider that this run does not release,
 	// performed so that its outputs can reach a consumer.
@@ -84,11 +82,9 @@ const (
 	// MessageClaim is the worker taking the assignment, which it does only
 	// when it has a free slot for it.
 	MessageClaim MessageKind = "claim"
-	// MessageReady is a publisher reporting that everything before the
-	// irreversible command is done and it is waiting to be authorized.
+	// MessageReady is retained for reading and refusing legacy publish chains.
 	MessageReady MessageKind = "ready"
-	// MessageGo is the orchestrator's single-use publication authorization,
-	// written after the ownership and the inputs have been revalidated.
+	// MessageGo is retained for reading and refusing legacy publish chains.
 	MessageGo MessageKind = "go"
 	// MessageResult is the terminal report of one attempt.
 	MessageResult MessageKind = "result"
@@ -399,13 +395,10 @@ type AssignmentInput struct {
 	Path    string `json:"path,omitempty"`
 }
 
-// AssignmentPermits is what one assignment authorizes beyond running
-// commands. Both default to false, so an assignment that says nothing
-// authorizes nothing.
+// AssignmentPermits are legacy fields. Workers refuse either permission when
+// it is set; a normal assignment authorizes only its declared commands.
 type AssignmentPermits struct {
-	// Publish is the right to run the publish stage's own command, and is
-	// never enough on its own: the single-use MessageGo is what authorizes
-	// the irreversible effect at the moment it happens.
+	// Publish was the worker publication permission.
 	Publish bool `json:"publish"`
 	// NativeRefs is the right to write a release ref, and is never granted to
 	// a worker: transport credentials do not authorize native records
@@ -438,16 +431,7 @@ type Claim struct {
 	Assignment string `json:"assignment"`
 }
 
-// Ready is a publisher reporting that everything before the irreversible
-// command is done. It names both the assignment it belongs to and the claim
-// commit it follows, so that the orchestrator authorizing it knows exactly
-// which state of the branch it is authorizing.
-//
-// The hook's exports travel with it rather than waiting for the result,
-// because they are what a beforePublish hook is for: the orchestrator merges
-// them onto the release at the moment the local path would have, so the values
-// a hook exported are on the release whether or not the publication that
-// follows succeeds.
+// Ready is the legacy worker publication message kept for chain parsing.
 type Ready struct {
 	Header
 	Assignment string          `json:"assignment"`
@@ -455,16 +439,7 @@ type Ready struct {
 	Exports    []ExportedValue `json:"hookExports,omitempty"`
 }
 
-// Go is the orchestrator's single-use publication authorization. It names the
-// exact ready commit it answers, which is what makes it single use: an
-// authorization for one state of one branch is not an authorization for the
-// next one, so it cannot be replayed onto a later attempt or a later ready.
-//
-// NotAfter is the instant the authorization stops meaning anything. It is
-// stated rather than implied because the publisher is the party that acts on
-// it: an authorization that reached a node minutes late is an authorization
-// taken under checks that are no longer current, and a node that started
-// publishing on it would be publishing under ownership nobody re-verified.
+// Go is the legacy publication authorization kept for chain parsing.
 type Go struct {
 	Header
 	Assignment string `json:"assignment"`

@@ -5184,10 +5184,11 @@ one against its plan:
 4. a receipt whose planned head the current head does not reach cannot affect the plan and is left as it is.
 
 The receipt fetch must discard local receipts the store no longer holds; if the authoritative store cannot be read,
-a mutating recovery run MUST fail closed. Receipt settlement itself performs no upload. Its replan may still change
-which later forward publications are eligible under the ordinary rules. A receipt does not close the window between
-a publication and the receipt itself: a run stopped there leaves the publication with neither, and the next run meets
-it through the identity check above.
+a mutating recovery run MUST fail closed. Skipping an optional remote comparison of release records does not waive
+this receipt read or turn an unreadable store into an empty inventory. Receipt settlement itself performs no upload.
+Its replan may still change which later forward publications are eligible under the ordinary rules. A receipt does
+not close the window between a publication and the receipt itself: a run stopped there leaves the publication with
+neither, and the next run meets it through the identity check above.
 
 ### 19.5 Manifest writes
 
@@ -8082,7 +8083,9 @@ from that node's own environment; resolved secret values MUST NOT be written to 
 manifests, receipts or logs.
 Workers MUST authenticate the assigning orchestrator and the assignment's integrity; a matching digest alone
 is not proof of authority. Nested hooks and commands retain the assigned policy, package-root mapping and
-worker authority; they MUST NOT rediscover policy or source history from a transport checkout.
+worker authority; they MUST NOT rediscover policy or source history from a transport checkout, compute a second
+release plan, or revise the orchestrator's fixed plan. They verify the assignment's source object IDs and materialize
+only its stated inputs before executing its commands.
 Duplicate delivery MUST be recognized. Only one attempt may be authorized to
 perform a given external side effect; an uncertain previous attempt is reconciled
 before another is authorized. A task receipt is execution evidence, never a
@@ -8140,7 +8143,7 @@ planned source head under §19.1, while an enabled native release commit follows
 replaced by tagging a transport commit or requiring a source commit solely for distributed execution.
 Generated release-file digests remain execution provenance when ordinary tag-only policy does not commit them.
 
-Before authorizing publication, the orchestrator MUST compare the result's full effective input identity
+Before starting publication, the orchestrator MUST compare the result's full effective input identity
 against the current admitted relevant input closure. A native head advance preserves a completed result only
 when its effective input state still matches; admitting a head is not permission to ignore changed source
 bytes. Integrating one task MUST NOT silently alter another task's inputs. Overlapping writes require explicit
@@ -8229,94 +8232,54 @@ bytes replaces (above); and under `none` nothing.
 
 ### 28.6 Publication, recording and recovery
 
-Build, test and publish commands MAY execute on workers. Repository ownership
-does not change: publication uses the owning package's checkout and policy.
-The orchestrator alone admits results and authorizes publication after all
-ordinary test, dependency, settlement and relevant-input checks. For this profile it serializes publication and recording within one owner, including a single-history
-monorepo, extending §27.2's owner lane to distributed execution; isolated builds
-within that owner may still run concurrently. Independent owners retain allowed
-publication concurrency. A worker MUST NOT independently move release branches,
-create release tags, settle peer links or finalize the fleet. The orchestrator
-performs those native transactions under the existing ownership/locking rules.
+One orchestrator owns each compiled release run and its lock set. Other entry processes MAY attempt a release of an
+overlapping repository set, but the locks admit at most one owner; they do not create additional orchestrators for
+that run. Build, test and user-defined stages before the release records MAY execute on workers under §28.2. The
+engine-managed `publish` stage and its hooks MUST execute on the orchestrator. A configured worker placement for
+`publish` MUST be refused; a scalar `runOnly: worker` also states that forbidden placement and MUST be refused.
+`runOnly: [worker, orchestrator]` delegates eligible build-side frames while retaining publication on the
+orchestrator. A worker MUST NOT independently move release branches, create release tags, settle peer links or
+finalize the fleet. Arbitrary worker script commands remain executable policy and do not gain native release authority.
 
-Hooks that bracket a delegated stage execute with that stage on the executing node, under that assignment's
-worker authority. Run-level hooks, native recording, hooks that observe a completed publication, failure
-hooks and any restoration of a package's working tree after failure execute under the orchestrator.
+The orchestrator alone admits worker results, verifies their complete relevant input identity, and starts
+publication after all test, dependency, settlement, output and lock-ownership checks. It runs `beforePublish` in its
+own checkout and revalidates immediately after that hook and before the irreversible publish command (§27.2). It
+serializes publication and recording within one owner, including a single-history monorepo; isolated builds within
+that owner MAY overlap. Independent owners retain allowed dependency-safe publication concurrency. Run-level hooks,
+native recording, hooks that observe a completed publication, failure hooks, and restoration of a package's working
+tree after failure execute under the orchestrator. Hooks that bracket a delegated build-side stage execute with that
+stage under worker authority.
 
-Authorization to publish is an explicit, single-use step bound to one task attempt. The orchestrator issues
-it only after the package's `beforePublish` hook has completed on the executing node and after the
-relevant-input and lock-ownership checks of this section, which is how §27.2's revalidation immediately after
-`beforePublish` and before the publish command is preserved when that hook runs on a worker. The publisher
-MUST NOT start its publication command before it has observed that authorization for its own attempt, and an
-authorization already issued MUST NOT be reused by another attempt or for another effect.
+The orchestrator MUST retain and verify lock ownership while it dispatches work and publishes. Assignments and
+results are bound to its ownership generation; a stale result cannot authorize publication or native recording.
+After lock loss the orchestrator issues no new assignment or publication, but it MUST still attempt the create-only
+record of an effect that completed before the loss (§19.1). A record of an existing effect is not a new publication.
+A worker's missing result concerns computation or validation and MUST NOT be mistaken for an unknown
+engine-managed publication. Claimed work is not retried on another worker within the same run without proof the
+prior attempt stopped; an unclaimed assignment may be revoked under its exact coordination ref and offered again.
+Neither a missing worker reply nor a task receipt discharges a release obligation.
 
-An implementation MAY bound an authorization in time. The authorization then states the instant after which the
-publisher MUST NOT start its command, the assignment states the deadline at which the executing node itself ends the
-command and everything it started, and the executing node enforces both without waiting to be told. Under a documented
-bound on clock disagreement between nodes, the later of those two instants plus that bound is then a proof of
-quiescence that needs no reply from the node, which no other rule of this section provides for a node that has become
-unreachable. The bound limits when an effect may begin and how long it may run. It is not an expiry of the release
-lock, which still never lapses by itself (VCS-PROTOCOL.md §4), and it authorizes no automatic takeover.
+The orchestrator's own publish command can still have an uncertain external result. A failed command reply or a
+missing tag does not prove that the destination lacks the artifact. Before repeating a potentially completed
+external effect, recovery MUST establish destination identity under §19.4 or use a publisher whose retry is
+demonstrably safe for that package, version and artifact identity. An opaque command without either capability
+cannot promise automatic recovery from this window. Preserve prior successes, block affected dependents and
+continue unrelated safe work under the ordinary failure rules. Worker completion order does not change
+consumer-owned release boundaries. Fresh invocations reconstruct pending releases from authoritative repository
+records; task receipts, coordination branches, bundles and caches are not a second recovery ledger. Verified task
+outputs MAY be reused only when their full semantic input identity and provenance match, with a fresh current-run
+admission receipt.
 
-The orchestrator MUST retain and verify lock ownership for the lifetime of all
-authorized effects. Assignments and results are bound to its ownership
-generation; stale results cannot authorize publication or native recording.
-After lock loss, no new effect may start: the orchestrator issues no further assignment and no further authorization.
-Recording an effect that was authorized before the loss is not a new effect. It MUST still be attempted, as the
-create-only record of §19.1, because a publication left unrecorded is a wedge the next owner can clear only by
-§19.4, and a create-only record cannot overwrite what a successor wrote. A timed-out worker is not proof its
-publisher stopped: cancellation must be acknowledged, a fencing mechanism must
-be enforced where the effect occurs, or the outcome must be reconciled before
-ownership is safely handed over. A cancellation and its acknowledgement MUST state where the attempt was when it
-stopped, and in particular whether the command that performs the effect had started: without that, an attempt
-withdrawn before its command is indistinguishable from one whose outcome is unknown, and the run can never report
-the former as not published. A generation field alone does not fence an
-arbitrary registry command. No automatic takeover may simply expire ownership
-and republish while the previous process can still act.
-
-If a worker fails before publication, retry eligible computation under a new
-attempt without discharging the package. If publication may have succeeded,
-use §19.4 identity reconciliation or a safely repeatable publisher before a
-new attempt; neither a missing reply nor a missing tag proves failure. Only the
-ordinary durable source release record discharges the release obligation.
-Preserve prior successes, block affected dependents, and continue unrelated
-safe work under the ordinary failure rules. Worker completion order does not
-alter the consumer-owned release boundaries.
-
-Fresh invocations reconstruct pending releases from authoritative repository records. Rollback requests and
-withdrawal receipts retain the separate rules of §26; task receipts MUST NOT discharge either rollback or
-ordinary release intent. Scheduling a rollback handler remotely does not relax its activation, identity,
-consumer-first order or reconciliation obligations. Verified task outputs MAY be reused when their full input identity
-still matches, but loss of a worker, branch, bundle or cache cannot erase
-pending work or successful release records. Synchronization state is not a
-second recovery ledger. Cleanup removes only owned temporary refs and bundles,
-after all consumers and uncertain operations are settled. Failed attempts and
-receipts retain diagnostic provenance. Cleanup failure is reported without
-rewriting successful package outcomes; borrowed nodes' unrelated data is never
-deleted. Repository locks are released only after authorized operations have quiesced or been safely fenced, then
-in reverse acquisition order. If that cannot be proved, the run MUST fail and retain or restore exclusion
-rather than report successful cleanup and permit overlapping effects. Such a run ends holding its exclusion and
-holding no record of the package whose outcome it could not establish: the retained lock is a ref and never a
-release record, and the next run treats that package as pending until §19.4 says otherwise. An attempt that was
-never authorized to
-perform an external effect, holding neither publication authorization nor permission to write native refs, is
-safely fenced by revoking its coordination ref: its expected-previous-object-ID updates can no longer succeed.
-Revocation fences an attempt nothing has been admitted from; a branch a result was admitted from is a checkpoint
-its consumers may still need (§28.4) and is removed by cleanup, not by revocation.
-Releasing repository locks need not await such an attempt's acknowledgement. An authorized publisher is not
-fenced this way and still requires acknowledged cancellation, an effective fence where the effect occurs, or
-reconciliation. A changed ownership generation rejects stale receipts but is not, by itself, an external
-publication fence.
-
-A run that ended without releasing its locks leaves them for an operator (VCS-PROTOCOL.md §4), and the operator needs
-the same proof of quiescence the run would have needed. Synchronization state is not a recovery ledger for releases,
-but it is the evidence for this one question: an attempt whose coordination branch carries a publication authorization
-and no terminal result may still be publishing. An implementation MUST therefore make an abandoned run findable from
-its lock, by recording the run identity in the lock object or an equivalent documented place, and MUST document the
-order of recovery: revoke the run's coordination refs first, so that no attempt not yet authorized can begin; then
-establish, for every attempt that was authorized and has no result, acknowledged cancellation, an effective fence,
-elapsed authorization bounds where the implementation states them, or the reconciled outcome of §19.4; only then remove
-the lock. The remedy a lock diagnostic prints MUST NOT tell the operator to delete the lock without naming those steps.
+Cleanup removes only owned temporary refs and bundles after their consumers have finished. Failed attempts and
+receipts retain diagnostic provenance. Cleanup failure is reported without rewriting successful package outcomes;
+borrowed nodes' unrelated data is never deleted. Repository locks are normally released in reverse acquisition
+order after the orchestrator's publication and recording path ends. A local publish-script error alone does not
+retain a release lock as evidence of an uncertain destination outcome. The lock serializes active orchestrators;
+it does not establish what happened at an external destination. A process stopped without lock cleanup leaves its
+lock for operator recovery under VCS-PROTOCOL.md §4. Revoking an unclaimed worker assignment fences that
+assignment's coordination ref, not an external publication. A changed ownership generation rejects stale worker
+results but is not an external-effect
+fence.
 
 ### 28.7 Required example and performance boundary
 
@@ -8377,12 +8340,12 @@ violated, and every remaining vector still applies in full.
 12. A worker's Git transport commit is fetched: no new intent, release baseline,
     tag, or admitted native head arises. Temporary commits stay outside release
     ancestry; only validated release-file changes enter native recording.
-13. Where publication commands execute on workers, a worker publishes and its
-    reply is lost: reconcile artifact identity before reauthorization; never
-    infer a failed publish from the timeout.
-14. A worker disconnects or the orchestrator loses its lock: no new effects and
-    no unsafe handover. Where publication commands execute on workers and a
-    publisher is in flight, no unfenced duplicate attempt arises.
+13. A configuration places `publish` on a worker, including scalar `runOnly: worker`:
+    refuse it before dispatch. With `runOnly: [worker, orchestrator]`, delegate
+    the eligible build-side frames and run `publish` on the orchestrator.
+14. A worker disconnects or the orchestrator loses its lock: no new assignments
+    or publications start, and no missing worker reply is treated as evidence
+    of an engine-managed publication.
 15. A source tag succeeds and later checkpoint/cleanup fails: preserve source
     success and report the specific failure; no source republication for cleanup.
 16. Delete temporary branches/caches after a completed run and replan unchanged
@@ -8418,15 +8381,16 @@ violated, and every remaining vector still applies in full.
 27. The orchestrator's checkout lacks a release tag that its remote holds on a commit reachable from the planned
     head: refuse with `E196` under the locks, before the plan is fixed and before any assignment. Planning that
     package from its older baseline, or replacing the remote tag afterwards, is non-conforming (§13.2, §19.1).
-28. The orchestrator loses its lock after a publication was authorized and before its record is written: issue no
-    further assignment or authorization, and still attempt the create-only record of that publication. A record
+28. The orchestrator loses its lock after a publication completed and before its record is written: issue no
+    further assignment or publication, and still attempt the create-only record of that publication. A record
     another owner already wrote is not overwritten.
-29. A run ends with its locks held and one attempt authorized without a terminal result: the lock names the run,
-    and the documented recovery revokes the run's coordination refs and settles that attempt before the lock is
-    removed. A remedy that says only to delete the lock is non-conforming.
-30. Where the implementation bounds authorizations in time, a publisher that observes its authorization after the
-    stated instant does not start its command, and a command still running at its assignment's deadline is ended
-    by the executing node without a request from the orchestrator. The release lock does not lapse in either case.
+29. An orchestrator publication has an uncertain destination outcome: a later attempt MUST establish the package,
+    version and artifact identity under §19.4, or prove its publisher can safely repeat the same effect, before a
+    retry. A task receipt or missing tag alone does not settle it; a local publish-script error alone does not retain
+    the release lock. Without destination verification or a safe repeatable publisher, automatic recovery is not
+    guaranteed.
+30. A claimed worker task exceeds its deadline: the executing node ends its command, and the orchestrator does not
+    reassign that attempt within the same run without proof it stopped. The release lock does not lapse by timeout.
 31. Where the implementation delegates command sweeps (§28.10), a sweep and a release of the same repositories run
     at once: the sweep takes no release lock, its messages carry a generation of their own, and neither run reads
     the other's coordination branches as its own. A sweep that acquired a release lock, or a release refused because
@@ -8453,7 +8417,6 @@ parser leniency.
 | Execution configuration | `execution-configuration` | Invalid role, concurrency, endpoint, protocol, task graph or transfer capability fails before dispatch. |
 | Execution authority | `execution-authority` | Worker initiation, unauthenticated assignment, stale ownership or unauthorized writes are refused before the affected operation. A duplicate receipt cannot create a second side effect. |
 | Input or output integrity | `io-integrity` | Missing, changed, incomplete, incompatible or escaping input/output data fails the affected prerequisite and blocks required consumers. Preserve unrelated successful work. |
-| Publication outcome unknown | `publication-unknown` | A lost acknowledgement or unfenced in-flight publisher withholds reauthorization and unsafe lock handover until quiescence, effective fencing or identity reconciliation is proven. Report the run as incomplete and return nonzero. |
 | Native recording or lock failure | `native-recording-or-lock` | Apply §§19 and 27, preserve successful publication and fail the run; do not retag transport work or release unsafe exclusion. |
 | Transport cleanup | `transport-cleanup` | Report owned temporary refs or bundles that could not be removed. Their existence cannot erase a release record. Harmless retained transport data MAY be a warning; lost exclusion or unresolved effects MUST be an error. |
 

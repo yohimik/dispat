@@ -4,7 +4,7 @@
 package integration
 
 // Goal 57: a consumer's pick-up of a provider it overtook works the same way
-// when every build and publication runs on a worker node as when nothing is
+// when builds run on a worker node as when nothing is
 // delegated.
 //
 // The plan, its owed windows included, and the refusal of a provider released
@@ -14,7 +14,7 @@ package integration
 // a record the next plan reads: a release tag says `release <tag>` wherever
 // its package was built. So the whole sequence, from the failed provider to
 // the settled catch-up, is released twice, once locally and once with both
-// stages of both packages pinned to a worker, and the two histories must be
+// builds of both packages pinned to a worker, and the two histories must be
 // the same history.
 
 import (
@@ -34,9 +34,7 @@ import (
 )
 
 // executionParityGateEnv names the file whose presence lets the provider's
-// publish succeed. It lives outside every checkout and reaches the release and
-// the node alike, because the publish runs on whichever of them the twin
-// places it on.
+// publish succeed. It lives outside every checkout and reaches both runs.
 const executionParityGateEnv = "DISPAT_IT_PARITY_GATE"
 
 // executionParityTwin is one of the two releases of the fixture: the
@@ -50,7 +48,7 @@ type executionParityTwin struct {
 
 // newExecutionParityTwin seeds `core` and its consumer `cli`. Every script
 // records the machine it ran on; core's publish fails while the gate is shut.
-// The delegating twin pins build and publish of both packages to its one node,
+// The delegating twin pins the builds of both packages to its one node,
 // which is the only difference between the twins.
 func newExecutionParityTwin(t *testing.T, isDistributed bool) *executionParityTwin {
 	t.Helper()
@@ -75,7 +73,7 @@ func newExecutionParityTwin(t *testing.T, isDistributed bool) *executionParityTw
 			Workers:   []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
 			Timeouts:  &models.ExecutionTimeoutsConfig{Preflight: 30},
 		}
-		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyWorker)
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
 	}
 	repo.WriteConfigModel(cfg)
 	repo.SeedPackage("packages/libs", "core")
@@ -214,7 +212,7 @@ func TestExecutionPickUpMatchesALocalRelease(t *testing.T) {
 	}, localSnapshot)
 	assert.Equal(t, map[string]string{"core": executionOrchestratorLabel, "cli": executionOrchestratorLabel},
 		local.publishedOn(), "the local twin publishes here")
-	assert.Equal(t, map[string]string{"core": executionNode, "cli": executionNode},
-		distributed.publishedOn(), "the delegating twin publishes on its node, the catch-up included")
+	assert.Equal(t, map[string]string{"core": executionOrchestratorLabel, "cli": executionOrchestratorLabel},
+		distributed.publishedOn(), "the delegating twin also publishes locally, including catch-up")
 	assert.Empty(t, distributed.rig.branches(), "the run closed every coordination branch it created")
 }
