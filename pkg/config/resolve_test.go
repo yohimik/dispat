@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -357,4 +358,75 @@ func TestAscentEndsAtTheFilesystemRoot(t *testing.T) {
 	if !strings.HasSuffix(dirs[0], filepath.Join("a", "b")) {
 		t.Errorf("the walk started at %q", dirs[0])
 	}
+}
+
+// TestResolveTreeHandsBackTheTreeItParsed: whichever file the ascent settles
+// on, the root that ended it, a remembered candidate or the nearest fallback,
+// comes back with the tree ReadTree would build for it, and no file is read
+// more than once. A file that cannot be read comes back with no tree, so that
+// loading it is where it fails.
+func TestResolveTreeHandsBackTheTreeItParsed(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		files map[string]string
+		start string
+		want  string
+	}{
+		{"the root", map[string]string{"app.json": `{"areas": {"libs": {"path": "pkgs"}}}`}, "pkgs/core", "app.json"},
+		{"a remembered candidate", map[string]string{
+			"app.json":      `{"areas": {"libs": {"path": "elsewhere"}}}`,
+			"pkgs/app.json": `{"hooks": [{"$ref": "./hook.json"}]}`, "pkgs/hook.json": `{"url": "u"}`,
+		}, "pkgs", "pkgs/app.json"},
+		{"the nearest fallback", map[string]string{
+			"app.json": `{"name": "root"}`, "pkgs/core/app.json": `{"name": "core"}`,
+		}, "pkgs/core", "pkgs/core/app.json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, body := range tc.files {
+				writeFile(t, filepath.Join(dir, filepath.Dir(name)), filepath.Base(name), body)
+			}
+			start := filepath.Join(dir, filepath.FromSlash(tc.start))
+			if err := os.MkdirAll(start, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			reads := map[string]int{}
+			l := NewLoader(Options{ReadFile: func(path string) ([]byte, error) {
+				reads[path]++
+				return os.ReadFile(path)
+			}})
+			found, err := l.ResolveTree(t.Context(), start, appResolver())
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			want := filepath.Join(dir, filepath.FromSlash(tc.want))
+			if found.Path != want || found.Root != filepath.Dir(want) {
+				t.Fatalf("resolve = %q, %q; want %q", found.Path, found.Root, want)
+			}
+			for path, n := range reads {
+				if n != 1 {
+					t.Errorf("%s read %d times", path, n)
+				}
+			}
+			parsed, err := NewLoader(Options{}).ReadTree(t.Context(), want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if found.Tree == nil || !reflect.DeepEqual(found.Tree, parsed) {
+				t.Errorf("tree = %#v; want %#v", found.Tree, parsed)
+			}
+		})
+	}
+
+	t.Run("a file that cannot be read", func(t *testing.T) {
+		dir := t.TempDir()
+		broken := writeFile(t, dir, "app.json", "{not json")
+		found, err := NewLoader(Options{}).ResolveTree(t.Context(), dir, appResolver())
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if found.Path != broken || found.Tree != nil {
+			t.Errorf("resolve = %q with tree %v; want %q and no tree", found.Path, found.Tree, broken)
+		}
+	})
 }

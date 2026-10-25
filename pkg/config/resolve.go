@@ -96,17 +96,35 @@ type Resolver struct {
 // mistake, and it is a better message than this one could be. When nothing is
 // found at all, the error is a *NoConfigError naming every candidate tried.
 func (l *Loader) Resolve(ctx context.Context, dir string, r Resolver) (path, root string, err error) {
+	found, err := l.ResolveTree(ctx, dir, r)
+	return found.Path, found.Root, err
+}
+
+// Resolution is what the ascent found: the file to load, the directory it
+// establishes as the root, and the tree the ascent parsed that file into.
+type Resolution struct {
+	Path string
+	Root string
+	// Tree is nil when the file could not be read, so that loading it is
+	// where it fails.
+	Tree *Tree
+}
+
+// ResolveTree is Resolve handing back the tree it parsed for the file it
+// chose, so that a caller loading that file next does not read and parse it,
+// and every file it refers to, a second time.
+func (l *Loader) ResolveTree(ctx context.Context, dir string, r Resolver) (Resolution, error) {
 	l = l.loader()
 	log := l.logger(ctx)
-	var candidate, candidateRoot string // could be a root, could be a layer
-	var fallback, fallbackRoot string   // declares nothing either way
-	try := func(at string) (string, string, error) {
+	var candidate Resolution // could be a root, could be a layer
+	var fallback Resolution  // declares nothing either way
+	try := func(at string) (Resolution, error) {
 		names, err := r.candidates(at)
 		if err != nil {
-			return "", "", err
+			return Resolution{}, err
 		}
 		if len(names) == 0 {
-			return "", "", nil
+			return Resolution{}, nil
 		}
 		p := filepath.Join(at, names[0])
 		// One parse answers both questions this file is asked, so a candidate
@@ -116,54 +134,55 @@ func (l *Loader) Resolve(ctx context.Context, dir string, r Resolver) (path, roo
 			// A file that cannot be read is broken rather than skippable:
 			// loading is where a broken config fails loudly, and stepping over
 			// it to use a parent's file would hide the breakage.
-			return p, at, nil
+			return Resolution{Path: p, Root: at}, nil
 		}
 		class := r.classify(t.Root)
 		if log.Enabled(LevelTrace) {
 			log.Log(LevelTrace, EventResolveStep, Str("dir", at), Str("candidate", p),
 				Str("class", class.String()))
 		}
+		here := Resolution{Path: p, Root: at, Tree: t}
 		switch class {
 		case ClassRoot:
 			// A candidate below is a sub-folder's file when this root claims
 			// its folder, and a project of its own when it does not.
-			if candidate != "" && !r.owns(t.Root, at, candidateRoot) {
-				return candidate, candidateRoot, nil
+			if candidate.Path != "" && !r.owns(t.Root, at, candidate.Root) {
+				return candidate, nil
 			}
-			return p, at, nil
+			return here, nil
 		case ClassCandidate:
-			if candidate == "" {
-				candidate, candidateRoot = p, at
+			if candidate.Path == "" {
+				candidate = here
 			}
 		default:
-			if fallback == "" {
-				fallback, fallbackRoot = p, at
+			if fallback.Path == "" {
+				fallback = here
 			}
 		}
-		return "", "", nil
+		return Resolution{}, nil
 	}
-	found := func(p, rt string) (string, string, error) {
+	found := func(res Resolution) (Resolution, error) {
 		if log.Enabled(LevelDebug) {
-			log.Log(LevelDebug, EventResolveDone, Str("path", p), Str("root", rt))
+			log.Log(LevelDebug, EventResolveDone, Str("path", res.Path), Str("root", res.Root))
 		}
-		return p, rt, nil
+		return res, nil
 	}
 	for _, at := range ascent(dir) {
-		p, rt, err := try(at)
+		res, err := try(at)
 		if err != nil {
-			return "", "", err
+			return Resolution{}, err
 		}
-		if p != "" {
-			return found(p, rt)
+		if res.Path != "" {
+			return found(res)
 		}
 	}
-	if candidate != "" {
-		return found(candidate, candidateRoot)
+	if candidate.Path != "" {
+		return found(candidate)
 	}
-	if fallback != "" {
-		return found(fallback, fallbackRoot)
+	if fallback.Path != "" {
+		return found(fallback)
 	}
-	return "", "", &NoConfigError{Dir: dir, Names: r.Names}
+	return Resolution{}, &NoConfigError{Dir: dir, Names: r.Names}
 }
 
 // ascent is the directories to try, in order: the one asked for as it was

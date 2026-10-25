@@ -67,6 +67,10 @@ first of each of the others, and lets a root displace a remembered candidate onl
 folder that candidate was found in. A file that cannot be read stops the ascent too: a broken root config must fail
 where configuration is loaded, not be silently stepped over.
 
+The ascent parses every file it classifies. `Loader.ResolveTree` returns the chosen file's tree with its path and
+root, so a program that loads the file next reads it and its references once. The tree is nil for a file that could
+not be read; reading it again is what reports why.
+
 ## Composing with `$ref`
 
 An object holding `$ref` is replaced by the file it names, resolved against the directory of the file that wrote it:
