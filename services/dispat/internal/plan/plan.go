@@ -1316,9 +1316,10 @@ type computation struct {
 	// catching up to a version the group has already published.
 	ownContribs map[string][]groupContrib
 
-	cancels []*cancelRec
-	held    map[string]bool
-	pinned  map[string]pin
+	cancels     []*cancelRec
+	cancelIndex *cancelIndex
+	held        map[string]bool
+	pinned      map[string]pin
 
 	// corrections state (§13.4b, §7.3). dropped holds every claimed
 	// (package, record) pair and the correction that claimed it; corrects and
@@ -1704,6 +1705,7 @@ func (cp *computation) releaseWorkspaceScratch() {
 	cp.window = nil
 	cp.windowRefs = nil
 	cp.closures = nil
+	cp.cancelIndex = nil
 	// The attribution is on the releases now, and the keys that indexed it
 	// answer no question the plan can still be asked.
 	cp.windowAuthors = nil

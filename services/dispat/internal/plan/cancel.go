@@ -3,6 +3,8 @@
 
 package plan
 
+import "math/bits"
+
 // ---------------------------------------------------------------------------
 // §13.5 cancellation
 // ---------------------------------------------------------------------------
@@ -22,6 +24,104 @@ func (cp *computation) collectCancels() {
 			cp.cancels = append(cp.cancels, c)
 		}
 	}
+	cp.cancelIndex = cp.newCancelIndex()
+}
+
+// cancelIndex answers which cancel, first in cp.cancels order, reaches a
+// commit for a package with two lookups and a word of bits per 64 cancels,
+// where asking each cancel costs a scope lookup and a closure call apiece
+// (CCME §13.11, cancellation predicates). The cancel set and its scopes are
+// settled before collectCancels and never change after it (applyCorrections),
+// so the index is built once.
+type cancelIndex struct {
+	words int
+	// naming is, per package, the cancels whose scope holds it.
+	naming map[string][]uint64
+	// reached is, per rank, the cancels whose barrier the commit is an
+	// ancestor-or-self of, words to a commit.
+	reached []uint64
+}
+
+// newCancelIndex indexes the cancels when every barrier's closure is its
+// ancestor set in the marker index, and answers nil otherwise: a barrier asked
+// a commit at a time is asked as it always was.
+func (cp *computation) newCancelIndex() *cancelIndex {
+	if len(cp.cancels) == 0 {
+		return nil
+	}
+	sets := make([]*commitSet, len(cp.cancels))
+	for j, c := range cp.cancels {
+		if sets[j] = cp.barrierAncestors(c.key); sets[j] == nil {
+			return nil
+		}
+	}
+	index := &cancelIndex{words: (len(cp.cancels) + 63) / 64, naming: make(map[string][]uint64)}
+	for j, c := range cp.cancels {
+		for pkg, isNamed := range c.scope {
+			if !isNamed {
+				continue
+			}
+			if index.naming[pkg] == nil {
+				index.naming[pkg] = make([]uint64, index.words)
+			}
+			index.naming[pkg][j>>6] |= 1 << (uint(j) & 63)
+		}
+	}
+	index.reached = transposeSets(sets, len(cp.commits))
+	return index
+}
+
+// transposeSets is the sets' rows: for each of n ranks, the sets holding it,
+// a bit per set and ceil(len(sets)/64) words to a rank, transposed 64 by 64.
+func transposeSets(sets []*commitSet, n int) []uint64 {
+	words := (len(sets) + 63) / 64
+	rows := make([]uint64, n*words)
+	var block [64]uint64
+	for w := 0; w < words; w++ {
+		group := sets[w<<6 : min(len(sets), w<<6+64)]
+		for start := 0; start < n; start += 64 {
+			isSet := false
+			for i := range block {
+				block[i] = 0
+				if i < len(group) {
+					block[i] = group[i].word(start >> 6)
+				}
+				isSet = isSet || block[i] != 0
+			}
+			if !isSet {
+				continue
+			}
+			transposeBlock(&block)
+			for i, row := range block[:min(64, n-start)] {
+				rows[(start+i)*words+w] = row
+			}
+		}
+	}
+	return rows
+}
+
+// firstCancel is the first cancel, in cp.cancels order, whose scope holds
+// pkg and whose barrier the commit is an ancestor-or-self of, or nil.
+func (cp *computation) firstCancel(commitKey, pkg string) *cancelRec {
+	index := cp.cancelIndex
+	if index == nil {
+		for _, c := range cp.cancels {
+			if c.scope[pkg] && c.closure(commitKey) {
+				return c
+			}
+		}
+		return nil
+	}
+	rec, naming := cp.byKey[commitKey], index.naming[pkg]
+	if rec == nil || naming == nil {
+		return nil
+	}
+	for w, reached := range index.reached[rec.rank*index.words : (rec.rank+1)*index.words] {
+		if hit := reached & naming[w]; hit != 0 {
+			return cp.cancels[w<<6+bits.TrailingZeros64(hit)]
+		}
+	}
+	return nil
 }
 
 // ancestorClosure is the set of examined commits that are ancestors-or-self of
@@ -47,15 +147,10 @@ func (cp *computation) ancestorClosure(key string) func(commitKey string) bool {
 // newAncestorClosure computes one barrier's closure, from the marker pass
 // where it answers and a commit at a time where it does not.
 func (cp *computation) newAncestorClosure(key string) func(commitKey string) bool {
-	// One history only: a control repository's barrier also reaches the source
-	// commits its snapshot observed, which no ancestor set of its own says.
-	if rec := cp.byKey[key]; rec != nil && len(cp.histories) == 0 && cp.anc != nil &&
-		cp.parentsAreAncestry(rec.repository) {
-		if set := cp.anc.ancestors(int32(rec.rank)); set != nil {
-			return func(commitKey string) bool {
-				c := cp.byKey[commitKey]
-				return c != nil && set.has(c.rank)
-			}
+	if set := cp.barrierAncestors(key); set != nil {
+		return func(commitKey string) bool {
+			c := cp.byKey[commitKey]
+			return c != nil && set.has(c.rank)
 		}
 	}
 	keys := make(map[string]bool)
@@ -65,6 +160,18 @@ func (cp *computation) newAncestorClosure(key string) func(commitKey string) boo
 		}
 	}
 	return func(commitKey string) bool { return keys[commitKey] }
+}
+
+// barrierAncestors is a barrier's ancestor set in the marker index, or nil
+// where the index does not answer for it. One history only: a control
+// repository's barrier also reaches the source commits its snapshot observed,
+// which no ancestor set of its own says.
+func (cp *computation) barrierAncestors(key string) *commitSet {
+	rec := cp.byKey[key]
+	if rec == nil || len(cp.histories) > 0 || cp.anc == nil || !cp.parentsAreAncestry(rec.repository) {
+		return nil
+	}
+	return cp.anc.ancestors(int32(rec.rank))
 }
 
 // cancelledFor is cancelledFor(C, X) from §13.4a: C is an ancestor-or-self of
@@ -82,19 +189,12 @@ func (cp *computation) cancelledFor(commitKey, pkg string) bool {
 		// target: no cancel, so no containment question worth asking.
 		return false
 	}
-	if cp.containedInBaseline(pkg, commitKey) {
+	c := cp.firstCancel(commitKey, pkg)
+	if c == nil || cp.containedInBaseline(pkg, commitKey) {
 		return false
 	}
-	for _, c := range cp.cancels {
-		if !c.scope[pkg] {
-			continue
-		}
-		if c.closure(commitKey) {
-			c.discarded = true
-			return true
-		}
-	}
-	return false
+	c.discarded = true
+	return true
 }
 
 // cancelledForOwed is cancelledFor for a contribution the package released
@@ -104,13 +204,12 @@ func (cp *computation) cancelledFor(commitKey, pkg string) bool {
 // in the consumer's ledger, and a later `cancel(<consumer>)` discards it
 // (§13.5a, §13.7d).
 func (cp *computation) cancelledForOwed(commitKey, pkg string) bool {
-	for _, cancellation := range cp.cancels {
-		if cancellation.scope[pkg] && cancellation.closure(commitKey) {
-			cancellation.discarded = true
-			return true
-		}
+	c := cp.firstCancel(commitKey, pkg)
+	if c == nil {
+		return false
 	}
-	return false
+	c.discarded = true
+	return true
 }
 
 // reportCancels emits W170 for a `cancel` that discarded nothing. §13.7d calls
