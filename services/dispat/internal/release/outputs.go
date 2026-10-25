@@ -97,12 +97,14 @@ func MergeOutputs(rel *plan.Release, outs []plan.Output) {
 }
 
 // outputScanLimit is the most exports a merge looks up by scanning. A scan
-// costs a comparison per output per export and the index a map insert per
-// output, so the index wins once a merge carries more exports than a map
-// insert costs comparisons, which is what `dispat run` does when a consumer
-// takes its provider's whole accumulated list. A stage's own few exports
-// keep the scan, which then costs no more than building the index would.
-const outputScanLimit = 12
+// costs a comparison per output per export, and the index a map lookup per
+// output, so the index wins once a merge carries more exports than a lookup
+// costs comparisons, which is what `dispat run` does when a consumer takes
+// its provider's whole accumulated list. BenchmarkMergeOutputsCrossover
+// measures it: from 8 exports the index is no slower onto 100 outputs and
+// faster onto 1000, below that the scan is faster, and at 8 or fewer neither
+// allocates, because an index that small stays on the stack.
+const outputScanLimit = 7
 
 // mergeOutputsByScan merges by looking each name up in the release's list.
 func mergeOutputsByScan(rel *plan.Release, outs []plan.Output) {
@@ -121,26 +123,66 @@ func mergeOutputsByScan(rel *plan.Release, outs []plan.Output) {
 	}
 }
 
-// mergeOutputsByIndex merges exactly as the scan does, through an index built
-// for this one call. The index is not kept on the release: a shallow copy of
-// a release shares its outputs, and some writers append to them directly.
-// It holds the first position of a name because the scan overrides the first
-// match, and wire exports can carry a name twice.
+// mergeOutputsByIndex merges exactly as the scan does, through an index of
+// the exports built for this one call, so what it holds grows with the merge
+// rather than with the list it lands on. The index is not kept on the
+// release: a shallow copy of a release shares its outputs, and some writers
+// append to them directly.
+//
+// The scan gives every name the value and source of its last export. A name
+// the release already carries lands on its first copy, because wire exports
+// can carry a name twice and the scan overrides the first match. A new name
+// is appended once, where its first export stands, and one at a time, so the
+// list grows to the capacity the scan would leave it with. Onto no list at
+// all, which is how `dispat run` hands a consumer its provider's outputs, the
+// fold is the list.
 func mergeOutputsByIndex(rel *plan.Release, outs []plan.Output) {
-	positions := make(map[string]int, len(rel.Outputs)+len(outs))
-	for i, o := range rel.Outputs {
-		if _, isIndexed := positions[o.Name]; !isIndexed {
-			positions[o.Name] = i
+	if rel.Outputs == nil {
+		rel.Outputs = foldExports(outs)
+		return
+	}
+	lastExport := make(map[string]int, len(outs))
+	for i, o := range outs {
+		lastExport[o.Name] = i
+	}
+	for i := range rel.Outputs {
+		last, isExported := lastExport[rel.Outputs[i].Name]
+		if !isExported {
+			continue
+		}
+		rel.Outputs[i].Value, rel.Outputs[i].Source = outs[last].Value, outs[last].Source
+		delete(lastExport, rel.Outputs[i].Name)
+		if len(lastExport) == 0 {
+			return
 		}
 	}
 	for _, o := range outs {
-		if i, isIndexed := positions[o.Name]; isIndexed {
-			rel.Outputs[i].Value, rel.Outputs[i].Source = o.Value, o.Source
+		last, isNew := lastExport[o.Name]
+		if !isNew {
 			continue
 		}
-		positions[o.Name] = len(rel.Outputs)
+		o.Value, o.Source = outs[last].Value, outs[last].Source
 		rel.Outputs = append(rel.Outputs, o)
+		delete(lastExport, o.Name)
 	}
+}
+
+// foldExports is what the scan leaves on an empty list, grown one export at
+// a time as the scan grows it, so it is the scan's list to the capacity:
+// every name once, where it is first exported, with its last export's value
+// and source.
+func foldExports(outs []plan.Output) []plan.Output {
+	var merged []plan.Output
+	positions := make(map[string]int, len(outs))
+	for _, o := range outs {
+		if j, isFolded := positions[o.Name]; isFolded {
+			merged[j].Value, merged[j].Source = o.Value, o.Source
+			continue
+		}
+		positions[o.Name] = len(merged)
+		merged = append(merged, o)
+	}
+	return merged
 }
 
 // capture runs the sequence with an output file attached — the environment is

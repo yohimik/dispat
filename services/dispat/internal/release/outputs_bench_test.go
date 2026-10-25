@@ -34,7 +34,7 @@ func BenchmarkMergeOutputs(b *testing.B) {
 // a name the list already carries and half are new.
 func BenchmarkMergeOutputsCrossover(b *testing.B) {
 	for _, outputs := range []int{100, 1000} {
-		for _, exports := range []int{4, 8, 12, 16, 24} {
+		for _, exports := range []int{4, 6, 8, 12, 16, 24} {
 			for _, merge := range []struct {
 				name string
 				fold func(*plan.Release, []plan.Output)

@@ -3,6 +3,7 @@ package release
 import (
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -325,4 +326,48 @@ func TestMergeOutputsIndexMatchesTheScan(t *testing.T) {
 		"the first copy of a repeated name takes the new value")
 	assert.Equal(t, "3", indexed.Outputs[2].Value, "and the second keeps its own")
 	assert.Len(t, indexed.Outputs, 3+5, "a name exported twice in one list is appended once")
+}
+
+// TestMergeOutputsIndexAnswersAsTheScanOnDrawnLists: drawn from a small
+// alphabet, so that a release carries names twice and an export list repeats
+// names the release has and names it does not.
+func TestMergeOutputsIndexAnswersAsTheScanOnDrawnLists(t *testing.T) {
+	for seed := range uint64(200) {
+		random := rand.New(rand.NewPCG(seed, 7))
+		draw := func(n int, source string) []plan.Output {
+			var list []plan.Output
+			for i := range n {
+				list = append(list, plan.Output{Name: fmt.Sprintf("N%d", random.IntN(24)),
+					Value: fmt.Sprint(i), Source: source})
+			}
+			return list
+		}
+		current, exports := draw(random.IntN(30), "p:build"), draw(random.IntN(40), "c:build")
+
+		scanned := &plan.Release{Outputs: slices.Clone(current)}
+		mergeOutputsByScan(scanned, exports)
+		indexed := &plan.Release{Outputs: slices.Clone(current)}
+		mergeOutputsByIndex(indexed, exports)
+
+		require.Equal(t, scanned.Outputs, indexed.Outputs, "seed %d", seed)
+	}
+}
+
+// TestMergeOutputsIndexHoldsOnlyTheExports pins what a large merge holds: its
+// allocations follow the exports it folds and not the list they land on,
+// which is what a consumer carrying many providers' outputs merges onto.
+func TestMergeOutputsIndexHoldsOnlyTheExports(t *testing.T) {
+	allocsOnto := func(outputs int) float64 {
+		current, exports := mkCrossoverOutputs(outputs, 2*outputScanLimit)
+		for i := range exports {
+			exports[i].Name = current[(i*outputs)/len(exports)].Name
+		}
+		rel := &plan.Release{}
+		return testing.AllocsPerRun(20, func() {
+			rel.Outputs = current
+			mergeOutputsByIndex(rel, exports)
+		})
+	}
+
+	assert.Equal(t, allocsOnto(100), allocsOnto(10000))
 }
