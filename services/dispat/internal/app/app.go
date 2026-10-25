@@ -125,11 +125,12 @@ type App struct {
 	owedAtHead []plan.OwedPair
 
 	// plannedOptions are the planner inputs the last plan was computed from,
-	// kept for the one consumer that needs the input rather than the result:
-	// a distributed run digests the plan together with what it was planned
-	// from (§28.3), and assembling those inputs a second time would walk the
-	// workspace again. Written by plan alone, which is the only place a plan
-	// is computed.
+	// kept for the consumers that need the input rather than the result: a
+	// distributed run digests the plan together with what it was planned
+	// from (§28.3), and --since asks the planner which packages a range
+	// addresses. Assembling those inputs a second time would resolve every
+	// source repository's record target again. Written by plan alone, which
+	// is the only place a plan is computed.
 	plannedOptions plan.Options
 }
 

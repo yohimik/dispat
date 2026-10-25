@@ -409,7 +409,7 @@ func (a *App) sincePackages(ctx context.Context, pl *plan.Plan, rev string) ([]s
 	if rev == SinceAll {
 		return append([]string(nil), pl.Order...), nil
 	}
-	opts, err := a.planOptions(ctx)
+	opts, err := a.plannerInputs(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -418,6 +418,15 @@ func (a *App) sincePackages(ctx context.Context, pl *plan.Plan, rev string) ([]s
 		return nil, fmt.Errorf("resolving --since %q: %w", rev, err)
 	}
 	return selected, nil
+}
+
+// plannerInputs are the inputs the plan in hand was computed from, assembled
+// here only when no plan has been computed yet.
+func (a *App) plannerInputs(ctx context.Context) (plan.Options, error) {
+	if a.plannedOptions.Packages != nil {
+		return a.plannedOptions, nil
+	}
+	return a.planOptions(ctx)
 }
 
 // selectPackages resolves one command's filter against the workspace. The
