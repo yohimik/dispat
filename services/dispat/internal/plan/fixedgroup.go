@@ -42,15 +42,6 @@ import (
 // exactly the version every member takes. With a channel of its own a member
 // computes its own version instead, floored at the group's core.
 
-// groupContrib is one direct contribution as the fixed-group aggregate needs
-// it: the bump and the commit that carried it. directBumps records them beside
-// OwnBump, which collapses the same tuples into a single maximum and loses the
-// commits the aggregate's re-measuring needs.
-type groupContrib struct {
-	key  string
-	bump ccme.Bump
-}
-
 // samePrefix reports whether two versions agree on their first d core
 // components. Prerelease identifiers are deliberately ignored, so 2.0.0-beta.0
 // and 2.1.0 share a major: the prefix is about which line a version belongs
@@ -643,13 +634,16 @@ func (cp *computation) fixedGroupAggregate(groupName string, members []string) (
 // that version, and counting the source again would move the group once more
 // on every retry (§13.7c G3), so it is masked like any other published work.
 func (cp *computation) groupFresh(name, mask string, groupBaseline ccme.Version) (own, propagated ccme.Bump, fresh bool) {
-	for _, c := range cp.ownContribs[name] {
-		if cp.ancestorOrSelf(c.key, mask) {
+	rel := cp.rel[name]
+	// rel.Units are the member's direct contributions, each carried by the
+	// commit unitCommits names: what OwnBump collapses into one maximum,
+	// re-measured here against the mask.
+	for _, u := range rel.Units {
+		if cp.ancestorOrSelf(cp.unitCommits[u], mask) {
 			continue
 		}
-		own = ccme.MaxBump(own, c.bump)
+		own = ccme.MaxBump(own, u.Bump)
 	}
-	rel := cp.rel[name]
 	isBehindGroup := !rel.HasBaseline || versionLess(rel.Baseline, groupBaseline)
 	for _, s := range rel.Sources {
 		key := s.commitKey

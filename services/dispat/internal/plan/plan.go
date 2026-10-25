@@ -1311,14 +1311,6 @@ type computation struct {
 	parents             map[string][]string
 	linked              bool // whether parent pointers are available
 
-	// ownContribs is each package's direct contributions with the commits
-	// that carried them: what directBumps folded into OwnBump, kept apart so
-	// the fixed-group aggregate can re-measure a member's pending work
-	// against the group's published baseline instead of the member's own —
-	// the difference between a group whose prefix must move and a member
-	// catching up to a version the group has already published.
-	ownContribs map[string][]groupContrib
-
 	cancels     []*cancelRec
 	cancelIndex *cancelIndex
 	held        map[string]bool
@@ -1443,7 +1435,6 @@ func newComputation(ctx context.Context, git TagInventoryGitx, opts Options) *co
 		controlInputs:       make(map[string]bool, len(pkgs)),
 		stableBoundaries:    make(map[string]map[string]string, len(pkgs)),
 		publishedBoundaries: make(map[string]map[string]string, len(pkgs)),
-		ownContribs:         make(map[string][]groupContrib, len(pkgs)),
 		byKey:               make(map[string]*commitRec),
 		parents:             make(map[string][]string),
 		held:                make(map[string]bool),

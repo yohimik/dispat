@@ -42,7 +42,6 @@ func (cp *computation) directBumps() {
 				rel := cp.rel[name]
 				rel.Units = append(rel.Units, u)
 				rel.OwnBump = ccme.MaxBump(rel.OwnBump, bump)
-				cp.ownContribs[name] = append(cp.ownContribs[name], groupContrib{key: rec.key, bump: bump})
 				if !cp.containedInBaseline(name, rec.key) {
 					rel.NewWork = true
 					rel.FreshUnits = append(rel.FreshUnits, u)
