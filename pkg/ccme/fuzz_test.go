@@ -195,10 +195,10 @@ func FuzzParseSubject(f *testing.F) {
 	})
 }
 
-// FuzzNormalize pins the contract between the fast-path predicate and the
-// rewriter: normalising must reach a fixed point that the predicate then
-// recognises as needing no work. A disagreement here would mean Parse and
-// Normalize could see different text.
+// FuzzNormalize pins the contract between the fast path and the rewriter:
+// trimming the edges by slicing must give exactly what the full rewrite of the
+// untrimmed message gives, and normalising must reach a fixed point. A
+// disagreement here would mean Parse and Normalize could see different text.
 func FuzzNormalize(f *testing.F) {
 	for _, s := range fuzzSeeds {
 		f.Add(s)
@@ -208,8 +208,8 @@ func FuzzNormalize(f *testing.F) {
 		if twice := Normalize(once); twice != once {
 			t.Fatalf("Normalize is not idempotent: %q -> %q -> %q", msg, once, twice)
 		}
-		if needsNormalizing(once) {
-			t.Fatalf("needsNormalizing still reports work after normalising: %q -> %q", msg, once)
+		if literal := normalizeSlow(msg); once != literal {
+			t.Fatalf("Normalize disagrees with the full rewrite: %q -> %q, want %q", msg, once, literal)
 		}
 		// The postconditions of §4.1, stated directly.
 		if strings.HasPrefix(once, utf8BOM) {

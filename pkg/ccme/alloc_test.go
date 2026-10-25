@@ -36,17 +36,17 @@ func TestAllocationBudget(t *testing.T) {
 		},
 		{
 			name:   "Parse/simple",
-			budget: 6, // measured 5: normalisation, lines, sources, scopes, buffer
+			budget: 5, // measured 4: lines, sources, scopes, buffer
 			run:    func() { allocSink, _ = p.Parse(benchSimple) },
 		},
 		{
 			name:   "Parse/directives",
-			budget: 17, // measured 16 (go1.26, two-axis grammar with a footer)
+			budget: 16, // measured 15 (go1.26, two-axis grammar with a footer)
 			run:    func() { allocSink, _ = p.Parse(benchDirectives) },
 		},
 		{
 			name:   "Parse/multiUnit",
-			budget: 13, // measured 12
+			budget: 12, // measured 11
 			run:    func() { allocSink, _ = p.Parse(benchMultiUnit) },
 		},
 	}
@@ -72,9 +72,9 @@ func TestAllocationByteBudget(t *testing.T) {
 		run    func()
 	}{
 		{"ParseSubject", 1000, func() { allocSink, _ = p.ParseSubject(benchSubject) }}, // measured 774
-		{"Parse/simple", 1500, func() { allocSink, _ = p.Parse(benchSimple) }},         // measured 1142
-		{"Parse/directives", 3200, func() { allocSink, _ = p.Parse(benchDirectives) }}, // measured 2454
-		{"Parse/multiUnit", 5000, func() { allocSink, _ = p.Parse(benchMultiUnit) }},   // measured 3846
+		{"Parse/simple", 1300, func() { allocSink, _ = p.Parse(benchSimple) }},         // measured 976
+		{"Parse/directives", 2800, func() { allocSink, _ = p.Parse(benchDirectives) }}, // measured 2128
+		{"Parse/multiUnit", 4800, func() { allocSink, _ = p.Parse(benchMultiUnit) }},   // measured 3648
 	}
 
 	for _, tc := range cases {
@@ -94,7 +94,7 @@ func TestAllocationByteBudget(t *testing.T) {
 // throughput numbers: a message that arrives already normalised is not copied.
 func TestNormalizeFastPathIsAllocationFree(t *testing.T) {
 	msg := strings.TrimRight(benchSimple, "\n")
-	if needsNormalizing(msg) {
+	if trimMessageEdges(msg) != msg || isLineRewriteNeeded(msg) {
 		t.Fatalf("the fixture is not already normalised: %q", msg)
 	}
 
@@ -105,6 +105,22 @@ func TestNormalizeFastPathIsAllocationFree(t *testing.T) {
 	}
 	if sink != msg {
 		t.Errorf("Normalize altered an already-normalised message")
+	}
+}
+
+// TestNormalizeTrimsGitsTrailingNewlineWithoutCopying pins the raw shape `git
+// log --format=%B` and COMMIT_EDITMSG produce: clean lines ending in LF. Only
+// the edges deviate, so the normalised message is a substring of the input.
+func TestNormalizeTrimsGitsTrailingNewlineWithoutCopying(t *testing.T) {
+	for _, msg := range []string{benchSimple, utf8BOM + benchSimple, benchSimple + " \t\r\n\n"} {
+		var sink string
+		got := testing.AllocsPerRun(200, func() { sink = Normalize(msg) })
+		if got != 0 {
+			t.Errorf("Normalize(%q): %.0f allocs, want 0", msg, got)
+		}
+		if want := strings.TrimRight(benchSimple, "\n"); sink != want {
+			t.Errorf("Normalize(%q) = %q, want %q", msg, sink, want)
+		}
 	}
 }
 

@@ -15,40 +15,45 @@ const utf8BOM = "\uFEFF"
 //     leading whitespace, which is significant for footer continuations;
 //  4. strip trailing blank lines from the end of the message.
 //
-// Nothing else is altered. Normalize is idempotent, and returns the input
-// string unchanged, with no allocation, when it is already normalised, which
-// is the common case for messages read straight from git.
+// Nothing else is altered. Normalize is idempotent. The two ends are trimmed by
+// slicing, so a message whose lines are already clean, which is every message
+// read straight from git, comes back as a substring of the input with no
+// allocation.
 func Normalize(message string) string {
-	if !needsNormalizing(message) {
-		return message
+	trimmed := trimMessageEdges(message)
+	if !isLineRewriteNeeded(trimmed) {
+		return trimmed
 	}
-	return normalizeSlow(message)
+	return normalizeSlow(trimmed)
 }
 
-// needsNormalizing reports whether normalizeSlow would change the message,
-// letting the caller skip the rewrite entirely.
+// trimMessageEdges strips every leading BOM and the trailing whitespace and
+// blank lines. normalizeSlow drops a tail of spaces, tabs and line terminators
+// in full, so trimming it first changes nothing that normalizeSlow returns.
+func trimMessageEdges(m string) string {
+	for strings.HasPrefix(m, utf8BOM) {
+		m = m[len(utf8BOM):]
+	}
+	end := len(m)
+	for end > 0 && isTrailingWhitespace(m[end-1]) {
+		end--
+	}
+	return m[:end]
+}
+
+func isTrailingWhitespace(c byte) bool { return c == ' ' || c == '\t' || c == '\r' || c == '\n' }
+
+// isLineRewriteNeeded reports whether normalizeSlow would change a message
+// whose edges trimMessageEdges has already trimmed: what is left to rewrite is
+// a CR, or a line ending in a space or tab.
 //
 // It is written around strings.IndexByte rather than a byte-at-a-time loop:
 // this runs over every message in a history, most of which need no work, so
 // the scan itself is the cost that matters.
-func needsNormalizing(m string) bool {
-	if m == "" {
-		return false
-	}
-	if strings.HasPrefix(m, utf8BOM) {
-		return true
-	}
-	// A trailing newline means trailing blank lines; a trailing space or tab
-	// means the final line needs trimming.
-	switch m[len(m)-1] {
-	case '\n', '\r', ' ', '\t':
-		return true
-	}
+func isLineRewriteNeeded(m string) bool {
 	if strings.IndexByte(m, '\r') >= 0 {
 		return true
 	}
-	// Any remaining work is a line ending in a space or tab, which is exactly
-	// a space or tab immediately before an LF.
 	for i := 0; ; {
 		j := strings.IndexByte(m[i:], '\n')
 		if j < 0 {

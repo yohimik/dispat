@@ -40,10 +40,10 @@ func TestNormalize(t *testing.T) {
 		if again := Normalize(got); again != got {
 			t.Errorf("%s: Normalize is not idempotent: %q -> %q", tc.name, got, again)
 		}
-		// The fast-path predicate must agree with the rewriter, or Parse and
-		// Normalize would disagree about what the normalised message is.
-		if needsNormalizing(got) {
-			t.Errorf("%s: needsNormalizing still reports work on %q", tc.name, got)
+		// The fast path must agree with the rewriter, or Parse and Normalize
+		// would disagree about what the normalised message is.
+		if literal := normalizeSlow(tc.in); got != literal {
+			t.Errorf("%s: Normalize(%q) = %q, but the full rewrite gives %q", tc.name, tc.in, got, literal)
 		}
 	}
 }
