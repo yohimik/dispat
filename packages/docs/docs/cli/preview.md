@@ -55,11 +55,25 @@ and an [alias tag](../configuration/alias-tags.md) is read through the release t
 package and needs no selection. dispat refuses a version or tag that names no release, a tag of a package outside the
 selection, and a version beside a selection of several packages.
 
-dispat renders the release the way the release itself did. It plans again with the tag's commit as HEAD, leaving out
-that tag, every later release of the package, and the other packages' release tags on the same commit, which the same
-run wrote. The plan depends only on the history, the configuration and the tags, so it is the plan the release was cut
-from. The bodies come from the same renderers the release used. With [release commits](../configuration/records.md#commit)
-on, the GitHub body carries the `### Release` block naming the tag's commit.
+dispat renders the release the way the release itself did. It plans again with the tag's commit as HEAD, so the
+changelogs and manifests read as they were released, and leaves out that tag, every later release of the package, and
+every other release tag the same run wrote. The plan depends only on the history, the configuration and the tags, so it
+is the plan the release was cut from. The bodies come from the same renderers the release used. With
+[release commits](../configuration/records.md#commit) on, the GitHub body carries the `### Release` block naming the
+tag's commit.
+
+The run's other packages are rendered as the release saw them. A run whose packages each make their own release commit,
+for example with `dispat commit --tag` in their flow, lays those commits one after another, so its providers' tags sit
+on commits below the consumer's. dispat walks down the first-parent line from the tag's commit while each commit is a
+release commit: its message is `commit.messageFormat` rendered with the release tags it carries. The tags on those
+commits belong to the same run, so they are left out too, and the providers plan again. The consumer's
+`### Dependencies` section then lists the versions the run released. A provider that released in an earlier run stays,
+because the release read that tag as history. A release commit whose message came from
+`dispat commit --message-format` instead of the configuration is not recognised, and the walk stops there.
+
+The changelog header carries the tag's date: the tagger date of an annotated tag, or the commit date of a lightweight
+one, in UTC under the entry's `dateFormat`. The release dated its entry by its own clock when it wrote the entry,
+shortly before it wrote the tag. The two dates differ only when midnight UTC fell between those two steps.
 
 dispat reads the current checkout's configuration. If the configuration changed after the release, the notes can
 differ from what the release wrote. When the plan computes a different version, dispat warns and renders the notes

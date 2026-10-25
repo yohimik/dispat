@@ -49,7 +49,147 @@ func previewInventory(t *testing.T, selected ...string) releaseInventory {
 			tag, ok := aliases[name]
 			return tag, ok, nil
 		},
+		firstParents: fakeFirstParents(fakeCommit{"c0", "feat(dispat): first"},
+			fakeCommit{"c1", "feat(dispat): second"}, fakeCommit{"c2", "feat(dispat): third"}),
 	}
+}
+
+// fakeCommit is one commit of a fake first-parent line.
+type fakeCommit struct{ sha, message string }
+
+// fakeFirstParents is a first-parent line, oldest commit first, read the way
+// the inventory reads one: from a commit down, at most limit commits.
+func fakeFirstParents(line ...fakeCommit) func(string, int) ([]gitx.CommitMessage, error) {
+	return func(commit string, limit int) ([]gitx.CommitMessage, error) {
+		var out []gitx.CommitMessage
+		for i := len(line) - 1; i >= 0; i-- {
+			if len(out) == 0 && line[i].sha != commit {
+				continue
+			}
+			if len(out) == limit {
+				break
+			}
+			out = append(out, gitx.CommitMessage{SHA: line[i].sha, Message: line[i].message + "\n"})
+		}
+		return out, nil
+	}
+}
+
+// runInventory is a run in which every package committed for itself: on top
+// of the planned commit p1, utils and then web each got a release commit, and
+// core, which consumes both, got the last one. utils released once before, in
+// an earlier run whose release commit r0 sits below p0.
+func runInventory(t *testing.T) releaseInventory {
+	t.Helper()
+	core := &model.Package{Name: "core"}
+	utils := &model.Package{Name: "utils"}
+	web := &model.Package{Name: "web"}
+	return releaseInventory{
+		packages: []*model.Package{core, utils, web},
+		tags: map[string]gitx.Tags{
+			"core": {releaseTag(t, "core@0.2.0", "0.2.0", "r3")},
+			"utils": {
+				releaseTag(t, "utils@0.0.2", "0.0.2", "r1"),
+				releaseTag(t, "utils@0.0.1", "0.0.1", "r0"),
+			},
+			"web": {releaseTag(t, "web@1.1.0", "1.1.0", "r2")},
+		},
+		selected: []string{"core"},
+		firstParents: fakeFirstParents(
+			fakeCommit{"r0", "chore(release): utils@0.0.1"},
+			fakeCommit{"p0", "fix(utils): first fix"},
+			fakeCommit{"p1", "feat(core): a feature"},
+			fakeCommit{"r1", "chore(release): utils@0.0.2"},
+			fakeCommit{"r2", "chore(release): web@1.1.0"},
+			fakeCommit{"r3", "chore(release): core@0.2.0"},
+		),
+	}
+}
+
+func TestPreviewReleaseMasksEveryReleaseTheRunCommittedBelowIt(t *testing.T) {
+	released, err := runInventory(t).resolve("0.2.0")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"core@0.2.0", "utils@0.0.2", "web@1.1.0"}, released.masked,
+		"the walk crosses the run's release commits and stops at the commit it planned at, "+
+			"below which utils@0.0.1 is an earlier run's")
+}
+
+func TestPreviewReleaseKeepsAnEarlierRunsReleases(t *testing.T) {
+	inventory := runInventory(t)
+	inventory.tags["utils"] = gitx.Tags{releaseTag(t, "utils@0.0.1", "0.0.1", "r0")}
+	inventory.tags["web"] = nil
+	inventory.firstParents = fakeFirstParents(
+		fakeCommit{"r0", "chore(release): utils@0.0.1"},
+		fakeCommit{"p1", "feat(core): a feature"},
+		fakeCommit{"r3", "chore(release): core@0.2.0"},
+	)
+	released, err := inventory.resolve("0.2.0")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"core@0.2.0"}, released.masked,
+		"utils released in a run that ended below the commit this one planned at")
+
+	inventory = runInventory(t)
+	inventory.tags["core"] = gitx.Tags{releaseTag(t, "core@0.2.0", "0.2.0", "p1")}
+	released, err = inventory.resolve("0.2.0")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"core@0.2.0"}, released.masked,
+		"a tag on an ordinary commit was written by a run that made no release commit")
+}
+
+func TestPreviewReleaseReadsTheConfiguredCommitMessage(t *testing.T) {
+	inventory := runInventory(t)
+	inventory.commitFormat = "release {packages}: {tags}"
+	inventory.firstParents = fakeFirstParents(
+		fakeCommit{"p1", "feat(core): a feature"},
+		fakeCommit{"r1", "chore(release): utils@0.0.2"},
+		fakeCommit{"r2", "release web: web@1.1.0"},
+		fakeCommit{"r3", "release core: core@0.2.0"},
+	)
+	released, err := inventory.resolve("0.2.0")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"core@0.2.0", "web@1.1.0"}, released.masked,
+		"a message the configured format does not render ends the run")
+}
+
+func TestPreviewReleaseRecognisesACommitRecordingSeveralReleases(t *testing.T) {
+	inventory := runInventory(t)
+	inventory.tags["web"] = gitx.Tags{releaseTag(t, "web@1.1.0", "1.1.0", "r1")}
+	inventory.firstParents = fakeFirstParents(
+		fakeCommit{"p1", "feat(core): a feature"},
+		fakeCommit{"r1", "chore(release): web@1.1.0, utils@0.0.2"},
+		fakeCommit{"r3", "chore(release): core@0.2.0"},
+	)
+	released, err := inventory.resolve("0.2.0")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"core@0.2.0", "utils@0.0.2", "web@1.1.0"}, released.masked,
+		"the message names its releases in the order the run planned them")
+}
+
+func TestPreviewReleaseStopsAtACommitTaggedByAnotherRun(t *testing.T) {
+	inventory := runInventory(t)
+	inventory.tags["web"] = gitx.Tags{releaseTag(t, "web@1.1.0", "1.1.0", "r1")}
+	inventory.firstParents = fakeFirstParents(
+		fakeCommit{"p1", "feat(core): a feature"},
+		fakeCommit{"r1", "chore(release): utils@0.0.2"},
+		fakeCommit{"r3", "chore(release): core@0.2.0"},
+	)
+	released, err := inventory.resolve("0.2.0")
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"core@0.2.0"}, released.masked,
+		"web's tag on r1 is not in its message, so r1 was tagged again later and is no proof of this run")
+}
+
+func TestPreviewReleaseBoundsTheWalkByThePackageCount(t *testing.T) {
+	inventory := runInventory(t)
+	var asked int
+	walk := inventory.firstParents
+	inventory.firstParents = func(commit string, limit int) ([]gitx.CommitMessage, error) {
+		asked = limit
+		return walk(commit, limit)
+	}
+	_, err := inventory.resolve("0.2.0")
+	require.NoError(t, err)
+	assert.Equal(t, 4, asked, "one release commit per package and one for the run")
 }
 
 func TestPreviewReleaseResolvesAVersionOfTheSelectedPackage(t *testing.T) {

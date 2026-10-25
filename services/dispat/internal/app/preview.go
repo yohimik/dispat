@@ -117,22 +117,28 @@ func (a *App) previewOne(rel *plan.Release, opts PreviewOptions) string {
 	if !rel.IsReleasable() {
 		return ""
 	}
-	return a.renderPreviewNotes(rel, opts, a.previewGitHubBody)
+	// The changelog entry's header carries the tag and a date; a pending
+	// release has no date yet, so it shows the channel movement instead: the
+	// transition (§13.10) is the context a reader needs to judge the sections
+	// below.
+	header := fmt.Sprintf("## %s (%s)\n", rel.TagName(), rel.ChannelTransition())
+	return a.renderPreviewNotes(rel, opts, previewedNotes{header: header, githubBody: a.previewGitHubBody})
 }
 
-// renderPreviewNotes renders one release's header and the bodies asked for,
-// with the GitHub body from githubBody: a pending release and a past one
-// render it differently.
-func (a *App) renderPreviewNotes(rel *plan.Release, opts PreviewOptions, githubBody func(*plan.Release) string) string {
+// previewedNotes are the parts of a preview a pending release and a past one
+// render differently.
+type previewedNotes struct {
+	header     string
+	githubBody func(*plan.Release) string
+}
+
+// renderPreviewNotes renders one release's header and the bodies asked for.
+func (a *App) renderPreviewNotes(rel *plan.Release, opts PreviewOptions, notes previewedNotes) string {
 	// The preview resolves its link coordinates the way the recorders do, so
 	// what it shows is what the record will say. It is the same completion at
 	// the same point: nothing about a rendered entry depends on the
 	// environment once the format is built.
 	format := changelog.SpecFormat(rel.Pkg.Changelog.Format).WithRepoEnv()
-	// The changelog entry's header carries the tag and a date; a preview has
-	// no date yet, so it shows the channel movement instead: the transition
-	// (§13.10) is the context a reader needs to judge the sections below.
-	header := fmt.Sprintf("## %s (%s)\n", rel.TagName(), rel.ChannelTransition())
 
 	wantChangelog, wantGitHub, labelled := opts.bodies()
 	blocks := make([]string, 0, 2)
@@ -141,15 +147,15 @@ func (a *App) renderPreviewNotes(rel *plan.Release, opts PreviewOptions, githubB
 			a.previewChangelogBody(rel, format, opts.Changelog))
 	}
 	if wantGitHub {
-		blocks = appendPreviewBlock(blocks, labelled, "github release", githubBody(rel))
+		blocks = appendPreviewBlock(blocks, labelled, "github release", notes.githubBody(rel))
 	}
 	if len(blocks) == 0 {
-		return header
+		return notes.header
 	}
 	a.log.Trace().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).
 		Str("channel", rel.Channel).Bool("changelog", wantChangelog).Bool("github", wantGitHub).
 		Msg("preview rendered")
-	return header + "\n" + strings.Join(blocks, "\n")
+	return notes.header + "\n" + strings.Join(blocks, "\n")
 }
 
 // previewChangelogBody renders what the changelog entry would carry. Asked for

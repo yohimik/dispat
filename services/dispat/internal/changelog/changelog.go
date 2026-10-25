@@ -424,11 +424,17 @@ func RenderEntryBody(rel *plan.Release, f Format, look Lookup) string {
 	return joinBlocks(appendBlock([]string{"### " + name + "\n"}, body))
 }
 
-// RenderEntry renders one dated changelog entry: a "## pkg@version (date)"
-// header followed by the body.
+// RenderEntryHeader renders a dated changelog entry's "## pkg@version (date)"
+// header line.
+func RenderEntryHeader(rel *plan.Release, date time.Time, f Format) string {
+	return fmt.Sprintf("## %s (%s)\n", rel.TagName(), date.Format(f.withDefaults().DateFormat))
+}
+
+// RenderEntry renders one dated changelog entry: its header followed by the
+// body.
 func RenderEntry(rel *plan.Release, date time.Time, f Format) string {
 	f = f.withDefaults()
-	header := fmt.Sprintf("## %s (%s)\n", rel.TagName(), date.Format(f.DateFormat))
+	header := RenderEntryHeader(rel, date, f)
 	body := RenderEntryBody(rel, f, nil)
 	if body == "" {
 		return header
