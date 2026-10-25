@@ -521,3 +521,33 @@ func TestLinkPeersAreTheScanOfEveryHistory(t *testing.T) {
 		}
 	}
 }
+
+// TestLinkEvidenceReadsOnlyTheBoundaryTags: boundaries are asked only for a
+// package's stable and newest release tags, so those are the only subjects
+// read, in one call per repository, and an older release's commit is never
+// asked about.
+func TestLinkEvidenceReadsOnlyTheBoundaryTags(t *testing.T) {
+	git := newLinkedGit("r4")
+	stats := &HistoryStats{}
+	tags := gitx.Tags{
+		{Name: "app@1.1.0-beta.0", Commit: "r4", Parsed: true},
+		{Name: "app@1.0.0", Commit: "r3", Parsed: true},
+		{Name: "app@0.9.0", Commit: "r2", Parsed: true},
+		{Name: "app@0.8.0", Commit: "r1", Parsed: true},
+	}
+	for _, tag := range tags {
+		git.records(tag.Commit, "chore(release): "+tag.Name)
+	}
+	cp := &computation{ctx: t.Context(), stats: stats,
+		pkgs:       []*model.Package{{Name: "app", Repository: "api"}, {Name: "lib", Repository: "api"}},
+		tags:       map[string]gitx.Tags{"app": tags},
+		stableTags: map[string]gitx.Tag{"app": tags[1]}, latestTags: map[string]gitx.Tag{"app": tags[0]},
+		histories: map[string]RepositoryHistory{"api": {Name: "api", Git: git}}}
+	evidence := newLinkEvidence(cp)
+	require.NoError(t, evidence.index())
+	assert.Equal(t, 2, git.revisions, "the stable and the newest tag's commits")
+	assert.Equal(t, 1, git.subject)
+	assert.EqualValues(t, 1, stats.LinkReads.Load())
+	assert.Equal(t, "chore(release): app@1.0.0", evidence.subjects[historyKey("api", "r3")])
+	assert.Equal(t, "chore(release): app@1.1.0-beta.0", evidence.subjects[historyKey("api", "r4")])
+}

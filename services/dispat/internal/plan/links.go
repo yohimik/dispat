@@ -153,26 +153,27 @@ func newLinkEvidence(cp *computation) *linkEvidence {
 		trees: map[string]map[string]string{}, routes: map[string][]string{}}
 }
 
-// index reads the subject of every release tag's own commit, one call per
-// repository. The first thing every boundary asks is whether the tag sits on
-// an ordinary release commit, and asking that per consumer per provider would
-// be one Git process each.
+// index reads the subject of every package's stable and newest release tag
+// commit, one call per repository. The first thing every boundary asks is
+// whether the tag sits on an ordinary release commit, and asking that per
+// consumer per provider would be one Git process each. Boundaries are asked
+// only for those two tags, so an older release's subject is never read; a
+// repository is still read once whenever one of its packages has a tag.
 func (e *linkEvidence) index() error {
 	cp := e.cp
 	byRepository := map[string]map[string]bool{}
 	for _, p := range cp.pkgs {
-		if p.Repository == "" {
+		if p.Repository == "" || !hasTagCommit(cp.tags[p.Name]) {
 			continue
 		}
-		for _, tag := range cp.tags[p.Name] {
-			if tag.Name == "" || tag.Commit == "" {
-				continue
+		key := globx.Fold(p.Repository)
+		if byRepository[key] == nil {
+			byRepository[key] = map[string]bool{}
+		}
+		for _, tag := range [2]gitx.Tag{cp.stableTags[p.Name], cp.latestTags[p.Name]} {
+			if tag.Name != "" && tag.Commit != "" {
+				byRepository[key][tag.Commit] = true
 			}
-			key := globx.Fold(p.Repository)
-			if byRepository[key] == nil {
-				byRepository[key] = map[string]bool{}
-			}
-			byRepository[key][tag.Commit] = true
 		}
 	}
 	for _, key := range sortedNames(byRepository) {
@@ -203,6 +204,15 @@ func (e *linkEvidence) index() error {
 	cp.log.Debug().Int("repositories", len(byRepository)).Int("revisions", len(e.subjects)).
 		Msg("plan: fleet release subjects indexed")
 	return nil
+}
+
+func hasTagCommit(tags gitx.Tags) bool {
+	for _, tag := range tags {
+		if tag.Name != "" && tag.Commit != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *linkEvidence) resolve(q boundaryQuery) (string, string) {
