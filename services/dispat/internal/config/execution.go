@@ -41,8 +41,9 @@ type (
 	ExecutionTransferConfig = public.ExecutionTransferConfig
 )
 
-// LoadNode reads a configuration as a serving node's rather than as a
-// release's.
+// LoadResolvedNode reads the file ResolveConfigFile found as a serving node's
+// configuration rather than as a release's, decoding the tree the ascent
+// parsed rather than reading the file and its references again.
 //
 // The difference is one rule: a file that declares no space and no package is
 // complete here. A node serving tasks is told what to do by the assignments
@@ -50,8 +51,8 @@ type (
 // beyond what it is, and refusing its file for holding no packages would be
 // refusing it for being exactly what it is. Everything else about the load is
 // the same, the `execution` object's own validation included.
-func LoadNode(path string, flags *pflag.FlagSet) (*File, error) {
-	return load(ResolvedFile{Path: path}, flags, true)
+func LoadResolvedNode(found ResolvedFile, flags *pflag.FlagSet) (*File, error) {
+	return load(found, flags, true)
 }
 
 // DiagnosticExecution reports a configuration no distributed run could be

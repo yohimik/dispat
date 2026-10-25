@@ -936,6 +936,9 @@ func TestExampleConfigsAreValid(t *testing.T) {
 // copied as written, so each has to load as written, under the loader the
 // command it is meant for uses.
 func TestModeExampleConfigsAreValid(t *testing.T) {
+	loadNode := func(path string, flags *pflag.FlagSet) (*File, error) {
+		return LoadResolvedNode(ResolvedFile{Path: path}, flags)
+	}
 	for name, row := range map[string]struct {
 		file  string
 		load  func(string, *pflag.FlagSet) (*File, error)
@@ -959,7 +962,7 @@ func TestModeExampleConfigsAreValid(t *testing.T) {
 					"%s reaches the repository being released, as the example says", worker.Name)
 			}
 		}},
-		"a worker node": {"dispat.example.worker.yaml", LoadNode, func(t *testing.T, cfg *File) {
+		"a worker node": {"dispat.example.worker.yaml", loadNode, func(t *testing.T, cfg *File) {
 			assert.True(t, cfg.Execution.IsWorker())
 			assert.False(t, cfg.Execution.IsDistributed(), "a worker delegates nothing")
 			assert.Empty(t, cfg.Spaces, "a worker states no release policy of its own")

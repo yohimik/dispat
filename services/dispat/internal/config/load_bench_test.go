@@ -150,7 +150,7 @@ func resolveAndLoadNode(root string) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return LoadNode(found.Path, nil)
+	return LoadResolvedNode(found, nil)
 }
 
 // BenchmarkResolveAndLoadNode is BenchmarkResolveAndLoadControl for a serving
@@ -169,4 +169,27 @@ func BenchmarkResolveAndLoadNode(b *testing.B) {
 		}
 	}
 	b.ReportMetric(float64(reads), "files-read/op")
+}
+
+// TestResolveAndLoadNodeReadsEachFileOnce is
+// TestResolveAndLoadControlReadsEachFileOnce for a serving node, which decodes
+// the same tree under the node's rule.
+func TestResolveAndLoadNodeReadsEachFileOnce(t *testing.T) {
+	root := writeComposedRepo(t)
+	var loaded *File
+	reads := countFileReads(t, func() error {
+		var err error
+		loaded, err = resolveAndLoadNode(root)
+		return err
+	})
+	if reads != 2 {
+		t.Errorf("resolve and load read %d files; want 2, the root configuration and its fragment", reads)
+	}
+	direct, err := load(ResolvedFile{Path: filepath.Join(root, "dispat.json")}, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(loaded, direct) {
+		t.Errorf("the resolved load decoded %#v; reading the file decodes %#v", loaded, direct)
+	}
 }

@@ -725,8 +725,8 @@ func (r *runner) runDiagnostics() int {
 // because it left work undone; a serving command that was asked to stop has
 // done exactly what it was asked, and a CI job that starts a node beside a
 // release must not fail because the node it started ended cleanly.
-func (r *runner) runWorker(cfgPath, root string) int {
-	cfg, err := config.LoadNode(cfgPath, r.fs)
+func (r *runner) runWorker(found config.ResolvedFile) int {
+	cfg, err := config.LoadResolvedNode(found, r.fs)
 	if err != nil {
 		logConfigError(r.boot, err).Msg("invalid configuration")
 		return 1
@@ -746,7 +746,7 @@ func (r *runner) runWorker(cfgPath, root string) int {
 	}
 	ctx, stop := signalCtx()
 	defer stop()
-	if err := app.New(root, cfg, log).ServeTasks(ctx, app.WorkerOptions{
+	if err := app.New(found.Root, cfg, log).ServeTasks(ctx, app.WorkerOptions{
 		StateDir:    *r.o.workerStateDir,
 		IdleTimeout: time.Duration(*r.o.workerIdleTimeout) * time.Second,
 		Version:     selfupdate.Describe(Version).Version,
@@ -984,14 +984,14 @@ func (r *runner) runConfigured() int {
 		r.boot.Error().Err(err).Msg("config file not found")
 		return 1
 	}
-	cfgPath, resolvedRoot := found.Path, found.Root
 	if r.inv.cmd == cmdWorker {
 		// A serving node reads the node-startup settings of this file and
 		// nothing else: it plans nothing, so it composes no workspace, needs
 		// no package and needs no git repository at the root. It stops here
 		// for that reason and not as an optimisation.
-		return r.runWorker(cfgPath, resolvedRoot)
+		return r.runWorker(found)
 	}
+	cfgPath, resolvedRoot := found.Path, found.Root
 	cfg, err := config.LoadResolvedControl(found, r.fs, len(*r.o.configs) > 0)
 	if err != nil {
 		logConfigError(r.boot, err).Msg("invalid configuration")
