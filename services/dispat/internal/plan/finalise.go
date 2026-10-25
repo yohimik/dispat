@@ -42,12 +42,6 @@ func (cp *computation) finalise() {
 		// consumer of the release.
 		rel.Corrects = cp.corrects[name]
 		rel.SuppressedNotes = cp.noteDrops[name]
-		// The attribution, alongside the other two unit-keyed marks. The map is
-		// shared rather than copied per package for the same reason the units
-		// themselves are: it is read-only from here on, and a unit reaching two
-		// packages is by the same people in both.
-		rel.UnitAuthors = cp.unitAuthors
-		rel.UnitCommits = cp.unitCommits
 		rel.Channel = cp.channel[name]
 		if rel.Channel == "" {
 			rel.Channel = rel.BaselineChannel
@@ -71,6 +65,7 @@ func (cp *computation) finalise() {
 	// After every version, fixed rides included: whether a release has an
 	// entry to attribute is decided by then.
 	cp.collectReleaseAuthors()
+	cp.shareUnitMarks()
 
 	// Provider version movements, resolved after every version is final. The
 	// topological order already guarantees a provider's Next is computed
@@ -87,6 +82,49 @@ func (cp *computation) finalise() {
 
 	cp.reportCatchUp()
 	cp.reportChannelOnly()
+}
+
+// shareUnitMarks hands every release the attribution and the commit of the
+// units releases hold, beside the other two unit-keyed marks. The maps are
+// shared rather than copied per package for the same reason the units
+// themselves are: they are read-only from here on, and a unit reaching two
+// packages is by the same people in both. They hold only the units some
+// release names, in Units, Corrects or SuppressedNotes, which are the only
+// keys anything reads them by: the computation's own maps hold every unit of
+// the union, and handing those over would keep every parsed message of the
+// history alive for as long as the plan.
+func (cp *computation) shareUnitMarks() {
+	authors := make(map[*ccme.Unit][]Author)
+	commits := make(map[*ccme.Unit]string)
+	keep := func(u *ccme.Unit) {
+		if _, kept := commits[u]; kept {
+			return
+		}
+		commits[u] = cp.unitCommits[u]
+		if a, ok := cp.unitAuthors[u]; ok {
+			authors[u] = a
+		}
+	}
+	for _, name := range cp.order {
+		rel := cp.rel[name]
+		if rel == nil {
+			continue
+		}
+		for _, u := range rel.Units {
+			keep(u)
+		}
+		for u := range rel.Corrects {
+			keep(u)
+		}
+		for u := range rel.SuppressedNotes {
+			keep(u)
+		}
+	}
+	for _, name := range cp.order {
+		if rel := cp.rel[name]; rel != nil {
+			rel.UnitAuthors, rel.UnitCommits = authors, commits
+		}
+	}
 }
 
 // newerCommit reports whether commit a is newer than commit b in the examined
