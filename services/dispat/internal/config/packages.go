@@ -454,8 +454,8 @@ func fieldOf(flow *SpaceFlowConfig, name string) *[]string {
 	switch name {
 	case public.FlowStageBuild:
 		return &flow.Build
-	case public.FlowStageTests:
-		return &flow.Tests
+	case public.FlowStageTest:
+		return &flow.Test
 	case public.FlowStagePublish:
 		return &flow.Publish
 	case public.FlowStageSign:
@@ -817,7 +817,7 @@ func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 		name string
 		list []string
 	}{
-		{public.FlowStageBuild, over.Build}, {public.FlowStageTests, over.Tests},
+		{public.FlowStageBuild, over.Build}, {public.FlowStageTest, over.Test},
 		{public.FlowStagePublish, over.Publish}, {public.FlowStageSign, over.Sign},
 		{public.FlowStageAnnounce, over.Announce},
 	} {
@@ -841,8 +841,8 @@ func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 	pickPair(&out.PostVersion, &out.PostPropagate, over.PostVersion, over.PostPropagate)
 	pick(&out.BeforeBuild, over.BeforeBuild)
 	pick(&out.PostBuild, over.PostBuild)
-	pick(&out.BeforeTests, over.BeforeTests)
-	pick(&out.PostTests, over.PostTests)
+	pick(&out.BeforeTest, over.BeforeTest)
+	pick(&out.PostTest, over.PostTest)
 	pick(&out.BeforePublish, over.BeforePublish)
 	pick(&out.PostPublish, over.PostPublish)
 	pick(&out.BeforeAnnounce, over.BeforeAnnounce)

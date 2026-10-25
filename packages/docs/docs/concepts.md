@@ -262,10 +262,10 @@ the other built-in ones where the flow configures them, and any
    to every later script of the package as `DISPAT_OUTPUT_<NAME>`, with `DISPAT_OUTPUT_SOURCE_<NAME>` naming the
    exporter. One export is special: `DISPAT_EXPORT_GITHUB` holds absolute file paths and opts the package into a GitHub
    release with those files as assets.
-4. **tests**: runs only for a package whose space configures `flow.tests`, `flow.beforeTests` or `flow.postTests`. It
+4. **test**: runs only for a package whose space configures `flow.test`, `flow.beforeTest` or `flow.postTest`. It
    checks what the build produced, after the build and before the publish, so a package whose artefact fails its
    checks is never published. It reads the build's exports and hands its own to the publish. A package without that
-   configuration has no tests stage at all.
+   configuration has no test stage at all.
 5. **publish**: for a package whose flow configures a publish or one of its hooks. It waits for every stage before it, and always for its
    providers' publishes. A space with a `flow.login`
    authenticates **once per space** before its first publish, failing all publishes on error, while successful login
@@ -286,19 +286,19 @@ Every script option accepts a single script name or an array of names run in seq
 release-gating sequence stops it and fails the package, while warn-only sequences keep running and only log.
 
 A package's stages form a graph: every package has a version stage and a build, the other stages are there where
-the flow gives them something to do, and a stage you define sits beside the tests, unordered with them, so a run with
+the flow gives them something to do, and a stage you define sits beside the test stage, unordered with it, so a run with
 room starts them at once. A package with no publish stage is recorded, tagged and reported published once its other
 stages have completed. A stage entry written as an object places its stage with `before` or `after`, and `parallel` says two stages are
 unordered: `announce: { script: announce, after: build }` runs the announce before the publication, where it gates. Everything before the release records gates the release; everything after
 them observes a release that is out and only warns. A configuration no order realises is refused before any command
 runs. See [the order of the stages](./configuration/spaces.md#the-order-of-the-stages).
 
-The build, tests and publish frames, and the frames of your own stages before the records, can run on
+The build, test and publish frames, and the frames of your own stages before the records, can run on
 [worker nodes](./distributed-execution.md). The orchestrator keeps the preparing stages, the stages after the records
 and release coordination. Without configured workers, all stages run on the machine that started the release.
 
 You can bracket the stages with per-space hooks. `flow.beforeAll`, `flow.beforeSign`, `flow.postSign`,
-`flow.beforeVersion`, `flow.postVersion`, `flow.beforeBuild`, `flow.postBuild`, `flow.beforeTests`, `flow.postTests`
+`flow.beforeVersion`, `flow.postVersion`, `flow.beforeBuild`, `flow.postBuild`, `flow.beforeTest`, `flow.postTest`
 and `flow.beforePublish` all *gate* the
 release, so their failure fails the package. `flow.postPublish` only warns since the release is already out.
 
@@ -322,7 +322,7 @@ would be rejected anyway.
 The warn-only run hooks `run.beforeCommit`, `run.afterCommit`, `run.postCommit` (after the commit and the tags),
 `run.beforePush`, and `run.afterPush` bracket this phase.
 
-Build and publish have independent concurrency budgets (`concurrency: [build, publish]`). The sign, version and tests
+Build and publish have independent concurrency budgets (`concurrency: [build, publish]`). The sign, version and test
 stages and your own stages share the build budget wherever they sit; the publish, the records and the announce share
 the publish budget.
 

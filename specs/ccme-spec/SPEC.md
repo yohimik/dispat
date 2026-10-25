@@ -3354,7 +3354,7 @@ There is no fixed upper limit on its task, edge or worker counts; `Tk`, `Dk` and
 and constants in asymptotic claims do not depend on them.
 Its vertices and precedence edges are fixed before execution; task durations become known when the tasks run. For a
 fixed history, configuration and inventory, §17.2 determines one semantic release plan and hence one task graph under
-the execution policy: package stages, sign, version, syncLock, build, tests, publication and record tasks, and the
+the execution policy: package stages, sign, version, syncLock, build, test, publication and record tasks, and the
 edges of §19.2, §19.2a and §28.5. Let `R` name its publications, records and withdrawals whose effects require
 durable recovery evidence. This does not identify a unique schedule, representation or executor. A command sweep
 (§28.10) also compiles to a graph. Write `Wk = sum(d_i)` for its task work and `Lk` for the greatest sum of
@@ -3712,16 +3712,21 @@ those asymptotic time and memory bounds.
 passage says which graph that is, and when a configuration has one at all. It is a model, not an obligation: §19.2a
 states the obligations of an implementation that offers configured stages, and §28.5 how their outputs travel. `flow`
 and the stage names below are to be the dispat engine's configuration surface, configuration beyond §14 that §17.1
-permits; no key of §14 defines them. The passage is the model the dispat engine is to implement; nothing of it is
-released. What that engine runs today is stated by date in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md).
+permits; no key of §14 defines them. The passage uses `test` for the optional built-in stage. The prerelease
+`tests` stage spelling and its hooks are refused with migration guidance; `scripts.tests` and `dispat run tests`
+remain ordinary script names. The optional stage was exposed as `tests` in a prerelease, while the configured-stage
+graph and canonical `test` spelling are new. What the engine runs by date is stated in
+[DESIGN-HISTORY.md](./DESIGN-HISTORY.md).
 
 *Stages.* For a package `p`, `S_p` is its set of stages. Its built-in stages are `version`, also spelled `propagate`,
 and `build`, which every package has; `publish`, unless the publish target fixed at `HEAD` is `none`; and `sign`,
-`syncLock`, `tests` and `announce` where its configuration gives it one. Its user stages are the keys of its `flow`
+`syncLock`, `test` and `announce` where its configuration gives it one. Its user stages are the keys of its `flow`
 object that are neither built-in stages, nor hooks, nor keys the implementation reserves for steps that are not the
-package's own. The login that runs once per space is such a step and is not a stage. In the model it waits on no task,
-so it lies on no cycle. `sign`, `version` and `syncLock` are the *preparing* stages. `S_p`, and `E_p` below, are
-functions of the resolved configuration and of the publish target fixed at `HEAD` (§13.1, §13.10a).
+package's own. Name user stages with verbs such as `scan`, `lint` or `deploy`; this is naming guidance, not a
+condition for accepting their graph. The login that runs once per space is such a step and is not a stage. In the
+model it waits on no task, so it lies on no cycle. `sign`, `version` and `syncLock` are the *preparing* stages.
+`S_p` and `E_p` below are functions of the resolved configuration and of the publish target fixed at `HEAD`
+(§13.1, §13.10a).
 A stage a plan does
 not run, such as a version stage with nothing to reconcile, is a task of duration zero that takes no slot, so nothing
 below depends on the plan.
@@ -3733,7 +3738,7 @@ levels of the configuration, the file's, the space's and the package's, merge th
 that states an entry replaces the whole inherited entry, its constraints included. A level that states both `version`
 and `propagate` is refused when the configuration loads, by the rule that already refuses the two spellings together,
 before any graph is formed; it is no diagnostic of this passage. A constraint can name `version` by either spelling. A
-name of a built-in stage the package lacks, `publish` under target `none`, or `sign`, `syncLock`, `tests` or `announce`
+name of a built-in stage the package lacks, `publish` under target `none`, or `sign`, `syncLock`, `test` or `announce`
 where it is not configured, is dropped from that package's constraints, and the entry of such a stage is dropped whole,
 its own constraints included, so one shared configuration stays valid across targets. A stage *places itself* when its
 entry states a non-empty `before` or `after` once those names are dropped. A stage whose stated `before` and `after`
@@ -3746,23 +3751,23 @@ carrying stage's own name, fail condition 1 (below).
 1. **Constraints.** For each `t` that `before(s)` names, `s -> t`; for each `t` that `after(s)` names, `t -> s`.
    `parallel` gives no edge. For each `t` that `parallel(s)` names, it asserts that `s` and `t` are *incomparable*,
    which condition 3 checks against the whole package graph.
-2. **Defaults.** The ranks are `sign` 1, `version` 2, `syncLock` 3, `build` 4, `tests` and every user stage 5, `publish`
+2. **Defaults.** The ranks are `sign` 1, `version` 2, `syncLock` 3, `build` 4, `test` and every user stage 5, `publish`
    6 and `announce` 7. `x -> y` is a default edge when `y` does not place itself and `x` is a stage of `S_p` at the
    greatest rank below `y`'s that `S_p` holds. The *stage order* sorts stages by rank and then by name byte-wise, and
    where §19.2a orders a diagnostic by a stated name that is no stage of `S_p`, that name ranks as a user stage.
    Without
    constraints the built-in stages form the chain
-   `sign -> version -> syncLock -> build -> tests -> publish -> announce`, less the stages `p` lacks. A default edge
+   `sign -> version -> syncLock -> build -> test -> publish -> announce`, less the stages `p` lacks. A default edge
    depends only on whether its target places itself, and some direct consequences follow:
-   * `tests` keeps `build -> tests` when `build` places itself.
+   * `test` keeps `build -> test` when `build` places itself.
    * `announce` keeps `publish -> announce` when `publish` places itself.
    * In a package that publishes, `announce {after: build}` drops its default edge from `publish`. The publication edges
      below then place it before the publication, which it gates.
    * A stage whose entry states only `parallel` keeps its place.
    * Where the package states no constraints, a user stage follows `build`, precedes the stages of the next rank `S_p`
-     holds, and is unordered with `tests` and with every other user stage.
+     holds, and is unordered with `test` and with every other user stage.
    * A stage placed after a stage `y` that does not place itself closes a cycle with `y`'s default edges, refused under
-     condition 2, when it is or reaches a stage at the greatest rank below `y`'s that `S_p` holds. So `tests` or a user
+     condition 2, when it is or reaches a stage at the greatest rank below `y`'s that `S_p` holds. So `test` or a user
      stage placed after `publish` needs `publish` to place itself, as `publish {after: build}` does. Under target `none`
      a stage of rank 5 placed after an `announce` that does not place itself is refused in the same way, and so is
      `build` placed there, unless `S_p` holds a stage of rank 5 and `build` reaches none of them.
@@ -3863,7 +3868,7 @@ strict order does, and a pair the closure relates stays related in every such or
 not placed after it, so `s -> publish`. `publish` reaches every stage placed after it, so in a package that publishes a
 `parallel` that names `publish` is always refused, and in one that does not, the same holds for an `announce` that does
 not place itself. A stage meant to run beside the publication is placed after it instead, and it then starts once the
-record is written, since a stage after the publication follows the record. Where that stage is `tests` or a user stage,
+record is written, since a stage after the publication follows the record. Where that stage is `test` or a user stage,
 it is accepted only where `publish` places itself too, as `publish {after: build}` does, since otherwise the default
 edges into `publish` close a cycle (*Defaults*, above).
 
@@ -5037,7 +5042,7 @@ deployment order: infrastructure before the application that runs on it, a schem
   1 to 3 are ordered by package name byte-wise (§17.2), then by condition number, then by the carrying stage, or the
   lesser stage of a pair, in the stage order, and then by the stated name, or the greater stage of a pair, in the stage
   order, a stated name that is no stage of the package ranking as a user stage. The stage order sorts by rank, `sign` 1,
-  `version` 2, `syncLock` 3, `build` 4, `tests` and every user stage 5, `publish` 6 and `announce` 7, and then by name
+  `version` 2, `syncLock` 3, `build` 4, `test` and every user stage 5, `publish` 6 and `announce` 7, and then by name
   byte-wise.
 
 §13.11 states the dispat theorem, gives the run durations the three values lead to, and says what no value promises.

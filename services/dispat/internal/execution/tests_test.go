@@ -3,7 +3,7 @@
 
 package execution
 
-// A stage that is neither the build nor the publish, the tests stage here, as
+// A stage that is neither the build nor the publish, the test stage here, as
 // the generic stage path places and runs it: where it may run, what its
 // assignment asks for back, what a node calls it, where the summary sorts it,
 // and what a frame placed on this machine does.
@@ -37,9 +37,9 @@ func TestATestsFrameIsPlacedLikeTheBuild(t *testing.T) {
 	}
 }
 
-// testsStage is the tests stage's descriptor, as the executor hands it over.
+// testsStage is the test stage's descriptor, as the executor hands it over.
 func testsStage() release.Stage {
-	return release.Stage{Name: "tests", Title: "Tests", Placement: release.PlacementByBuild,
+	return release.Stage{Name: "test", Title: "Test", Placement: release.PlacementByBuild,
 		Inputs: release.InputsOwnOutputs}
 }
 
@@ -56,22 +56,22 @@ func TestATestsFrameCarriesNoDeclaredOutputs(t *testing.T) {
 }
 
 // TestANodeRunsATestsFrameUnderItsOwnName: a node serves the generic kind, its
-// scripts read the stage the assignment names, DISPAT_STAGE=tests, its hooks
-// are beforeTests and postTests, an assignment naming no stage is refused, and
+// scripts read the stage the assignment names, DISPAT_STAGE=test, its hooks
+// are beforeTest and postTest, an assignment naming no stage is refused, and
 // the summary sorts the frame between the build and the publication of its
 // package.
 func TestANodeRunsATestsFrameUnderItsOwnName(t *testing.T) {
-	assignment := Assignment{Header: Header{Kind: KindStage}, Stage: "tests"}
+	assignment := Assignment{Header: Header{Kind: KindStage}, Stage: "test"}
 	assert.True(t, isFrameKind(KindStage))
-	assert.Equal(t, "tests", resolveFrameStage(assignment))
-	assert.Equal(t, "Tests", formatStageTitle(resolveFrameStage(assignment)))
-	assert.True(t, isStageName("tests"))
-	for _, name := range []string{"", "run:tests", "../tests", "tests stage"} {
+	assert.Equal(t, "test", resolveFrameStage(assignment))
+	assert.Equal(t, "Test", formatStageTitle(resolveFrameStage(assignment)))
+	assert.True(t, isStageName("test"))
+	for _, name := range []string{"", "run:test", "../tests", "test stage"} {
 		assert.False(t, isStageName(name), "%q", name)
 	}
-	assert.Less(t, resolveStageRank(KindBuild), resolveStageRank("tests"))
-	assert.Less(t, resolveStageRank("tests"), resolveStageRank(KindPublish))
-	assert.Equal(t, "tests", resolveAssignmentStage(KindStage, release.StageRequest{Stage: "tests"}))
+	assert.Less(t, resolveStageRank(KindBuild), resolveStageRank("test"))
+	assert.Less(t, resolveStageRank("test"), resolveStageRank(KindPublish))
+	assert.Equal(t, "test", resolveAssignmentStage(KindStage, release.StageRequest{Stage: "test"}))
 	assert.Empty(t, resolveAssignmentStage(KindBuild, release.StageRequest{Stage: "build"}),
 		"a build assignment reads exactly as it always has")
 }
@@ -83,10 +83,10 @@ func localTestsCoordinator() *Coordinator {
 		Pool: NewPool(nil, nil, LocalNode{Name: "here", Capacity: 1}, zerolog.Nop())}
 }
 
-// testsRequest is the tests frame of one package pinned to this machine.
+// testsRequest is the test frame of one package pinned to this machine.
 func testsRequest() release.StageRequest {
 	space := &model.Space{RunOnly: &public.RunOnly{Build: public.RunOnlyOrchestrator, Publish: public.RunOnlyOrchestrator}}
-	return release.StageRequest{Stage: "tests", Descriptor: testsStage(),
+	return release.StageRequest{Stage: "test", Descriptor: testsStage(),
 		Release: &plan.Release{Pkg: &model.Package{Name: "core", Space: space}}}
 }
 

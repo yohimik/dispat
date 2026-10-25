@@ -48,10 +48,10 @@ scripts:
   verify-unlinked: |
     dispat scanner --root-only --verify-unlinked || exit 1
     phase=pre
-    case "${DISPAT_STAGE:-}" in build|tests) phase=post ;; esac
+    case "${DISPAT_STAGE:-}" in build|test) phase=post ;; esac
     sh ../../scripts/verify-go-sums.sh go.mod go.sum "$phase"
   # The release build: the binaries, exported into dist/. DIST_DIR is
-  # exported for the tests stage, which checks exactly this folder.
+  # exported for the test stage, which checks exactly this folder.
   release-build:
     - dispat exec link --for pkg:dispat
     # DISPAT_EXPORT_BASE is where the export is about to land, which is
@@ -101,7 +101,7 @@ scripts:
     - dispat exec verify-unlinked --for pkg:dispat
   # The CI build gate `dispat run build` executes: the release build and
   # the smoke gate over what it exported, which is what the release runs
-  # as its build and tests stages.
+  # as its build and test stages.
   build:
     - dispat exec release-build --for pkg:dispat
     - dispat exec smoke --for pkg:dispat
@@ -158,7 +158,7 @@ scripts:
 # published as a go.mod no consumer can resolve.
 flow:
   build: release-build
-  tests: smoke
+  test: smoke
   postPublish: released
   onFail: unlink
 

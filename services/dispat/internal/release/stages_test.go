@@ -1,7 +1,7 @@
 package release
 
-// The stage names a release reports and the optional tests stage. The version
-// stage runs under the name its configuration gave it; the tests stage sits on
+// The stage names a release reports and the optional test stage. The version
+// stage runs under the name its configuration gave it; the test stage sits on
 // the one path from a package's build to its publish, gates the publish, and
 // carries exports in both directions like every other stage.
 
@@ -63,9 +63,9 @@ func (b *budgetRunner) Run(ctx context.Context, dir, command string, env []strin
 	return b.fakeRunner.Run(ctx, dir, command, env, stdout, stderr)
 }
 
-// testsExport is what a delegated tests frame reports as its export.
+// testsExport is what a delegated test frame reports as its export.
 func testsExport() []plan.Output {
-	return []plan.Output{{Name: "TESTED", Value: "yes", Source: "a:tests"}}
+	return []plan.Output{{Name: "TESTED", Value: "yes", Source: "a:test"}}
 }
 
 // TestVersionStageRunsUnderItsConfiguredName: a version stage configured as
@@ -112,15 +112,15 @@ func TestVersionStageRunsUnderItsConfiguredName(t *testing.T) {
 	}
 }
 
-// TestTestsStageRunsBetweenBuildAndPublish: the frame runs after the build and
+// TestTestStageRunsBetweenBuildAndPublish: the frame runs after the build and
 // before the publish, under its own name and hook names, and it is reported
 // as a stage of its own.
-func TestTestsStageRunsBetweenBuildAndPublish(t *testing.T) {
+func TestTestStageRunsBetweenBuildAndPublish(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	space := p.Releases["a"].Pkg.Space
-	space.TestsScript = []string{"check"}
-	space.BeforeTestsScript = []string{"pre-check"}
-	space.PostTestsScript = []string{"post-check"}
+	space.TestScript = []string{"check"}
+	space.BeforeTestScript = []string{"pre-check"}
+	space.PostTestScript = []string{"post-check"}
 	r := &fakeRunner{}
 	observer := &fakeObserver{}
 	ex := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Build: 1, Publish: 1})
@@ -132,15 +132,15 @@ func TestTestsStageRunsBetweenBuildAndPublish(t *testing.T) {
 	for i := 1; i < len(order); i++ {
 		assert.Less(t, r.indexOf(order[i-1]), r.indexOf(order[i]), "%s before %s", order[i-1], order[i])
 	}
-	assert.Equal(t, "tests", envValue(t, r.envPrefix(t, "check"), "DISPAT_STAGE"))
-	assert.Equal(t, "beforeTests", envValue(t, r.envPrefix(t, "pre-check"), "DISPAT_STAGE"))
-	assert.Equal(t, "postTests", envValue(t, r.envPrefix(t, "post-check"), "DISPAT_STAGE"))
-	assert.Equal(t, []string{"build", "tests", "publish"}, observer.stagesOf(EventStageSucceeded, "a"))
+	assert.Equal(t, "test", envValue(t, r.envPrefix(t, "check"), "DISPAT_STAGE"))
+	assert.Equal(t, "beforeTest", envValue(t, r.envPrefix(t, "pre-check"), "DISPAT_STAGE"))
+	assert.Equal(t, "postTest", envValue(t, r.envPrefix(t, "post-check"), "DISPAT_STAGE"))
+	assert.Equal(t, []string{"build", "test", "publish"}, observer.stagesOf(EventStageSucceeded, "a"))
 }
 
-// TestTestsStageAbsentLeavesTheRunUnchanged: a space that configures none of
+// TestTestStageAbsentLeavesTheRunUnchanged: a space that configures none of
 // the three sequences has no tests task, no event and no hook.
-func TestTestsStageAbsentLeavesTheRunUnchanged(t *testing.T) {
+func TestTestStageAbsentLeavesTheRunUnchanged(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	r := &fakeRunner{}
 	observer := &fakeObserver{}
@@ -153,11 +153,11 @@ func TestTestsStageAbsentLeavesTheRunUnchanged(t *testing.T) {
 	assert.Equal(t, []string{"build", "publish"}, observer.stagesOf(EventStageSucceeded, "a"))
 }
 
-// TestTestsStageHookAloneGivesTheStage: a hook somebody configured is never
-// silent, so a postTests hook alone is a tests stage with no commands.
-func TestTestsStageHookAloneGivesTheStage(t *testing.T) {
+// TestTestStageHookAloneGivesTheStage: a hook somebody configured is never
+// silent, so a postTest hook alone is a test stage with no commands.
+func TestTestStageHookAloneGivesTheStage(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a"}})
-	p.Releases["a"].Pkg.Space.PostTestsScript = []string{"report"}
+	p.Releases["a"].Pkg.Space.PostTestScript = []string{"report"}
 	r := &fakeRunner{}
 	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Build: 1, Publish: 1}).
 		Run(context.Background(), p)
@@ -166,19 +166,19 @@ func TestTestsStageHookAloneGivesTheStage(t *testing.T) {
 	assert.Equal(t, []string{"build a", "report a", "publish a"}, r.events)
 }
 
-// TestTestsStageFailureGatesThePublish: a failed tests frame fails the package
-// at the tests stage before anything is published, reverts its folder under
+// TestTestStageFailureGatesThePublish: a failed test frame fails the package
+// at the test stage before anything is published, reverts its folder under
 // revertOnFail, runs onFail with the stage it failed at, and skips a consumer
 // that has no release reason of its own.
-func TestTestsStageFailureGatesThePublish(t *testing.T) {
+func TestTestStageFailureGatesThePublish(t *testing.T) {
 	for _, failing := range []string{"pre-check", "check", "post-check"} {
 		t.Run(failing, func(t *testing.T) {
 			p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 			space := p.Releases["a"].Pkg.Space
 			space.RevertOnFail = true
-			space.TestsScript = []string{"check"}
-			space.BeforeTestsScript = []string{"pre-check"}
-			space.PostTestsScript = []string{"post-check"}
+			space.TestScript = []string{"check"}
+			space.BeforeTestScript = []string{"pre-check"}
+			space.PostTestScript = []string{"post-check"}
 			space.OnFailScript = []string{"onfail"}
 			r := &fakeRunner{fail: map[string]bool{failing + " a": true}}
 			rv := &fakeReverter{}
@@ -188,10 +188,10 @@ func TestTestsStageFailureGatesThePublish(t *testing.T) {
 			res := ex.Run(context.Background(), p)
 
 			require.Equal(t, StatusFailed, res["a"].Status)
-			assert.Equal(t, "tests", res["a"].FailedStage)
+			assert.Equal(t, "test", res["a"].FailedStage)
 			assert.Equal(t, -1, r.indexOf("publish a"), "a package that failed its tests is not published")
 			assert.Contains(t, rv.dirs, "a")
-			assert.Equal(t, "tests", envValue(t, r.envPrefix(t, "onfail"), "DISPAT_FAILED_STAGE"))
+			assert.Equal(t, "test", envValue(t, r.envPrefix(t, "onfail"), "DISPAT_FAILED_STAGE"))
 			assert.NotContains(t, tagger.tags, p.Releases["a"].TagName())
 			assert.Equal(t, StatusSkipped, res["b"].Status, "the consumer has no release reason of its own")
 			assert.True(t, res["b"].Blocked)
@@ -200,11 +200,11 @@ func TestTestsStageFailureGatesThePublish(t *testing.T) {
 	}
 }
 
-// TestTestsStageSharesTheBuildBudget: a tests frame holds a build slot, so
-// with one slot no build and no tests frame ever run at the same moment.
-func TestTestsStageSharesTheBuildBudget(t *testing.T) {
+// TestTestStageSharesTheBuildBudget: a test frame holds a build slot, so
+// with one slot no build and no test frame ever run at the same moment.
+func TestTestStageSharesTheBuildBudget(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a", "b", "c"}})
-	p.Releases["a"].Pkg.Space.TestsScript = []string{"check"}
+	p.Releases["a"].Pkg.Space.TestScript = []string{"check"}
 	runner := &budgetRunner{fakeRunner: &fakeRunner{delay: 5 * time.Millisecond}}
 	ex := newExecutor(execSpec{Runner: runner.fakeRunner, Tagger: &fakeTagger{}, Build: 1, Publish: 3})
 	ex.Runner = runner
@@ -213,17 +213,17 @@ func TestTestsStageSharesTheBuildBudget(t *testing.T) {
 	for _, name := range []string{"a", "b", "c"} {
 		require.Equal(t, StatusPublished, res[name].Status)
 	}
-	assert.Equal(t, 1, runner.peak, "one build slot is one build or tests frame at a time")
+	assert.Equal(t, 1, runner.peak, "one build slot is one build or test frame at a time")
 }
 
-// TestTestsStageCarriesExports: what the build exported reaches the tests
-// frame, and what the tests frame exported reaches the publish, exactly as a
+// TestTestStageCarriesExports: what the build exported reaches the tests
+// frame, and what the test frame exported reaches the publish, exactly as a
 // build's export reaches the publish today.
-func TestTestsStageCarriesExports(t *testing.T) {
+func TestTestStageCarriesExports(t *testing.T) {
 	space := &model.Space{
 		Name:          "libs",
 		BuildScript:   []string{`echo "ARTIFACT=core.tgz" >> "$DISPAT_OUTPUT"`},
-		TestsScript:   []string{`env > tests.env && echo "TESTED=core.tgz" >> "$DISPAT_OUTPUT"`},
+		TestScript:    []string{`env > tests.env && echo "TESTED=core.tgz" >> "$DISPAT_OUTPUT"`},
 		PublishScript: []string{`env > publish.env`},
 	}
 	p, dir := shellPlan(t, space)
@@ -236,21 +236,21 @@ func TestTestsStageCarriesExports(t *testing.T) {
 		return string(data)
 	}
 	tests := read("tests.env")
-	assert.Contains(t, tests, "DISPAT_OUTPUT_ARTIFACT=core.tgz\n", "the build's export reaches the tests frame")
-	assert.Contains(t, tests, "DISPAT_STAGE=tests\n")
+	assert.Contains(t, tests, "DISPAT_OUTPUT_ARTIFACT=core.tgz\n", "the build's export reaches the test frame")
+	assert.Contains(t, tests, "DISPAT_STAGE=test\n")
 	publish := read("publish.env")
 	assert.Contains(t, publish, "DISPAT_OUTPUT_ARTIFACT=core.tgz\n")
-	assert.Contains(t, publish, "DISPAT_OUTPUT_TESTED=core.tgz\n", "the tests frame's export reaches the publish")
-	assert.Contains(t, publish, "DISPAT_OUTPUT_SOURCE_TESTED=core:tests\n")
+	assert.Contains(t, publish, "DISPAT_OUTPUT_TESTED=core.tgz\n", "the test frame's export reaches the publish")
+	assert.Contains(t, publish, "DISPAT_OUTPUT_SOURCE_TESTED=core:test\n")
 }
 
-// TestTestsStageTravelsThroughTheRemote: with a remote, the tests frame is
-// handed to it as the "tests" stage, its exports are folded into the release,
+// TestTestStageTravelsThroughTheRemote: with a remote, the test frame is
+// handed to it as the "test" stage, its exports are folded into the release,
 // and a failure on a node is reported in the stage's own words.
-func TestTestsStageTravelsThroughTheRemote(t *testing.T) {
+func TestTestStageTravelsThroughTheRemote(t *testing.T) {
 	t.Run("delegated", func(t *testing.T) {
 		p := mkPlan(planSpec{Names: []string{"a"}})
-		p.Releases["a"].Pkg.Space.TestsScript = []string{"check"}
+		p.Releases["a"].Pkg.Space.TestScript = []string{"check"}
 		remote := &fakeRemote{testsExports: testsExport()}
 		ex := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{}, Build: 1, Publish: 1})
 		ex.Remote = remote
@@ -259,29 +259,29 @@ func TestTestsStageTravelsThroughTheRemote(t *testing.T) {
 		require.Equal(t, StatusPublished, res["a"].Status, "%v", res["a"].Err)
 		require.Len(t, remote.tests, 1)
 		request := remote.tests[0]
-		assert.Equal(t, "tests", request.Stage)
+		assert.Equal(t, "test", request.Stage)
 		assert.Equal(t, []string{"check"}, request.Frame.Commands)
-		assert.Equal(t, "tests", envValue(t, request.Env, "DISPAT_STAGE"))
+		assert.Equal(t, "test", envValue(t, request.Env, "DISPAT_STAGE"))
 		assert.Equal(t, "build-a", res["a"].Worker)
 		assert.Contains(t, p.Releases["a"].Outputs, testsExport()[0])
 	})
 	t.Run("failed on a node", func(t *testing.T) {
 		p := mkPlan(planSpec{Names: []string{"a"}})
-		p.Releases["a"].Pkg.Space.TestsScript = []string{"check"}
+		p.Releases["a"].Pkg.Space.TestScript = []string{"check"}
 		remote := &fakeRemote{failTests: "a", failTestsPart: PartCommands}
 		ex := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{}, Build: 1, Publish: 1})
 		ex.Remote = remote
 		res := ex.Run(context.Background(), p)
 
 		require.Equal(t, StatusFailed, res["a"].Status)
-		assert.Equal(t, "tests", res["a"].FailedStage)
+		assert.Equal(t, "test", res["a"].FailedStage)
 		assert.Empty(t, remote.publishes)
-		assert.Equal(t, "tests script failed", formatRemoteFailure(stageOf(taskTests), PartCommands))
-		assert.Equal(t, "beforeTests hook failed", formatRemoteFailure(stageOf(taskTests), PartBefore))
+		assert.Equal(t, "test script failed", formatRemoteFailure(stageOf(taskTest), PartCommands))
+		assert.Equal(t, "beforeTest hook failed", formatRemoteFailure(stageOf(taskTest), PartBefore))
 	})
 	t.Run("placed here", func(t *testing.T) {
 		p := mkPlan(planSpec{Names: []string{"a"}})
-		p.Releases["a"].Pkg.Space.TestsScript = []string{"check"}
+		p.Releases["a"].Pkg.Space.TestScript = []string{"check"}
 		remote := &fakeRemote{placeHere: "a"}
 		r := &fakeRunner{}
 		ex := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Build: 1, Publish: 1})

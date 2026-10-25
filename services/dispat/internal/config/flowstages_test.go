@@ -106,6 +106,24 @@ func TestFlowConstraintOnlyUserStageKeepsItsOrderingNode(t *testing.T) {
 	assert.True(t, space.StageGraph.IsBefore("lint", "build"))
 }
 
+// TestRemovedPluralTestStageKeysFailAtLoad: prerelease stage spellings must
+// not become user stages when the singular built-in stage is selected.
+func TestRemovedPluralTestStageKeysFailAtLoad(t *testing.T) {
+	for _, row := range []struct {
+		flow map[string]any
+		want string
+	}{
+		{map[string]any{"tests": "check"}, "use flow.test"},
+		{map[string]any{"beforeTests": "check"}, "use flow.beforeTest"},
+		{map[string]any{"postTests": "check"}, "use flow.postTest"},
+		{map[string]any{"lint": map[string]any{"after": "tests"}}, `stage constraint "tests" was renamed to test`},
+	} {
+		_, err := loadRawFlow(t, row.flow)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), row.want)
+	}
+}
+
 // TestFlowUserStageScriptsAreCheckedLikeTheOthers: a defined stage or its
 // hook naming a script nobody declared is refused by the entry's own name.
 func TestFlowUserStageScriptsAreCheckedLikeTheOthers(t *testing.T) {
@@ -167,20 +185,20 @@ func TestFlowGraphRefusalsCarryTheirCode(t *testing.T) {
 // default place by what remains.
 func TestFlowConstraintOnAMissingBuiltInStageStatesNothing(t *testing.T) {
 	pkgs, err := loadRawFlow(t, map[string]any{"build": "build",
-		"lint": map[string]any{"script": "lint", "after": "tests", "before": "publish", "parallel": "announce"}})
+		"lint": map[string]any{"script": "lint", "after": "test", "before": "publish", "parallel": "announce"}})
 	require.NoError(t, err)
 	require.NoError(t, CheckStageGraphs(pkgs))
 	graph := coreOf(t, pkgs).StageGraph
 	assert.True(t, graph.IsBefore("build", "lint"), "the lint keeps its default place")
 	assert.True(t, graph.IsBefore("lint", model.RecordStage))
 
-	pkgs, err = loadRawFlow(t, map[string]any{"build": "build", "tests": "check",
-		"lint": map[string]any{"script": "lint", "after": "tests", "before": "publish"}})
+	pkgs, err = loadRawFlow(t, map[string]any{"build": "build", "test": "check",
+		"lint": map[string]any{"script": "lint", "after": "test", "before": "publish"}})
 	require.NoError(t, err)
 	require.NoError(t, CheckStageGraphs(pkgs))
 	graph = coreOf(t, pkgs).StageGraph
-	assert.Equal(t, []string{"version", "tests"}, graph.Predecessors("lint"),
-		"the remaining constraint places the lint after the tests, in place of its default edge from the build")
+	assert.Equal(t, []string{"version", "test"}, graph.Predecessors("lint"),
+		"the remaining constraint places the lint after the test, in place of its default edge from the build")
 }
 
 func TestExplicitCommandlessPublishKeepsItsStageConstraints(t *testing.T) {

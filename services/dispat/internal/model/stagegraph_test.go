@@ -63,24 +63,24 @@ func nodesOf(graph StageGraph) []string {
 }
 
 // TestStageGraphDefaultChain: with no constraint the built-in stages form the
-// default chain, every user stage sits where the tests sit and is unordered
+// default chain, every user stage sits where the test sit and is unordered
 // with them and with each other, the record follows the publish, and the
 // announce follows the record. Each optional stage left out joins its
 // neighbours directly.
 func TestStageGraphDefaultChain(t *testing.T) {
-	graph := resolve(t, "publish", "zeta", "announce", "build", "version", "alpha", "tests")
-	assert.Equal(t, []string{"version", "build", "alpha", "tests", "zeta", "publish", "record", "announce"}, nodesOf(graph))
-	assert.Equal(t, []string{"version", "build", "alpha", "tests", "zeta", "publish"}, gatingOf(graph))
+	graph := resolve(t, "publish", "zeta", "announce", "build", "version", "alpha", "test")
+	assert.Equal(t, []string{"version", "build", "alpha", "test", "zeta", "publish", "record", "announce"}, nodesOf(graph))
+	assert.Equal(t, []string{"version", "build", "alpha", "test", "zeta", "publish"}, gatingOf(graph))
 	assert.ElementsMatch(t, []string{
-		"version>build", "version>alpha", "version>tests", "version>zeta", "version>publish", "version>announce",
-		"build>alpha", "build>tests", "build>zeta", "build>publish",
-		"alpha>publish", "tests>publish", "zeta>publish",
+		"version>build", "version>alpha", "version>test", "version>zeta", "version>publish", "version>announce",
+		"build>alpha", "build>test", "build>zeta", "build>publish",
+		"alpha>publish", "test>publish", "zeta>publish",
 		"publish>announce", "publish>record", "record>announce",
 	}, edgesOf(graph))
-	assert.False(t, graph.IsBefore("alpha", "tests"))
-	assert.False(t, graph.IsBefore("tests", "alpha"))
-	assert.Equal(t, []string{"version", "build", "alpha", "tests", "zeta"}, graph.Predecessors("publish"))
-	assert.Equal(t, []string{"version", "build", "alpha", "tests", "zeta", "publish", "announce"}, graph.Stages())
+	assert.False(t, graph.IsBefore("alpha", "test"))
+	assert.False(t, graph.IsBefore("test", "alpha"))
+	assert.Equal(t, []string{"version", "build", "alpha", "test", "zeta"}, graph.Predecessors("publish"))
+	assert.Equal(t, []string{"version", "build", "alpha", "test", "zeta", "publish", "announce"}, graph.Stages())
 	assert.True(t, DefaultStageGraph(nil).IsEmpty())
 
 	for name, row := range map[string]struct {
@@ -89,23 +89,23 @@ func TestStageGraphDefaultChain(t *testing.T) {
 		edges  []string
 	}{
 		"every built-in stage": {
-			[]string{"sign", "version", "syncLock", "build", "tests", "publish", "announce"},
-			[]string{"sign", "version", "syncLock", "build", "tests", "publish", "record", "announce"},
+			[]string{"sign", "version", "syncLock", "build", "test", "publish", "announce"},
+			[]string{"sign", "version", "syncLock", "build", "test", "publish", "record", "announce"},
 			[]string{
-				"sign>version", "sign>build", "sign>tests", "sign>publish", "sign>announce",
-				"version>syncLock", "version>build", "version>tests", "version>publish", "version>announce",
-				"syncLock>build", "syncLock>tests", "syncLock>publish", "syncLock>announce",
-				"build>tests", "build>publish", "tests>publish", "publish>record", "publish>announce", "record>announce",
+				"sign>version", "sign>build", "sign>test", "sign>publish", "sign>announce",
+				"version>syncLock", "version>build", "version>test", "version>publish", "version>announce",
+				"syncLock>build", "syncLock>test", "syncLock>publish", "syncLock>announce",
+				"build>test", "build>publish", "test>publish", "publish>record", "publish>announce", "record>announce",
 			}},
 		"the version stage and the build alone": {
 			[]string{"version", "build"},
 			[]string{"version", "build", "record"},
 			[]string{"version>build", "version>record", "build>record"}},
 		"no publish": {
-			[]string{"version", "build", "tests"},
-			[]string{"version", "build", "tests", "record"},
-			[]string{"version>build", "version>tests", "version>record", "build>tests", "build>record", "tests>record"}},
-		"no tests": {
+			[]string{"version", "build", "test"},
+			[]string{"version", "build", "test", "record"},
+			[]string{"version>build", "version>test", "version>record", "build>test", "build>record", "test>record"}},
+		"no test": {
 			[]string{"version", "build", "publish"},
 			[]string{"version", "build", "publish", "record"},
 			[]string{"version>build", "version>publish", "build>publish", "publish>record"}},
@@ -127,8 +127,8 @@ func TestStageGraphDefaultChain(t *testing.T) {
 func TestStageGraphDefaultIsTheUnconstrainedResolution(t *testing.T) {
 	for _, stages := range [][]string{
 		{"version", "build"},
-		{"version", "build", "tests", "publish"},
-		{"sign", "version", "syncLock", "build", "tests", "publish", "announce"},
+		{"version", "build", "test", "publish"},
+		{"sign", "version", "syncLock", "build", "test", "publish", "announce"},
 		{"version", "build", "lint", "announce"},
 		{"version", "build", "docs", "lint", "publish"},
 	} {
@@ -167,39 +167,39 @@ func TestStageGraphRecordWithoutAPublish(t *testing.T) {
 // every stage the publish does not reach precedes it; and a parallel
 // constraint alone leaves a stage in its default place.
 func TestStageGraphConstraints(t *testing.T) {
-	plain := resolve(t, "version", "syncLock", "build", "tests", "publish")
-	restated := resolve(t, "version", "syncLock", StageSpec{Name: "build", After: []string{"syncLock"}}, "tests", "publish")
+	plain := resolve(t, "version", "syncLock", "build", "test", "publish")
+	restated := resolve(t, "version", "syncLock", StageSpec{Name: "build", After: []string{"syncLock"}}, "test", "publish")
 	assert.Equal(t, edgesOf(plain), edgesOf(restated), "restating a default position changes nothing")
 
-	movedPublish := resolve(t, "version", "build", "tests", StageSpec{Name: "publish", After: []string{"build"}}, "announce")
+	movedPublish := resolve(t, "version", "build", "test", StageSpec{Name: "publish", After: []string{"build"}}, "announce")
 	assert.True(t, movedPublish.IsBefore("publish", "announce"), "the announce keeps its own default edge")
-	assert.Contains(t, edgesOf(movedPublish), "tests>publish", "the publication edge keeps the tests before the publish")
-	assert.Equal(t, []string{"version", "build", "tests", "publish"}, gatingOf(movedPublish))
+	assert.Contains(t, edgesOf(movedPublish), "test>publish", "the publication edge keeps the test before the publish")
+	assert.Equal(t, []string{"version", "build", "test", "publish"}, gatingOf(movedPublish))
 
-	movedAnnounce := resolve(t, "version", "build", "tests", "publish", StageSpec{Name: "announce", After: []string{"build"}})
+	movedAnnounce := resolve(t, "version", "build", "test", "publish", StageSpec{Name: "announce", After: []string{"build"}})
 	assert.Contains(t, edgesOf(movedAnnounce), "announce>publish", "the announce lands before the publication")
-	assert.Contains(t, edgesOf(movedAnnounce), "tests>publish", "the publish keeps its own default edge")
+	assert.Contains(t, edgesOf(movedAnnounce), "test>publish", "the publish keeps its own default edge")
 	assert.NotContains(t, edgesOf(movedAnnounce), "publish>announce")
 	assert.True(t, movedAnnounce.IsBefore("announce", RecordStage))
-	assert.Equal(t, []string{"version", "build", "tests", "publish", "announce"}, gatingOf(movedAnnounce))
-	assert.Equal(t, []string{"version", "build", "tests", "publish", "record", "announce"}, nodesOf(movedAnnounce),
+	assert.Equal(t, []string{"version", "build", "test", "publish", "announce"}, gatingOf(movedAnnounce))
+	assert.Equal(t, []string{"version", "build", "test", "publish", "record", "announce"}, nodesOf(movedAnnounce),
 		"the record stays right after the publish in the stage order")
-	assert.False(t, movedAnnounce.IsBefore("announce", "tests") || movedAnnounce.IsBefore("tests", "announce"), "unordered with the tests")
+	assert.False(t, movedAnnounce.IsBefore("announce", "test") || movedAnnounce.IsBefore("test", "announce"), "unordered with the test")
 
-	testsFirst := resolve(t, "version", "build", "publish", StageSpec{Name: "tests", Before: []string{"build"}})
+	testFirst := resolve(t, "version", "build", "publish", StageSpec{Name: "test", Before: []string{"build"}})
 	assert.ElementsMatch(t, []string{
-		"version>build", "version>tests", "version>publish", "build>publish",
-		"tests>build", "tests>publish", "publish>record",
-	}, edgesOf(testsFirst), "the build's own default edge comes from the version stage, so the tests may precede it")
+		"version>build", "version>test", "version>publish", "build>publish",
+		"test>build", "test>publish", "publish>record",
+	}, edgesOf(testFirst), "the build's own default edge comes from the version stage, so the test may precede it")
 
-	beside := resolve(t, "version", "build", "tests", StageSpec{Name: "lint", Parallel: []string{"tests"}}, "publish")
+	beside := resolve(t, "version", "build", "test", StageSpec{Name: "lint", Parallel: []string{"test"}}, "publish")
 	assert.Contains(t, edgesOf(beside), "build>lint", "a parallel constraint keeps the default edges")
 	assert.Contains(t, edgesOf(beside), "lint>publish")
-	assert.False(t, beside.IsBefore("lint", "tests") || beside.IsBefore("tests", "lint"))
+	assert.False(t, beside.IsBefore("lint", "test") || beside.IsBefore("test", "lint"))
 
 	plainLint := resolve(t, "version", "build", "lint", "publish")
 	for name, lint := range map[string]StageSpec{
-		"the tests the package lacks":    {Name: "lint", After: []string{"tests"}},
+		"the test the package lacks":     {Name: "lint", After: []string{"test"}},
 		"an announce the package lacks":  {Name: "lint", Parallel: []string{"announce"}, Before: []string{"sign"}},
 		"the lock-file stage it lacks":   {Name: "lint", After: []string{"syncLock"}},
 		"the version stage's other name": {Name: "lint", After: []string{"propagate", "build"}},
@@ -207,8 +207,8 @@ func TestStageGraphConstraints(t *testing.T) {
 		dropped := resolve(t, "version", "build", lint, "publish")
 		assert.Equal(t, edgesOf(plainLint), edgesOf(dropped), name)
 	}
-	placedByTheRest := resolve(t, "version", "build", "tests", StageSpec{Name: "lint", After: []string{"tests", "sign"}}, "publish")
-	assert.Contains(t, edgesOf(placedByTheRest), "tests>lint")
+	placedByTheRest := resolve(t, "version", "build", "test", StageSpec{Name: "lint", After: []string{"test", "sign"}}, "publish")
+	assert.Contains(t, edgesOf(placedByTheRest), "test>lint")
 	assert.NotContains(t, edgesOf(placedByTheRest), "build>lint", "the remaining constraint still places the stage")
 
 	noPublish := resolve(t, "version", "build", StageSpec{Name: "lint", Before: []string{"publish"}})
@@ -325,12 +325,25 @@ func TestStageGraphParallelRefusalSaysHowToRunBesideTheRelease(t *testing.T) {
 	assert.False(t, observing.IsBefore("lint", "announce") || observing.IsBefore("announce", "lint"))
 }
 
+func TestStageGraphRejectsRemovedPluralTestName(t *testing.T) {
+	for _, specs := range [][]StageSpec{
+		{{Name: "version"}, {Name: "build"}, {Name: "tests"}},
+		{{Name: "version"}, {Name: "build"}, {Name: "lint", After: []string{"tests"}}},
+	} {
+		graph, refusals := ResolveStageGraph(specs)
+		assert.True(t, graph.IsEmpty())
+		require.Len(t, refusals, 1)
+		assert.Equal(t, CodeStageUnknown, refusals[0].Code)
+		assert.Contains(t, refusals[0].Message, "test")
+	}
+}
+
 // TestStageGraphRanks: the stage order the tie-break reads.
 func TestStageGraphRanks(t *testing.T) {
 	assert.Less(t, StageRank("sign"), StageRank("version"))
 	assert.Less(t, StageRank("version"), StageRank("syncLock"))
 	assert.Less(t, StageRank("syncLock"), StageRank("build"))
-	assert.Equal(t, StageRank("tests"), StageRank("anything"))
+	assert.Equal(t, StageRank("test"), StageRank("anything"))
 	assert.Equal(t, StageRank("publish"), StageRank(RecordStage))
 	assert.Less(t, StageRank("publish"), StageRank("announce"))
 	assert.Equal(t, StageRank("version"), StageRank("propagate"))

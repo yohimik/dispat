@@ -118,7 +118,7 @@ type StageRequest struct {
 	// Release is the package's planned release, which names the package, its
 	// folder and the repository it belongs to.
 	Release *plan.Release
-	// Stage is the stage name the frame belongs to ("build", "tests",
+	// Stage is the stage name the frame belongs to ("build", "test",
 	// "publish"), which is what the task is identified by and what the failing
 	// part is reported against.
 	Stage string

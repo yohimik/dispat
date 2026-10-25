@@ -68,7 +68,7 @@ package, because TinyGo's `httptest.Server.Close` waits forever for connections 
 
 What the matrix says at 0.42.0: `pkg/manifest`, `pkg/models`, `pkg/scanner` and `pkg/writer` pass; `pkg/ccme` fails
 its allocation budget (1632 bytes per parse where gc stays under 1500; a different allocator, not a wrong answer). Of
-the CLI's nineteen packages with tests, nine pass (`changelog`, `cond`, `filter`, `fsx`, `globx`, `graph`, `ignore`,
+the CLI's nineteen packages with test, nine pass (`changelog`, `cond`, `filter`, `fsx`, `globx`, `graph`, `ignore`,
 `model`, `plan`); five hang in `httptest` (`app`, `cli`, `github`, `selfupdate`, `webhook`); `config` panics on a
 nil pointer; and `gitx`, `install`, `release` and `script` fail every test that spawns a process, with
 `files setting not implemented` or `directory setting not implemented`, since upstream's `os.StartProcess` honours
@@ -112,7 +112,7 @@ To advance the fork, follow the
 explicitly. Review and commit the manifest and checksums together. The explicit version avoids selecting an unreleased
 draft tag. The darwin spike checks the recorded version on every run and reuses Aqua’s verified downloads.
 
-The release's tests stage runs the complete integration suite against the exact native TinyGo binary its build stage
+The release's test stage runs the complete integration suite against the exact native TinyGo binary its build stage
 exported. Version-stamped self-update fixtures use the same compiler, including trusted TLS update and offline rollback
 checks. Any failed or skipped test fails the stage, so nothing is published. The CI build gate runs the same build and
 tests on native Linux AMD64 and ARM64 builders.

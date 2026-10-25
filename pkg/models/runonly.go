@@ -21,7 +21,7 @@ import (
 //	runOnly: [worker, orchestrator] # build on a node, publish here
 //
 // `build` and `publish` are the two values because they are the two placements
-// a run has: the tests stage and the stages a flow defines before the records
+// a run has: the test stage and the stages a flow defines before the records
 // follow the build's value. The version stage, the lock-file preparation, the
 // space login, the recording, the stages after the records and every run-level
 // hook always run on the orchestrator, so there is nothing for this key to say

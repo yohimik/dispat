@@ -27,7 +27,7 @@ func TestPlanDigestFollowsTheConfiguredStages(t *testing.T) {
 		"the stage's hook": withStage(model.UserStage{Name: "lint", Commands: []string{"make lint"},
 			PostHook: []string{"make report"}}),
 		"the order of the stages": func(options *Options) {
-			libsSpace(options).StageGraph = model.DefaultStageGraph([]string{"version", "build", "tests"})
+			libsSpace(options).StageGraph = model.DefaultStageGraph([]string{"version", "build", "test"})
 		},
 		"a stage moved before the publication": func(options *Options) {
 			graph, refusals := model.ResolveStageGraph([]model.StageSpec{{Name: "version"}, {Name: "build"},

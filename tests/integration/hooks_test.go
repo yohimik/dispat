@@ -1023,28 +1023,28 @@ func megabyteOfX(char string) string {
 	return "head -c 1200000 /dev/zero | tr '\\0' " + char
 }
 
-// testsHookLog is hookLog with the tests frame wired in as well: the tests
+// testsHookLog is hookLog with the test frame wired in as well: the tests
 // stage's own script and its two hooks, each appending its runtime name.
 func testsHookLog() map[string]models.Script {
 	scripts := hookLog()
-	for _, name := range []string{"beforeTests", "tests", "postTests"} {
+	for _, name := range []string{"beforeTest", "test", "postTest"} {
 		scripts[name] = models.Script{"echo $DISPAT_STAGE:$DISPAT_PACKAGE >> ../../hooks.log"}
 	}
 	return scripts
 }
 
-// testsHookFlow is hookFlow with the tests frame referenced from its slots.
+// testsHookFlow is hookFlow with the test frame referenced from its slots.
 func testsHookFlow() *models.SpaceFlowConfig {
 	flow := hookFlow()
-	flow.Tests, flow.BeforeTests, flow.PostTests = []string{"tests"}, []string{"beforeTests"}, []string{"postTests"}
+	flow.Test, flow.BeforeTest, flow.PostTest = []string{"test"}, []string{"beforeTest"}, []string{"postTest"}
 	return flow
 }
 
-// TestHooksTestsFrameFiresBetweenBuildAndPublish: a space configuring the
-// tests stage runs beforeTests, tests and postTests after the build frame and
+// TestHooksTestFrameFiresBetweenBuildAndPublish: a space configuring the
+// test stage runs beforeTest, test and postTest after the build frame and
 // before the publish frame, in a provider's frame and a consumer's alike, and
 // each reports its runtime name.
-func TestHooksTestsFrameFiresBetweenBuildAndPublish(t *testing.T) {
+func TestHooksTestFrameFiresBetweenBuildAndPublish(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = testsHookLog()
@@ -1058,24 +1058,24 @@ func TestHooksTestsFrameFiresBetweenBuildAndPublish(t *testing.T) {
 	r.ReleaseOK()
 	assert.Equal(t, []string{
 		"beforeAll", "beforeBuild", "build", "postBuild",
-		"beforeTests", "tests", "postTests",
+		"beforeTest", "test", "postTest",
 		"beforePublish", "publish", "postPublish",
 		"beforeAnnounce", "announce", "postAnnounce",
 	}, hookSequence(t, r, "core"), "the provider's frame")
 	assert.Equal(t, []string{
 		"beforeAll", "beforeVersion", "version", "postVersion",
 		"beforeBuild", "build", "postBuild",
-		"beforeTests", "tests", "postTests",
+		"beforeTest", "test", "postTest",
 		"beforePublish", "publish", "postPublish",
 		"beforeAnnounce", "announce", "postAnnounce",
 	}, hookSequence(t, r, "app"), "the consumer's frame")
 	assert.ElementsMatch(t, []string{"core@0.1.0", "app@0.0.1"}, r.TagList())
 }
 
-// TestHooksTestsFrameCarriesExports: what the build exports reaches the tests
-// stage, and what the tests stage exports reaches the publish, the way a
+// TestHooksTestFrameCarriesExports: what the build exports reaches the tests
+// stage, and what the test stage exports reaches the publish, the way a
 // build's export has always reached the publish.
-func TestHooksTestsFrameCarriesExports(t *testing.T) {
+func TestHooksTestFrameCarriesExports(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(`echo "ARTIFACT=core-$DISPAT_NEW_VERSION.tgz" >> "$DISPAT_OUTPUT"`, 1)
 	cfg.Scripts["check"] = models.Script{
@@ -1083,30 +1083,30 @@ func TestHooksTestsFrameCarriesExports(t *testing.T) {
 	cfg.Scripts["publish"] = models.Script{
 		`echo "$DISPAT_OUTPUT_ARTIFACT $DISPAT_OUTPUT_TESTED $DISPAT_OUTPUT_SOURCE_TESTED" > ../../publish.txt`}
 	space := cfg.Spaces["libs"]
-	space.Flow.Tests = []string{"check"}
+	space.Flow.Test = []string{"check"}
 	cfg.Spaces["libs"] = space
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
 	r.Commit("feat(core): first release")
 
 	r.ReleaseOK()
-	assert.Equal(t, "tests core-0.1.0.tgz\n", readFile(t, r, "tests.txt"), "the build's export reached the tests stage")
-	assert.Equal(t, "core-0.1.0.tgz core-0.1.0.tgz core:tests\n", readFile(t, r, "publish.txt"),
-		"both exports reached the publish, the tests stage's under its own source")
+	assert.Equal(t, "test core-0.1.0.tgz\n", readFile(t, r, "tests.txt"), "the build's export reached the test stage")
+	assert.Equal(t, "core-0.1.0.tgz core-0.1.0.tgz core:test\n", readFile(t, r, "publish.txt"),
+		"both exports reached the publish, the test stage's under its own source")
 }
 
-// TestHooksTestsFailureGatesThePublish: a tests stage that fails fails its
-// package at the tests stage before anything is published or tagged, onFail
+// TestHooksTestFailureGatesThePublish: a test stage that fails fails its
+// package at the test stage before anything is published or tagged, onFail
 // is told so, and a consumer owed nothing but the provider's propagation is
 // skipped behind it.
-func TestHooksTestsFailureGatesThePublish(t *testing.T) {
+func TestHooksTestFailureGatesThePublish(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["check"] = models.Script{`test "$DISPAT_PACKAGE" != core`}
 	cfg.Scripts["publish"] = models.Script{`echo "$DISPAT_PACKAGE" >> ../../published.log`}
 	cfg.Scripts["failed"] = models.Script{`echo "$DISPAT_PACKAGE:$DISPAT_FAILED_STAGE" >> ../../failed.log`}
 	space := cfg.Spaces["libs"]
-	space.Flow.Tests, space.Flow.OnFail = []string{"check"}, []string{"failed"}
+	space.Flow.Test, space.Flow.OnFail = []string{"check"}, []string{"failed"}
 	cfg.Spaces["libs"] = space
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "app", Provider: "core"}}
 	r.WriteConfigModel(cfg)
@@ -1118,8 +1118,8 @@ func TestHooksTestsFailureGatesThePublish(t *testing.T) {
 	assert.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
 	assert.Empty(t, r.TagList(), "neither package is tagged")
 	assert.NoFileExists(t, r.Path("published.log"), "nothing was published")
-	assert.Equal(t, "core:tests\n", readFile(t, r, "failed.log"))
-	assert.Contains(t, res.Stdout, `"failedStage":"tests"`)
+	assert.Equal(t, "core:test\n", readFile(t, r, "failed.log"))
+	assert.Contains(t, res.Stdout, `"failedStage":"test"`)
 	assert.Contains(t, res.Stdout, `"code":"W194"`, "the consumer is skipped behind its provider")
 }
 
@@ -1160,14 +1160,14 @@ func TestHooksVersionStageRunsUnderItsConfiguredName(t *testing.T) {
 }
 
 // TestHooksRunTestsRunsTheScriptNotTheStage: `dispat run tests` runs the script
-// named tests, as it always has, whatever a flow's tests stage names.
+// named tests, as it always has, whatever a flow's test stage names.
 func TestHooksRunTestsRunsTheScriptNotTheStage(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Scripts["tests"] = models.Script{`echo script >> ../../ran.log`}
 	cfg.Scripts["check"] = models.Script{`echo stage >> ../../ran.log`}
 	space := cfg.Spaces["libs"]
-	space.Flow.Tests = []string{"check"}
+	space.Flow.Test = []string{"check"}
 	cfg.Spaces["libs"] = space
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")

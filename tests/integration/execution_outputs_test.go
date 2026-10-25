@@ -168,7 +168,7 @@ func TestExecutionIgnoredOutputsReachConsumersOnOtherWorkers(t *testing.T) {
 	stopAll(t, workers)
 }
 
-// executionTestsCheck is the tests stage of the scenario below: it records the
+// executionTestsCheck is the test stage of the scenario below: it records the
 // bytes its package's folder holds and the node it ran on, and exports that
 // node for the publish that follows it.
 const executionTestsCheck = `test -d dist &&
@@ -178,19 +178,19 @@ printf '%s %s %s\n' probe-tests-node "$DISPAT_PACKAGE" "${DISPAT_EXECUTION_NODE:
   >> "$DISPAT_IT_EXECUTION_LOG" &&
 echo "TESTED_ON=${DISPAT_EXECUTION_NODE:-orchestrator}" >> "$DISPAT_OUTPUT"`
 
-// TestExecutionTestsFramesCheckTheBuildsOutputsOnWorkers: a tests stage is
+// TestExecutionTestFramesCheckTheBuildsOutputsOnWorkers: a test stage is
 // placed the way the build is, so with the builds pinned to workers every
-// tests frame runs on a worker, reads exactly the bytes its own build
+// test frame runs on a worker, reads exactly the bytes its own build
 // produced, and what it exports reaches the publication on the orchestrator.
 // Nothing is built twice for it.
-func TestExecutionTestsFramesCheckTheBuildsOutputsOnWorkers(t *testing.T) {
+func TestExecutionTestFramesCheckTheBuildsOutputsOnWorkers(t *testing.T) {
 	rig := newExecutionOutputWorkspace(t, func(cfg *models.File) {
 		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker, Publish: models.RunOnlyBoth}
 		cfg.Scripts["check"] = models.Script{executionTestsCheck}
 		cfg.Scripts["publish"] = models.Script{executionOutputPublish + ` &&
 printf '%s %s %s\n' probe-tested "$DISPAT_PACKAGE" "$DISPAT_OUTPUT_TESTED_ON" >> "$DISPAT_IT_EXECUTION_LOG"`}
 		space := cfg.Spaces["libs"]
-		space.Flow.Tests = []string{"check"}
+		space.Flow.Test = []string{"check"}
 		cfg.Spaces["libs"] = space
 	})
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 1)
@@ -204,13 +204,13 @@ printf '%s %s %s\n' probe-tested "$DISPAT_PACKAGE" "$DISPAT_OUTPUT_TESTED_ON" >>
 	published := executionProbeValues(rig, "tested")
 	for _, name := range executionWorkspacePackages {
 		assert.Equal(t, 1, executionBuildCount(rig, name), "%s was built once: %v", name, rig.runs())
-		require.Contains(t, tested, name, "%s ran its tests stage", name)
+		require.Contains(t, tested, name, "%s ran its test stage", name)
 		assert.Equal(t, produced[name], tested[name], "%s's tests read the bytes its build produced", name)
 		assert.Contains(t, []string{executionNode, executionSecondNode}, nodes[name],
 			"%s's tests ran on a worker, as its build was pinned to", name)
 		assert.Equal(t, nodes[name], published[name], "%s's tests export reached its publication", name)
 	}
-	assert.Contains(t, res.Stdout, `"task":"assets:tests"`, "the frame travels as a task of its own")
+	assert.Contains(t, res.Stdout, `"task":"assets:test"`, "the frame travels as a task of its own")
 	assert.ElementsMatch(t,
 		[]string{"assets@0.1.0", "ui@0.1.0", "docs@0.1.0", "app@0.1.0"}, rig.repo.TagList())
 	assert.Empty(t, rig.branches(), "the run closed every coordination branch it created")

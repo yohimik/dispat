@@ -1458,12 +1458,9 @@ func (c *AutoSignConfig) IsEnabled() bool {
 // defines a stage of that name; see Stages and StageHooks.
 type SpaceFlowConfig struct {
 	Build []string `json:"build,omitempty"`
-	// Tests is the optional tests stage, run after the build and before the
-	// publish: its job is checking what the build produced, so a release
-	// whose artefact fails its tests never publishes it. Stating it, or either
-	// of its hooks, gives every releasing package of the level a tests stage;
-	// with none of them the package has no tests stage at all.
-	Tests   []string `json:"tests,omitempty"`
+	// Test is the optional stage that checks built artifacts before publish.
+	// Stating it or either hook gives a package this stage.
+	Test    []string `json:"test,omitempty"`
 	Publish []string `json:"publish,omitempty"`
 	Version []string `json:"version,omitempty"`
 	// Propagate is Version under the stage's other name: the stage that
@@ -1504,8 +1501,8 @@ type SpaceFlowConfig struct {
 	PostPropagate   []string `json:"postPropagate,omitempty"`
 	BeforeBuild     []string `json:"beforeBuild,omitempty"`
 	PostBuild       []string `json:"postBuild,omitempty"`
-	BeforeTests     []string `json:"beforeTests,omitempty"`
-	PostTests       []string `json:"postTests,omitempty"`
+	BeforeTest      []string `json:"beforeTest,omitempty"`
+	PostTest        []string `json:"postTest,omitempty"`
 	BeforePublish   []string `json:"beforePublish,omitempty"`
 	PostPublish     []string `json:"postPublish,omitempty"`
 	BeforeAnnounce  []string `json:"beforeAnnounce,omitempty"`

@@ -86,10 +86,10 @@ otherwise.
 | 11 | `beforeBuild` | hook | Before the build stage. Fails the release. |
 | 12 | `build` | stage | Build stage command(s). Every package has a build stage; one with no `build` entry runs no command there. |
 | 13 | `postBuild` | hook | After the build stage. Fails the release. |
-| 14 | `beforeTests` | hook | Before the tests stage. Fails the release. |
-| 15 | `tests` | stage | Command(s) checking what the build produced. Runs only for a package whose space sets any of `tests`, `beforeTests` and `postTests`; a package without them has no tests stage at all. |
-| 16 | `postTests` | hook | After the tests stage. Fails the release. |
-| - | *(your stages)* | stage | [Stages the flow defines](#stages-of-your-own) sit here by default, where the tests sit, unordered with the tests and with each other, each inside its `before<Name>` and `post<Name>` hooks. A constraint moves one anywhere between the preparing stages and the announce. |
+| 14 | `beforeTest` | hook | Before the test stage. Fails the release. |
+| 15 | `test` | stage | Command(s) checking what the build produced. Runs only for a package whose space sets any of `test`, `beforeTest` and `postTest`; a package without them has no test stage at all. |
+| 16 | `postTest` | hook | After the test stage. Fails the release. |
+| - | *(your stages)* | stage | [Stages the flow defines](#stages-of-your-own) sit here by default, where the test sits, unordered with the test and with each other, each inside its `before<Name>` and `post<Name>` hooks. A constraint moves one anywhere between the preparing stages and the announce. |
 | 17 | `login` | stage | Authentication command(s). Runs once **per space**, before that space's first publish. Every other publish of the space waits on it. See [`flow.login`](#flowlogin). |
 | 18 | `beforePublish` | hook | Before the publish stage, after the login. The last **hook** that can still stop a release. Fails the release. |
 | 19 | `publish` | stage | Publish stage command(s). Still gating. A publish script that exits non-zero has not released the package, so it fails exactly like a failed build and nothing below runs. Runs for a package whose flow sets `publish`, `beforePublish` or `postPublish`, or places `publish` with `before` or `after`; a package without them is recorded right after its last stage instead (see [the order of the stages](#the-order-of-the-stages)). |
@@ -124,36 +124,38 @@ first stage: `beforeAll` runs before it, and it waits for the package's provider
 it comes first. It shares the build budget with the version stage and the build, and it runs on the machine the
 release was started on. A package without that configuration runs exactly the stages it always did.
 
-The tests stage exists only where it is configured, like the sign stage. A package gets one when its space sets any of
-`flow.tests`, `flow.beforeTests` and `flow.postTests`. It runs after the build and before the publish, so a package
+The test stage exists only where it is configured, like the sign stage. A package gets one when its space sets any of
+`flow.test`, `flow.beforeTest` and `flow.postTest`. It runs after the build and before the publish, so a package
 whose artefact fails its checks is never published, and a failure there blocks its consumers exactly as a failed build
 does. What the build [exported](../reference/environment.md#script-outputs) reaches it, and what it exports reaches the
 publish. It shares the build budget, and with worker nodes it is placed the way the build is (see
-[distributed execution](../distributed-execution.md#the-tests-stage)). `dispat run tests` still runs the script named
-`tests`, whatever the flow names.
+[distributed execution](../distributed-execution.md#the-test-stage)). `dispat run tests` still runs the script named
+`tests`, whatever the flow names. The old prerelease `flow.tests`, `flow.beforeTests` and
+`flow.postTests` spellings are refused; rename them to `flow.test`, `flow.beforeTest` and `flow.postTest`.
+Stage constraints that name `tests` must name `test` instead.
 
 ### The order of the stages
 
 A package's stages form a graph, and the graph says what runs before what and what may run at once (the model is
 CCME §13.11). The preparing stages (`sign`, then `version` or `propagate`, then `autoVersion.syncLock`) always come
-first: they rewrite the files every other stage reads. Every package has a `version` stage and a `build`; `tests`,
+first: they rewrite the files every other stage reads. Every package has a `version` stage and a `build`; `test`,
 `publish` and `announce` are in the graph where the flow gives them a script, a hook, or a `before` or `after`
 placement. Stages you define are in the graph when they have an entry. With no constraint the built-in stages form
-the chain `sign → version → syncLock → build → tests → publish → announce`.
+the chain `sign → version → syncLock → build → test → publish → announce`.
 Stages the package lacks are omitted.
-Each [stage of your own](#stages-of-your-own) sits where `tests` sits: after the
-build and before the publish, unordered with the tests and with each other, so a run with room starts them at once.
+Each [stage of your own](#stages-of-your-own) sits where `test` sits: after the
+build and before the publish, unordered with the test and with each other, so a run with room starts them at once.
 
 A stage entry written as an object places its stage:
 
 ```yaml
 flow:
   build: build
-  tests: tests
+  test: test
   publish: publish
   announce: { script: announce, after: build }   # before the publication, where it gates
-  lint: { script: lint, parallel: tests }        # beside the tests, in its default place
-  docs: { script: docs, before: publish, label: "Build the docs" }   # may run beside the build
+  lint: { script: lint, parallel: test }        # beside the test, in its default place
+  render: { script: docs, before: publish, label: "Build the docs" }   # may run beside the build
 ```
 
 - `before: <stage>` runs the stage before the named one and `after: <stage>` after it. Each names a stage of the
@@ -163,13 +165,13 @@ flow:
   moves nothing: a stage stating only `parallel` keeps its default place. It is refused where the other edges relate
   the pair, so `parallel: publish` is refused for a stage before the publication; place it after the publish instead.
 - A stage that does not place itself keeps its default edge from the stages of the greatest rank below it (the ranks
-  are `sign` 1, `version` 2, `syncLock` 3, `build` 4, `tests` and your stages 5, `publish` 6, `announce` 7), whether
-  or not those place themselves: `tests` keeps `build → tests` when the build moves, and `announce` keeps
+  are `sign` 1, `version` 2, `syncLock` 3, `build` 4, `test` and your stages 5, `publish` 6, `announce` 7), whether
+  or not those place themselves: `test` keeps `build → test` when the build moves, and `announce` keeps
   `publish → announce` when the publish moves. The edge belongs to the stage it enters, so an
   `announce: { after: build }` entry drops it and lands before publication, whatever the publish states.
 - Two edges hold whatever the constraints say: the preparing stages precede every other stage, and the build precedes
   the publish, which ships what the build produced.
-- A name that is a built-in stage this package lacks (an unconfigured `tests` or `announce`, the `publish` of a
+- A name that is a built-in stage this package lacks (an unconfigured `test` or `announce`, the `publish` of a
   package with none) is dropped rather than refused, so one shared flow stays valid across packages that differ.
 
 The release records (the changelog entry, the GitHub release and the tag) follow the publish at once, so
@@ -213,7 +215,8 @@ alike, and keeps the entries it does not write. To move an inherited stage, rest
 ### Stages of your own
 
 A flow key that is neither a built-in stage nor a hook defines a stage of that name, written in letters and starting
-with a lower-case one:
+with a lower-case one. Name a stage with a verb such as `scan`, `lint` or `deploy`; the name is
+not checked against an English dictionary:
 
 ```yaml
 scripts:
@@ -221,7 +224,7 @@ scripts:
   fetch-db: ./fetch-vulnerability-db.sh
 flow:
   build: build
-  scan: { script: scan, label: "Security scan" }   # after the build and before the publish, beside the tests
+  scan: { script: scan, label: "Security scan" }   # after the build and before the publish, beside the test
   beforeScan: fetch-db
   publish: publish
 ```
@@ -290,7 +293,7 @@ is `onFail` / `onSkip`) plus the specifics:
 
 | Variable              | Set for  | Meaning                                                 |
 |-----------------------|----------|---------------------------------------------------------|
-| `DISPAT_FAILED_STAGE` | `onFail` | The stage that failed: `sign`, `version` or `propagate`, `syncLock`, `build`, `tests` or `publish`. |
+| `DISPAT_FAILED_STAGE` | `onFail` | The stage that failed: `sign`, `version` or `propagate`, `syncLock`, `build`, `test` or `publish`. |
 | `DISPAT_ERROR`        | `onFail` | The error message of the failing command or operation.  |
 | `DISPAT_BLOCKED_BY`   | `onSkip` | The provider whose failure caused the skip.             |
 

@@ -95,10 +95,10 @@ func TestPlanDigestIsStableAcrossRecomputation(t *testing.T) {
 // purpose is legitimate and requires bumping DigestSchema in the same commit,
 // because a node running the older code has to disagree loudly rather than
 // agree by accident. The value is the fixture's digest under
-// dispat-plan-digest/5, the schema that binds publication and failure blocking
-// edge selections beside the configured stage graph.
+// dispat-plan-digest/6, the schema that names the optional test stage as a verb
+// beside the configured publication and failure blocking graph.
 func TestPlanDigestGolden(t *testing.T) {
-	const golden = "0eb5774c33352144825e9b94c37ef2ee11aa17743857abfab4aed6212ae3bfd3"
+	const golden = "672c13de5127526ea66ba250c5b582b086fb524df3b87eb1da2a9e0253491c89"
 	assert.Equal(t, golden, digestOfFixture(t),
 		"changing the canonical document requires bumping DigestSchema in the same commit")
 }
@@ -184,10 +184,10 @@ func TestPlanDigestFollowsWhatIsReleased(t *testing.T) {
 			o.Packages[0].Space.SignScript = []string{"sign-manifests"}
 		}, heads},
 		"a tests command": {func(o *Options) {
-			o.Packages[0].Space.TestsScript = []string{"make check"}
+			o.Packages[0].Space.TestScript = []string{"make check"}
 		}, heads},
 		"a tests hook": {func(o *Options) {
-			o.Packages[0].Space.PostTestsScript = []string{"collect-reports"}
+			o.Packages[0].Space.PostTestScript = []string{"collect-reports"}
 		}, heads},
 		"the version stage configured as propagate": {func(o *Options) {
 			o.Packages[0].Space.VersionStage = model.StagePropagate

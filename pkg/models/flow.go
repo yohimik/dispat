@@ -56,7 +56,7 @@ func (c StageConfig) IsPlaced() bool {
 // order between its preparation and its records.
 const (
 	FlowStageBuild    = "build"
-	FlowStageTests    = "tests"
+	FlowStageTest     = "test"
 	FlowStagePublish  = "publish"
 	FlowStageAnnounce = "announce"
 )
@@ -80,7 +80,7 @@ const FlowStageRecord = "record"
 // the order the stages run by default.
 var flowStageKeys = []string{
 	FlowStageSign, FlowStageVersion, FlowStagePropagate,
-	FlowStageBuild, FlowStageTests, FlowStagePublish, FlowStageAnnounce,
+	FlowStageBuild, FlowStageTest, FlowStagePublish, FlowStageAnnounce,
 }
 
 // FlowEntryKeys lists every key the `flow` object has a typed field for, as
@@ -92,16 +92,16 @@ func FlowEntryKeys() []string {
 // flowEntryOrder is the typed entries in the order the object is written
 // back in.
 var flowEntryOrder = []string{
-	"build", "tests", "publish", "version", "propagate", "sign", "login", "announce",
+	"build", "test", "publish", "version", "propagate", "sign", "login", "announce",
 	"beforeAll", "beforeSign", "postSign", "beforeVersion", "postVersion",
-	"beforePropagate", "postPropagate", "beforeBuild", "postBuild", "beforeTests", "postTests",
+	"beforePropagate", "postPropagate", "beforeBuild", "postBuild", "beforeTest", "postTest",
 	"beforePublish", "postPublish", "beforeAnnounce", "postAnnounce", "onFail", "onSkip",
 }
 
 // entryFields maps each typed entry's folded key onto the field holding it.
 func (f *SpaceFlowConfig) entryFields() map[string]*[]string {
 	return map[string]*[]string{
-		"build": &f.Build, "tests": &f.Tests, "publish": &f.Publish,
+		"build": &f.Build, "test": &f.Test, "publish": &f.Publish,
 		"version": &f.Version, "propagate": &f.Propagate, "sign": &f.Sign,
 		"login": &f.Login, "announce": &f.Announce,
 		"beforeall":  &f.BeforeAll,
@@ -109,7 +109,7 @@ func (f *SpaceFlowConfig) entryFields() map[string]*[]string {
 		"beforeversion": &f.BeforeVersion, "postversion": &f.PostVersion,
 		"beforepropagate": &f.BeforePropagate, "postpropagate": &f.PostPropagate,
 		"beforebuild": &f.BeforeBuild, "postbuild": &f.PostBuild,
-		"beforetests": &f.BeforeTests, "posttests": &f.PostTests,
+		"beforetest": &f.BeforeTest, "posttest": &f.PostTest,
 		"beforepublish": &f.BeforePublish, "postpublish": &f.PostPublish,
 		"beforeannounce": &f.BeforeAnnounce, "postannounce": &f.PostAnnounce,
 		"onfail": &f.OnFail, "onskip": &f.OnSkip,
@@ -200,6 +200,19 @@ func NormalizeFlow(raw map[string]any, where string, readList FlowListReader) (*
 	seen := make(map[string]string, len(raw))
 	for _, key := range sortedMapKeys(raw) {
 		fold := strings.ToLower(key)
+		replacement := ""
+		switch fold {
+		case "tests":
+			replacement = "test"
+		case "beforetests":
+			replacement = "beforeTest"
+		case "posttests":
+			replacement = "postTest"
+		}
+		if replacement != "" {
+			return nil, fmt.Errorf("%s.%s: use flow.%s; the optional stage is named by the verb test",
+				where, key, replacement)
+		}
 		if first, isDuplicate := seen[fold]; isDuplicate {
 			return nil, fmt.Errorf("%s: keys %q and %q are one name written twice", where, first, key)
 		}
@@ -309,6 +322,7 @@ func readStageObject(object map[string]any, at string, readList FlowListReader) 
 		}
 		path := at + "." + key
 		var err error
+		var refs []string
 		switch strings.ToLower(key) {
 		case "script":
 			out.Script, err = readList(value, path)
@@ -320,15 +334,23 @@ func readStageObject(object map[string]any, at string, readList FlowListReader) 
 			out.Label = label
 		case "before":
 			out.Before, err = readList(value, path)
+			refs = out.Before
 		case "after":
 			out.After, err = readList(value, path)
+			refs = out.After
 		case "parallel":
 			out.Parallel, err = readList(value, path)
+			refs = out.Parallel
 		default:
 			return out, fmt.Errorf("%s: unknown key %q; a stage entry names script, label, before, after and parallel", at, key)
 		}
 		if err != nil {
 			return out, err
+		}
+		for _, target := range refs {
+			if strings.EqualFold(target, "tests") {
+				return out, fmt.Errorf("%s: stage constraint %q was renamed to test", path, target)
+			}
 		}
 	}
 	return out, nil

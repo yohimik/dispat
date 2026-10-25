@@ -202,9 +202,9 @@ Placement follows these rules:
 on, empty meaning any node. A preparation obeys the provider's own `runOnly` and `buildPlatforms`, not its
 consumer's.
 
-### The tests stage
+### The test stage
 
-Configure [`flow.tests`](./configuration/spaces.md#stages-and-hooks) or one of its hooks to run a tests frame after
+Configure [`flow.test`](./configuration/spaces.md#stages-and-hooks) or one of its hooks to run a test frame after
 build and before publish. Tests check the build's output and use build placement rules:
 
 - **It reads the build's `runOnly` value** with the build's meaning, and the same `buildPlatforms`. A space's login
@@ -214,11 +214,11 @@ build and before publish. Tests check the build's output and use build placement
 - **The package's own admitted outputs are installed first** on a node that did not build them, together with the
   provider outputs its build was given, exactly as for a delegated publication. A frame placed on the orchestrator
   installs nothing: the outputs are already in its checkout. A package that declares no `buildOutputs` hands a node
-  its sources alone, so declare what the tests read.
+  its sources alone, so declare what the test scripts read.
 - **It produces no output set.** The admitted set stays the one the build reported. What its scripts export travels
   back in the signed result and reaches the publish, as a build's exports do.
 
-Tests run as a separate `<package>:tests` task and share the build budget. The assignment kind is `stage`; its `stage`
+The test runs as a separate `<package>:test` task and shares the build budget. The assignment kind is `stage`; its `stage`
 field supplies `DISPAT_STAGE` and the hook names. Build and publish assignments keep their existing `build` and
 `publish` kinds.
 
@@ -227,13 +227,13 @@ task unclaimed; it is placed again and eventually fails the package if no node c
 
 ### Stages of your own
 
-A [stage the flow defines](./configuration/spaces.md#stages-of-your-own) travels like the tests stage, under the
+A [stage the flow defines](./configuration/spaces.md#stages-of-your-own) travels like the test stage, under the
 generic `stage` kind naming it, and follows the build's placement rules:
 
 - **Before the release records** it reads the build's `runOnly` value with the build's meaning and the same
   `buildPlatforms`, holds a slot of the build budget, and runs as a `<package>:<stage>` task of its own. Where the
   build reaches it in the [package graph](./configuration/spaces.md#the-order-of-the-stages), it is given the package's
-  own admitted outputs, like the tests stage; where it does not, it is given the providers' outputs, like the build.
+  own admitted outputs, like the test stage; where it does not, it is given the providers' outputs, like the build.
   Output sets travel along the graph's edges only, so a stage never reads what a stage beside it produced. It
   produces no output set of its own: the admitted set stays the build's, and what its scripts export travels back and
   reaches the stages after it.
@@ -241,8 +241,8 @@ generic `stage` kind naming it, and follows the build's placement rules:
   announce stage does.
 
 Two stages the flow leaves unordered are two tasks: they take two slots and may land on two nodes, which is how a
-fleet runs every independent stage of a package at once. A stage you define sits beside the tests by default, so a
-package with tests and two stages of its own fans out to three nodes once its build is admitted.
+fleet runs every independent stage of a package at once. A stage you define sits beside the test stage by default, so a
+package with test and two stages of its own fans out to three nodes once its build is admitted.
 
 ## How a run distributes tasks
 
@@ -276,8 +276,8 @@ What stays on the orchestrator:
 | release commits, tags, changelogs, GitHub releases, records     | a worker is never granted the right to write a release ref  |
 | `postPublish`, every stage after the records (`announce` by default), `onFail`, `onSkip` and every run-level hook | they observe the run, which exists here          |
 
-What a worker runs: the build frame (`beforeBuild`, the build commands, `postBuild`), the tests frame (`beforeTests`,
-the tests commands, `postTests`) where the package has one, the frame of every [stage of your
+What a worker runs: the build frame (`beforeBuild`, the build commands, `postBuild`), the test frame (`beforeTest`,
+the test commands, `postTest`) where the package has one, the frame of every [stage of your
 own](#stages-of-your-own) before the records, and, where `runOnly` delegates it, the publish frame
 (`beforePublish`, the publish commands and the stage's after hook). A frame always runs as one unit on one node,
 because a hook that observed a folder another machine wrote would be observing nothing.

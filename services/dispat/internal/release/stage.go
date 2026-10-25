@@ -132,10 +132,10 @@ var stageTable = []Stage{
 		frame: func(s *model.Space) stage {
 			return stage{before: s.BeforeBuildScript, commands: s.BuildScript, after: s.PostBuildScript}
 		}},
-	{Name: public.FlowStageTests, Title: "Tests", Budget: BudgetBuild, Placement: PlacementByBuild,
-		Inputs: InputsOwnOutputs, kind: taskTests, isPresent: hasTestsStage,
+	{Name: public.FlowStageTest, Title: "Test", Budget: BudgetBuild, Placement: PlacementByBuild,
+		Inputs: InputsOwnOutputs, kind: taskTest, isPresent: hasTestStage,
 		frame: func(s *model.Space) stage {
-			return stage{before: s.BeforeTestsScript, commands: s.TestsScript, after: s.PostTestsScript}
+			return stage{before: s.BeforeTestScript, commands: s.TestScript, after: s.PostTestScript}
 		}},
 	// postPublish is not part of the publish frame: it only runs after the
 	// package is fully published, in the publish tail.
@@ -198,10 +198,10 @@ func hasBuildStage(space *model.Space) bool {
 	return len(space.BuildScript) > 0 || len(space.BeforeBuildScript) > 0 || len(space.PostBuildScript) > 0
 }
 
-// hasTestsStage reports whether a space's packages run a tests stage, on the
+// hasTestStage reports whether a space's packages run a test stage, on the
 // same terms as the build.
-func hasTestsStage(space *model.Space) bool {
-	return len(space.TestsScript) > 0 || len(space.BeforeTestsScript) > 0 || len(space.PostTestsScript) > 0
+func hasTestStage(space *model.Space) bool {
+	return len(space.TestScript) > 0 || len(space.BeforeTestScript) > 0 || len(space.PostTestScript) > 0
 }
 
 // hasPublishStage reports whether a space's packages run a publish stage: its

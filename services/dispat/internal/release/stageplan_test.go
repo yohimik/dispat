@@ -56,7 +56,7 @@ func lintStage() model.UserStage {
 }
 
 // newRunFor is the run Executor.Run builds for a plan, with nothing started,
-// for the tests that execute one task against outcomes staged by hand.
+// for the test that execute one task against outcomes staged by hand.
 func newRunFor(p *plan.Plan, changed map[string]bool, runner *fakeRunner) *run {
 	e := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{}, Build: 4, Publish: 4})
 	results, _ := newReleasingResults(p)
@@ -81,12 +81,12 @@ func (r *run) failedAfterBuild(pkg string) {
 
 // TestUserStageRunsAfterTheBuildAndBeforeThePublish: a defined stage runs
 // under its own name with its own hooks, after the build and before the
-// publish, unordered with the tests, and is reported as a stage of its own
+// publish, unordered with the test, and is reported as a stage of its own
 // with the label the flow gave it.
 func TestUserStageRunsAfterTheBuildAndBeforeThePublish(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	space := p.Releases["a"].Pkg.Space
-	space.TestsScript = []string{"check"}
+	space.TestScript = []string{"check"}
 	space.UserStages = []model.UserStage{lintStage()}
 	space.StageLabels = map[string]string{"lint": "Lint it"}
 	r := &fakeRunner{}
@@ -100,7 +100,7 @@ func TestUserStageRunsAfterTheBuildAndBeforeThePublish(t *testing.T) {
 	assert.Equal(t, "lint", envValue(t, r.envs["lint a"], "DISPAT_STAGE"))
 	assert.Equal(t, "beforeLint", envValue(t, r.envs["h-bl a"], "DISPAT_STAGE"))
 	assert.Equal(t, "postLint", envValue(t, r.envs["h-pl a"], "DISPAT_STAGE"))
-	assert.ElementsMatch(t, []string{"build", "tests", "lint", "publish"}, obs.stagesOf(EventStageSucceeded, "a"))
+	assert.ElementsMatch(t, []string{"build", "test", "lint", "publish"}, obs.stagesOf(EventStageSucceeded, "a"))
 	for _, ev := range obs.events {
 		if ev.Stage == "lint" {
 			assert.Equal(t, "Lint it", ev.Label)
@@ -273,15 +273,15 @@ func TestEveryPackageBuildsAndIsRecorded(t *testing.T) {
 func TestParallelStagesAreHandedOutInTheStageOrder(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	space := p.Releases["a"].Pkg.Space
-	space.TestsScript = []string{"check"}
+	space.TestScript = []string{"check"}
 	space.UserStages = []model.UserStage{lintStage()}
 	changed := map[string]bool{"a": true}
 	sched, _ := (&Executor{}).buildTaskGraph(p, changed, newStagePlans(p, changed))
 
 	assert.Equal(t, []task{{"a", taskBuild, ""}}, sched.Ready())
 	readied := sched.Done(task{"a", taskBuild, ""})
-	assert.Equal(t, []task{{"a", taskUser, "lint"}, {"a", taskTests, ""}}, readied, "the stage order: rank, then name")
-	assert.Empty(t, sched.Done(task{"a", taskTests, ""}), "the publish waits for every stage before it")
+	assert.Equal(t, []task{{"a", taskUser, "lint"}, {"a", taskTest, ""}}, readied, "the stage order: rank, then name")
+	assert.Empty(t, sched.Done(task{"a", taskTest, ""}), "the publish waits for every stage before it")
 	assert.Equal(t, []task{{"a", taskPublish, ""}}, sched.Done(task{"a", taskUser, "lint"}))
 }
 
@@ -450,7 +450,7 @@ func TestExportsReachOnlyTheStagesAStageReaches(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	space := p.Releases["a"].Pkg.Space
 	space.BuildScript = []string{"export FROM_BUILD=1"}
-	space.TestsScript = []string{"export FROM_TESTS=2"}
+	space.TestScript = []string{"export FROM_TESTS=2"}
 	space.UserStages = []model.UserStage{{Name: "lint", Commands: []string{"export FROM_LINT=3"}}}
 	space.PublishScript = []string{"publish"}
 	r := &exportScriptRunner{fakeRunner: &fakeRunner{}}
@@ -461,8 +461,8 @@ func TestExportsReachOnlyTheStagesAStageReaches(t *testing.T) {
 
 	tests, lint, publish := r.seen["export FROM_TESTS=2 a"], r.seen["export FROM_LINT=3 a"], r.seen["publish a"]
 	assert.Equal(t, "1", envValueOrEmpty(tests, "DISPAT_OUTPUT_FROM_BUILD"))
-	assert.Empty(t, envValueOrEmpty(tests, "DISPAT_OUTPUT_FROM_LINT"), "the tests do not read a stage beside them")
-	assert.Empty(t, envValueOrEmpty(lint, "DISPAT_OUTPUT_FROM_TESTS"), "nor the lint the tests")
+	assert.Empty(t, envValueOrEmpty(tests, "DISPAT_OUTPUT_FROM_LINT"), "the test does not read a stage beside it")
+	assert.Empty(t, envValueOrEmpty(lint, "DISPAT_OUTPUT_FROM_TESTS"), "nor the lint the test")
 	assert.Equal(t, "FROM_BUILD FROM_LINT FROM_TESTS", envValueOrEmpty(publish, "DISPAT_OUTPUTS"),
 		"the publish reads every export before it, in the stage order")
 	assert.Equal(t, "a:lint", envValueOrEmpty(publish, "DISPAT_OUTPUT_SOURCE_FROM_LINT"))

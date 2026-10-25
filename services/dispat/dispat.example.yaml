@@ -158,27 +158,27 @@ spaces:
       # Runs once per space, before the space's first publish; every other
       # publish of the space waits for it, and its failure fails them all.
       login: npm-login
-      # The optional tests stage, between the build and the publish: it
+      # The optional test stage, between the build and the publish: it
       # checks what the build produced, so a package whose artefact fails
       # its checks is never published. It reads the build's exports and
       # hands its own to the publish.
-      tests: smoke-test
+      test: smoke-test
       # The object form of an entry: the same scripts, a label the log, the
       # events and the summary show, and a place in the package's stage
       # graph. By default the stages form the chain sign, version, syncLock,
-      # build, tests, publish, the records, announce, with your own stages
-      # beside the tests; a stage stating `before` or `after` places itself,
+      # build, test, publish, the records, announce, with your own stages
+      # beside the test; a stage stating `before` or `after` places itself,
       # one stating neither keeps its default place, `parallel` says two
       # stages are unordered, and a configuration no order realises is
       # refused (E230-E232) before anything runs.
       #   announce: { script: announce, after: build }   # before the publication, where it gates
-      #   scan: { script: smoke-test, label: "Security scan", parallel: tests }
+      #   scan: { script: smoke-test, label: "Security scan", parallel: test }
       #   beforeScan: install                            # the stage's own hooks
       # A stage after the records (the announce by default) only warns and
       # runs on the orchestrator; everything before them gates the release.
       # Hooks around the package stages (beforeAll, beforeSign, postSign,
-      # beforeVersion, postVersion, beforeBuild, postBuild, beforeTests,
-      # postTests, beforePublish, postPublish, beforeAnnounce, postAnnounce).
+      # beforeVersion, postVersion, beforeBuild, postBuild, beforeTest,
+      # postTest, beforePublish, postPublish, beforeAnnounce, postAnnounce).
       # The version entries may be spelled propagate, beforePropagate and
       # postPropagate instead, and the stage then runs and reports as
       # `propagate`; `sign` names the optional sign stage's own scripts.

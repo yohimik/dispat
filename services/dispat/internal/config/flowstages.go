@@ -138,7 +138,7 @@ func resolveStageLabels(sc SpaceConfig) map[string]string {
 // resolveStageGraph resolves the package graph of every stage the package
 // has (§13.11): the version stage and the build, which every package has, the
 // publish where the flow configures one (a package without one has the
-// `none` target), the sign, syncLock, tests and announce stages where the
+// `none` target), the sign, syncLock, test and announce stages where the
 // configuration gives it one, and the stages the flow defines. The version
 // stage goes in under its canonical name whatever key configured it. The
 // resolver reads either spelling of it in a constraint, and drops a built-in
@@ -163,7 +163,7 @@ func resolveStageGraph(sc SpaceConfig) (model.StageGraph, []model.StageDiagnosti
 		name                  string
 		script, before, after []string
 	}{
-		{public.FlowStageTests, flow.Tests, flow.BeforeTests, flow.PostTests},
+		{public.FlowStageTest, flow.Test, flow.BeforeTest, flow.PostTest},
 		{public.FlowStagePublish, flow.Publish, flow.BeforePublish, flow.PostPublish},
 		{public.FlowStageAnnounce, flow.Announce, flow.BeforeAnnounce, flow.PostAnnounce},
 	} {

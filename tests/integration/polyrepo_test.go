@@ -3076,22 +3076,25 @@ func TestPolyrepoCommitModeSourceRestoresASkippedConsumer(t *testing.T) {
 
 	control := harness.New(t)
 	addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-	// core fails only once app's version stage has edited its folder, so the
+	// core fails only once app's beforeAll hook has edited its folder, so the
 	// skip always follows a stage that wrote.
-	appMark := harness.ShQuote(filepath.Join(t.TempDir(), "app"))
+	appMarkPath := filepath.Join(t.TempDir(), "app")
+	appMark := harness.ShQuote(appMarkPath)
 	cfg := polyrepoFile()
 	cfg["spaces"] = centralSpaces(map[string]string{"libs": "sources/lib/packages"})
 	cfg["dependencies"] = map[string]any{"app": []any{"core"}}
 	cfg["scripts"] = map[string]any{
-		"build":  []string{"echo building"},
-		"mutate": []string{"echo dirty >> main.txt && echo extra > extra.txt && : > " + appMark},
-		"publish": []string{`if [ "$DISPAT_PACKAGE" = core ]; then while [ ! -e ` + appMark +
-			` ]; do sleep 0.05; done; exit 1; fi; echo publishing`},
+		"build": []string{"echo building"},
+		"mutate": []string{`if [ "$DISPAT_PACKAGE" = app ]; then ` +
+			`echo dirty >> main.txt && echo extra > extra.txt && : > ` + appMark + `; fi`},
+		"publish": []string{`if [ "$DISPAT_PACKAGE" = core ]; then i=0; ` +
+			`while [ ! -e ` + appMark + ` ] && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i+1)); done; ` +
+			`test -e ` + appMark + ` || exit 2; exit 1; fi; echo publishing`},
 	}
 	cfg["flow"] = map[string]any{
-		"version": []string{"mutate"},
-		"build":   []string{"build"},
-		"publish": []string{"publish"},
+		"beforeAll": []string{"mutate"},
+		"build":     []string{"build"},
+		"publish":   []string{"publish"},
 	}
 	cfg["repositoryOverrides"] = map[string]any{
 		"lib-source": map[string]any{"commit": map[string]any{"enabled": true}},
@@ -3101,6 +3104,7 @@ func TestPolyrepoCommitModeSourceRestoresASkippedConsumer(t *testing.T) {
 
 	res := control.Release()
 	require.Equal(t, 1, res.Code, "the provider's publish failure fails the run\nstdout:\n%s", res.Stdout)
+	assert.FileExists(t, appMarkPath, "app's beforeAll edit preceded the provider failure")
 	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "app"), "app is reported blocked")
 	assert.Empty(t, polyrepoTags(control, "sources/lib"))
 	assert.Equal(t, "app\n", readFileString(t, control.Path("sources", "lib", "packages", "app", "main.txt")),

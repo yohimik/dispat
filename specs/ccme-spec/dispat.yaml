@@ -10,7 +10,7 @@ versionGroup: ccme
 scripts:
   verify-spec: sh verify.sh
   tests: sh test.sh
-  # The release's tests stage: the same suite, after the build has verified
+  # The release's test stage: the same suite, after the build has verified
   # the document. Inside the suite's own fixture releases it does nothing,
   # because those releases read this file too (see test.sh).
   release-tests: '[ -n "${DISPAT_SPEC_TEST_FIXTURE:-}" ] || sh test.sh'
@@ -42,5 +42,5 @@ flow:
   # then verify their consistency again as the build gate.
   beforeVersion: [verify-spec]
   build: verify-spec
-  tests: release-tests
+  test: release-tests
   publish: [changelog, commit]

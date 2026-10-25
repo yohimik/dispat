@@ -303,11 +303,11 @@ type Space struct {
 	BuildScript   []string
 	PublishScript []string
 	VersionScript []string
-	// TestsScript is the optional tests stage's command sequence, run after
+	// TestScript is the optional test stage's command sequence, run after
 	// the build and before the publish: its job is checking what the build
-	// produced. Any of the three tests sequences gives the package a tests
-	// stage; with none of them the package has no tests stage at all.
-	TestsScript []string
+	// produced. Any of its three sequences gives the package a test stage;
+	// with none of them the package has no test stage at all.
+	TestScript []string
 	// VersionStage is the name the version stage runs under, which is the key
 	// that configured it: `propagate` for flow.propagate, autoPropagate or a
 	// propagate hook, `version` otherwise. It is what DISPAT_STAGE, the
@@ -347,8 +347,8 @@ type Space struct {
 	PostVersionScript    []string
 	BeforeBuildScript    []string
 	PostBuildScript      []string
-	BeforeTestsScript    []string
-	PostTestsScript      []string
+	BeforeTestScript     []string
+	PostTestScript       []string
 	BeforePublishScript  []string
 	PostPublishScript    []string
 	BeforeAnnounceScript []string // warn-only, like the announce stage they bracket

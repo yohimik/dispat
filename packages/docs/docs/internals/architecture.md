@@ -114,11 +114,11 @@ read it back as a release tag.
 10. Execute the task graph with per-stage concurrency budgets. This runs, per *releasing* package and excluding held
     packages, the stages of its package graph (CCME §13.11): a sign stage first for a package whose space configures
     one, a version stage for a package that picks up a provider's version or auto-versions, the build every package
-    has, and the tests, the stages the flow defines and the publish where the flow configures them, in the order the
+    has, and the test, the stages the flow defines and the publish where the flow configures them, in the order the
     flow's constraints, the default chain and the engine's own edges resolve to. The version stage runs
     under the name its configuration gave it, `version` or `propagate`. The space's gating hooks bracket each stage
     (`beforeAll`, `beforeSign`/`postSign`, `beforeVersion`/`postVersion`, `beforeBuild`/`postBuild`,
-    `beforeTests`/`postTests`, `before<Name>`/`post<Name>` for a defined stage, `beforePublish`). A space's `flow.login` runs once before
+    `beforeTest`/`postTest`, `before<Name>`/`post<Name>` for a defined stage, `beforePublish`). A space's `flow.login` runs once before
     its first publish. Every other publish in that space waits on it. Source-history mode revalidates a package's
     owner plus the transitive provider and shared-version-group repository closure after `beforePublish` and before its
     publish command. The same check includes control when applicable control intent was consulted or a checkpoint will
@@ -384,7 +384,7 @@ stage cannot be conditional on this run's updates. "Moved" means `Release.Update
 `DueTo`. A provider releasing beside its consumer with no propagation between them still hands it a version to pick up.
 Gating on `DueTo` made a scripted version stage and a native `autoVersion` block disagree about the same run. The
 `syncLock` node exists when an autoVersion space configures the scripts. The `build` node always exists. The
-`tests`, `publish` and `announce` nodes, and a node per stage the flow defines, exist where the flow configures the
+`test`, `publish` and `announce` nodes, and a node per stage the flow defines, exist where the flow configures the
 stage or one of its hooks; the edges among them are the package graph of CCME §13.11, resolved as the configuration
 loads: the flow's constraints, the default chain for the stages that carry none, the preparing stages before every
 other and the build before the publish, with the publication and record edges on top. A package with no `publish`
@@ -401,8 +401,8 @@ follow it in the graph and nothing beside it.
 ```
 
 (The two provider edges land on web's *first* task, its `version`, and on its `publish`. With a sign stage, web's
-chain starts `sign ─► version`, and the first provider edge lands on `sign` instead. With a tests stage, a package's
-chain ends `build ─► tests ─► publish`, and the publish edges are unchanged. Read the bullets below for the precise
+chain starts `sign ─► version`, and the first provider edge lands on `sign` instead. With a test stage, a package's
+chain ends `build ─► test ─► publish`, and the publish edges are unchanged. Read the bullets below for the precise
 rule.)
 
 - What a consumer's **first** task (sign when present, then version, build otherwise) waits for on each changed
@@ -471,14 +471,14 @@ command that covers packages requires only one small file rather than a copy of 
 
 ### The stage seam: where a frame may leave this machine
 
-The task graph stays the same when work moves to other machines. Only build, tests and publish frames, and the
+The task graph stays the same when work moves to other machines. Only build, test and publish frames, and the
 frames of the stages the flow defines before the records, can leave this machine: the sign, version and syncLock frames write the working tree every delegated frame is
 snapshotted from, so they run on the orchestrator under the snapshot guard, as every manifest reconciliation must
 (§28.3 of the specification). [Distributed
 execution](../distributed-execution.md) adds no barrier nodes or edges. Before running a stage frame, the executor asks
 the coordinator whether to run it locally or place it on another node.
 
-The stages are data. One ordered table describes sign, version, syncLock, build, tests, publish and announce: each
+The stages are data. One ordered table describes sign, version, syncLock, build, test, publish and announce: each
 stage's name and hook spelling, the budget its tasks hold, whether its frame stays on the orchestrator or is placed by
 the build's or the publish's `runOnly` value, what a node must install before it runs (nothing, the providers'
 outputs, or the package's own outputs), whether its outputs are admitted, and whether its commands wait for the run's

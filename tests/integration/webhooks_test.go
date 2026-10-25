@@ -859,11 +859,11 @@ func TestWebhookSignStageOnlyWhenConfigured(t *testing.T) {
 	assert.Equal(t, "sign", failed["failedStage"])
 }
 
-// TestWebhookReportsTheTestsAndPropagateStages: a package with a tests stage
+// TestWebhookReportsTheTestAndPropagateStages: a package with a test stage
 // reports it between its build and its publish, a version stage configured as
-// flow.propagate reports itself as propagate, and a tests stage that fails is
+// flow.propagate reports itself as propagate, and a test stage that fails is
 // the failed stage the package event names.
-func TestWebhookReportsTheTestsAndPropagateStages(t *testing.T) {
+func TestWebhookReportsTheTestAndPropagateStages(t *testing.T) {
 	sink := newWebhookSink(t)
 	r := harness.New(t)
 	cfg := webhooksConfig(echoBuild, models.WebhookConfig{URL: sink.srv.URL})
@@ -871,8 +871,8 @@ func TestWebhookReportsTheTestsAndPropagateStages(t *testing.T) {
 	cfg.Scripts["sync"] = models.Script{"echo syncing"}
 	cfg.Scripts["boom"] = models.Script{"exit 1"}
 	cfg.Packages = map[string]models.PackageConfig{
-		"web": {Flow: &models.SpaceFlowConfig{Tests: []string{"check"}, Propagate: []string{"sync"}}},
-		"api": {Flow: &models.SpaceFlowConfig{Tests: []string{"boom"}}},
+		"web": {Flow: &models.SpaceFlowConfig{Test: []string{"check"}, Propagate: []string{"sync"}}},
+		"api": {Flow: &models.SpaceFlowConfig{Test: []string{"boom"}}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
 	r.WriteConfigModel(cfg)
@@ -881,7 +881,7 @@ func TestWebhookReportsTheTestsAndPropagateStages(t *testing.T) {
 	r.SeedPackage("packages", "api")
 	r.Commit("feat(core,web,api): bootstrap three packages")
 	res := r.Release()
-	assert.Equal(t, 1, res.Code, "the failed tests stage fails the run")
+	assert.Equal(t, 1, res.Code, "the failed test stage fails the run")
 
 	stages := map[string][]string{}
 	for _, p := range sink.payloads(t) {
@@ -897,17 +897,17 @@ func TestWebhookReportsTheTestsAndPropagateStages(t *testing.T) {
 	assert.Equal(t, []string{
 		"stage.started:propagate", "stage.succeeded:propagate",
 		"stage.started:build", "stage.succeeded:build",
-		"stage.started:tests", "stage.succeeded:tests",
+		"stage.started:test", "stage.succeeded:test",
 		"stage.started:publish", "stage.succeeded:publish",
 		"package.published:",
 	}, stages["web"])
 	assert.Equal(t, []string{
 		"stage.started:build", "stage.succeeded:build",
-		"stage.started:tests", "package.failed:",
+		"stage.started:test", "package.failed:",
 	}, stages["api"])
 	failed := sink.find(t, "package.failed")
 	assert.Equal(t, "api", failed["package"])
-	assert.Equal(t, "tests", failed["failedStage"])
+	assert.Equal(t, "test", failed["failedStage"])
 }
 
 // TestWebhookGivesUpOnAStatusNoRetryWouldChange: a 5xx and a 429 are

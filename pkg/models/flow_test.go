@@ -15,23 +15,23 @@ func TestFlowReadsEveryEntryForm(t *testing.T) {
 	var flow SpaceFlowConfig
 	require.NoError(t, json.Unmarshal([]byte(`{
 		"build": "build",
-		"tests": ["unit", "smoke"],
+		"test": ["unit", "smoke"],
 		"announce": {"script": "announce", "label": "Tell the world", "after": "build"},
 		"publish": {"label": "Ship"},
-		"lint": {"script": ["lint"], "parallel": ["tests"], "label": "Lint"},
+		"lint": {"script": ["lint"], "parallel": ["test"], "label": "Lint"},
 		"beforeLint": "pre-lint",
 		"postLint": ["post-lint"],
 		"docs": "docs"
 	}`), &flow))
 
 	assert.Equal(t, []string{"build"}, flow.Build)
-	assert.Equal(t, []string{"unit", "smoke"}, flow.Tests)
+	assert.Equal(t, []string{"unit", "smoke"}, flow.Test)
 	assert.Equal(t, []string{"announce"}, flow.Announce, "the object form's script fills the typed field")
 	assert.Nil(t, flow.Publish, "an object without a script states no script")
 	assert.Equal(t, map[string]StageConfig{
 		"announce": {Label: "Tell the world", After: []string{"build"}},
 		"publish":  {Label: "Ship"},
-		"lint":     {Script: []string{"lint"}, Parallel: []string{"tests"}, Label: "Lint"},
+		"lint":     {Script: []string{"lint"}, Parallel: []string{"test"}, Label: "Lint"},
 		"docs":     {Script: []string{"docs"}},
 	}, flow.Stages)
 	assert.Equal(t, map[string][]string{"beforeLint": {"pre-lint"}, "postLint": {"post-lint"}}, flow.StageHooks)
@@ -70,19 +70,19 @@ func TestFlowRoundTrips(t *testing.T) {
 func TestFlowWritesABuiltInStageScriptHeldInItsObject(t *testing.T) {
 	flow := SpaceFlowConfig{Stages: map[string]StageConfig{
 		"announce": {Script: []string{"boom"}, After: []string{"build"}},
-		"tests":    {Script: []string{"unit"}},
+		"test":     {Script: []string{"unit"}},
 	}}
 	data, err := json.Marshal(flow)
 	require.NoError(t, err)
 	var raw map[string]any
 	require.NoError(t, json.Unmarshal(data, &raw))
 	assert.Equal(t, map[string]any{"script": []any{"boom"}, "after": []any{"build"}}, raw["announce"])
-	assert.Equal(t, []any{"unit"}, raw["tests"])
+	assert.Equal(t, []any{"unit"}, raw["test"])
 
 	var back SpaceFlowConfig
 	require.NoError(t, json.Unmarshal(data, &back))
 	assert.Equal(t, []string{"boom"}, back.Announce)
-	assert.Equal(t, []string{"unit"}, back.Tests)
+	assert.Equal(t, []string{"unit"}, back.Test)
 	assert.Equal(t, map[string]StageConfig{"announce": {After: []string{"build"}}}, back.Stages)
 
 	typed := SpaceFlowConfig{Announce: []string{"typed"}, Stages: map[string]StageConfig{"announce": {Script: []string{"object"}}}}
@@ -96,13 +96,13 @@ func TestFlowWritesABuiltInStageScriptHeldInItsObject(t *testing.T) {
 // is still written in the object form.
 func TestFlowStagePlacement(t *testing.T) {
 	assert.True(t, StageConfig{Before: []string{"publish"}}.IsPlaced())
-	assert.True(t, StageConfig{After: []string{"build"}, Parallel: []string{"tests"}}.IsPlaced())
-	assert.False(t, StageConfig{Parallel: []string{"tests"}}.IsPlaced())
+	assert.True(t, StageConfig{After: []string{"build"}, Parallel: []string{"test"}}.IsPlaced())
+	assert.False(t, StageConfig{Parallel: []string{"test"}}.IsPlaced())
 	assert.False(t, StageConfig{Label: "Lint", After: []string{}}.IsPlaced(), "an empty list states no place")
 
-	data, err := json.Marshal(SpaceFlowConfig{Stages: map[string]StageConfig{"lint": {Script: []string{"lint"}, Parallel: []string{"tests"}}}})
+	data, err := json.Marshal(SpaceFlowConfig{Stages: map[string]StageConfig{"lint": {Script: []string{"lint"}, Parallel: []string{"test"}}}})
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"lint": {"script": ["lint"], "parallel": ["tests"]}}`, string(data))
+	assert.JSONEq(t, `{"lint": {"script": ["lint"], "parallel": ["test"]}}`, string(data))
 }
 
 // TestFlowRefusesWhatIsNoStage: a key that cannot name a stage, a hook of one,
@@ -121,6 +121,10 @@ func TestFlowRefusesWhatIsNoStage(t *testing.T) {
 		"a label that is no string": {`{"build": {"label": 3}}`, "flow.build.label: wants a string"},
 		"an object for a hook":      {`{"beforeBuild": {"script": "x"}}`, "wants a script name"},
 		"two spellings of one key":  {`{"build": "a", "Build": "b"}`, "one name written twice"},
+		"removed test stage":        {`{"tests": "check"}`, "use flow.test"},
+		"removed before hook":       {`{"beforeTests": "pre"}`, "use flow.beforeTest"},
+		"removed after hook":        {`{"postTests": "post"}`, "use flow.postTest"},
+		"removed stage reference":   {`{"lint": {"after": ["tests"]}}`, `stage constraint "tests" was renamed to test`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var flow SpaceFlowConfig

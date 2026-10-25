@@ -15,7 +15,7 @@ scripts:
     docker buildx build --file Dockerfile --target typecheck
     $(sh ../../scripts/buildx-cache.sh cli-npm) --output type=cacheonly ../..
   # The release build packs the tarball and exports its path as TARBALL
-  # (with INTEGRITY, PACKED_NAME and PACKED_VERSION); the tests stage
+  # (with INTEGRITY, PACKED_NAME and PACKED_VERSION); the test stage
   # smoke-installs exactly that tarball, and publish uploads it.
   release-build: |
     set -eu
@@ -46,7 +46,7 @@ scripts:
     echo "published @dispat/bin@$DISPAT_NEW_VERSION"
 flow:
   build: release-build
-  tests: release-tests
+  test: release-tests
   publish: publish
   postPublish: released
 github:

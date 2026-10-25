@@ -50,23 +50,23 @@ func flowStageSequence(t *testing.T, r *harness.Repo, pkg string) []string {
 
 // TestFlowConstraintMovesABuiltInStage: beside a constrained publish,
 // `announce: {after: build}` runs the announce frame after the build frame
-// and before the publish, unordered with the tests, and there it gates: a
+// and before the publish, unordered with the test, and there it gates: a
 // failing announce fails the package before anything is published or tagged,
 // where the same announce after the publish only warns.
 func TestFlowConstraintMovesABuiltInStage(t *testing.T) {
 	cfg := harness.BaseFile(1)
-	cfg.Scripts = flowStageLog("build", "tests", "publish", "announce",
-		"beforeBuild", "postBuild", "beforeTests", "postTests", "beforePublish", "postPublish",
+	cfg.Scripts = flowStageLog("build", "test", "publish", "announce",
+		"beforeBuild", "postBuild", "beforeTest", "postTest", "beforePublish", "postPublish",
 		"beforeAnnounce", "postAnnounce")
 	cfg.Scripts["boom"] = models.Script{"exit 1"}
 	flow := &models.SpaceFlowConfig{
-		Build: []string{"build"}, Tests: []string{"tests"}, Publish: []string{"publish"},
+		Build: []string{"build"}, Test: []string{"test"}, Publish: []string{"publish"},
 		Announce: []string{"announce"},
 		Stages: map[string]models.StageConfig{
 			"publish":  {Script: []string{"publish"}, After: []string{"build"}},
 			"announce": {Script: []string{"announce"}, After: []string{"build"}}},
 		BeforeBuild: []string{"beforeBuild"}, PostBuild: []string{"postBuild"},
-		BeforeTests: []string{"beforeTests"}, PostTests: []string{"postTests"},
+		BeforeTest: []string{"beforeTest"}, PostTest: []string{"postTest"},
 		BeforePublish: []string{"beforePublish"}, PostPublish: []string{"postPublish"},
 		BeforeAnnounce: []string{"beforeAnnounce"}, PostAnnounce: []string{"postAnnounce"},
 	}
@@ -85,7 +85,7 @@ func TestFlowConstraintMovesABuiltInStage(t *testing.T) {
 		assert.Equal(t, []string{"beforePublish", "publish", "postPublish"}, sequence[len(sequence)-3:])
 		assert.Less(t, at("beforeAnnounce"), at("announce"))
 		assert.Less(t, at("announce"), at("postAnnounce"))
-		assert.ElementsMatch(t, []string{"beforeAnnounce", "announce", "postAnnounce", "beforeTests", "tests", "postTests"},
+		assert.ElementsMatch(t, []string{"beforeAnnounce", "announce", "postAnnounce", "beforeTest", "test", "postTest"},
 			sequence[3:len(sequence)-3], "the announce and the tests run between them, unordered with each other")
 		assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 	})
@@ -239,14 +239,14 @@ func TestFlowPackagesWithoutAPublishAreStillRecorded(t *testing.T) {
 func TestFlowParallelStagesRunAtOnce(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 2, 1)
-	cfg.Scripts["tests"] = models.Script{
+	cfg.Scripts["test"] = models.Script{
 		`i=0; while [ ! -f ../../lint-started ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done; ` +
 			`test -f ../../lint-started && echo tests-done >> ../../order.log`}
 	cfg.Scripts["lint"] = models.Script{`touch ../../lint-started && echo lint-done >> ../../order.log`}
 	cfg.Scripts["publish"] = models.Script{`echo publish >> ../../order.log`}
 	space := cfg.Spaces["libs"]
-	space.Flow.Tests = []string{"tests"}
-	space.Flow.Stages = map[string]models.StageConfig{"lint": {Script: []string{"lint"}, Parallel: []string{"tests"}}}
+	space.Flow.Test = []string{"test"}
+	space.Flow.Stages = map[string]models.StageConfig{"lint": {Script: []string{"lint"}, Parallel: []string{"test"}}}
 	cfg.Spaces["libs"] = space
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -282,7 +282,7 @@ printf '%s %s %s\n' probe-tested "$DISPAT_PACKAGE" "$DISPAT_OUTPUT_TESTED_ON" >>
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	produced := executionProbeValues(rig, "inputs")
-	verified := executionProbeValues(rig, "tests")
+	verified := executionProbeValues(rig, "test")
 	nodes := executionProbeValues(rig, "tests-node")
 	published := executionProbeValues(rig, "tested")
 	for _, name := range executionWorkspacePackages {

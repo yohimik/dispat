@@ -51,7 +51,7 @@ run refused before that (a blocked plan, failed verification, a failed `run.befo
 |---------------------|----------------------------------------------------------------------------------------------------|
 | `release.started`   | Once, when the task graph is about to start, carrying the whole plan.                             |
 | `release.finished`  | Once, when the run has settled, carrying the outcome counts and every package's status.           |
-| `stage.started`     | When one package's `sign`, `version` or `propagate`, `syncLock`, `build`, `tests`, `publish` or `announce` stage, or a [stage the flow defines](./spaces.md#stages-of-your-own), starts. |
+| `stage.started`     | When one package's `sign`, `version` or `propagate`, `syncLock`, `build`, `test`, `publish` or `announce` stage, or a [stage the flow defines](./spaces.md#stages-of-your-own), starts. |
 | `stage.succeeded`   | When that stage completes. A stage with nothing to run, such as a build with no `build` entry, still fires both; a stage after the records that failed fires `stage.started` alone and only warns. |
 | `package.published` | When one package's publish frame completes, carrying the release tag.                             |
 | `package.failed`    | When one package fails, naming the failed stage and the error.                                    |
@@ -60,7 +60,7 @@ run refused before that (a blocked plan, failed verification, a failed `run.befo
 | `script.progress`   | When a stage script raises it through [`dispat trigger progress`](../cli/trigger.md), with a 0 to 100 value and an optional message. |
 | `script.<word>`     | When a stage script raises its own event through [`dispat trigger <word>`](../cli/trigger.md): the family is open-ended, and a subscription may name any word a trigger can say. |
 
-A stage is observed only for a package that has one: the `build` stage for every package, the `tests`, `publish` and
+A stage is observed only for a package that has one: the `build` stage for every package, the `test`, `publish` and
 `announce` stages for a package whose flow configures the stage or one of its hooks, the `sign` stage for one whose space configures
 [`autoSign`](./autosign.md) or a sign flow entry, and a stage the flow defines under its own name. A package with no
 publish stage reports `package.published` once the stages before its record completed. A stage

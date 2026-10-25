@@ -70,9 +70,9 @@ command and do not require a release plan.
 
 ## Reading version and stage values
 
-`DISPAT_STAGE` carries `sign`, `version` or `propagate`, `build`, `tests`, `publish`, or `announce` for a built-in
+`DISPAT_STAGE` carries `sign`, `version` or `propagate`, `build`, `test`, `publish`, or `announce` for a built-in
 stage script, and the stage's own name for a [stage the flow defines](../configuration/spaces.md#stages-of-your-own)
-(`scan` for `flow.scan`). It holds the hook's name (`beforeSign`, `beforeBuild`, `beforeTests`, `postPublish`,
+(`scan` for `flow.scan`). It holds the hook's name (`beforeSign`, `beforeBuild`, `beforeTest`, `postPublish`,
 `postAll`, ..., and `beforeScan` or `postScan` for a defined stage) for a hook. It holds
 `login` for the login, `syncLock` for an [`autoVersion.syncLock`](../configuration/autoversion.md) script, and
 `run:<name>` for [`dispat run <name>`](../configuration/spaces.md#scripts-and-dispat-run). The version stage runs under

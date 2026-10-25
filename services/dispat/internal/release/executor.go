@@ -64,7 +64,7 @@ type Result struct {
 	Channel string
 	Status  Status
 	// FailedStage names the stage that failed, under the name it ran as:
-	// "sign", "version" or "propagate", "syncLock", "build", "tests",
+	// "sign", "version" or "propagate", "syncLock", "build", "test",
 	// "publish" or a stage the flow defines; empty unless Status is
 	// StatusFailed. FailedStageLabel is the label the flow gave that stage,
 	// empty where it gave none. Both are informational (shown in the summary).
@@ -171,7 +171,7 @@ type Reverterx interface {
 // configures a sign stage gets a sign task before all of them (its job is
 // writing the package's own version). The flow's stages run in the order of
 // the package's stage graph (CCME §13.11, resolved as the configuration
-// loads): by default the build, then the tests and the user stages at once,
+// loads): by default the build, then the test and the user stages at once,
 // then the publish and the announce. The publish records the release in its
 // tail, and a package with no publish records it in a task of its own after
 // its last gating stage. What a consumer's stages after the preparing ones
@@ -191,7 +191,7 @@ type Reverterx interface {
 // (§19.3): a provider reached only through a package with nothing to release
 // still publishes first, and still blocks the consumers behind it.
 //
-// Every package has a version and a build task; the tests, the publish, the
+// Every package has a version and a build task; the test, the publish, the
 // announce and the user stages exist where the flow gives them a script or a
 // hook, and a package with no publish is recorded by a task of its own.
 // Scripts receive DISPAT_* environment
@@ -200,7 +200,7 @@ type Reverterx interface {
 // stage as per-package DISPAT_WORKSPACE_* / DISPAT_UPDATED_* variables).
 //
 // Build and publish stages have independent parallelism budgets: at most
-// BuildConcurrency sign/version/build/tests/user-stage scripts and
+// BuildConcurrency sign/version/build/test/user-stage scripts and
 // PublishConcurrency publish, record and announce scripts run at any moment.
 // A package runs two of its tasks at once only where its graph leaves two
 // stages unordered.
@@ -280,12 +280,12 @@ const (
 	// the version stage, and only for a package whose space configures it
 	// (see hasSignTask).
 	taskSign
-	// taskTests is the optional tests stage, between the package's build and
+	// taskTest is the optional test stage, between the package's build and
 	// its publish: it checks what the build produced, so its failure fails the
 	// package before anything is published. It runs under the build budget
 	// and is placed the way the build is, and only for a package whose space
-	// configures it (see hasTestsTask).
-	taskTests
+	// configures it (see hasTestStage).
+	taskTest
 	// taskAnnounce is the announce stage, which observes a release that is
 	// out by default and gates like its neighbours when the flow places it
 	// before the publish.
@@ -624,7 +624,7 @@ func (e *Executor) addPublishGroupEdges(sched *graph.Scheduler[task], p *plan.Pl
 // the tasks' context stopped.
 func (r *run) drain(tasks context.Context, sched *graph.Scheduler[task], changed map[string]bool) error {
 	// Sign and version tasks share the build budget: they are short local
-	// manifest updates leading straight into the build. Tests tasks share it
+	// manifest updates leading straight into the build. Test tasks share it
 	// too: they are the build's own continuation, checking what it produced. syncLock has its own
 	// budget — almost always 1 — because its whole reason to exist is
 	// serialising lock file regeneration. Draining per class keeps the budgets independent, so

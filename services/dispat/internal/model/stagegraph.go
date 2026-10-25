@@ -185,19 +185,19 @@ func (d StageDiagnostic) DiagnosticCode() string { return d.Code }
 // DiagnosticCategory is the refusal's stable identifier (§28.9).
 func (d StageDiagnostic) DiagnosticCategory() string { return "execution-configuration" }
 
-// Ranks of the default chain. Every user stage ranks with the tests.
+// Ranks of the default chain. Every user stage ranks with the test.
 const (
 	rankSign     = 1
 	rankVersion  = 2
 	rankSyncLock = 3
 	rankBuild    = 4
-	rankTests    = 5
+	rankTest     = 5
 	rankPublish  = 6
 	rankAnnounce = 7
 )
 
 // StageRank is a stage's rank in the default chain: the built-in stages'
-// own, and the tests stage's for every stage a flow defines. The record is
+// own, and the test stage's for every stage a flow defines. The record is
 // ranked right after the publish.
 func StageRank(name string) int {
 	switch name {
@@ -214,7 +214,7 @@ func StageRank(name string) int {
 	case public.FlowStageAnnounce:
 		return rankAnnounce
 	default:
-		return rankTests
+		return rankTest
 	}
 }
 
@@ -327,7 +327,7 @@ func canonicalStage(name string) string {
 func isBuiltInStage(name string) bool {
 	switch name {
 	case public.FlowStageSign, public.FlowStageVersion, public.FlowStageSyncLock, public.FlowStageBuild,
-		public.FlowStageTests, public.FlowStagePublish, public.FlowStageAnnounce:
+		public.FlowStageTest, public.FlowStagePublish, public.FlowStageAnnounce:
 		return true
 	}
 	return false
@@ -344,6 +344,11 @@ func (r *stageResolver) has(name string) bool {
 func (r *stageResolver) checkNames() []StageDiagnostic {
 	var refusals []StageDiagnostic
 	for _, name := range r.order {
+		if name == "tests" {
+			refusals = append(refusals, StageDiagnostic{Code: CodeStageUnknown, Condition: 1, Stage: name,
+				Names: []string{name}, Message: "flow.tests was renamed to flow.test (stage order condition 1)"})
+			continue
+		}
 		spec := r.specs[name]
 		keyOf := map[string]string{}
 		var stated []string
@@ -352,7 +357,7 @@ func (r *stageResolver) checkNames() []StageDiagnostic {
 			names []string
 		}{{"before", spec.Before}, {"after", spec.After}, {"parallel", spec.Parallel}} {
 			for _, target := range constraint.names {
-				if _, isSeen := keyOf[target]; isSeen || (r.has(target) && target != name) {
+				if _, isSeen := keyOf[target]; isSeen || (r.has(target) && target != name && target != "tests") {
 					continue
 				}
 				keyOf[target] = constraint.key
@@ -369,6 +374,10 @@ func (r *stageResolver) checkNames() []StageDiagnostic {
 }
 
 func unknownStageMessage(carrier, key, target string) string {
+	if target == "tests" {
+		return fmt.Sprintf("flow.%s.%s names tests; use test for the optional stage (stage order condition 1)",
+			carrier, key)
+	}
 	if target == carrier {
 		return fmt.Sprintf("flow.%s.%s names the stage itself, which no order places before, after or beside itself (stage order condition 1)",
 			carrier, key)

@@ -575,3 +575,13 @@ duration/slot/priority schedules on all 75 topologically numbered DAGs with one 
 compares the chain-window scan formulas with measured `AuthorScans/op` counts for 64, 128 and 256 packages.
 Its finite enumeration is a computational check of the written proof, not a proof for arbitrary DAGs or a
 claim of unique or globally optimal scheduling. The regular test suite does not require WolframScript.
+
+## 2026-10-26: Canonical test stage name
+
+The optional release gate appeared as `tests` in the published `services/dispat/v1.11.0-rc.7` prerelease. The
+configured-stage implementation names that built-in stage `test`, with `flow.test`, `flow.beforeTest` and
+`flow.postTest`, and uses `test` in graph constraints, task names and `DISPAT_STAGE`. The old prerelease stage
+spelling and hooks are refused at configuration load with migration guidance, so `flow.tests` cannot silently
+become a user stage. Stable 1.10.0 exposed `scripts.tests` and `dispat run tests` as an ordinary script name;
+those remain valid. User-defined stage names are recommended verbs such as `scan`, `lint` and `deploy`, without
+an English-language validity check. The 2026-10-25 entries above retain the stage names used by those designs.

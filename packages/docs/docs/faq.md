@@ -176,7 +176,7 @@ not coordinate their dependency graphs automatically.
 Yes. Configure [`execution`](./configuration/execution.md) and run `dispat worker` on the worker machines. The machine
 that starts the release remains the orchestrator: it owns the plan, locks, authorizations, and release records.
 
-Workers execute assigned stages, which can include build, tests, and publish. Verified output files travel to workers
+Workers execute assigned stages, which can include build, test, and publish. Verified output files travel to workers
 that need them, so a consumer can use a provider's `dist` directory without committing it. Coordination uses Git
 branches, by default in the repository being released. You can configure a separate coordination repository. Workers
 poll it and do not need inbound network access.

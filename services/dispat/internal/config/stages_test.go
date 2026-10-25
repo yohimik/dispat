@@ -1,8 +1,8 @@
 package config
 
 // The names the release stages resolve to. The version stage runs under the
-// key that configured it, `propagate` or `version`, and the tests stage is
-// configured through flow.tests and its two hooks on every level that can
+// key that configured it, `propagate` or `version`, and the test stage is
+// configured through flow.test and its two hooks on every level that can
 // state a flow.
 
 import (
@@ -84,52 +84,52 @@ func TestVersionStageFollowsTheNearestLayer(t *testing.T) {
 	assert.Equal(t, model.StagePropagate, byName["utils"].Space.VersionStage)
 }
 
-// TestTestsStageResolvesLikeTheBuild: flow.tests and its hooks resolve to
+// TestTestStageResolvesLikeTheBuild: flow.test and its hooks resolve to
 // commands, a nearer layer replaces what a farther one stated, and an entry
 // the layer does not name is inherited.
-func TestTestsStageResolvesLikeTheBuild(t *testing.T) {
+func TestTestStageResolvesLikeTheBuild(t *testing.T) {
 	cfg := stagesConfig()
-	cfg.Flow = &SpaceFlowConfig{PostTests: []string{"report"}}
+	cfg.Flow = &SpaceFlowConfig{PostTest: []string{"report"}}
 	withLibs(&cfg, func(s *SpaceConfig) {
-		s.Flow.Tests = []string{"check"}
-		s.Flow.BeforeTests = []string{"pre"}
+		s.Flow.Test = []string{"check"}
+		s.Flow.BeforeTest = []string{"pre"}
 	})
-	cfg.Packages = map[string]PackageConfig{"core": {Flow: &SpaceFlowConfig{Tests: []string{"sync"}}}}
+	cfg.Packages = map[string]PackageConfig{"core": {Flow: &SpaceFlowConfig{Test: []string{"sync"}}}}
 	pkgs, err := discoverPackages(t, writeModelRepo(t, cfg, propagateDirs...))
 	require.NoError(t, err)
 	byName := packagesByName(pkgs)
 	core, utils, app := byName["core"].Space, byName["utils"].Space, byName["app"].Space
-	assert.Equal(t, []string{"echo sync"}, core.TestsScript, "the package's entry replaces the space's")
-	assert.Equal(t, []string{"echo pre"}, core.BeforeTestsScript, "a hook the package does not name is inherited")
-	assert.Equal(t, []string{"collect-reports"}, core.PostTestsScript, "the root's hook reaches every space")
-	assert.Equal(t, []string{"make check"}, utils.TestsScript)
-	assert.Empty(t, app.TestsScript, "a space that states no tests stage has none")
-	assert.Equal(t, []string{"collect-reports"}, app.PostTestsScript)
+	assert.Equal(t, []string{"echo sync"}, core.TestScript, "the package's entry replaces the space's")
+	assert.Equal(t, []string{"echo pre"}, core.BeforeTestScript, "a hook the package does not name is inherited")
+	assert.Equal(t, []string{"collect-reports"}, core.PostTestScript, "the root's hook reaches every space")
+	assert.Equal(t, []string{"make check"}, utils.TestScript)
+	assert.Empty(t, app.TestScript, "a space that states no test stage has none")
+	assert.Equal(t, []string{"collect-reports"}, app.PostTestScript)
 }
 
-// TestTestsStageNamesAnUnknownScript: a tests entry naming no script is the
+// TestTestStageNamesAnUnknownScript: a test entry naming no script is the
 // same load error a build entry naming no script is.
-func TestTestsStageNamesAnUnknownScript(t *testing.T) {
+func TestTestStageNamesAnUnknownScript(t *testing.T) {
 	cfg := stagesConfig()
-	withLibs(&cfg, func(s *SpaceConfig) { s.Flow.Tests = []string{"missing"} })
+	withLibs(&cfg, func(s *SpaceConfig) { s.Flow.Test = []string{"missing"} })
 	_, err := discoverPackages(t, writeModelRepo(t, cfg, propagateDirs...))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "flow.tests")
+	assert.Contains(t, err.Error(), "flow.test")
 	assert.Contains(t, err.Error(), "missing")
 }
 
-// TestTestsStageKeysReadFromAFile: the keys are matched like every other flow
+// TestTestStageKeysReadFromAFile: the keys are matched like every other flow
 // key, so a file spelling them in any case loads them.
-func TestTestsStageKeysReadFromAFile(t *testing.T) {
+func TestTestStageKeysReadFromAFile(t *testing.T) {
 	root := writeRawFile(t, `{
   "scripts": {"check": "make check", "pre": "echo pre", "post": "echo post"},
   "spaces": {"libs": {"path": "packages/libs",
-    "flow": {"tests": "check", "beforeTests": "pre", "PostTests": "post"}}}
+    "flow": {"test": "check", "beforeTest": "pre", "PostTest": "post"}}}
 }`, "packages/libs/core")
 	pkgs, err := discoverPackages(t, root)
 	require.NoError(t, err)
 	core := packagesByName(pkgs)["core"].Space
-	assert.Equal(t, []string{"make check"}, core.TestsScript)
-	assert.Equal(t, []string{"echo pre"}, core.BeforeTestsScript)
-	assert.Equal(t, []string{"echo post"}, core.PostTestsScript)
+	assert.Equal(t, []string{"make check"}, core.TestScript)
+	assert.Equal(t, []string{"echo pre"}, core.BeforeTestScript)
+	assert.Equal(t, []string{"echo post"}, core.PostTestScript)
 }

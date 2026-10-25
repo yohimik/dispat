@@ -40,7 +40,7 @@ const (
 	// KindBuild is one package's build stage.
 	KindBuild = "build"
 	// KindStage is one package's frame of any other delegable stage, such as
-	// the tests stage. The assignment names the stage, which is what its
+	// the test stage. The assignment names the stage, which is what its
 	// scripts read as DISPAT_STAGE and what its hooks are named after; the
 	// build and the publish keep kinds of their own, which every worker has
 	// always served.
