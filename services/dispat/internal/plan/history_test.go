@@ -55,3 +55,28 @@ func TestLocalCommitsAreKeptAsListed(t *testing.T) {
 	require.LessOrEqual(t, kept, float64(7*commits), "a listed commit's parents are kept, not copied")
 	require.GreaterOrEqual(t, copied, kept+float64(commits), "another implementation's commits are copied")
 }
+
+// TestOverlappingWindowsShareTheirKeys pins what a window costs whose
+// commits another window of its repository indexed already: their keys are
+// the ones interned then, looked up without being built again, and the
+// window is read off the union walk in place, so it allocates its own key
+// list and membership set and nothing per commit.
+func TestOverlappingWindowsShareTheirKeys(t *testing.T) {
+	const commits = 400
+	git := linearMergedGit(commits)
+	listing, err := git.Commits(context.Background(), "")
+	require.NoError(t, err)
+	cp := &computation{ctx: context.Background(), log: zerolog.Nop()}
+	history := RepositoryHistory{Name: "source", Root: "/r", Git: git}
+	load := func(boundaries ...string) {
+		idx := newWindowIndex()
+		for _, boundary := range boundaries {
+			idx.unions[historyKey("source", boundary)] = unionWindow{all: listing}
+			_, _, err := cp.load(idx, history, historyKey("source", boundary), "core")
+			require.NoError(t, err)
+		}
+	}
+	one := testing.AllocsPerRun(5, func() { load("") })
+	two := testing.AllocsPerRun(5, func() { load("", "c00") })
+	require.LessOrEqual(t, two-one, float64(commits/8), "a second window over the same commits allocates nothing per commit")
+}

@@ -148,6 +148,17 @@ func historyKey(repository, sha string) string {
 	return repository + historyKeySeparator + sha
 }
 
+// appendHistoryKey appends historyKey(repository, sha) to dst, so that a key
+// can be looked up before it is built as a string of its own.
+func appendHistoryKey(dst []byte, repository, sha string) []byte {
+	if repository == "" {
+		return append(dst, sha...)
+	}
+	dst = append(dst, repository...)
+	dst = append(dst, historyKeySeparator...)
+	return append(dst, sha...)
+}
+
 func splitHistoryKey(key string) (repository, sha string) {
 	if before, after, ok := strings.Cut(key, historyKeySeparator); ok {
 		return before, after
@@ -158,11 +169,6 @@ func splitHistoryKey(key string) (repository, sha string) {
 func rawHistoryKey(key string) string {
 	_, sha := splitHistoryKey(key)
 	return sha
-}
-
-func commitHistoryKey(c historyCommit) string {
-	key := commitKey(c.commit)
-	return historyKey(c.repository, key)
 }
 
 func qualifyParents(repository string, parents []string) []string {
@@ -342,6 +348,9 @@ type windowIndex struct {
 	// unions holds, per cache key, a window already read as part of its
 	// repository's single union walk; see readRepositoryUnions.
 	unions map[string]unionWindow
+	// spelled is where a commit's key is spelled to be looked up in
+	// internedKeys before it is built as a string of its own.
+	spelled []byte
 }
 
 // unionWindow is one boundary's window inside a union listing: the listing,
@@ -372,27 +381,9 @@ func (cp *computation) load(idx *windowIndex, history RepositoryHistory, boundar
 	cacheKey := historyKey(history.Name, rawBoundary)
 	keys, ok := idx.commitLists[cacheKey]
 	if !ok {
-		var raw []gitx.Commit
-		var err error
-		if history.Control && cp.controlIndexed {
-			raw = cp.controlCommitsAfter(rawBoundary)
-		} else if window, read := idx.unions[cacheKey]; read {
-			raw = make([]gitx.Commit, 0, len(window.all)-window.excluded.len())
-			for pos, commit := range window.all {
-				if !window.excluded.has(pos) {
-					raw = append(raw, commit)
-				}
-			}
-			delete(idx.unions, cacheKey)
-		} else {
-			// Stop reading one window after another once the caller has gone.
-			if err := cp.ctx.Err(); err != nil {
-				return nil, "", fmt.Errorf("plan: %s history for %s: %w", history.Name, pkg, err)
-			}
-			raw, err = history.Git.Commits(cp.ctx, rawBoundary)
-			if err != nil {
-				return nil, "", fmt.Errorf("plan: %s history for %s: %w", history.Name, pkg, err)
-			}
+		listing, excluded, err := cp.readWindowListing(idx, history, rawBoundary, pkg)
+		if err != nil {
+			return nil, "", err
 		}
 		counted := pkg != controlIntentLabel
 		if cp.stats != nil && counted {
@@ -400,13 +391,17 @@ func (cp *computation) load(idx *windowIndex, history RepositoryHistory, boundar
 		}
 		repository, root := strings.Clone(history.Name), strings.Clone(history.Root)
 		copyCommit := cp.copyCommitFor(history)
-		keys = make([]string, 0, len(raw))
-		for _, commit := range raw {
-			item := historyCommit{repository: history.Name, root: history.Root, commit: commit}
-			key := commitHistoryKey(item)
-			if interned, exists := idx.internedKeys[key]; exists {
-				key = interned
-			} else {
+		keys = make([]string, 0, len(listing)-excluded.len())
+		for pos, commit := range listing {
+			if excluded.has(pos) {
+				continue
+			}
+			// Spelled into a buffer first: most commits of a window are in
+			// another window already, and their key is the one interned then.
+			idx.spelled = appendHistoryKey(idx.spelled[:0], history.Name, commitKey(commit))
+			key, isInterned := idx.internedKeys[string(idx.spelled)]
+			if !isInterned {
+				key = string(idx.spelled)
 				idx.internedKeys[key] = key
 			}
 			keys = append(keys, key)
@@ -435,6 +430,33 @@ func (cp *computation) load(idx *windowIndex, history RepositoryHistory, boundar
 		idx.windowSets[cacheKey] = set
 	}
 	return set, cacheKey, nil
+}
+
+// readWindowListing is one window of a repository as a listing and the
+// commits of it the window leaves out: the control history from its index,
+// a window its repository's union walk read (taken, so that the walk can go
+// once its last window is loaded), or else the Git implementation's own
+// listing, all of it.
+func (cp *computation) readWindowListing(idx *windowIndex, history RepositoryHistory, rawBoundary, pkg string) (
+	[]gitx.Commit, *commitSet, error) {
+
+	if history.Control && cp.controlIndexed {
+		return cp.controlCommitsAfter(rawBoundary), nil, nil
+	}
+	cacheKey := historyKey(history.Name, rawBoundary)
+	if window, isRead := idx.unions[cacheKey]; isRead {
+		delete(idx.unions, cacheKey)
+		return window.all, window.excluded, nil
+	}
+	// Stop reading one window after another once the caller has gone.
+	if err := cp.ctx.Err(); err != nil {
+		return nil, nil, fmt.Errorf("plan: %s history for %s: %w", history.Name, pkg, err)
+	}
+	listing, err := history.Git.Commits(cp.ctx, rawBoundary)
+	if err != nil {
+		return nil, nil, fmt.Errorf("plan: %s history for %s: %w", history.Name, pkg, err)
+	}
+	return listing, nil, nil
 }
 
 // readRepositoryUnions reads, once, every repository whose windows start at
