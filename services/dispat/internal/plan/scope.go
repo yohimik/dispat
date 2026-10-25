@@ -48,7 +48,7 @@ func (r scopeResult) inert() bool { return r.empty() && len(r.nonPackage) == 0 }
 func (cp *computation) resolveScopeSet(scopes ccme.ScopeSet, written bool, rec *commitRec) scopeResult {
 	res := scopeResult{packages: make(map[string]bool)}
 
-	if !written || !hasInclusion(scopes) {
+	if !written || !isAnyInclusion(scopes) {
 		// No parentheses, or a set consisting only of exclusions: the base is
 		// the set of packages the commit's files belong to (§6.2).
 		for name := range cp.derived(rec) {
@@ -86,7 +86,7 @@ func (cp *computation) resolveScopeSet(scopes ccme.ScopeSet, written bool, rec *
 	return res
 }
 
-func hasInclusion(scopes ccme.ScopeSet) bool {
+func isAnyInclusion(scopes ccme.ScopeSet) bool {
 	for _, t := range scopes {
 		if !t.Exclude {
 			return true

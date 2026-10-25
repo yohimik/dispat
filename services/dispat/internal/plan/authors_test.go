@@ -389,11 +389,11 @@ func TestWindowAttributionFoldsEachCommitsAuthorOnce(t *testing.T) {
 
 	marks := &cp.authorMarks
 	marks.generation++
-	assert.True(t, marks.isFirst(&marks.window, id))
-	assert.False(t, marks.isFirst(&marks.window, same))
-	assert.True(t, marks.isFirst(&marks.fresh, id), "the fresh list is listed apart")
+	assert.True(t, marks.markListed(&marks.window, id))
+	assert.False(t, marks.markListed(&marks.window, same))
+	assert.True(t, marks.markListed(&marks.fresh, id), "the fresh list is listed apart")
 	marks.generation++
-	assert.True(t, marks.isFirst(&marks.window, id), "a new attribution starts with nobody listed")
+	assert.True(t, marks.markListed(&marks.window, id), "a new attribution starts with nobody listed")
 }
 
 // assertAttributionIsTheUnionScan plans a workspace and checks every

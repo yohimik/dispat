@@ -219,10 +219,10 @@ func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author
 		if id < 0 {
 			return
 		}
-		if marks.isFirst(&marks.window, id) {
+		if marks.markListed(&marks.window, id) {
 			window = append(window, a)
 		}
-		if !cp.containedInBaseline(name, rec.key) && marks.isFirst(&marks.fresh, id) {
+		if !cp.containedInBaseline(name, rec.key) && marks.markListed(&marks.fresh, id) {
 			fresh = append(fresh, a)
 		}
 	}
@@ -295,9 +295,9 @@ type authorMarks struct {
 	generation    uint32
 }
 
-// isFirst marks the author as listed in this generation and reports whether
-// it was not yet.
-func (m *authorMarks) isFirst(listed *[]uint32, id int) bool {
+// markListed records the author as listed in this generation and reports
+// whether that is new, false when this attribution listed it already.
+func (m *authorMarks) markListed(listed *[]uint32, id int) bool {
 	if id >= len(*listed) {
 		*listed = append(*listed, make([]uint32, id+1-len(*listed))...)
 	}

@@ -1248,7 +1248,9 @@ type computation struct {
 	// moved a link is not read as a change to a package.
 	linkPaths map[string]map[string]bool
 	// linkPeers is linkNeighbours for every repository, keyed by its folded
-	// name, built the first time a route is asked for.
+	// name, built the first time a route is asked for and never rebuilt.
+	// That holds because histories is complete before the first route is
+	// asked: a change that loads a history later has to drop this index.
 	linkPeers map[string][]string
 	// linkedFleet records that this computation reads a choreographed fleet,
 	// which is what makes a remedy naming a control repository wrong advice.

@@ -26,7 +26,7 @@ import (
 // changed files: it has no inclusion, so its base is the file-derived set, or
 // one of its terms is "." (resolveScopeSet, expandTerm).
 func isScopeSetDerived(scopes ccme.ScopeSet) bool {
-	if !hasInclusion(scopes) {
+	if !isAnyInclusion(scopes) {
 		return true
 	}
 	for _, term := range scopes {
