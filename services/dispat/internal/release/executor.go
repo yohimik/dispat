@@ -254,6 +254,12 @@ const (
 	// and is placed the way the build is, and only for a package whose space
 	// configures it (see hasTestsTask).
 	taskTests
+	// taskPassBuild and taskPassPublish are the pass-through nodes of a
+	// package this run does not release, through which its consumers wait for
+	// the builds and the publishes behind it (see stageGaps). Nothing runs
+	// them, so they have no stage.
+	taskPassBuild
+	taskPassPublish
 )
 
 func (k taskKind) String() string { return stageOf(k).Name }
@@ -425,22 +431,25 @@ func newSpaceLogins(p *plan.Plan) map[spaceLoginKey]*spaceLogin {
 // buildTaskGraph states the releasing packages' task graph and returns it with
 // what each consumer reaches over the publication order.
 func (e *Executor) buildTaskGraph(p *plan.Plan, changed map[string]bool) (*graph.Scheduler[task], map[string][]string) {
-	// Build the task graph. The scheduler owns the dependency bookkeeping —
-	// registration, in-degrees, the became-ready cascade — and this loop only
-	// states the edges; AddEdge registers its nodes as a side effect.
 	// Sorted iteration: the scheduler hands nodes out in insertion order, so
 	// building the edges in name order is what makes launch order — not just
 	// completion semantics — deterministic run to run (§17.2).
+	names := slices.Sorted(maps.Keys(changed))
 	sched := graph.NewScheduler[task]()
-	buildOrder := newBuildReach(p, changed)
-	publishOrder := newPublishReach(p, changed)
-	// What each consumer reaches over the publication order, kept for the skip
-	// cascade: §19.3 computes its closure over the full workspace graph, so the
-	// providers that can block a package are the same set that orders it. It is
-	// filled here, while nothing else runs, and only read afterwards, so every
-	// task goroutine reads one finished index.
-	reachedProviders := make(map[string][]string, len(changed))
-	for _, name := range slices.Sorted(maps.Keys(changed)) {
+	// A consumer reads a provider through whatever lies between them, and what
+	// lies between them need not be releasing, so the build order is taken
+	// over the whole dependency graph and then restricted to the packages that
+	// build (§19.2a). The publication order is taken over the same whole graph
+	// and filtered afterwards, never over the subgraph the plan induces
+	// (§19.2): `app` resolves `core` through an unreleasing `ui` at install
+	// time, so publishing `app` first would record a range reconciled against
+	// a version nobody published.
+	edges := newStageEdges(p, changed)
+	buildGaps := newBuildGaps(edges, names)
+	publishGaps := newPublishGaps(edges, names)
+	buildGaps.addPassThroughs(sched)
+	publishGaps.addPassThroughs(sched)
+	for _, name := range names {
 		pub := task{name, taskPublish}
 		first := addStageChain(sched, p.Releases[name])
 		for _, prov := range p.Providers[name] {
@@ -452,45 +461,48 @@ func (e *Executor) buildTaskGraph(p *plan.Plan, changed map[string]bool) (*graph
 			}
 			sched.AddEdge(task{prov, taskPublish}, pub)
 		}
-		// A consumer reads a provider through whatever lies between them, and
-		// what lies between them need not be releasing, so the build order is
-		// taken over the whole dependency graph and then restricted to the
-		// packages that build (§19.2a). These are the orderings that reach
-		// past a package this run does not build; the loop above states the
-		// ones the consumer's own providers impose.
-		for _, behind := range buildOrder.Indirect(name) {
-			sched.AddEdge(task{behind, taskBuild}, first)
-		}
-		// The publication order is taken over the same whole graph and filtered
-		// afterwards, never over the subgraph the plan induces (§19.2): `app`
-		// resolves `core` through an unreleasing `ui` at install time, so
-		// publishing `app` first would record a range reconciled against a
-		// version nobody published. No relation ends such a path, because under
-		// all three of them a provider publishes before its consumer does.
-		reached := publishOrder.Indirect(name)
-		reachedProviders[name] = reached
-		for _, behind := range reached {
-			sched.AddEdge(task{behind, taskPublish}, pub)
-		}
+		buildGaps.addConsumerEdges(sched, name, first)
+		publishGaps.addConsumerEdges(sched, name, pub)
 	}
+	buildGaps.addGapEdges(sched)
+	publishGaps.addGapEdges(sched)
 	if e.PublishGroup != nil {
-		last := make(map[string]string)
-		for _, name := range p.Order {
-			if !changed[name] {
-				continue
-			}
-			group := e.PublishGroup(p.Releases[name])
-			if group == "" {
-				continue
-			}
-			if previous := last[group]; previous != "" {
-				sched.AddEdge(task{previous, taskPublish}, task{name, taskPublish})
-			}
-			last[group] = name
-		}
+		e.addPublishGroupEdges(sched, p, changed)
 	}
+	return sched, indexReachedProviders(edges, names)
+}
 
-	return sched, reachedProviders
+// addPublishGroupEdges chains the publishes of each publish group in plan
+// order.
+func (e *Executor) addPublishGroupEdges(sched *graph.Scheduler[task], p *plan.Plan, changed map[string]bool) {
+	last := make(map[string]string)
+	for _, name := range p.Order {
+		if !changed[name] {
+			continue
+		}
+		group := e.PublishGroup(p.Releases[name])
+		if group == "" {
+			continue
+		}
+		if previous := last[group]; previous != "" {
+			sched.AddEdge(task{previous, taskPublish}, task{name, taskPublish})
+		}
+		last[group] = name
+	}
+}
+
+// indexReachedProviders is what each consumer reaches over the publication
+// order, kept for the skip cascade: §19.3 computes its closure over the full
+// workspace graph, so the providers that can block a package are the same set
+// that orders it. It is filled before any task runs and only read afterwards,
+// so every task goroutine reads one finished index.
+func indexReachedProviders(edges stageEdges, names []string) map[string][]string {
+	publishOrder := newPublishReach(edges)
+	reachedProviders := make(map[string][]string, len(names))
+	for _, name := range names {
+		reachedProviders[name] = publishOrder.Indirect(name)
+	}
+	return reachedProviders
 }
 
 // drain runs the task graph under the stage budgets until every task ran or

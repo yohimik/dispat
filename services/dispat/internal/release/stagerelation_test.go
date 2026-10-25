@@ -159,32 +159,30 @@ func mkReachPlan(relations map[string]models.StageWait, providers map[string][]s
 func TestStageRelationOrdersBuildsThroughAPackageThatDoesNotBuild(t *testing.T) {
 	for name, c := range map[string]struct {
 		toUI, toCore models.StageWait
-		want         []string
+		isOrdered    bool
 	}{
 		"a readable chain orders the far build": {
-			models.StageWaitBuild, models.StageWaitBuild, []string{"core"}},
+			models.StageWaitBuild, models.StageWaitBuild, true},
 		"a none hop behind the gap ends the path": {
-			models.StageWaitBuild, models.StageWaitNone, nil},
+			models.StageWaitBuild, models.StageWaitNone, false},
 		"a none hop at the gap ends it too": {
-			models.StageWaitNone, models.StageWaitBuild, nil},
+			models.StageWaitNone, models.StageWaitBuild, false},
 		"a publish hop is still a readable hop": {
-			models.StageWaitPublish, models.StageWaitPublish, []string{"core"}},
+			models.StageWaitPublish, models.StageWaitPublish, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p, changed := mkReachPlan(
 				map[string]models.StageWait{"app": models.StageWaitBuild, "ui": c.toUI, "core": c.toCore},
 				map[string][]string{"app": {"ui"}, "ui": {"core"}},
 				"app", "core")
-			assert.Equal(t, c.want, newBuildReach(p, changed).Indirect("app"))
+			assert.Equal(t, c.isOrdered, isHeldBehind(p, changed, task{"core", taskBuild}, task{"app", taskBuild}))
 		})
 	}
 }
 
 // TestStageRelationBuildReachConvergesThroughTwoGaps: a diamond whose two arms
-// are both packages that do not build. The far provider is ordered once, the
-// answer is sorted so the edges enter the scheduler the same way on every run,
-// and a direct changed provider is left to the loop that reads its own
-// relation rather than counted twice.
+// are both packages that do not build. The consumer's build waits for both
+// far providers, and for the provider it names itself.
 func TestStageRelationBuildReachConvergesThroughTwoGaps(t *testing.T) {
 	p, changed := mkReachPlan(
 		map[string]models.StageWait{
@@ -198,13 +196,28 @@ func TestStageRelationBuildReachConvergesThroughTwoGaps(t *testing.T) {
 		},
 		"app", "core", "util", "direct")
 
-	reach := newBuildReach(p, changed)
-	assert.Equal(t, []string{"core", "util"}, reach.Indirect("app"),
-		"one edge per far provider, sorted, and the direct provider is not restated")
-	assert.Empty(t, reach.Indirect("core"), "a package with no providers reaches nothing")
+	for _, provider := range []string{"core", "util", "direct"} {
+		assert.True(t, isHeldBehind(p, changed, task{provider, taskBuild}, task{"app", taskBuild}), provider)
+	}
+	assert.False(t, isHeldBehind(p, changed, task{"util", taskBuild}, task{"core", taskBuild}),
+		"a package with no providers waits for nothing")
+}
 
-	// A second reading answers from the memo rather than walking again.
-	assert.Equal(t, []string{"core", "util"}, reach.Indirect("app"))
+// isHeldBehind reports whether the task graph keeps waiting back while held
+// has not completed: it completes every task it can except held, and answers
+// whether waiting was never handed out.
+func isHeldBehind(p *plan.Plan, changed map[string]bool, held, waiting task) bool {
+	sched, _ := (&Executor{}).buildTaskGraph(p, changed)
+	inFlight := sched.Ready()
+	for next := 0; next < len(inFlight); next++ {
+		if inFlight[next] == waiting {
+			return false
+		}
+		if inFlight[next] != held {
+			inFlight = append(inFlight, sched.Done(inFlight[next])...)
+		}
+	}
+	return true
 }
 
 // TestStageRelationBlockingOutranksOwnWork is the skip cascade's half of the

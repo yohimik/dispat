@@ -1,8 +1,10 @@
 package graph
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 )
 
 // Scheduler is the incremental core of Kahn's algorithm: a dependency graph
@@ -23,7 +25,17 @@ type Scheduler[N comparable] struct {
 	nodes      []N
 	indeg      map[N]int
 	dependents map[N][]N
-	handed     map[N]bool // already returned by Ready or Done
+	handed     map[N]bool // already returned by Ready or Done, or completed in place
+	// passThroughs are the nodes nothing runs, in registration order; see
+	// AddPassThrough.
+	passThroughs  []N
+	isPassThrough map[N]bool
+	// edgeSequences numbers each node's dependent edges in the order they
+	// were stated, and is kept only by a scheduler with pass-through nodes:
+	// it is how Done hands out what a pass-through node readied in the
+	// place of the edge that readied it.
+	edgeSequences map[N][]int
+	edgeCount     int
 }
 
 // NewScheduler returns an empty scheduler.
@@ -45,6 +57,30 @@ func (s *Scheduler[N]) Add(n N) {
 	s.nodes = append(s.nodes, n)
 }
 
+// AddPassThrough registers a node that stands for an ordering rather than for
+// work. It is never handed out and never counted: it completes in place the
+// moment its last dependency does, so its dependents wait for everything it
+// waits for. One between j dependencies and k dependents states with j + k
+// edges what j * k edges would state directly.
+//
+// Pass-through nodes are added before any edge, because only then can every
+// edge be numbered for Done's order, a cost a graph without them never pays.
+func (s *Scheduler[N]) AddPassThrough(n N) {
+	if s.edgeCount > 0 {
+		panic("graph: a pass-through node is added before the edges")
+	}
+	if _, ok := s.indeg[n]; ok {
+		return
+	}
+	if s.isPassThrough == nil {
+		s.isPassThrough = make(map[N]bool)
+		s.edgeSequences = make(map[N][]int)
+	}
+	s.indeg[n] = 0
+	s.isPassThrough[n] = true
+	s.passThroughs = append(s.passThroughs, n)
+}
+
 // AddEdge records that after may only run once before has completed. Both
 // nodes are registered as a side effect.
 func (s *Scheduler[N]) AddEdge(before, after N) {
@@ -52,15 +88,26 @@ func (s *Scheduler[N]) AddEdge(before, after N) {
 	s.Add(after)
 	s.indeg[after]++
 	s.dependents[before] = append(s.dependents[before], after)
+	if s.edgeSequences != nil {
+		s.edgeSequences[before] = append(s.edgeSequences[before], s.edgeCount)
+	}
+	s.edgeCount++
 }
 
-// Len is the total number of nodes.
+// Len is the total number of nodes, pass-through nodes not counted.
 func (s *Scheduler[N]) Len() int { return len(s.nodes) }
 
 // Ready returns the nodes with no pending dependencies that have not been
 // handed out yet, in insertion order. The initial frontier, on a fresh
-// scheduler.
+// scheduler. Pass-through nodes with nothing to wait for complete first, so
+// what they held back is part of the frontier at its own insertion place.
 func (s *Scheduler[N]) Ready() []N {
+	for _, n := range s.passThroughs {
+		if s.indeg[n] == 0 && !s.handed[n] {
+			s.handed[n] = true
+			s.completeOnFrontier(n)
+		}
+	}
 	var out []N
 	for _, n := range s.nodes {
 		if s.indeg[n] == 0 && !s.handed[n] {
@@ -71,9 +118,43 @@ func (s *Scheduler[N]) Ready() []N {
 	return out
 }
 
+// completeOnFrontier completes a pass-through node before anything ran. The
+// pass-through nodes it readies complete with it; the nodes that run are left
+// for Ready's scan, which keeps them in insertion order.
+func (s *Scheduler[N]) completeOnFrontier(n N) {
+	for _, dep := range s.dependents[n] {
+		s.indeg[dep]--
+		if s.indeg[dep] == 0 && s.isPassThrough[dep] && !s.handed[dep] {
+			s.handed[dep] = true
+			s.completeOnFrontier(dep)
+		}
+	}
+}
+
 // Done marks a node complete and returns the nodes that just became ready, in
-// edge insertion order.
+// edge insertion order. A pass-through node it readies completes in place,
+// and each node that readies hands out at the place of the edge that readied
+// it. A caller that states a pass-through node's edges to its dependents where
+// the direct edges would have stood gets the direct graph's order.
 func (s *Scheduler[N]) Done(n N) []N {
+	if s.isPassThrough == nil {
+		return s.completeDirect(n)
+	}
+	readied := s.completeThrough(n, nil)
+	if len(readied) == 0 {
+		return nil
+	}
+	slices.SortFunc(readied, func(a, b readiedNode[N]) int { return cmp.Compare(a.sequence, b.sequence) })
+	out := make([]N, len(readied))
+	for i, r := range readied {
+		out[i] = r.node
+	}
+	return out
+}
+
+// completeDirect is Done on a graph with no pass-through node, whose edges
+// already come in insertion order.
+func (s *Scheduler[N]) completeDirect(n N) []N {
 	var out []N
 	for _, dep := range s.dependents[n] {
 		s.indeg[dep]--
@@ -83,6 +164,35 @@ func (s *Scheduler[N]) Done(n N) []N {
 		}
 	}
 	return out
+}
+
+// readiedNode is a node Done hands out with the number of the edge that
+// readied it.
+type readiedNode[N comparable] struct {
+	node     N
+	sequence int
+}
+
+// completeThrough completes n and appends what it readied, completing in
+// place every pass-through node it readies. In place, rather than after n's
+// own edges, so that a node readied both through a pass-through node and by a
+// later edge of n's is readied by that later edge, as it is when every
+// ordering is stated directly.
+func (s *Scheduler[N]) completeThrough(n N, readied []readiedNode[N]) []readiedNode[N] {
+	sequences := s.edgeSequences[n]
+	for i, dep := range s.dependents[n] {
+		s.indeg[dep]--
+		if s.indeg[dep] != 0 || s.handed[dep] {
+			continue
+		}
+		s.handed[dep] = true
+		if s.isPassThrough[dep] {
+			readied = s.completeThrough(dep, readied)
+			continue
+		}
+		readied = append(readied, readiedNode[N]{node: dep, sequence: sequences[i]})
+	}
+	return readied
 }
 
 // Blocked returns the nodes that still have pending dependencies, in insertion

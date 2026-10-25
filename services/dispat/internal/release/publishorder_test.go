@@ -84,7 +84,7 @@ func TestPublishOrderReachesThroughAPackageThatIsNotInThePlan(t *testing.T) {
 				map[string]models.StageWait{"app": models.StageWaitBuild, "ui": c.toUI, "core": c.toCore},
 				map[string][]string{"app": {"ui"}, "ui": {"core"}},
 				"app", "core")
-			assert.Equal(t, []string{"core"}, newPublishReach(p, changed).Indirect("app"),
+			assert.Equal(t, []string{"core"}, newPublishReach(newStageEdges(p, changed)).Indirect("app"),
 				"no relation declares the publication order away")
 		})
 	}
@@ -109,7 +109,7 @@ func TestPublishOrderConvergesThroughTwoUnreleasingPackages(t *testing.T) {
 		},
 		"app", "core", "util", "direct")
 
-	reach := newPublishReach(p, changed)
+	reach := newPublishReach(newStageEdges(p, changed))
 	assert.Equal(t, []string{"core", "util"}, reach.Indirect("app"),
 		"one edge per far provider, sorted, and the direct provider is not restated")
 	assert.Empty(t, reach.Indirect("core"), "a package with no providers reaches nothing")

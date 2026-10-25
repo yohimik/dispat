@@ -14,8 +14,10 @@ package release
 // relation answers from its own branch.
 
 import (
+	"slices"
 	"sort"
 
+	"github.com/yohimik/dispat/services/dispat/internal/graph"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -40,8 +42,10 @@ func resolveFirstTaskWaits(relation model.StageRelation, provider string) []task
 	return []task{{provider, taskBuild}}
 }
 
-// stageReach indexes the orderings the dependency graph imposes on a consumer
-// beyond the changed providers it names itself (§19.2, §19.2a).
+// stageGaps is one ordering's pass-through nodes in the task graph: one per
+// package this run does not release that the ordering travels through
+// (§19.2, §19.2a), which is what the specification's cost table prices the
+// build readiness row by.
 //
 // A consumer reads its providers through whatever sits between them, and what
 // sits between them need not be releasing: `app` depends on `ui`, `ui` depends
@@ -53,46 +57,167 @@ func resolveFirstTaskWaits(relation model.StageRelation, provider string) []task
 // commonest shape there is: any package with no bump this run sits where `ui`
 // sits.
 //
+// A node for `ui` waits for the stage of every changed provider it carries the
+// ordering from, and for the nodes of the gaps behind it, and the consumer
+// waits for the node. Stated as one edge per consumer and reached provider
+// instead, n consumers behind one gap over m providers cost n * m edges; the
+// nodes cost one edge per dependency edge.
+//
 // The two orderings are the same walk over the same graph asking one question
 // of each hop, which is why they are one type: what differs is whether the
-// ordering travels through a provider with a given relation, and nothing else.
-//
-// It is an index rather than extra nodes in the task graph. The specification
-// suggests a pass-through node per package that does not build, which is the
-// same asymptotics; here it would mean the scheduler holding nodes that no
-// stage budget prices and that nothing executes, so every task the drain hands
-// out would have to be asked first whether it is real. Answering the question
-// beside the graph instead leaves the drain and the task execution exactly as
-// they were. The walk visits each package once and memoises its answer, so one
-// index costs one pass over the graph rather than a search per pair.
-type stageReach struct {
-	providers map[string][]string
-	changed   map[string]bool
-	relations map[string]model.StageRelation
-	// isCarriedThrough is the question this index asks of every hop: does the
-	// ordering it indexes travel through a provider under this relation. One
-	// index answers one question, so its memo below is never a mixture of two.
+// ordering travels through a provider with a given relation, and which stage
+// it orders.
+type stageGaps struct {
+	stageEdges
+	// isCarriedThrough is the question this ordering asks of every hop: does it
+	// travel through a provider under this relation.
 	isCarriedThrough func(model.StageRelation) bool
-	// nearest memoises, per package, the changed packages it reaches through
-	// hops that carry the ordering, stopping at each one: a changed package's
-	// own edges carry whatever lies behind it.
-	nearest map[string][]string
+	// stage is the task of a changed provider the ordering waits for, and
+	// passThrough the kind of the gaps' nodes.
+	stage, passThrough taskKind
+	// gaps lists the packages the ordering passes through, in the order the
+	// consumers, in name order, first reach them.
+	gaps  []string
+	isGap map[string]bool
+	// firstReached lists per consumer, sorted, the changed providers no
+	// consumer before it in name order reaches through a gap. The literal
+	// graph states one edge per reached provider in the consumer's turn, which
+	// registers a provider's task that early, and the scheduler's insertion
+	// order is the order its initial frontier is handed out in.
+	firstReached map[string][]string
 }
 
-// newBuildReach indexes the build orderings of §19.2a: a path ends at the
-// first hop whose relation is `none`, which is the declaration that nothing
-// the provider builds reaches the consumer's build, and what a package does
-// not read it cannot pass on.
-func newBuildReach(p *plan.Plan, changed map[string]bool) *stageReach {
-	return newStageReach(p, changed, model.StageRelation.IsBuildWaitingBuild)
+// newBuildGaps finds the gaps of the build orderings of §19.2a: a path ends at
+// the first hop whose relation is `none`, which is the declaration that
+// nothing the provider builds reaches the consumer's build, and what a package
+// does not read it cannot pass on.
+func newBuildGaps(edges stageEdges, consumers []string) *stageGaps {
+	return newStageGaps(edges, consumers, buildGapKinds)
 }
 
-// newPublishReach indexes the publication orderings of §19.2: every path is
-// walked to its end, because a relation cannot declare the publication order
-// away. The consumer resolves the provider at install time through whatever
-// lies between them, whether or not that build read anything of it.
-func newPublishReach(p *plan.Plan, changed map[string]bool) *stageReach {
-	return newStageReach(p, changed, isPublicationCarried)
+// newPublishGaps finds the gaps of the publication orderings of §19.2: every
+// path is walked to its end, because a relation cannot declare the
+// publication order away. The consumer resolves the provider at install time
+// through whatever lies between them, whether or not that build read anything
+// of it.
+func newPublishGaps(edges stageEdges, consumers []string) *stageGaps {
+	return newStageGaps(edges, consumers, publishGapKinds)
+}
+
+// gapKinds is what one ordering asks of a hop and which tasks it orders.
+type gapKinds struct {
+	isCarriedThrough   func(model.StageRelation) bool
+	stage, passThrough taskKind
+}
+
+var (
+	buildGapKinds   = gapKinds{model.StageRelation.IsBuildWaitingBuild, taskBuild, taskPassBuild}
+	publishGapKinds = gapKinds{isPublicationCarried, taskPublish, taskPassPublish}
+)
+
+// newStageGaps walks the graph from each consumer in name order, visiting
+// every gap once.
+func newStageGaps(edges stageEdges, consumers []string, kinds gapKinds) *stageGaps {
+	g := &stageGaps{
+		stageEdges:       edges,
+		isCarriedThrough: kinds.isCarriedThrough,
+		stage:            kinds.stage,
+		passThrough:      kinds.passThrough,
+		isGap:            make(map[string]bool),
+		firstReached:     make(map[string][]string),
+	}
+	isReached := make(map[string]bool)
+	for _, consumer := range consumers {
+		var reached []string
+		for _, gap := range g.carryingGaps(consumer) {
+			reached = g.visit(gap, isReached, reached)
+		}
+		if len(reached) > 0 {
+			slices.Sort(reached)
+			g.firstReached[consumer] = reached
+		}
+	}
+	return g
+}
+
+// visit records a gap and every gap behind it, and appends the changed
+// providers they carry the ordering from that nothing reached before. It
+// recurses along dependency edges alone, and the workspace graph is acyclic
+// by the time a release executes, because a cycle is E197 or E200 and no plan
+// survives one.
+func (g *stageGaps) visit(gap string, isReached map[string]bool, reached []string) []string {
+	if g.isGap[gap] {
+		return reached
+	}
+	g.isGap[gap] = true
+	g.gaps = append(g.gaps, gap)
+	for _, provider := range g.providers[gap] {
+		if !g.isCarriedThrough(g.relations[provider]) {
+			continue
+		}
+		if !g.changed[provider] {
+			reached = g.visit(provider, isReached, reached)
+			continue
+		}
+		if !isReached[provider] {
+			isReached[provider] = true
+			reached = append(reached, provider)
+		}
+	}
+	return reached
+}
+
+// carryingGaps lists a package's providers that are gaps of this ordering:
+// not released this run, under a relation the ordering travels through.
+func (g *stageGaps) carryingGaps(name string) []string {
+	var gaps []string
+	for _, provider := range g.providers[name] {
+		if !g.changed[provider] && g.isCarriedThrough(g.relations[provider]) {
+			gaps = append(gaps, provider)
+		}
+	}
+	return gaps
+}
+
+// passThroughOf is the gap's node in the task graph.
+func (g *stageGaps) passThroughOf(gap string) task { return task{gap, g.passThrough} }
+
+// addPassThroughs registers the gaps' nodes, which the scheduler needs before
+// any edge.
+func (g *stageGaps) addPassThroughs(sched *graph.Scheduler[task]) {
+	for _, gap := range g.gaps {
+		sched.AddPassThrough(g.passThroughOf(gap))
+	}
+}
+
+// addConsumerEdges states, in the consumer's turn, what the literal graph
+// states there: the providers' tasks it registers first, and the waits of the
+// consumer's task, here on the gaps it reads through.
+func (g *stageGaps) addConsumerEdges(sched *graph.Scheduler[task], consumer string, waiting task) {
+	for _, provider := range g.firstReached[consumer] {
+		sched.Add(task{provider, g.stage})
+	}
+	for _, gap := range g.carryingGaps(consumer) {
+		sched.AddEdge(g.passThroughOf(gap), waiting)
+	}
+}
+
+// addGapEdges states what each gap's node waits for: the stage of every
+// changed provider it carries the ordering from, and the gaps behind it. It
+// runs once every task is registered, so these edges register nothing.
+func (g *stageGaps) addGapEdges(sched *graph.Scheduler[task]) {
+	for _, gap := range g.gaps {
+		for _, provider := range g.providers[gap] {
+			if !g.isCarriedThrough(g.relations[provider]) {
+				continue
+			}
+			if g.changed[provider] {
+				sched.AddEdge(task{provider, g.stage}, g.passThroughOf(gap))
+				continue
+			}
+			sched.AddEdge(g.passThroughOf(provider), g.passThroughOf(gap))
+		}
+	}
 }
 
 // isPublicationCarried answers the publication walk's question of a hop, and
@@ -102,33 +227,59 @@ func newPublishReach(p *plan.Plan, changed map[string]bool) *stageReach {
 // question would be a walk with a mode.
 func isPublicationCarried(model.StageRelation) bool { return true }
 
-// newStageReach indexes the plan's relations once, so the walk below asks a
-// map rather than following a pointer chain per edge. A name the plan carries
-// no release for reads as the zero relation, which is the default one, and the
-// walk goes on through it.
-func newStageReach(p *plan.Plan, changed map[string]bool,
-	isCarriedThrough func(model.StageRelation) bool) *stageReach {
+// stageEdges is the dependency graph the orderings walk: every package's
+// providers, which of them release, and each provider's relation.
+type stageEdges struct {
+	providers map[string][]string
+	changed   map[string]bool
+	relations map[string]model.StageRelation
+}
+
+// newStageEdges indexes the plan's relations once, so a walk asks a map rather
+// than following a pointer chain per edge. A name the plan carries no release
+// for reads as the zero relation, which is the default one, and the walk goes
+// on through it.
+func newStageEdges(p *plan.Plan, changed map[string]bool) stageEdges {
 	relations := make(map[string]model.StageRelation, len(p.Releases))
 	for name, rel := range p.Releases {
 		relations[name] = rel.Pkg.Space.ProviderRelation
 	}
+	return stageEdges{providers: p.Providers, changed: changed, relations: relations}
+}
+
+// stageReach lists the changed providers a consumer reaches over the
+// publication order through packages this run does not release, which is the
+// closure the skip cascade reads (§19.3): the providers that can block a
+// package are the same set that orders it.
+type stageReach struct {
+	stageEdges
+	// isCarriedThrough is the question this index asks of every hop. One
+	// index answers one question, so its memo below is never a mixture of two.
+	isCarriedThrough func(model.StageRelation) bool
+	// nearest memoises, per package, the changed packages it reaches through
+	// hops that carry the ordering, stopping at each one: a changed package's
+	// own edges carry whatever lies behind it.
+	nearest map[string][]string
+}
+
+// newPublishReach indexes the publication orderings of §19.2 the way
+// newPublishGaps walks them.
+func newPublishReach(edges stageEdges) *stageReach {
+	return newStageReach(edges, isPublicationCarried)
+}
+
+// newStageReach indexes the closure of one ordering.
+func newStageReach(edges stageEdges, isCarriedThrough func(model.StageRelation) bool) *stageReach {
 	return &stageReach{
-		providers:        p.Providers,
-		changed:          changed,
-		relations:        relations,
+		stageEdges:       edges,
 		isCarriedThrough: isCarriedThrough,
-		nearest:          make(map[string][]string, len(p.Releases)),
+		nearest:          make(map[string][]string, len(edges.relations)),
 	}
 }
 
 // Indirect lists the changed packages this index orders before one consumer
-// and that the consumer does not name as a provider itself: the orderings
-// reached through packages this run does not release. The direct ones are
-// stated where each provider's own relation is read, so the graph is written
-// once in the place a reader looks for it.
-//
-// The result is sorted, so the derived edges enter the scheduler in the same
-// order on every run, which is what keeps launch order deterministic (§17.2).
+// and that the consumer does not name as a provider itself, sorted, so the
+// cascade names the same blocker on every run.
 func (s *stageReach) Indirect(consumer string) []string {
 	var reached []string
 	seen := make(map[string]bool)
@@ -149,10 +300,7 @@ func (s *stageReach) Indirect(consumer string) []string {
 }
 
 // resolve is the memoised walk: the changed packages one package reaches
-// through hops that carry this index's ordering. It recurses along dependency
-// edges alone, and the workspace graph is acyclic by the time a release
-// executes, because a cycle is E197 or E200 and no plan survives one, so the
-// recursion terminates.
+// through hops that carry this index's ordering.
 func (s *stageReach) resolve(name string) []string {
 	if cached, isKnown := s.nearest[name]; isKnown {
 		return cached
