@@ -88,6 +88,165 @@ func TestAncestryIndexAgreesWithAWalk(t *testing.T) {
 		"two commits naming each other as parent are not a history")
 }
 
+func TestChainAncestryUsesIntervalsAtWordBoundaries(t *testing.T) {
+	for _, n := range []int{1, 63, 64, 65, 128, 129} {
+		index := newAncestryIndex(n, func(rank int) []int32 {
+			if rank == n-1 {
+				return nil
+			}
+			return []int32{int32(rank + 1)}
+		})
+		require.NotNil(t, index)
+		require.True(t, index.chain, "n=%d", n)
+		markers := make([]int32, n)
+		for rank := range markers {
+			markers[rank] = int32(rank)
+		}
+		index.mark(markers)
+		for marker := 0; marker < n; marker++ {
+			ancestors := index.ancestors(int32(marker))
+			require.True(t, ancestors.interval)
+			window := commitSetWithout(n, ancestors)
+			require.True(t, window.interval)
+			require.Equal(t, n-marker, ancestors.len())
+			require.Equal(t, marker, window.len())
+			for rank := 0; rank < n; rank++ {
+				require.Equalf(t, rank >= marker, ancestors.has(rank), "n=%d marker=%d rank=%d", n, marker, rank)
+				require.Equalf(t, rank < marker, window.has(rank), "n=%d marker=%d rank=%d", n, marker, rank)
+			}
+			for word := 0; word < (n+63)/64; word++ {
+				var wantAncestors, wantWindow uint64
+				for rank := word * 64; rank < min((word+1)*64, n); rank++ {
+					if rank >= marker {
+						wantAncestors |= 1 << uint(rank%64)
+					} else {
+						wantWindow |= 1 << uint(rank%64)
+					}
+				}
+				require.Equalf(t, wantAncestors, ancestors.word(word), "ancestor word: n=%d marker=%d word=%d", n, marker, word)
+				require.Equalf(t, wantWindow, window.word(word), "window word: n=%d marker=%d word=%d", n, marker, word)
+			}
+		}
+	}
+	branched := newAncestryIndex(3, func(rank int) []int32 {
+		switch rank {
+		case 0:
+			return []int32{1, 2}
+		case 1:
+			return []int32{2}
+		default:
+			return nil
+		}
+	})
+	require.NotNil(t, branched)
+	require.False(t, branched.chain)
+	branched.mark([]int32{0})
+	require.False(t, branched.ancestors(0).interval)
+}
+
+func TestChainWindowsMatchPerBoundaryPlan(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a real repository")
+	}
+	const packages = 9
+	repo := buildChainWindowRepo(t, packages)
+	git := &gitx.LocalGitx{Dir: repo.dir}
+	opts := Options{Packages: repo.pkgs, Root: repo.dir}
+	want, err := Compute(context.Background(), perBoundaryGit{inner: git}, opts)
+	require.NoError(t, err)
+	stats := &HistoryStats{}
+	opts.HistoryStats = stats
+	got, err := Compute(context.Background(), git, opts)
+	require.NoError(t, err)
+	require.Equal(t, want.Order, got.Order)
+	require.Equal(t, want.Diagnostics, got.Diagnostics)
+	for name, release := range want.Releases {
+		require.Equal(t, canonical(reflect.ValueOf(release)), canonical(reflect.ValueOf(got.Releases[name])), name)
+	}
+	require.Equal(t, int64(2*packages-1), stats.AuthorScans.Load())
+	require.Equal(t, int64(packages*(2*packages)-packages*(packages+1)/2), stats.WindowCommitRefs.Load())
+	first, second := got.Releases["pkg-0000"], got.Releases["pkg-0001"]
+	require.NotEmpty(t, first.WindowAuthors)
+	require.NotEmpty(t, first.FreshWindowAuthors)
+	require.NotEmpty(t, second.WindowAuthors)
+	first.WindowAuthors[0].Name = "changed by caller"
+	require.NotEqual(t, "changed by caller", first.FreshWindowAuthors[0].Name)
+	require.NotEqual(t, "changed by caller", second.WindowAuthors[0].Name)
+}
+
+func TestChainAuthorPrefixesKeepPrereleaseFreshnessAndInvalidContributors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a real repository")
+	}
+	repo := buildChainWindowRepo(t, 4)
+	gitCommand := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", repo.dir}, args...)...).CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+		return strings.TrimSpace(string(out))
+	}
+	gitCommand("reset", "--hard", "HEAD")
+	gitCommand("tag", "pkg-0000@1.1.0-beta.0")
+	commit := func(filename, message, name, email string) {
+		t.Helper()
+		path := filepath.Join(repo.dir, "pkgs", "pkg-0000", filename)
+		require.NoError(t, os.WriteFile(path, []byte(message), 0o644))
+		gitCommand("add", path)
+		gitCommand("-c", "user.name="+name, "-c", "user.email="+email, "commit", "-qm", message)
+	}
+	commit("invalid.txt", "not a release record", "Other Writer", "other@example.com")
+	commit("fresh.txt", "fix(pkg-0000): fresh", "New Spelling", "same@example.com")
+	git := &gitx.LocalGitx{Dir: repo.dir}
+	opts := Options{Packages: repo.pkgs, Root: repo.dir}
+	want, err := Compute(context.Background(), perBoundaryGit{inner: git}, opts)
+	require.NoError(t, err)
+	got, err := Compute(context.Background(), git, opts)
+	require.NoError(t, err)
+	for name, release := range want.Releases {
+		require.Equal(t, canonical(reflect.ValueOf(release)), canonical(reflect.ValueOf(got.Releases[name])), name)
+	}
+	release := got.Releases["pkg-0000"]
+	require.Equal(t, []Author{{Name: "New Spelling", Email: "same@example.com"},
+		{Name: "Other Writer", Email: "other@example.com"}}, release.FreshWindowAuthors)
+	require.Equal(t, release.FreshWindowAuthors, release.WindowAuthors)
+}
+
+func TestChainAuthorPrefixesFallBackForBaselineOutsideUnion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a real repository")
+	}
+	repo := buildChainWindowRepo(t, 4)
+	cmd := exec.Command("git", "-C", repo.dir, "tag", "pkg-0001@1.1.0-beta.0", "HEAD~7")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	git := &gitx.LocalGitx{Dir: repo.dir}
+	opts := Options{Packages: repo.pkgs, Root: repo.dir}
+	want, err := Compute(context.Background(), perBoundaryGit{inner: git}, opts)
+	require.NoError(t, err)
+	stats := &HistoryStats{}
+	opts.HistoryStats = stats
+	got, err := Compute(context.Background(), git, opts)
+	require.NoError(t, err)
+	for name, release := range want.Releases {
+		require.Equal(t, canonical(reflect.ValueOf(release)), canonical(reflect.ValueOf(got.Releases[name])), name)
+	}
+	require.Greater(t, stats.AuthorScans.Load(), int64(2*4-1), "outside-union baseline keeps general attribution")
+}
+
+func TestChainAuthorPrefixesScanOnlyChangedWindow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a real repository")
+	}
+	const packages = 40
+	repo := buildChainWindowRepoWithChanges(t, packages, []int{packages - 1})
+	stats := &HistoryStats{}
+	plan, err := Compute(context.Background(), &gitx.LocalGitx{Dir: repo.dir}, Options{
+		Packages: repo.pkgs, Root: repo.dir, HistoryStats: stats})
+	require.NoError(t, err)
+	require.True(t, plan.Releases["pkg-0039"].IsChanged())
+	require.Equal(t, int64(1), stats.AuthorScans.Load(), "untouched packages widen the union but not the attribution scan")
+}
+
 // TestTransposeBlockSwapsRowsAndColumns: bit j of row i is bit i of column
 // j after the transpose, for sparse, dense and single-bit blocks.
 func TestTransposeBlockSwapsRowsAndColumns(t *testing.T) {

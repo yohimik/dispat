@@ -8,10 +8,11 @@ What the code costs, as opposed to [what it does](./test-results.mdx) and [what 
 
 <BenchmarkSummary />
 
-Every number on this page is measured rather than written. A benchmark pass runs `go test -run '^$' -bench . -benchmem`
+Every number in the generated report below comes from a benchmark stream. A benchmark pass runs
+`go test -run '^$' -bench . -benchmem`
 per module, in a stage of its own, and the release folds the stream into the same report the coverage and test-results
-pages read. Nothing here is a figure someone typed into a document, which matters more for a performance claim than for
-almost any other kind: a benchmark number written by hand is a number about a machine that no longer exists.
+pages read. The generated report preserves the measured runner and revision; the dated comparison below separately states
+its fixture, toolchain and source revisions.
 
 `-run '^$'` is not optional. Without it every test runs again alongside the benchmarks, and the timings become numbers
 about a machine that was busy doing something else. `-benchtime` is left at Go's own default, because a measurement
@@ -24,6 +25,28 @@ the publishing commit while retaining the runner and timestamp recorded by the a
 ## By module
 
 <BenchmarkTable />
+
+## Nested chain windows: before and after
+
+`BenchmarkComputeChainWindows` builds one real Git chain with `P` distinct stable boundaries and one later scoped
+change per package. Every commit has the same primary author, so the author output is linear in `P` while the
+pending windows have quadratic logical membership. The comparison used the same fixture and ten measured iterations
+per case on Apple M5, macOS arm64, Go 1.26.0. The before column is production revision `1460e93f` with only the
+benchmark file added; the after column is implementation revision `ccb6c9d15c71`. Both ran through `testreport bench` with
+`-C services/dispat -run '^$' -bench '^BenchmarkComputeChainWindows$' -benchtime=10x -benchmem ./internal/plan`.
+
+| Packages | Author visits/op before → after | Allocated B/op before → after | Sampled peak heap MiB before → after |
+| ---: | ---: | ---: | ---: |
+| 64 | 6,112 → 127 | 881,732 → 859,935 | 0.3867 → 0.2651 |
+| 128 | 24,512 → 255 | 1,626,112 → 1,577,108 | 0.8587 → 0.7957 |
+| 256 | 98,176 → 511 | 3,172,186 → 3,049,360 | 1.840 → 1.879 |
+
+The author-visit counter measures the changed subphase directly: the nested windows' separate scans are replaced
+by one scan through the largest changed prefix. `WindowCommitRefs/op` remains 6,112, 24,512 and 98,176 respectively;
+it counts logical window membership, not allocated bitsets. Peak heap is sampled and varies, as the 256-package row
+shows. These measurements do not establish a time or space bound for the complete planner. To reproduce the before
+column, add only the benchmark file to revision `1460e93f` and run the command above; run it again at the landed
+implementation revision for the after column.
 
 A row is one benchmark function, or one case of a table-driven one, named as its source names it. The iteration count
 is a column rather than a footnote because it is what says how much to trust the row beside it: a benchmark the tool

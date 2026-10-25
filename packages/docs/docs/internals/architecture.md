@@ -157,6 +157,13 @@ bitsets in a shared repository order. Validation reuses those words and copies a
 control checkpoint. Planning drops its temporary repository-name lists before returning the plan, so those lists do
 not remain reachable through the plan's ancestry callback.
 
+For one Git history whose pending union has verified single-parent chain order, the planner stores ancestry and
+pending windows as rank intervals. It scans the largest pending prefix among changed releasable packages once to
+collect authors in newest-first order, then gives each release its own author slices. A prerelease's fresh authors
+stop at its in-union baseline rank. A merged or composed history uses the general DAG path; an out-of-union
+prerelease baseline uses the general attribution path. This saves window-index space and repeated author visits on
+nested chain windows; other planning phases and explicit output still have their own costs.
+
 **Windows.** dispat answers every question of the form "does this commit still count?" against a *pending window*. This
 window contains the commits from a package's last **stable** tag to `HEAD`. Which package's window it consults depends
 on the purpose. Conflating the two is the bug that loses releases:

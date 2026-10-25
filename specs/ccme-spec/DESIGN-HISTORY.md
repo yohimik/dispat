@@ -335,6 +335,13 @@ This adds a linear pass when the fallback already scans those same parent lists 
 work on the one-author chain family. The engine at `0e495797` does not implement the rank fast path.
 No input distribution is asserted, so these are worst-case or stated-family comparisons.
 
+The later single-history implementation detects a verified chain and stores its marker ancestry and pending
+windows as intervals. For changed releasable packages it scans the largest pending prefix once for author identities,
+then copies each release's author lists so their exported slices remain independent. It keeps the general DAG and
+composed-history paths, and falls back when a prerelease baseline cannot be located in the union. The dated
+counterexample above remains evidence about the earlier engine; the later improvement addresses its window and
+author subphases, without establishing an optimal bound for all of `plan.Compute`.
+
 The current fixed-stage task compiler reads `Plan.Providers` and returns an explicit task scheduler graph.
 Those retained input and output representations occupy `Theta(P + E + Tk + Dk)` words when both coexist;
 their sizes do not give an auxiliary bookkeeping lower bound. Under indexed relations, constant-time map

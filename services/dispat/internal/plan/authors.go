@@ -170,6 +170,10 @@ func (cp *computation) resolveAuthors(rec *commitRec) {
 // and a versioning none package, which never has a record, is not scanned: in
 // a large workspace that is most packages, and the scan is its whole window.
 func (cp *computation) collectReleaseAuthors() {
+	if cp.collectChainReleaseAuthors() {
+		cp.dropAuthorScratch()
+		return
+	}
 	for _, name := range cp.order {
 		rel := cp.rel[name]
 		if rel == nil || !rel.IsReleasable() || !rel.IsChanged() {
@@ -184,10 +188,78 @@ func (cp *computation) collectReleaseAuthors() {
 	cp.dropAuthorScratch()
 }
 
-// dropAuthorScratch releases what the attribution keeps from one window to
-// the next. Nothing reads it once every release is attributed, and the rank
-// sets alone are a bitset of the union per shared window, which would
-// otherwise stay live for the rest of the plan.
+// collectChainReleaseAuthors shares the ordered author list of nested pending
+// prefixes. It applies only when the verified history and every selected
+// window support that representation; the general window walk remains below.
+func (cp *computation) collectChainReleaseAuthors() bool {
+	if len(cp.histories) != 0 || cp.anc == nil || !cp.anc.chain {
+		return false
+	}
+	type cuts struct{ window, fresh int }
+	byPackage := make(map[string]cuts)
+	maxCut := 0
+	for _, name := range cp.order {
+		rel := cp.rel[name]
+		if rel == nil || !rel.IsReleasable() || !rel.IsChanged() {
+			continue
+		}
+		window := cp.window[name]
+		if window == nil || !window.interval || window.start != 0 {
+			return false
+		}
+		freshCut := window.end
+		if rel.BaselineCommit != "" && rel.BaselineCommit != rel.StableCommit {
+			baseline := cp.byKey[rel.BaselineCommit]
+			if baseline == nil {
+				return false
+			}
+			freshCut = min(freshCut, baseline.rank)
+		}
+		byPackage[name] = cuts{window: window.end, fresh: freshCut}
+		maxCut = max(maxCut, window.end)
+	}
+	if len(byPackage) == 0 {
+		return true
+	}
+	// The first occurrence in newest-first rank order chooses both the
+	// attribution order and the spelling of a repeated author identity.
+	counts := make([]int, maxCut+1)
+	var authors []Author
+	marks := &cp.authorMarks
+	marks.begin()
+	for rank := 0; rank < maxCut; rank++ {
+		author, id := cp.authorOf(cp.commits[rank])
+		if id >= 0 && marks.markListed(&marks.window, id) {
+			authors = append(authors, author)
+		}
+		counts[rank+1] = len(authors)
+	}
+	if cp.stats != nil {
+		cp.stats.AuthorScans.Add(int64(maxCut))
+	}
+	for _, name := range cp.order {
+		cut, ok := byPackage[name]
+		if !ok {
+			continue
+		}
+		rel := cp.rel[name]
+		if count := counts[cut.window]; count > 0 {
+			rel.WindowAuthors = slices.Clone(authors[:count])
+		}
+		if count := counts[cut.fresh]; count > 0 {
+			rel.FreshWindowAuthors = slices.Clone(authors[:count])
+		}
+		if len(rel.WindowAuthors) > 0 {
+			cp.log.Debug().Str("package", name).Int("window", len(rel.WindowAuthors)).
+				Int("fresh", len(rel.FreshWindowAuthors)).Msg("release authors collected")
+		}
+	}
+	return true
+}
+
+// dropAuthorScratch releases attribution state after every release has its
+// author slices. General histories can hold one rank bitset per shared window;
+// neither path needs this scratch for the rest of the plan.
 func (cp *computation) dropAuthorScratch() {
 	cp.windowCommits = nil
 	cp.controlCommits = nil
