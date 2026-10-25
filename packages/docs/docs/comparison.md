@@ -165,13 +165,17 @@ own history explains why: a documented manual force release after a publication 
 
 ### Planning and release time
 
-The timing cells give every tool the same pending change with no fault, run its own plan command and then its
-documented release, and time both. The builds and publications are timed by the fixture rather than read from any
-tool's log, and each release is set against the bound of the dispat theorem, `max(Lk, Wk / s)`, the time below which
-no execution of that plan can finish at the parallelism the release used. Each tool's plan is also read as a set of
-packages at their next versions and set beside dispat's plan of the same history, with the differences recorded as
-data. Both tables are on [release experiments](./internals/experiments.mdx#planning-and-release-time), with how to
-read the ratio and why the absolute seconds of one container are not the figures to compare.
+The timing cells tell every tool of one pending change, each the way it reads one, with no fault, run its own plan
+command and then its documented release, and time both. Builds are timed by the fixture and publications by the
+registry, as their uploads, the same two kinds of task for every tool, rather than read from any tool's log. Each
+release is set against the bound of the dispat theorem, `max(Lk, Wk / s)`, under the build readiness relation its
+tool's configuration declares, with s the concurrency the release was seen to use: no execution that honours that
+precedence and runs at most that many tasks at once with those durations finishes sooner. Every edge of the
+precedence is checked against the records, and the edges a release did not honour are listed beside its figures. Each
+tool's plan is also read as a set of packages at their next versions and set beside dispat's plan of the same
+scenario, with what each tool was told and the differences recorded as data. The tables, each task's duration, how to
+read the ratio and why the absolute seconds of one container are not the figures to compare are on
+[release experiments](./internals/experiments.mdx#planning-and-release-time).
 
 ### Scale and recovery growth
 

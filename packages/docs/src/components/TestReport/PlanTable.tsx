@@ -11,7 +11,7 @@ export interface PlanTableProps extends BasePlanTableProps {
   children?: never;
 }
 
-/** Each tool's plan of a scenario, set beside dispat's: agreement, or what differs. */
+/** Each tool's plan of a scenario, what it was told, and the plan set beside dispat's: agreement, or what differs. */
 export const PlanTable: FC<PlanTableProps> = (props) => {
   const {rows} = props;
 
@@ -22,6 +22,7 @@ export const PlanTable: FC<PlanTableProps> = (props) => {
           <tr>
             <th>Scenario</th>
             <th>Tool</th>
+            <th>Told</th>
             <th>Plan beside dispat&apos;s</th>
           </tr>
         </thead>
@@ -31,6 +32,9 @@ export const PlanTable: FC<PlanTableProps> = (props) => {
               <td>{row.scenario}</td>
               <td>
                 <code className={styles.whole}>{row.tool}</code>
+              </td>
+              <td>
+                <code>{row.told}</code>
               </td>
               <td>{row.text}</td>
             </tr>

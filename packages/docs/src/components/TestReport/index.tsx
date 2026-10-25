@@ -15,12 +15,13 @@ import type {
 import {validateArchivedReport} from '@site/plugins/test-report/validate';
 import {resolveArchivedState, type ArchivedState} from '@site/plugins/test-report/state';
 import {catchUpText, isSingleCommandCatchUp} from '@site/plugins/test-report/catchup';
-import {planRows, timingRows} from '@site/plugins/test-report/timing';
+import {finalStateEntries, planRows, taskLists, taskRows, timingRows} from '@site/plugins/test-report/timing';
 import Admonition from '@theme/Admonition';
 import React, {useEffect, useState} from 'react';
 
 import {PlanTable} from './PlanTable';
 import styles from './styles.module.css';
+import {TasksTable} from './TasksTable';
 import {TimingTable} from './TimingTable';
 
 // The coverage, test-results, benchmarks and experiments pages, insofar as
@@ -642,7 +643,7 @@ export function ExperimentsTable(): React.ReactElement | null {
                     <td>{cellOutcome(cell)}</td>
                     <td>
                       <code>
-                        {keptWhole({entries: cell.final.packages.map((pkg) => `${pkg.name}=${pkg.registry}/${pkg.state}`)})}
+                        {keptWhole({entries: finalStateEntries({packages: cell.final.packages})})}
                       </code>
                     </td>
                   </tr>
@@ -686,6 +687,16 @@ export function ExperimentsTimingTable(): React.ReactElement | null {
       <TimingTable rows={rows} />
     </>
   );
+}
+
+/** The timing cells' tasks by kind, and every task of each cell. */
+export function ExperimentsTasksTable(): React.ReactElement | null {
+  const cells = useExperimentCells();
+  const rows = taskRows({cells});
+  if (rows.length === 0) {
+    return null;
+  }
+  return <TasksTable rows={rows} lists={taskLists({cells})} />;
 }
 
 /** Each timing cell's plan, set beside dispat's plan of the same scenario. */

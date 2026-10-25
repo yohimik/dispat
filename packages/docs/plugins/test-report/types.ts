@@ -150,42 +150,80 @@ export interface ExperimentRecovery {
 /**
  * A timing cell's figures in the vocabulary of the dispat theorem (CCME
  * SPEC.md §13.11), as the harness's lib/timing.py computes them from the
- * fixture's own records of every build and publication. Seconds throughout.
+ * fixture's own records of every build and upload. Seconds throughout.
  */
 export interface ExperimentTiming {
-  /** What a consumer's build waits for in the plan's precedence (§19.2a). */
+  /** What a consumer's build waits for, as the tool's configuration declares it (§19.2a). */
   relation: ExperimentRelation;
+  /** The strongest relation every consumer build in the records honoured; absent where no consumer built. */
+  observedRelation?: ExperimentRelation;
+  consumerBuilds: ExperimentConsumerBuilds;
+  /** Every edge of the declared precedence the records contradict. */
+  violations: ExperimentEdge[];
   planningSeconds: number;
+  /** The builds the plan command ran inside its own duration. */
+  planBuilds: ExperimentPlanBuilds;
   makespanSeconds: number;
-  /** Wk, the summed duration of the release's tasks. */
+  /** The part of the makespan no task was running in. */
+  idleSeconds: number;
+  /** Wk, the summed duration of the release's builds and uploads. */
   work: number;
   /** Lk, the duration of the longest precedence chain. */
   criticalPath: number;
-  /** s, the most tasks the release ran at one instant. */
+  /** s as the release was seen to use it: the most tasks running at one instant. */
   parallelism: number;
-  /** max(Lk, Wk / s), which no execution of the plan beats. */
+  /** max(Lk, Wk / s). */
   bound: number;
   /** The makespan over the bound. */
   ratio: number;
-  /** The tasks on the longest chain, `core build` first. */
+  /** The tasks on the longest chain, the first first. */
   criticalChain: string[];
-  tasks: ExperimentTimedTasks;
-  publishTimedAt: ExperimentPublishSources;
+  tasks: ExperimentTaskKinds;
+  taskTimes: ExperimentTaskTime[];
 }
 
-export type ExperimentRelation = 'build' | 'publish';
+export type ExperimentRelation = 'publish' | 'build' | 'none';
 
-/** The release's tasks by kind; a version task is a tool's version command timed whole. */
-export interface ExperimentTimedTasks {
-  version: number;
-  build: number;
-  publish: number;
+/** Provider-to-consumer pairs that both built, and how many consumer builds followed the provider's build and its publication. */
+export interface ExperimentConsumerBuilds {
+  edges: number;
+  afterBuild: number;
+  afterPublish: number;
 }
 
-/** Where each publication was timed: around `npm publish`, or at the registry. */
-export interface ExperimentPublishSources {
-  npm: number;
-  registry: number;
+/** One precedence edge, `core build` before `ui build`. */
+export interface ExperimentEdge {
+  before: string;
+  after: string;
+}
+
+export interface ExperimentPlanBuilds {
+  count: number;
+  seconds: number;
+}
+
+/** The builds and uploads Wk is made of, and the `npm publish` processes beside them, which are not part of it. */
+export interface ExperimentTaskKinds {
+  build: ExperimentTaskStats;
+  publish: ExperimentTaskStats;
+  npmPublish: ExperimentTaskStats;
+}
+
+/** One kind's tasks: how many, their summed, median and longest durations, and how many failed. */
+export interface ExperimentTaskStats {
+  count: number;
+  seconds: number;
+  median: number;
+  max: number;
+  failed: number;
+}
+
+/** One task: its package, its kind, when it started after the release did, and how long it ran. */
+export interface ExperimentTaskTime {
+  package: string;
+  task: 'build' | 'publish';
+  start: number;
+  seconds: number;
 }
 
 /** One package of a plan at the version planned for it. */
@@ -208,6 +246,8 @@ export interface ExperimentPlanDifference {
  */
 export interface ExperimentPlan {
   packages: ExperimentPlannedPackage[];
+  /** What the tool read of the pending change: the commit subject, or the pending changesets. */
+  told: string;
   reference?: string;
   agrees?: boolean;
   differences: ExperimentPlanDifference[];

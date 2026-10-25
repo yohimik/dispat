@@ -22,13 +22,16 @@ export const TimingTable: FC<TimingTableProps> = (props) => {
           <tr>
             <th>Scenario</th>
             <th>Tool</th>
+            <th>Relation</th>
             <th className={styles.number}>Planning</th>
             <th className={styles.number}>Makespan</th>
+            <th className={styles.number}>Idle</th>
             <th className={styles.number}>Wk</th>
             <th className={styles.number}>Lk</th>
             <th className={styles.number}>s</th>
             <th className={styles.number}>Bound</th>
             <th className={styles.number}>Ratio</th>
+            <th>Edges not honoured</th>
             <th>Longest chain</th>
           </tr>
         </thead>
@@ -39,8 +42,12 @@ export const TimingTable: FC<TimingTableProps> = (props) => {
               <td>
                 <code className={styles.whole}>{row.tool}</code>
               </td>
+              <td>
+                <code>{row.relation}</code>
+              </td>
               <td className={styles.number}>{row.planning}</td>
               <td className={styles.number}>{row.makespan}</td>
+              <td className={styles.number}>{row.idle}</td>
               <td className={styles.number}>{row.work}</td>
               <td className={styles.number}>{row.criticalPath}</td>
               <td className={styles.number}>{row.parallelism}</td>
@@ -48,6 +55,7 @@ export const TimingTable: FC<TimingTableProps> = (props) => {
               <td className={styles.number}>
                 <strong>{row.ratio}</strong>
               </td>
+              <td>{row.notHonoured}</td>
               <td>{row.criticalChain}</td>
             </tr>
           ))}

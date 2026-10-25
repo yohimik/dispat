@@ -19,6 +19,8 @@ import type {
   ExperimentStep,
   ExperimentStepKind,
   ExperimentStepPhase,
+  ExperimentTaskStats,
+  ExperimentTaskTime,
   ExperimentTiming,
   FuzzTarget,
   Group,
@@ -272,7 +274,7 @@ interface ExperimentFieldOptions {
   at: string;
 }
 
-const RELATIONS: readonly ExperimentRelation[] = ['build', 'publish'];
+const RELATIONS: readonly ExperimentRelation[] = ['publish', 'build', 'none'];
 
 /** A duration in seconds, never below zero. */
 function duration(options: ExperimentFieldOptions): number {
@@ -294,24 +296,103 @@ function tally(options: ExperimentFieldOptions): number {
   return n;
 }
 
+// The slack between figures lib/timing.py rounded to the millisecond on
+// their own, and how far a release that honoured its precedence can still
+// come in under its bound: two of the harness's 50 ms clock slacks. Both are
+// tools/testreport's timing.go's too.
+const ROUNDING = 0.002;
+const CLOCK_SLACK = 0.1;
+const TASKS: readonly ExperimentTaskTime['task'][] = ['build', 'publish'];
+
+function taskStats(options: ExperimentFieldOptions): ExperimentTaskStats {
+  const {value, at} = options;
+  const o = object(value, at);
+  return {
+    count: tally({value: o.count, at: `${at}.count`}),
+    seconds: duration({value: o.seconds, at: `${at}.seconds`}),
+    median: duration({value: o.median, at: `${at}.median`}),
+    max: duration({value: o.max, at: `${at}.max`}),
+    failed: tally({value: o.failed, at: `${at}.failed`}),
+  };
+}
+
+function taskTime(options: ExperimentFieldOptions): ExperimentTaskTime {
+  const {value, at} = options;
+  const o = object(value, at);
+  const task = optionalWord({value: o.task, at: `${at}.task`, words: TASKS});
+  if (task === undefined) {
+    throw new ReportError(`${at}.task`, `one of ${TASKS.join(', ')}`, o.task);
+  }
+  return {
+    package: string(o.package, `${at}.package`),
+    task,
+    start: number(o.start, `${at}.start`),
+    seconds: duration({value: o.seconds, at: `${at}.seconds`}),
+  };
+}
+
+function relationWord(options: ExperimentFieldOptions): ExperimentRelation {
+  const {value, at} = options;
+  const relation = optionalWord({value, at, words: RELATIONS});
+  if (relation === undefined) {
+    throw new ReportError(at, `one of ${RELATIONS.join(', ')}`, value);
+  }
+  return relation;
+}
+
 /**
- * A timing cell's figures. A release that ran a task ran it in a slot, so a
- * parallelism below one is refused, and so is a longest chain longer than the
- * work it is part of.
+ * Figures over records that did not cover the release: a shipped package
+ * without a build or an accepted upload, a package outside the graph, or a
+ * record crossing the release's edge. The harness refuses such a cell, and so
+ * does the page.
+ */
+function refuseUncovered(options: ExperimentFieldOptions): void {
+  const {value, at} = options;
+  const o = object(value, at);
+  for (const field of ['untimed', 'unknown']) {
+    const names = optionalArray(o[field], `${at}.${field}`);
+    if (names.length > 0) {
+      throw new ReportError(`${at}.${field}`, 'no package', names);
+    }
+  }
+  if (o.straddling !== undefined && tally({value: o.straddling, at: `${at}.straddling`}) > 0) {
+    throw new ReportError(`${at}.straddling`, 'no record', o.straddling);
+  }
+}
+
+/**
+ * A timing cell's figures, held to what a measurement could have produced:
+ * the same checks tools/testreport's validateTiming makes, so a report that
+ * one accepts the other does too.
  */
 function experimentTiming(options: ExperimentFieldOptions): ExperimentTiming {
   const {value, at} = options;
   const o = object(value, at);
+  refuseUncovered({value, at});
+  const builds = object(o.consumerBuilds, `${at}.consumerBuilds`);
+  const planBuilds = object(o.planBuilds, `${at}.planBuilds`);
   const tasks = object(o.tasks, `${at}.tasks`);
-  const sources = object(o.publishTimedAt, `${at}.publishTimedAt`);
-  const relation = optionalWord({value: o.relation, at: `${at}.relation`, words: RELATIONS});
-  if (relation === undefined) {
-    throw new ReportError(`${at}.relation`, `one of ${RELATIONS.join(', ')}`, o.relation);
-  }
   const timing: ExperimentTiming = {
-    relation,
+    relation: relationWord({value: o.relation, at: `${at}.relation`}),
+    ...(o.observedRelation === undefined || o.observedRelation === null
+      ? {}
+      : {observedRelation: relationWord({value: o.observedRelation, at: `${at}.observedRelation`})}),
+    consumerBuilds: {
+      edges: tally({value: builds.edges, at: `${at}.consumerBuilds.edges`}),
+      afterBuild: tally({value: builds.afterBuild, at: `${at}.consumerBuilds.afterBuild`}),
+      afterPublish: tally({value: builds.afterPublish, at: `${at}.consumerBuilds.afterPublish`}),
+    },
+    violations: optionalArray(o.violations, `${at}.violations`).map((edge, i) => {
+      const e = object(edge, `${at}.violations[${i}]`);
+      return {before: string(e.before, `${at}.violations[${i}].before`), after: string(e.after, `${at}.violations[${i}].after`)};
+    }),
     planningSeconds: duration({value: o.planningSeconds, at: `${at}.planningSeconds`}),
+    planBuilds: {
+      count: tally({value: planBuilds.count, at: `${at}.planBuilds.count`}),
+      seconds: duration({value: planBuilds.seconds, at: `${at}.planBuilds.seconds`}),
+    },
     makespanSeconds: duration({value: o.makespanSeconds, at: `${at}.makespanSeconds`}),
+    idleSeconds: duration({value: o.idleSeconds, at: `${at}.idleSeconds`}),
     work: duration({value: o.work, at: `${at}.work`}),
     criticalPath: duration({value: o.criticalPath, at: `${at}.criticalPath`}),
     parallelism: tally({value: o.parallelism, at: `${at}.parallelism`}),
@@ -321,20 +402,35 @@ function experimentTiming(options: ExperimentFieldOptions): ExperimentTiming {
       string(task, `${at}.criticalChain[${i}]`),
     ),
     tasks: {
-      version: tally({value: tasks.version, at: `${at}.tasks.version`}),
-      build: tally({value: tasks.build, at: `${at}.tasks.build`}),
-      publish: tally({value: tasks.publish, at: `${at}.tasks.publish`}),
+      build: taskStats({value: tasks.build, at: `${at}.tasks.build`}),
+      publish: taskStats({value: tasks.publish, at: `${at}.tasks.publish`}),
+      npmPublish: taskStats({value: tasks.npmPublish, at: `${at}.tasks.npmPublish`}),
     },
-    publishTimedAt: {
-      npm: tally({value: sources.npm, at: `${at}.publishTimedAt.npm`}),
-      registry: tally({value: sources.registry, at: `${at}.publishTimedAt.registry`}),
-    },
+    taskTimes: optionalArray(o.taskTimes, `${at}.taskTimes`).map((task, i) =>
+      taskTime({value: task, at: `${at}.taskTimes[${i}]`}),
+    ),
   };
-  if (timing.parallelism < 1) {
-    throw new ReportError(`${at}.parallelism`, 'at least one slot', timing.parallelism);
-  }
-  if (timing.criticalPath > timing.work + 0.002) {
-    throw new ReportError(`${at}.criticalPath`, `at most the work, ${timing.work}`, timing.criticalPath);
+  const {build, publish} = timing.tasks;
+  const checks: [boolean, string, string, unknown][] = [
+    [build.count < 1 || publish.count < 1, 'tasks', 'at least one build and one publication', timing.tasks],
+    [timing.parallelism < 1, 'parallelism', 'at least one slot', timing.parallelism],
+    [Math.abs(build.seconds + publish.seconds - timing.work) > ROUNDING, 'work', 'its builds and publications summed', timing.work],
+    [timing.taskTimes.length !== build.count + publish.count, 'taskTimes', `${build.count + publish.count} tasks`, timing.taskTimes.length],
+    [timing.criticalPath > timing.work + ROUNDING, 'criticalPath', `at most the work, ${timing.work}`, timing.criticalPath],
+    [timing.idleSeconds > timing.makespanSeconds + ROUNDING, 'idleSeconds', 'at most the makespan', timing.idleSeconds],
+    [Math.abs(timing.bound - Math.max(timing.criticalPath, timing.work / Math.max(timing.parallelism, 1))) > ROUNDING,
+      'bound', 'max(Lk, Wk / s)', timing.bound],
+    [Math.abs(timing.ratio * timing.bound - timing.makespanSeconds) > ROUNDING * (1 + timing.ratio + timing.bound),
+      'ratio', 'the makespan over the bound', timing.ratio],
+    [timing.violations.length === 0 && timing.makespanSeconds < timing.bound - CLOCK_SLACK,
+      'makespanSeconds', 'no shorter than the bound of a precedence it honoured', timing.makespanSeconds],
+    [timing.consumerBuilds.afterBuild > timing.consumerBuilds.edges || timing.consumerBuilds.afterPublish > timing.consumerBuilds.edges,
+      'consumerBuilds', 'no more consumer builds than edges', timing.consumerBuilds],
+  ];
+  for (const [refused, field, expected, got] of checks) {
+    if (refused) {
+      throw new ReportError(`${at}.${field}`, expected, got);
+    }
   }
   return timing;
 }
@@ -363,6 +459,7 @@ function experimentPlan(options: ExperimentFieldOptions): ExperimentPlan {
     packages: optionalArray(o.packages, `${at}.packages`).map((p, i) =>
       experimentPlannedPackage({value: p, at: `${at}.packages[${i}]`}),
     ),
+    told: string(o.told, `${at}.told`),
     ...(o.reference === undefined ? {} : {reference: string(o.reference, `${at}.reference`)}),
     ...(o.agrees === undefined ? {} : {agrees: boolean(o.agrees, `${at}.agrees`)}),
     differences: optionalArray(o.differences, `${at}.differences`).map((d, i) =>
