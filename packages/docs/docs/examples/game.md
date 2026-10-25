@@ -1,9 +1,11 @@
 # Game development
 
-A game is a release package with engine-specific build and publication commands. Start with the general guide
-[From one package to many](./one-to-many.md): it shows how to add deliverables while preserving an existing
-package’s source, release tags and version history. The same pattern applies when a game gains a dedicated server,
-modding SDK, launcher, editor or website.
+Keep your engine's build commands and the store's upload tools. dispat supplies the version plan and orders the
+releases of the game and anything it depends on.
+
+Choose an engine guide below for manifest handling, then a store guide for publication. When you add a dedicated
+server, SDK, launcher or website, [From one package to many](./one-to-many.md) shows how to extend the graph while
+keeping the game's existing tags and history.
 
 ## Choose the engine and destinations
 
@@ -32,9 +34,9 @@ server image and site. Declare only real dependencies: a website needs a game ed
 release data, not merely because the two share a repository. Request propagation explicitly when consumers should
 release with a provider.
 
-A server that downloads a published SDK must wait at its provider’s publication boundary; one compiling against
-local source may only need build ordering. Keep the appropriate engine, package-manager and container caches.
-There is no promised game-build speedup from adding release orchestration.
+A server that downloads a published SDK must wait for that SDK to publish. A server compiling against local output
+may only need to wait for the SDK's build. Keep your engine, package-manager and container caches: release ordering
+does not replace them or guarantee shorter builds.
 
 Playtests can use [prerelease channels](../reference/releasing/prerelease-branches.md). Unversioned build inputs can
 use [versioning: none](../reference/releasing/versioning.md#packages-that-never-release-none); separately shipped
@@ -46,7 +48,7 @@ Tie installer payload URLs to the exact build, preserve completed uploads on ret
 cannot be published. These checks complement the graph; they belong in the packaging and publishing scripts. See the
 [Defold and O3DE findings](./release-integration.md).
 
-Do not assume every version-looking field is the release identity. A Defold extension can use a GitHub tag as its
+Before editing a version, check which artifact it describes. A Defold extension can use a GitHub tag as its
 installable version while `game.project` describes only the example project. An O3DE release-train tag such as
 `2605.0` can intentionally contain a gem and engine compatibility version such as `4.2.0`. Give dispat the package
 whose identity you intend to release, and leave consumer, demo, and engine compatibility versions under their native

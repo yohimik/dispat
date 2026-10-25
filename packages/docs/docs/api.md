@@ -1,56 +1,61 @@
 # API reference
 
-This section covers everything dispat exposes to machines. The project has no server and no HTTP endpoint, so it relies
-entirely on three stable surfaces.
+Use these references when writing a configuration file, a CI script, or a tool that uses dispat's libraries. If you
+are setting up a project for the first time, start with [Getting started](./getting-started.md).
 
-Each surface provides a stable contract. The command line flags and exit codes are the contract for your CI pipeline.
-The configuration keys and defaults are the contract for your repository, and the exported types and functions are the
-contract for your custom programs.
+| You need to… | Start here |
+| --- | --- |
+| Choose a command or check its flags and exit codes | [Command line](./cli/README.md) |
+| Set package paths, dependencies, or release behavior | [Configuration](./configuration/README.md) |
+| Parse commits or read and update manifests in a Go program | [Go packages](./go/README.md) |
+| Write a commit that carries release intent | [Commit messages](./reference/commits.md) |
+| Use package versions and release data in a script | [Script environment](./reference/environment.md) |
+| Understand a warning or failed plan | [Diagnostic codes](./reference/plan-errors.md) |
 
 ## The command line
 
-Read the [CLI reference](./cli/README.md) for a list of every command and flag. The index page details the exit codes
-and global flags.
+[`dispat status`](./cli/status.md) computes and displays a release plan without changing files or publishing.
+[`dispat release`](./cli/release.md) computes a plan and runs the release. With unchanged inputs, they make the same
+version decisions; a status preview does not freeze the inputs for a later run.
 
-Run [`dispat status`](./cli/status.md) to plan a release and print it without doing anything. Run
-[`dispat release`](./cli/release.md) to carry out that exact plan. Every other command narrows these two or performs a
-single step.
+Other commands run scripts, edit manifests, or perform individual release steps. The [CLI index](./cli/README.md)
+groups them by task and lists the shared flags and exit codes.
 
 ## The configuration file
 
-Check the [Configuration reference](./configuration/README.md) to understand every key in `dispat.json`, `dispat.yaml`
-and `dispat.toml`. This page explains how dispat discovers the file and what each default is. It also shows how a
-package overrides its space.
+The [Configuration reference](./configuration/README.md) explains file discovery, supported formats, defaults, and
+how a package overrides shared settings. Use JSON, YAML, or TOML for the same configuration model.
 
-Polyrepository control files add four machine-readable fields: `polyrepo`, `configs`, `repositoryOverrides`, and
-`repositoryBaselines`. Dependency provider objects also accept `external`, and `commit` accepts `branch`. Their exact
-runtime and recovery contract is in [A control repository](./control-repository.md#source-history-mode); the exported
-Go shapes are in [models](./go/models.md). The CLI exposes the same composition through `--polyrepo` and repeatable
-`--configs` global flags.
+For releases spanning repositories, choose the setup before looking up its fields:
 
-A fleet with no control repository uses `repository` as its activating identity and an optional `repositories` roster
-of `{name, url, path, branch}` entries for other peers. Their contract is
-in [A choreographed fleet](./choreographed-repositories.md); `--polyrepo=false` is the local escape for one invocation.
+- A [control repository](./control-repository.md#source-history-mode) uses `polyrepo`, `configs`,
+  `repositoryOverrides`, and `repositoryBaselines`. Provider objects can declare `external`, and `commit.branch`
+  controls the recording branch. The CLI equivalents include `--polyrepo` and repeatable `--configs` flags.
+- A [choreographed fleet](./choreographed-repositories.md) starts with a `repository` identity. Its optional
+  `repositories` roster lists peers as `{name, url, path, branch}` entries. `--polyrepo=false` limits one invocation
+  to the local repository.
+
+The [models package](./go/models.md) exposes these settings as Go types.
 
 ## The Go packages
 
-Read [Go packages](./go/README.md) for details on the six modules dispat uses. You can import each module on its own.
-They do not require a dispat binary, a git repository, or network access.
+Each of the six modules is independently importable. You do not need the dispat executable to use them in your own
+program. Their individual pages explain inputs, outputs, and error handling.
 
 | Package | What it does |
-|---------|--------------|
+| --- | --- |
 | [`pkg/ccme`](./go/ccme.md) | Parses commit messages in the Conventional Commits Monorepo Extension format |
-| [`pkg/scanner`](./go/scanner.md) | Reads dependency manifests across twenty-one ecosystems into one shape |
-| [`pkg/writer`](./go/writer.md) | Rewrites those manifests in place, preserving every byte it does not change |
-| [`pkg/manifest`](./go/manifest.md) | Provides the vocabulary the reader and the writer share |
-| [`pkg/models`](./go/models.md) | Exposes the typed configuration model so tooling can author config files as values |
+| [`pkg/scanner`](./go/scanner.md) | Reads supported manifests into a common representation |
+| [`pkg/writer`](./go/writer.md) | Updates supported manifests while preserving formatting where the format allows |
+| [`pkg/manifest`](./go/manifest.md) | Defines the format names and types shared by scanner and writer |
+| [`pkg/models`](./go/models.md) | Represents dispat configuration as typed Go values |
 | [`pkg/config`](./go/config.md) | Loads JSON, YAML, and TOML configuration, including local file references |
 
 ## The formats around them
 
-Three more pages describe formats instead of surfaces. They belong in this section because machines read them.
+[Commit messages](./reference/commits.md) describe release intent. [Script environment variables](./reference/environment.md)
+pass the resulting plan to your commands. [Diagnostic codes](./reference/plan-errors.md) explain why a plan or run
+could not proceed as expected.
 
-- [Commit messages](./reference/commits.md) defines the format dispat reads release intent from.
-- [Script environment](./reference/environment.md) lists the `DISPAT_*` variables every stage script receives.
-- [Diagnostic codes](./reference/plan-errors.md) numbers everything dispat can report, explaining what each code means
-  and what you should do about it.
+Keep the documentation version matched to the CLI or library version you use. Select an older release in the version
+menu when maintaining a pinned installation.

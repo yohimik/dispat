@@ -1,7 +1,14 @@
 # Architecture
 
-Read this page to understand the source code or why a behaviour works the way it does. It covers the modules dispat is
-assembled from, the algorithms behind the plan, the execution model, and the design decisions that shape both.
+Start here when you are working on dispat's source or tracing a release decision. The page follows a run from command
+parsing through planning, execution, and recording.
+
+- Use the [module map](#module-map) to find the code responsible for a feature.
+- Read [planning](#planning) for release windows, propagation, and shared versions.
+- Read [graph algorithms](#graph-algorithms) for task ordering and concurrency.
+- Read [failure semantics](#failure-semantics) before changing error handling or recovery.
+- See [testing](#testing) for where to add and run tests.
+
 References like `§N.N` point into the separately versioned CCME specification, located at
 [`specs/ccme-spec/SPEC.md`](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md). The specification document is licensed under
 GPL-3.0-or-later. Quotations or adaptations of its text retain those terms.
@@ -104,12 +111,14 @@ read it back as a release tag.
 9. Run the gating run-level `beforeAll` hooks. A failure here aborts the run before any release work begins. In
    source-history mode, revalidate every participating repository after all control and imported hooks finish. A
    relevant head, release-tag, or pin change is `E330` before the first package task.
-10. Execute the task graph with per-stage concurrency budgets. This runs a version, build, and publish stage per
-    *releasing* package, excluding held packages, a sign stage first for a package whose space configures one, and a
-    tests stage between the build and the publish for a package whose space configures one. The version stage runs
+10. Execute the task graph with per-stage concurrency budgets. This runs, per *releasing* package and excluding held
+    packages, the stages of its package graph (CCME §13.11): a sign stage first for a package whose space configures
+    one, a version stage for a package that picks up a provider's version or auto-versions, the build every package
+    has, and the tests, the stages the flow defines and the publish where the flow configures them, in the order the
+    flow's constraints, the default chain and the engine's own edges resolve to. The version stage runs
     under the name its configuration gave it, `version` or `propagate`. The space's gating hooks bracket each stage
     (`beforeAll`, `beforeSign`/`postSign`, `beforeVersion`/`postVersion`, `beforeBuild`/`postBuild`,
-    `beforeTests`/`postTests`, `beforePublish`). A space's `flow.login` runs once before
+    `beforeTests`/`postTests`, `before<Name>`/`post<Name>` for a defined stage, `beforePublish`). A space's `flow.login` runs once before
     its first publish. Every other publish in that space waits on it. Source-history mode revalidates a package's
     owner plus the transitive provider and shared-version-group repository closure after `beforePublish` and before its
     publish command. The same check includes control when applicable control intent was consulted or a checkpoint will
@@ -127,6 +136,7 @@ read it back as a release tag.
     `publish.adoptPublished`: a verified matching artefact is adopted (`W196`), while a different or unverifiable
     artefact is refused (`E198`) and no later publication starts. Recording uses a detached context bounded at five
     minutes, so cancellation allows a record attempt to finish but cannot guarantee a remote will accept it.
+    A package with no publish stage records after its last gating stage; configured observer stages follow the record.
 12. Run the warn-only `postAll` hook. It receives the run outcome through the `DISPAT_RESULT_*` variables. From here
     the durable records run on a context of their own: the run's cancellation does not reach them, and an interrupt
     gives them five minutes from the moment it arrives. An uninterrupted run is not bounded by it. The hooks stay on
@@ -151,10 +161,13 @@ read it back as a release tag.
 
 ## Planning
 
-The planner acts as a pure function of your history, graph, and configuration. It never consults wall-clock time or the
-outcome of any previous run. This makes re-running after a partial publish deterministic. The one date-derived input is
-git's newest-first tag ordering, which decides which tag counts as a package's latest. That ordering remains a fixed
-property of the repository and stays the same on every re-run.
+The planner reads history, reachable tags, the dependency graph, and configuration. It does not read wall-clock time
+or a saved run outcome. For each package, it normally selects the highest version by SemVer precedence, including
+prereleases; the stable baseline excludes prereleases.
+
+If the newest reachable matching tag has an unparseable version, that tag supplies the history boundary and the
+configured initial version supplies the version. With the same repository state and resolved configuration, the
+planner makes the same decisions.
 
 In source-history mode, the planner passes repository input closures to release validation as immutable, interned
 bitsets in a shared repository order. Validation reuses those words and copies a set only when it must add an optional
@@ -168,9 +181,10 @@ stop at its in-union baseline rank. A merged or composed history uses the genera
 prerelease baseline uses the general attribution path. This saves window-index space and repeated author visits on
 nested chain windows; other planning phases and explicit output still have their own costs.
 
-**Windows.** dispat answers every question of the form "does this commit still count?" against a *pending window*. This
-window contains the commits from a package's last **stable** tag to `HEAD`. Which package's window it consults depends
-on the purpose. Conflating the two is the bug that loses releases:
+### Pending and owed windows
+
+A *pending window* contains commits from a package's last **stable** tag to `HEAD`. dispat uses it to decide whether a
+commit still contributes to a release. The package whose window is checked depends on the question:
 
 | Question                              | Window consulted |
 |---------------------------------------|------------------|
@@ -179,23 +193,27 @@ on the purpose. Conflating the two is the bug that loses releases:
 | Does this unit bump dependant `D`?    | **`D`'s**        |
 | Does this unit re-channel `D`?        | **`D`'s**        |
 
-Reading the last two questions against the *source's* window silently orphans consumers after a partial publish. The
-commit leaves the provider's window when it releases, making the unit lose its source packages. The consumer then never
-releases on this or any future run. The target's window handles the ordinary catch-up. A consumer that has itself
-released past the propagating commit, on a change of its own while its provider failed or was held, is asked the finer
-question of §13.4a instead: whether some release of the provider carries the commit and the consumer's own release
-reached it. Once the provider has published in a run the consumer sat out, no ordinary window holds the commit, so the
-planner also reads the *owed window* of each provider and consumer pair (§13.3): the history after the newest provider
-release the consumer's baseline reaches. It is taken for every consumer the provider reaches, not only the direct ones,
-and read only where it reaches further back than the union of the ordinary windows; it admits nothing by itself. dispat
-uses no repair pass, no second traversal, and no timestamp comparison anywhere in the package. Two releases on one
-commit are the one state ancestry cannot order, so a run that would release a provider on the baseline commit of a
-consumer it still owes, without releasing that consumer after it, is refused before any hook runs (`E201`), and a
-consumer that failed after its provider was released there is reported with the exact `Release-As` that delivers it.
+Using the source's window for a consumer would lose releases after a partial publication. The provider's release
+removes the commit from its own window while the consumer may still need it. Checking the target's window preserves
+that ordinary catch-up.
+
+A consumer may also have released its own work after the propagating commit while its provider failed or was held.
+Section §13.4a then asks whether a provider release carries the commit and whether the consumer's release reached that
+provider release.
+
+If the provider later publishes while the consumer sits out, neither ordinary window may hold the commit. The planner
+therefore also reads an *owed window* for each provider–consumer pair (§13.3): history after the newest provider release
+that the consumer's baseline reaches. This includes transitive consumers. It is read only when it extends beyond the
+ordinary windows, and does not itself admit a release. There is no repair pass, second traversal, or timestamp
+comparison.
+
+Ancestry cannot order two releases on the same commit. dispat refuses a run that would release a provider on an owed
+consumer's baseline commit without releasing that consumer afterward (`E201`), before any hook runs. If the consumer
+failed after the provider released there, the diagnostic gives the exact `Release-As` needed to deliver it.
 
 On a prerelease train, the window deliberately spans commits the train's prereleases already published. This lets §11.4
 recompute the train's target and a graduation's version over the whole train. But published work remains published. A
-commit contained in the *baseline* tag (the newest tag of any kind) still counts toward the bump and is discharged for
+commit contained in the *baseline* tag (the highest version by SemVer precedence, including prereleases) still counts toward the bump and is discharged for
 every question asking "is this still pending?". It cannot re-release the train, which prevents every run from emitting
 `beta.1`, `beta.2` from the same content. A `Release-As` it carries is consumed, and a `cancel` cannot discard it
 because a prerelease tag is a published tag. This discharge extends to diagnostics. dispat does not re-warn a contained
@@ -203,7 +221,9 @@ channel directive as `W199` because the tag records that it worked. It does not 
 (`W200`/`W208`). A cancel discharged for every package it names is spent rather than misaimed, so `W170` stays for live
 cancels only.
 
-**Propagation runs in three phases, and they may not be merged**. Phase 3 reads what phase 2 produces:
+### Propagation phases
+
+Propagation has three ordered phases. Keep them separate: phase 3 depends on phase 2's result.
 
 1. **Channel axis**: Each unit's `Propagate-Channel*` directives propose a channel per package. dispat admits these
    against each target's window.
@@ -227,7 +247,9 @@ republishing as a catch-up does not propagate onward. Across a retry, targets on
 traversal, and channel eligibility remain unchanged. If those inputs move, dispat surfaces any newly eligible targets
 for review before publishing.
 
-**Versioning groups.** Packages with shared versioning are grouped by their resolved group key. This key is the space's
+### Shared version computation
+
+Packages with shared versioning are grouped by their resolved group key. This key is the space's
 own name for a space with its own mode, or the declared `versionGroups` entry the space or package joined. A group may
 span spaces. A mode carries one number called its *shared depth*. This defines how many leading version components the
 group holds equal: 3 for `fixed`, 2 for `fixedMajorMinor`, 1 for `fixedMajor`, and 0 for `independent`. The group's
@@ -296,8 +318,7 @@ than a ride, and the member that published is not dragged into an empty re-relea
 
 ## Module map
 
-Read one line per package below. Each package's doc comment carries the full story, and the deeper design notes live in
-the sections below.
+Use this table to find a feature's implementation. Each package's doc comment provides more detail.
 
 | Package              | Role                                                                                                                                                                                                         |
 |----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -326,8 +347,8 @@ the sections below.
 
 ## Graph algorithms
 
-A handful of small graph algorithms and one graph-shaped structure carry the whole tool. This section maps what runs
-where.
+The dependency graph determines release order and propagation. The task graph expands releasing packages into stages
+and schedules them within concurrency limits.
 
 ### Topological sort: the publish order
 
@@ -352,16 +373,24 @@ this once per plan.
 
 ### The task graph: what a release actually schedules
 
-Each releasing package contributes up to five task nodes. The `sign` node exists when the package's space enables
+Each releasing package contributes task nodes for its applicable stages. The `sign` node exists when the package's
+space enables
 [`autoSign`](../configuration/autosign.md) or configures any of `flow.sign`, `flow.beforeSign` and `flow.postSign`,
-and it is the package's first node: it writes the package's own version before anything else of the release runs. A
-package without that configuration has no `sign` node, and its graph is the graph it always was. The `version` node
+and it is the package's first node: it writes the package's own version before later stages run. A
+package without that configuration has no `sign` node. The `version` node
 exists when any provider of the package
 moved in this run **or** its space auto-versions. Section §9.4 reconciles against every workspace dependency, so the
 stage cannot be conditional on this run's updates. "Moved" means `Release.Updates`, which is deliberately wider than
 `DueTo`. A provider releasing beside its consumer with no propagation between them still hands it a version to pick up.
 Gating on `DueTo` made a scripted version stage and a native `autoVersion` block disagree about the same run. The
-`syncLock` node exists when an autoVersion space configures the scripts. The `build` and `publish` nodes always exist.
+`syncLock` node exists when an autoVersion space configures the scripts. The `build` node always exists. The
+`tests`, `publish` and `announce` nodes, and a node per stage the flow defines, exist where the flow configures the
+stage or one of its hooks; the edges among them are the package graph of CCME §13.11, resolved as the configuration
+loads: the flow's constraints, the default chain for the stages that carry none, the preparing stages before every
+other and the build before the publish, with the publication and record edges on top. A package with no `publish`
+node has a `record` node that follows every stage before the record, which writes what the publish's tail writes, and
+a package with a `beforeAll` hook runs it as a node before its first stages. A node's exports reach the nodes that
+follow it in the graph and nothing beside it.
 
 ```
   core:   build ─────────────► publish
@@ -423,6 +452,9 @@ weight past the budget simply runs alone. A node that does not fit waits at the 
 it overtakes it. This head-of-line discipline makes a heavy node's wait finite instead of starvable. The syncLock node
 keeps the ordinary cost of one. Its budget exists to serialise lock-file writers, not to price packages.
 
+When a heavy head waits for enough slots, later ready light tasks leave spare slots unused. The weighted engine
+therefore does not satisfy the work-conserving one-pool premise of the ideal task-makespan bound in CCME §13.11.
+
 There are no locks in the scheduling hot path. A mutex guards only the shared result map that handles skip decisions,
 provider filtering, and the syncLock skip read. Every task finishes exactly once, including no-op completions for
 packages already failed or skipped. This lets the counting terminate without special cases. A cancelled context stops
@@ -439,20 +471,21 @@ command that covers packages requires only one small file rather than a copy of 
 
 ### The stage seam: where a frame may leave this machine
 
-The task graph is the same graph whether a release runs on one machine or several. Only build, tests and publish frames
-can leave this machine: the sign, version and syncLock frames write the working tree every delegated frame is
+The task graph stays the same when work moves to other machines. Only build, tests and publish frames, and the
+frames of the stages the flow defines before the records, can leave this machine: the sign, version and syncLock frames write the working tree every delegated frame is
 snapshotted from, so they run on the orchestrator under the snapshot guard, as every manifest reconciliation must
 (§28.3 of the specification). [Distributed
-execution](../distributed-execution.md) adds no barrier nodes and no edges, because a second scheduler would be a
-second answer to the order a release already has. What it adds is one seam inside the executor: the call that runs a
-stage frame asks a coordinator first, and the coordinator either runs the frame here or places it on a node.
+execution](../distributed-execution.md) adds no barrier nodes or edges. Before running a stage frame, the executor asks
+the coordinator whether to run it locally or place it on another node.
 
-The stages are data. One ordered table describes sign, version, syncLock, build, tests and publish: each stage's name
-and hook spelling, the budget its tasks hold, whether its frame stays on the orchestrator or is placed by the build's
-or the publish's `runOnly` value, what a node must install before it runs (nothing, the providers' outputs, or the
-package's own outputs), whether its outputs are admitted, and whether its commands wait for the run's authorization.
-The task graph chains the stages a package has in table order, and the seam is one call carrying the descriptor, so a
-stage added to the table is placed, transported, reported and gated the way the stages beside it are.
+The stages are data. One ordered table describes sign, version, syncLock, build, tests, publish and announce: each
+stage's name and hook spelling, the budget its tasks hold, whether its frame stays on the orchestrator or is placed by
+the build's or the publish's `runOnly` value, what a node must install before it runs (nothing, the providers'
+outputs, or the package's own outputs), whether its outputs are admitted, and whether its commands wait for the run's
+authorization. A stage the flow defines gets a descriptor of the same shape, placed like the build, and every
+position-dependent answer (whether the stage gates or observes, what a node installs for it) is decided once per
+package in its stage plan, off the package graph. The seam is one call carrying the descriptor, so a stage added to
+the table or defined by a flow is placed, transported, reported and gated the way the stages beside it are.
 
 Three properties follow from putting the seam there. A run-wide stage budget is never multiplied by the number of
 nodes, because a task holds its budget slot from the moment it is ready and asks for a node afterwards. The
@@ -540,7 +573,8 @@ command, dispat revalidates the repositories whose history supplies that package
 package fails before publishing, its consumers remain gated, and independent work continues. This catches Git changes
 made by build or hook commands after planning without claiming that dispat can exclude arbitrary external writers.
 
-Inside that, there is a second and stronger line. **Once a package's publish succeeds, nothing can fail that package**.
+**Once a package's publish succeeds, its status stays published.** Later failures affect recording and the run's exit
+code, rather than undoing the publication.
 See [After the point of no return](#after-the-point-of-no-return) below.
 
 A failed script marks the package failed, but nothing aborts the run. The `Result.FailedStage` records where it failed
@@ -595,13 +629,11 @@ Nothing is ever reverted after a successful publish, for the reason the next sec
 
 ### After the point of no return
 
-A package's publish script succeeding marks the point of no return. The artefact is on its registry, and no later step
-can take it back. From there, dispat has nothing left to decide and only things left to record. It writes the tag, the
-changelog entry, the GitHub release, the release commit, and the push.
+A successful publish script marks the point of no return: the artifact is on its registry. dispat then completes the
+configured records, including the tag, changelog, GitHub release, release commit, and push.
 
-When one of those fails, it is a **critical**. dispat logs it with its own code, counts it in the summary, and
-otherwise ignores it. The run carries on to everything else it owed. The command still exits `1` at the end, so a
-release that lost part of its record never looks green in CI.
+Failure to complete one of those records is a **critical**. dispat logs its code, includes it in the summary, and
+continues the remaining recording work. The command exits `1` so CI reports the incomplete release record.
 
 | Code | What failed |
 |-------|--------------------------------------------------|
@@ -611,16 +643,13 @@ release that lost part of its record never looks green in CI.
 | `E223` | The release commit could not be made, or its shared `commit.include` paths could not be re-synchronized and were left out of it |
 | `E224` | The push failed |
 
-None of these fails the package because failing it would be a lie with consequences. The package *is* published, so
-marking it failed would do three wrong things. It would revert the package folder, throwing away the version bump of
-something already on a registry. It would run the `onFail` script. It would also skip every consumer, none of which has
-anything wrong with it, and all of which have a real published provider to build against. None of that un-publishes
-anything. The status stays `published`, and the summary line for that package turns into an error carrying what went
-missing. You get told exactly what to go and repair.
+The package stays `published` because its artifact is already available. Treating a record failure as a publish failure
+would incorrectly roll back its folder, run `onFail`, and apply the ordinary failed-provider skip rules. Instead, the
+package's summary reports the missing record so the operator can repair it.
 
-For the same reason, nothing stops at the first failure. A changelog that could not be written must not cost the tag
-too. One package's tag failing says nothing about the next package's tag. A failed push must not withhold the GitHub
-releases that document the same work. Each step runs, each failure is recorded, and the exit code adds them up.
+Recording continues after a failure. A failed changelog write does not prevent the tag attempt, one package's tag
+failure does not stop another's, and a failed push does not suppress the GitHub release attempts. Each failure is
+reported in the final result.
 
 The `E221` error is the one case that also declines to act. A tag already sitting at another commit is left exactly
 where it is rather than moved onto this release. It is a record some earlier run made. With
@@ -654,7 +683,7 @@ Other choices:
 - Ordering is deterministic everywhere. dispat uses alphabetical tie-breaks in the toposort and sorted space iteration
   in discovery.
 
-Two diagnostics are deliberately not suppressible. Each explains a release outcome a reader of the commit log alone
+Some diagnostics cannot be suppressed because they explain outcomes the commit log alone
 cannot account for. A **catch-up** and a **channel-only** release explain a package's *presence* in a plan. A
 **blocked** package and a **suppressed propagation** explain an *absence*.
 
@@ -697,7 +726,7 @@ registry-aware and audit-aware features. Errors like `E197` (publish-order viola
 unverifiable), and `E199` (convergence check failed) assume an engine that queries registries and audits its own runs.
 Warnings like `W195` (staleness audit) and `W196` (published version adopted from the registry) belong to the same
 features. dispat implements and emits every other code of the registry, including the repository-scoped bucket (`E182`,
-`E185`, `E191`, `E195`, `E196`, `E200`) and the run-scoped `E201`, which refuses a run that would release a provider at
+`E185`, `E191`, `E195`, `E196`, `E200`, `E233`) and the run-scoped `E201`, which refuses a run that would release a provider at
 the baseline commit of a consumer it still owes and reports a consumer that failed after its provider was released
 there. This includes the codes the registry leaves to the engine rather than to the parser. dispat raises `E210`-`E213`
 and `W209`-`W215` here. These resolve an `Edits` or `Deletes` target against history and report what the correction did
@@ -765,9 +794,9 @@ each of its requirements onto the tests that prove it. The results are summarise
 [test results](./test-results.mdx). The unit suites have no equivalent catalogue. What they assert is stated in each
 test's own name and doc comment. You can see what the whole suite reaches per package in [coverage](./coverage.mdx).
 
-The composition claims live exclusively in the black-box
+End-to-end behavior is tested in the black-box
 [integration suite](https://github.com/yohimik/dispat/blob/main/tests/integration/README.md). This includes the
 compiled binary, real git over a process boundary, exit codes, scheduling under real concurrency, and signal handling.
 The suite builds the real binary and asserts on git state, JSON log events, and nanosecond execution timelines. The
-`services/dispat` module itself hosts no end-to-end tests. A test that could only be satisfied by faking what the suite
-can witness for real belongs in the integration suite instead.
+`services/dispat` module itself hosts no end-to-end tests. Add tests that need the real binary, Git process, scheduler,
+or signals to the integration suite.

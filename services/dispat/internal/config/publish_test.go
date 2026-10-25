@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
 package config
 
 // `publish.adoptPublished` from the two sides a configuration decides: what
@@ -94,4 +97,37 @@ func TestAdoptPublishedShapes(t *testing.T) {
 			assert.ErrorContains(t, err, row.err)
 		})
 	}
+}
+
+func TestPublishKindListsInheritAndAllowExplicitEmpty(t *testing.T) {
+	list := func(names ...string) *[]string {
+		if names == nil {
+			names = []string{}
+		}
+		return &names
+	}
+	cfg := minimalConfig()
+	cfg.Publish = &PublishConfig{
+		OrderKinds:    list("dependencies", "devDependencies"),
+		BlockingKinds: list("dependencies"),
+	}
+	cfg.Spaces = map[string]SpaceConfig{"libs": {Path: PathList{"pkgs"},
+		Publish: &PublishConfig{OrderKinds: list("peerDependencies")}}}
+	root := writeModelRepo(t, cfg, "pkgs/core", "pkgs/empty")
+	writePackageFile(t, root, "pkgs/empty", PackageConfig{
+		Publish: &PublishConfig{OrderKinds: list(), BlockingKinds: list()},
+	})
+	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
+	require.NoError(t, err)
+	pkgs, _, _, err := DiscoverPackages(loaded, root)
+	require.NoError(t, err)
+	by := packagesByName(pkgs)
+	assert.True(t, by["core"].Space.PublishOrderKindsSet)
+	assert.Equal(t, []model.DepKind{model.KindPeerDependencies}, by["core"].Space.PublishOrderKinds)
+	assert.True(t, by["core"].Space.PublishBlockingKindsSet)
+	assert.Equal(t, []model.DepKind{model.KindDependencies}, by["core"].Space.PublishBlockingKinds)
+	assert.True(t, by["empty"].Space.PublishOrderKindsSet)
+	assert.Empty(t, by["empty"].Space.PublishOrderKinds)
+	assert.True(t, by["empty"].Space.PublishBlockingKindsSet)
+	assert.Empty(t, by["empty"].Space.PublishBlockingKinds)
 }

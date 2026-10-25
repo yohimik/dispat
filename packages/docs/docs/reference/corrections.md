@@ -1,11 +1,9 @@
 # Correcting a release record
 
-A commit message is a release record. The type decides the bump, the description becomes the changelog entry, and the
-footers decide what travels to consumers. This works well until you push a wrong message and put it out of reach of
-`git commit --amend`.
+If a commit has the wrong type, scope, or description, you can correct its release metadata in a later commit. This
+is useful when the original commit has already been pushed and you do not want to rewrite history.
 
-Write a correction to fix a record from a later commit. You name the wrong record and either replace it or throw it
-away:
+Use `Edits` to replace a pending record with the correction's metadata, or `Deletes` to remove the record:
 
 ```
 Edits:   <sha>      restate that record as this commit's own
@@ -24,8 +22,7 @@ git log --oneline -1
 # 8cb07a5 feat(core)!: rewrite internals
 ```
 
-Left alone, that takes `core` to `2.0.0`. Write a commit that says what the change actually was. Point it at the one
-you got wrong:
+The `!` requests a major bump. If the change only needs a patch, write a correction and point it at the original commit:
 
 ```
 fix(core): rewrite internals
@@ -46,24 +43,21 @@ Now `core` releases `0.1.1`. The changelog carries the new description rather th
 The change is a refactor with a defensive fix, not a breaking feature.
 ```
 
-Run `git commit --allow-empty` to write a correction without changing files. A correction commit is usually empty,
-which is fine.
+Use `git commit --allow-empty` when the correction changes only the message metadata and needs no file changes.
 
 ## What a correction can reach
 
-Two rules decide this.
+A correction must meet both of these rules:
 
-**A correction reaches only work that has not been released.** Releasing writes a tag, and a tag is a promise. Once
-`core` ships `2.0.0`, the record that caused it becomes public history. No later commit takes it back. dispat does not
-fail the run over this, but it tells you the correction did nothing:
+**The target must still be unreleased.** Once `core` ships a version, a later correction cannot remove the record
+behind that release. dispat warns that the correction had no effect and continues:
 
 ```
 W209  Edits: f8c56e0 addresses no pending record; released work is history and cannot be corrected (§7.4.2)
 ```
 
-You cannot turn that warning off, not even with `--quiet-parser`. You must know when a correction fails so you do not
-believe a record was fixed when it was not. Publish a new release to explain the change if the record has already
-shipped.
+This warning remains visible with `--quiet-parser`. If the record has already shipped, explain the change in a new
+release.
 
 **A correction reaches only earlier commits.** The target must be an ancestor of the commit carrying the correction. A
 commit cannot correct itself or anything after it. This makes it safe to discard several old records and supply their
@@ -71,8 +65,8 @@ replacement in a single commit. Naming a commit that is not an earlier one yield
 
 ## Correcting part of a record
 
-A record is a claim about specific packages, so a correction and its target have scopes that must line up. The rule is
-containment. Your correction may name fewer packages than its target, never more.
+A correction may cover all or some of its target's packages. It cannot add packages that the original record did
+not cover.
 
 Assume one commit was scoped to the whole workspace:
 
@@ -95,12 +89,10 @@ other way:
 E213  correction names utils, which its target's record does not; a correction may narrow a record, never widen it
 ```
 
-The reason for the asymmetry is ownership. Narrowing only touches records that already covered the packages you named.
-Widening would extend a record to packages it never claimed, which releases a package by accident.
+This prevents a correction from introducing a release for an unrelated package.
 
-**When you write no scope-set at all**, the correction takes the packages of the records it targets. This is the
-recommended form, and it is why the short example above works. The correction commit is empty, so there are no changed
-files to derive a scope from. The targets already say which packages are meant.
+**Omit the scope-set to use the target records' packages.** This is usually the easiest form for an empty correction
+commit: the target supplies the package scope even though no files changed.
 
 ## Clearing a whole scope
 
@@ -112,8 +104,8 @@ chore(core): start the ledger over
 Deletes: *
 ```
 
-`chore` maps to a bump of `none`, so nothing replaces the deleted records. Use this to clear a ledger full of records
-that should never have existed. This typically happens after importing history from another tool.
+`chore` has a bump of `none`, so this clears the pending records without adding a new version bump. It can be useful
+after importing history that should not contribute to the next release.
 
 The wildcard reaches back from the correction's own commit and no further. Anything committed afterwards is unaffected.
 It also leaves `cancel` barriers and `release` directives alone, because those carry no record to discard.
@@ -147,9 +139,8 @@ dispat reports the voiding per package:
 W215  correction is void here: a newer correction discarded its own record for this package
 ```
 
-This is the undo, and it composes to any depth. Delete a delete to restore its target. Delete an edit to restore the
-original and drop the restatement. You do not need to worry about cycles, because a correction only ever names earlier
-commits.
+You can repeat this process: deleting a deletion restores its target; deleting an edit restores the original record
+and removes the replacement. Corrections cannot form a cycle because they can target only earlier commits.
 
 An `Edits` aimed at a correction replaces *that correction's own record*, not the record it was correcting. Aim at the
 original commit if you want to restate the original again. A newer `Edits` of the same target supersedes the older one
@@ -157,12 +148,11 @@ directly.
 
 ## Reverts and the changelog
 
-`revert` is a different tool from the two footers here. The difference is which layer it works on. A revert changes
-code, so the commit contains the inverse diff. A correction changes metadata and touches no files.
+A Git revert changes code by applying an inverse diff. `Edits` and `Deletes` change release metadata; they do not
+undo file changes.
 
-`Reverts:` is informational for the version. A `feat!` and a revert of it in one window still take the package to a
-major. `max()` sees both, and consumers may already have seen the feature in a prerelease. Silently downgrading is
-worse than the extra major.
+`Reverts:` does not cancel a version bump. A `feat!` and its revert in the same window still request a major release;
+the planner takes the largest bump, and the feature may already have reached prerelease consumers.
 
 `Reverts:` is not informational for the changelog. Both entries are suppressed when the reverted commit has not been
 released. The release contains neither the change nor its removal:
@@ -186,7 +176,7 @@ the entries.
 
 ## Which tool for which job
 
-These tools form a ladder from the gentlest to the most destructive:
+Choose the tool based on what needs to change:
 
 | Tool | What it undoes | Reaches |
 |------|----------------|---------|
@@ -216,8 +206,7 @@ a multi-unit commit, or a position past the end, yields `E211`.
 
 ## What each diagnostic means
 
-The four errors are unit-scoped. The offending commit contributes nothing at all, and every other commit in the run is
-unaffected. The release still goes ahead without it under the default
+The four errors apply to the offending unit. Its correction has no effect, while other valid units remain active. The release still goes ahead without it under the default
 [`commitErrors: "warn"`](../configuration/parser.md).
 
 | Code | Means |

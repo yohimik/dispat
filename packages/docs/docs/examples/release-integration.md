@@ -1,11 +1,14 @@
 # Integrating an existing release pipeline
 
-Start with the artifacts users install, then trace what each build reads. Keep the working build tools and publisher
-commands. dispat supplies the release graph, version plan and package completion records.
+Keep the build tools and publish commands that already work. To connect them to dispat, first list what users
+receive, then identify what each build needs from the packages before it. Those decisions define the release graph.
+
+Work through this guide in three passes: choose when dependent builds can start, check the files you will publish,
+then test recovery from a partial release. The ecosystem table links to concrete configurations.
 
 ## Choose the build boundary
 
-For each consumer, identify whether it needs its provider's local build output or its published artifact.
+For each dependency, ask what the consumer needs before it can build:
 
 | Input to the consumer | Integration |
 |---|---|
@@ -14,8 +17,8 @@ For each consumer, identify whether it needs its provider's local build output o
 | Infrastructure needed only for deployment | Set `isBuildWaitingPublish: {build: none}` on the provider. Nothing it builds reaches the consumer's build, so the builds run at once and only the deployments follow. |
 | An external CI workflow | Retain its invocation ID, wait for completion and propagate its final status. A dispatch response is not completion. |
 
-The relation belongs to the provider and affects all its consumers. If one artifact needs a different publication
-boundary, give it a separate package. See [space options](../configuration/spaces.md#space-options) and
+Set the relation on the provider; it applies to all of that provider's consumers. Give an artifact a separate package
+when it needs a different publication boundary. See [space options](../configuration/spaces.md#space-options) and
 [dependencies](../configuration/dependencies.md).
 
 A consumer using local output does not need a registry hop. A consumer that pulls
@@ -24,9 +27,9 @@ provide reproducible identity; retain the planned version or digest.
 
 ## Pin a runtime snapshot before downloading
 
-Resolve mutable discovery pointers once, then download every related file from the resulting immutable snapshot.
-Retain the snapshot identity and checksum so a retry resumes the same object. Re-reading a pointer for each file can
-mix releases even when every request succeeds.
+If a download starts from a mutable pointer such as `latest`, resolve it once. Download all related files from that
+fixed snapshot and keep its identity and checksum for retries. Looking up the pointer again for each file can mix
+files from different releases.
 
 For a distribution package, retain its source descriptor and applied patch series as well as its upstream version.
 A version comparison alone cannot establish whether a fix was backported. Test compatibility at the consumer boundary,
@@ -39,9 +42,9 @@ command must be the final external action in the publish stage. After it succeed
 write its native release records. Do not follow an accepted upload with a registry read or channel mutation that can
 turn publication into a failed package leg.
 
-Propagate failures from every build, signing and upload helper. Build in clean output directories so stale files cannot
-hide a failed command. When a package has several destinations, either make preflight checks cover the whole attempt or
-model independently recoverable deliverables as separate packages.
+Make every build, signing and upload helper return its failures to dispat. Use clean output directories so an old
+file cannot hide a failed build. If a package publishes to several destinations, check the whole attempt before
+starting or split deliverables that need independent release records and retries.
 
 If an upload response is lost, reconcile the exact version, artifact digest and destination outside the publish
 command before another workflow run. Never delete and recreate an immutable version as a routine retry. See
@@ -50,8 +53,8 @@ command before another workflow run. Never delete and recreate an immutable vers
 ## Keep the release tied to its input commit
 
 Serialize releases and retain the planned source revision, artifact digest, workflow invocation and attempt identity.
-A later branch tip must not become the identity of an earlier build. A rerun must distinguish work completed by the
-current attempt from successful jobs carried over from an earlier one.
+A later branch tip must not become the identity of an earlier build. On a rerun, distinguish work completed in that
+attempt from successful jobs carried over from an earlier one.
 
 Test this by starting from commit A, advancing the branch to commit B while publication is paused, and confirming that
 the resulting versions, artifacts, tags and changelog still describe A. Include recovery after publication but before
@@ -122,8 +125,8 @@ Registry quotas, credentials, signatures, platform compatibility and store appro
 configured tools and checks. dispat can order commands and record successful completion; it cannot repair a registry
 outage or validate an artifact that the publisher never tested.
 
-Run recovery exercises before adopting the setup: one failure after a publication and one lost response. Confirm that
-the retry preserves completed artifacts and refuses ambiguous or mismatched ones.
+Before enabling the setup, test a failure after an upload and a lost upload response. Confirm that retries preserve
+completed artifacts and stop when the remote result is ambiguous or does not match the planned artifact.
 
 ## Choose the authoring and document contract
 

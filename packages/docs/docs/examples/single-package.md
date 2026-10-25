@@ -1,8 +1,10 @@
 # A single package, no monorepo
 
-Set up semantic versioning, changelogs, and tags for a single package without a monorepo. Skip `spaces` entirely and
-declare one standalone `packages` entry pointing to your source or package folder. An npm project can keep its only
-`package.json` at the repository root.
+You need one entry under `packages` to release a single project. There is no need to define a space.
+
+Choose the layout that matches your repository: a root manifest with code in `src/`, a manifest inside a package
+folder, or the [whole repository as one package](#the-repository-itself-as-the-package). The examples below use npm;
+the build and publish commands can be replaced with your own tools.
 
 ## One root manifest
 
@@ -124,8 +126,8 @@ If your manifest already lives beside the code in a subfolder, commands can run 
 }
 ```
 
-In this layout, the folder contains its own manifest, and its scripts and changelog use that folder. The dispat
-configuration lives at the root, and tags belong to the repository.
+Here, scripts run beside the manifest and the changelog is written in the same folder. Keep the dispat configuration
+at the repository root; release tags still belong to the repository.
 
 Write commits scoped with the package name to drive releases. A commit with no scope also counts when it touches files
 inside the folder. Watch how dispat handles a new feature:
@@ -137,14 +139,13 @@ $ dispat status
 09:31:07 INF release plan ready held=0 packages=1 releasing=1
 ```
 
-Everything else works unchanged with one package. You can use channels, the changelog, GitHub releases, hooks, and
-`dispat run` exactly as documented. If the repository grows a second deliverable later, add another entry or a space
-and declare the edge between them.
+Channels, changelogs, GitHub releases, hooks and `dispat run` also work with one package. To release a second
+deliverable later, add another entry or a space and declare any dependency between them.
 
 ## The repository itself as the package
 
-A `path` of `.` names the repository root, so the package is the repository and no folder-relative detour is needed.
-Use it when the manifest, the sources and the changelog all live at the top:
+Use `path: .` when the package is the whole repository. Scripts then run at the root, beside the manifest and
+changelog:
 
 ```yaml title="dispat.yaml"
 scripts:
@@ -175,9 +176,9 @@ every local change in the tree, and a `buildOutputs` root holding another packag
 
 ## When it grows
 
-Add new packages without breaking your history. Nothing moves or gets renamed, and your published tags remain the
-baselines that future versions count from. Read [From one package to many](./one-to-many.md) to watch a single
-deliverable grow into a landing page, a docs site, an SDK, and a server in the same configuration file.
+When you add another package, keep the existing package's name, path and tag format. Its published tags continue to
+supply its version baseline. [From one package to many](./one-to-many.md) walks through adding a CLI, container,
+documentation site and marketing site to an existing library.
 
 ## One package can still have a partial release
 
@@ -185,9 +186,9 @@ A single npm package may also publish a binary archive, a GitHub release and a d
 external writes when designing recovery. Preserve the exact source revision and artifact identity across publication
 and recording; updating the checkout after a build can associate release records with code that was never built.
 
-In dispat, a successful package publish is recorded by a tag. A rerun uses recorded completion when planning pending
-work. This is forward recovery inspired by sagas: completed external writes remain in place. It is not a rollback
-transaction across npm, GitHub and a website.
+dispat records a successful package publish with a tag and uses that record when planning a retry. Already completed
+uploads stay in place. There is no transaction that can undo a release across npm, GitHub and a website, so each
+publisher needs a way to check what happened before it retries.
 
 | Where the run stops | Integration requirement |
 |---|---|

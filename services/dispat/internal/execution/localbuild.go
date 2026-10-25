@@ -3,8 +3,10 @@
 
 package execution
 
-// The orchestrator executing one of its own run's build frames (CCME §28.1:
-// the orchestrator "MAY execute tasks locally under the same rules").
+// The orchestrator executing one of its own run's frames (CCME §28.1:
+// the orchestrator "MAY execute tasks locally under the same rules"). Frames
+// with declared output roots use localisolation.go's private checkout; this
+// path handles frames with no declared roots.
 //
 // Under the same rules is the whole of the design here. A frame placed on
 // this machine runs the executor's own gating sequence, in the checkout the
@@ -129,17 +131,18 @@ func (c *Coordinator) captureLocalOutputs(ctx context.Context, task string,
 	c.guard.RLock()
 	defer c.guard.RUnlock()
 	manifest, err := CaptureOutputs(ctx, CaptureRequest{
-		Git:         owner,
-		Dir:         request.Dir,
-		PackagePath: dir,
-		Roots:       request.Release.Pkg.Space.BuildOutputs,
-		Limits:      c.Limits,
+		Git:               owner,
+		Dir:               request.Dir,
+		PackagePath:       dir,
+		Roots:             request.Release.Pkg.Space.BuildOutputs,
+		Limits:            c.Limits,
+		IsAbsentRootEmpty: request.Stage != "build",
 		Manifest: OutputManifest{
 			Run: c.Run, PlanDigest: c.PlanDigest, Task: task, Attempt: 1,
 			Generation: c.Generation, Node: c.Local.Name,
 			Package: request.Release.Pkg.Name, Version: request.Release.Next.String(),
 			Platform: Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
-			Inputs:   c.formatLocalInputs(request.Release.Pkg.Name),
+			Inputs:   c.formatLocalInputs(request),
 		},
 	})
 	if err != nil {
@@ -154,7 +157,8 @@ func (c *Coordinator) captureLocalOutputs(ctx context.Context, task string,
 // formatLocalInputs is what this build consumed, as a manifest names it: the
 // admitted output set of every provider whose bytes were in this checkout
 // when the frame ran.
-func (c *Coordinator) formatLocalInputs(packageName string) []ManifestInput {
+func (c *Coordinator) formatLocalInputs(request release.StageRequest) []ManifestInput {
+	packageName := request.Release.Pkg.Name
 	providers := c.dispatch.Inputs(packageName)
 	inputs := make([]ManifestInput, 0, len(providers))
 	for _, provider := range providers {
@@ -164,6 +168,16 @@ func (c *Coordinator) formatLocalInputs(packageName string) []ManifestInput {
 		}
 		inputs = append(inputs, ManifestInput{
 			Package: provider.Package, OutputTree: admitted.manifest.outputTree,
+			Digest: admitted.manifest.digest,
+		})
+	}
+	for _, stage := range request.Descriptor.OwnOutputStages {
+		admitted := c.outputs.findStage(packageName, stage)
+		if admitted == nil {
+			continue
+		}
+		inputs = append(inputs, ManifestInput{
+			Package: packageName, OutputTree: admitted.manifest.outputTree,
 			Digest: admitted.manifest.digest,
 		})
 	}

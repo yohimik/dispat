@@ -160,7 +160,8 @@ func DefaultNonPackageScopes() []string { return public.DefaultNonPackageScopes(
 // scriptRefs returns every script reference field of the space, labelled for
 // error messages, so validation and resolution never disagree about the list.
 func scriptRefs(s *SpaceConfig) map[string][]string {
-	return map[string][]string{
+	refs := flowStageRefs(s.Flow)
+	for field, list := range map[string][]string{
 		"flow.build":                    s.Flow.Build,
 		"flow.tests":                    s.Flow.Tests,
 		"flow.publish":                  s.Flow.Publish,
@@ -187,7 +188,10 @@ func scriptRefs(s *SpaceConfig) map[string][]string {
 		"flow.onFail":                   s.Flow.OnFail,
 		"flow.onSkip":                   s.Flow.OnSkip,
 		"publish.adoptPublished.verify": adoptVerifyRefs(s.Publish),
+	} {
+		refs[field] = list
 	}
+	return refs
 }
 
 // adoptVerifyRefs are the script names a level's publish.adoptPublished
@@ -1835,7 +1839,7 @@ func resolveVersionStage(sc SpaceConfig) model.VersionStage {
 	for _, pair := range []struct {
 		canonical, synonym bool
 	}{
-		{flow.Version != nil, flow.Propagate != nil},
+		{flow.Version != nil || hasStageObject(flow, "version"), flow.Propagate != nil || hasStageObject(flow, "propagate")},
 		{sc.AutoVersion != nil, sc.AutoPropagate != nil},
 		{flow.BeforeVersion != nil, flow.BeforePropagate != nil},
 		{flow.PostVersion != nil, flow.PostPropagate != nil},
@@ -2447,6 +2451,15 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 	if err != nil {
 		return nil, err
 	}
+	stageGraph, stageRefusals := resolveStageGraph(sc)
+	orderKinds, orderSet, err := resolvePublishKinds(label, "orderKinds", sc.Publish, false)
+	if err != nil {
+		return nil, err
+	}
+	blockingKinds, blockingSet, err := resolvePublishKinds(label, "blockingKinds", sc.Publish, true)
+	if err != nil {
+		return nil, err
+	}
 	return &model.Space{
 		Name: spaceName,
 		Path: sc.Path.First(),
@@ -2455,46 +2468,80 @@ func buildSpace(c *File, scope scriptScope, label, spaceName, dir string, sc Spa
 		// carrying the space plus any package override layers — the same
 		// invariant packageScope relies on — so only the top level is left to
 		// put underneath.
-		Env:                  EnvPairs(MergeEnv(c.Env, sc.Env)),
-		ProviderRelation:     model.NewStageRelation(sc.IsBuildWaitingPublish),
-		RevertOnFail:         boolValue(sc.RevertOnFail),
-		AdoptPublished:       resolveAdoptPublished(scope, sc.Publish),
-		Versioning:           model.Versioning(versioning.mode),
-		VersionGroup:         versioning.group,
-		CounterSharing:       versioning.counter,
-		ChannelSharing:       versioning.channels,
-		Scripts:              scope.scripts,
-		BuildScript:          scope.commands(sc.Flow.Build),
-		PublishScript:        scope.commands(sc.Flow.Publish),
-		VersionScript:        scope.commands(resolveFlowEntry(sc.Flow.Version, sc.Flow.Propagate)),
-		LoginScript:          login,
-		AnnounceScript:       scope.commands(sc.Flow.Announce),
-		BeforeAllScript:      scope.commands(sc.Flow.BeforeAll),
-		BeforeVersionScript:  scope.commands(resolveFlowEntry(sc.Flow.BeforeVersion, sc.Flow.BeforePropagate)),
-		PostVersionScript:    scope.commands(resolveFlowEntry(sc.Flow.PostVersion, sc.Flow.PostPropagate)),
-		BeforeBuildScript:    scope.commands(sc.Flow.BeforeBuild),
-		PostBuildScript:      scope.commands(sc.Flow.PostBuild),
-		TestsScript:          scope.commands(sc.Flow.Tests),
-		BeforeTestsScript:    scope.commands(sc.Flow.BeforeTests),
-		PostTestsScript:      scope.commands(sc.Flow.PostTests),
-		BeforePublishScript:  scope.commands(sc.Flow.BeforePublish),
-		PostPublishScript:    scope.commands(sc.Flow.PostPublish),
-		BeforeAnnounceScript: scope.commands(sc.Flow.BeforeAnnounce),
-		PostAnnounceScript:   scope.commands(sc.Flow.PostAnnounce),
-		OnFailScript:         scope.commands(sc.Flow.OnFail),
-		OnSkipScript:         scope.commands(sc.Flow.OnSkip),
-		TagFormat:            sc.TagFormat,
-		AliasTags:            resolvedAliases,
-		BuildOutputs:         sc.BuildOutputs,
-		BuildPlatforms:       sc.BuildPlatforms,
-		RunOnly:              sc.RunOnly,
-		AutoVersion:          autoVersion,
-		SignScript:           scope.commands(sc.Flow.Sign),
-		BeforeSignScript:     scope.commands(sc.Flow.BeforeSign),
-		PostSignScript:       scope.commands(sc.Flow.PostSign),
-		AutoSign:             resolveAutoSign(sc.AutoSign),
-		VersionStage:         resolveVersionStage(sc),
+		Env:                     EnvPairs(MergeEnv(c.Env, sc.Env)),
+		ProviderRelation:        model.NewStageRelation(sc.IsBuildWaitingPublish),
+		RevertOnFail:            boolValue(sc.RevertOnFail),
+		AdoptPublished:          resolveAdoptPublished(scope, sc.Publish),
+		PublishOrderKinds:       orderKinds,
+		PublishOrderKindsSet:    orderSet,
+		PublishBlockingKinds:    blockingKinds,
+		PublishBlockingKindsSet: blockingSet,
+		Versioning:              model.Versioning(versioning.mode),
+		VersionGroup:            versioning.group,
+		CounterSharing:          versioning.counter,
+		ChannelSharing:          versioning.channels,
+		Scripts:                 scope.scripts,
+		BuildScript:             scope.commands(sc.Flow.Build),
+		PublishScript:           scope.commands(sc.Flow.Publish),
+		VersionScript:           scope.commands(resolveFlowEntry(sc.Flow.Version, sc.Flow.Propagate)),
+		LoginScript:             login,
+		AnnounceScript:          scope.commands(sc.Flow.Announce),
+		BeforeAllScript:         scope.commands(sc.Flow.BeforeAll),
+		BeforeVersionScript:     scope.commands(resolveFlowEntry(sc.Flow.BeforeVersion, sc.Flow.BeforePropagate)),
+		PostVersionScript:       scope.commands(resolveFlowEntry(sc.Flow.PostVersion, sc.Flow.PostPropagate)),
+		BeforeBuildScript:       scope.commands(sc.Flow.BeforeBuild),
+		PostBuildScript:         scope.commands(sc.Flow.PostBuild),
+		TestsScript:             scope.commands(sc.Flow.Tests),
+		BeforeTestsScript:       scope.commands(sc.Flow.BeforeTests),
+		PostTestsScript:         scope.commands(sc.Flow.PostTests),
+		BeforePublishScript:     scope.commands(sc.Flow.BeforePublish),
+		PostPublishScript:       scope.commands(sc.Flow.PostPublish),
+		BeforeAnnounceScript:    scope.commands(sc.Flow.BeforeAnnounce),
+		PostAnnounceScript:      scope.commands(sc.Flow.PostAnnounce),
+		OnFailScript:            scope.commands(sc.Flow.OnFail),
+		OnSkipScript:            scope.commands(sc.Flow.OnSkip),
+		TagFormat:               sc.TagFormat,
+		AliasTags:               resolvedAliases,
+		BuildOutputs:            sc.BuildOutputs,
+		BuildPlatforms:          sc.BuildPlatforms,
+		RunOnly:                 sc.RunOnly,
+		AutoVersion:             autoVersion,
+		SignScript:              scope.commands(sc.Flow.Sign),
+		BeforeSignScript:        scope.commands(sc.Flow.BeforeSign),
+		PostSignScript:          scope.commands(sc.Flow.PostSign),
+		AutoSign:                resolveAutoSign(sc.AutoSign),
+		VersionStage:            resolveVersionStage(sc),
+		UserStages:              resolveUserStages(scope, sc.Flow),
+		StageLabels:             resolveStageLabels(sc),
+		StageGraph:              stageGraph,
+		StageRefusals:           stageRefusals,
 	}, nil
+}
+
+func resolvePublishKinds(label, field string, policy *PublishConfig, blocking bool) ([]model.DepKind, bool, error) {
+	if policy == nil {
+		return nil, false, nil
+	}
+	selected := policy.OrderKinds
+	if blocking {
+		selected = policy.BlockingKinds
+	}
+	if selected == nil {
+		return nil, false, nil
+	}
+	kinds := make([]model.DepKind, 0, len(*selected))
+	seen := make(map[model.DepKind]bool, len(*selected))
+	for _, name := range *selected {
+		kind, err := DepKind(name)
+		if err != nil {
+			return nil, false, fmt.Errorf("%s: publish.%s: %w", label, field, err)
+		}
+		if !seen[kind] {
+			seen[kind] = true
+			kinds = append(kinds, kind)
+		}
+	}
+	return kinds, true, nil
 }
 
 // DepKind maps a dependency edge's configured kind onto the model's. Empty

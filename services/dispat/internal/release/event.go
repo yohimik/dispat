@@ -35,8 +35,12 @@ type Event struct {
 	Name string    `json:"event"`
 	Time time.Time `json:"timestamp"`
 	// The package fields, set on stage.* and package.* events.
-	Package         string `json:"package,omitempty"`
-	Stage           string `json:"stage,omitempty"`
+	Package string `json:"package,omitempty"`
+	Stage   string `json:"stage,omitempty"`
+	// Label is the display name the flow gave the stage, on stage.* events
+	// and on a package.failed event for its failed stage; empty where the
+	// flow gave none.
+	Label           string `json:"label,omitempty"`
 	Version         string `json:"version,omitempty"`
 	PreviousVersion string `json:"previousVersion,omitempty"`
 	Channel         string `json:"channel,omitempty"`

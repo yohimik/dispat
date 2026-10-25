@@ -1,13 +1,13 @@
 # The scanner command
 
-Run `dispat scanner [folder]` to walk a directory and print each manifest's identity, ecosystem, and dependency
-declarations. Pass `--root-only` to stay out of sub-folders. A manifest that fails to parse reports a warning but
-leaves the rest of the list intact, and `--strict` turns that failure into an error and an exit `1`.
+Run `dispat scanner [folder]` to see the package names, versions, and dependencies declared in that folder's
+manifests. It includes subfolders by default; add `--root-only` to read only the folder's own manifests.
 
-The `dispat scanner`, `dispat writer`, and `dispat replacer` commands expose the manifest libraries directly. The first
-prints what a folder's manifests declare, the second edits a declaration in place while preserving formatting, and the
-third replaces literal text anywhere. You can run them on any checkout because they need no configuration file, git
-repository, or release plan.
+If a file cannot be parsed, the command warns and continues with the others. Add `--strict` to make a parse failure
+exit `1`.
+
+The scanner reads files without a configuration file, Git repository, or release plan. Use [`dispat writer`](./writer.md)
+to edit a manifest declaration or [`dispat replacer`](./replacer.md) to replace literal text.
 
 Positional paths resolve against `--root`. Pass `--log-format json` to swap each command's listing for one event per
 file.

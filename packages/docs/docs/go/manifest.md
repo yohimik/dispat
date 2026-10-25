@@ -1,12 +1,10 @@
 # manifest: the shared vocabulary
 
-The `github.com/yohimik/dispat/pkg/manifest` package provides the vocabulary shared by
-[the manifest reader](./scanner.md) and [the manifest writer](./writer.md). This ensures both halves never drift apart.
-They range over the same format list, spell dependency kinds the same way, and agree exactly on what a Docker reference
-is.
+`github.com/yohimik/dispat/pkg/manifest` defines the types and parsing helpers shared by
+[scanner](./scanner.md) and [writer](./writer.md). Use it when your code needs the same format names, dependency kinds,
+or Docker image parsing as those packages.
 
-The package contains models, pure functions, and parsers. It has no dependencies and performs no I/O. Nothing here
-touches your filesystem.
+The package contains models, pure functions, and parsers. It has no dependencies and performs no filesystem or other I/O.
 
 ```sh
 go get github.com/yohimik/dispat/pkg/manifest
@@ -15,7 +13,7 @@ go get github.com/yohimik/dispat/pkg/manifest
 ## The surface, by concern
 
 **Formats.** The `Format` type names each of the thirty-six recognised manifest formats, and `Formats` provides the
-canonical list both halves prove they cover. `FormatOf` maps a file name onto its format. `IsRequirementsFile` matches
+list used by both the reader and writer. `FormatOf` maps a file name onto its format. `IsRequirementsFile` matches
 requirements files by whole words, and `IsDockerfile` matches `Dockerfile`, `Dockerfile.dev`, `api.Dockerfile`, and
 `Containerfile` while excluding prose extensions.
 
@@ -29,7 +27,7 @@ on both sides. This normalization keeps `Acme_Core` and `acme-core` recognized a
 **Docker.** `ParseImageRef` reads an image reference into a repository, tag, and digest, recording the tag's byte span.
 `ValidTag` provides the registry tag grammar, while `DockerfileRefs` walks a Dockerfile's `FROM`, `COPY --from`, and
 `RUN --mount` instructions with stage-alias scoping. `ComposeService` and `ComposeIdentity` decide which service's
-image names a compose file, and these parsers live here so both halves get byte-identical offsets.
+image names a compose file, so the reader and writer use the same byte offsets.
 
 ## In use
 

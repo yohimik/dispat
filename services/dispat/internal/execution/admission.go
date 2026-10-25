@@ -27,6 +27,7 @@ package execution
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -88,12 +89,14 @@ func newAdmittedManifest(manifest *OutputManifest) admittedManifest {
 type outputRegistry struct {
 	mu       sync.Mutex
 	admitted map[string]*admittedOutputs
+	stages   map[string]*admittedOutputs
 	relayed  map[string]string
 }
 
 // newOutputRegistry opens an empty record.
 func newOutputRegistry() *outputRegistry {
-	return &outputRegistry{admitted: map[string]*admittedOutputs{}, relayed: map[string]string{}}
+	return &outputRegistry{admitted: map[string]*admittedOutputs{},
+		stages: map[string]*admittedOutputs{}, relayed: map[string]string{}}
 }
 
 // remember records one package's admitted set, replacing nothing: a package is
@@ -103,6 +106,20 @@ func (r *outputRegistry) remember(packageName string, admitted *admittedOutputs)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.admitted[packageName] = admitted
+}
+
+func stageOutputKey(packageName, stage string) string { return packageName + "\x00" + stage }
+
+func (r *outputRegistry) rememberStage(packageName, stage string, admitted *admittedOutputs) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stages[stageOutputKey(packageName, stage)] = admitted
+}
+
+func (r *outputRegistry) findStage(packageName, stage string) *admittedOutputs {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stages[stageOutputKey(packageName, stage)]
 }
 
 // find answers what was admitted for one package, and nil for a package that
@@ -187,10 +204,18 @@ func (c *Coordinator) admitOutputs(ctx context.Context, task string, produced pr
 			return c.refuseOutputSet(task, produced.node, OutputFaultReason(err), err)
 		}
 	}
-	c.outputs.remember(request.Release.Pkg.Name, &admittedOutputs{
+	accepted := &admittedOutputs{
 		node: produced.node, endpoint: produced.endpoint, branch: produced.branch,
 		commit: produced.commit, manifest: newAdmittedManifest(produced.manifest), store: produced.store,
-	})
+	}
+	stage := request.Stage
+	if stage == "" {
+		_, stage, _ = strings.Cut(task, ":")
+	}
+	c.outputs.rememberStage(request.Release.Pkg.Name, stage, accepted)
+	if stage == "build" {
+		c.outputs.remember(request.Release.Pkg.Name, accepted)
+	}
 	verified := c.Log.Debug().Str("run", c.Run).Str("task", task).
 		Int("files", validated.Files).Int64("bytes", validated.Bytes).Dur("took", time.Since(took))
 	admitted := c.Log.Info().Str("run", c.Run).Str("task", task).

@@ -1,16 +1,10 @@
 # The replacer
 
-Some versions do not live in a manifest.
+Use the replacer for version text that the manifest writer cannot update: a coordinate assembled in a build script,
+an installation example in a README, or an image reference in a workflow.
 
-A Gradle build script assembles a coordinate out of strings. A README shows the install line you copy. A CI workflow
-names a container, and a Helm chart pins an image. None of these is a file a parser can read as a package manifest. Yet
-every one of them has to move when you release.
-
-The replacer is dispat's answer to that. It finds literal text and writes different literal text in its place. It
-parses nothing and understands nothing, so it reaches everywhere.
-
-That is the whole trade. Give dispat enough context to be unambiguous. It cannot protect you from a pattern that
-matches the wrong place, because it does not understand the file. Look for `com.acme:core:1.2.0`, not for `1.2.0`.
+It replaces literal text without parsing the file. Include enough context to identify the intended value, such as
+`com.acme:core:1.2.0`. A bare `1.2.0` can match unrelated versions too.
 
 Use the `dispat replacer` command for one-off edits and scripts. Use the `replace` block of
 [`autoVersion`](../configuration/autoversion.md) during a release.
@@ -34,10 +28,9 @@ perfectly sensible edits.
 
 dispat splits the string at the first `=>`. A `=>` inside the replacement text survives.
 
-Pass files as positional arguments relative to `--root`. Name any file at all. This command has no idea what a manifest
-is.
+Pass file paths as positional arguments, relative to `--root`. They do not need to be manifests.
 
-Know three things before you run this command.
+Three rules determine the result:
 
 **Every occurrence is replaced, not just the first.** A version usually appears in a file more than once. Replacing
 only one occurrence leaves the file disagreeing with itself.
@@ -48,8 +41,6 @@ This command really does end at `2.0.0`:
 ```console
 $ dispat replacer --replace '1.0.0=>1.1.0' --replace '1.1.0=>2.0.0' notes.txt
 ```
-
-Order is yours to choose. Choose it deliberately.
 
 **A write only happens when something changed.** Run the same command twice and dispat leaves the file untouched the
 second time. The permissions and modification time stay intact.
@@ -124,8 +115,7 @@ spaces:
           write: "com.acme:{name}:{version}"
 ```
 
-The first rule keeps every module's dependency coordinates in step with the versions its providers just released. The
-second rule keeps the module's README honest about its own version.
+The first rule updates each module's dependency coordinates. The second updates the module's own version in its README.
 
 ### Placeholders
 
@@ -184,9 +174,8 @@ has not failed. Otherwise, dispat uses the version already published.
 This matches the rule the manifest side follows. A provider whose build fails leaves your files naming the version that
 really exists.
 
-Two warnings narrate what a release did that the commit log cannot explain. `W197` says a rule caught a file up to a
-provider released in an earlier run. `W203` says a stable release now names a prerelease provider. This is legal and
-worth a glance.
+`W197` reports that a rule caught up to a provider released in an earlier run. `W203` reports that a stable release now
+names a prerelease provider; this is allowed, but check that the dependency is intentional.
 
 ### When a rule matches nothing
 
@@ -210,9 +199,9 @@ The `autoVersion` block has two independent ways of reconciling a package. You c
 | Both, in one package                                                         | Both. Manifests are reconciled first.                   |
 | Neither, but a lock file to regenerate                                       | `manifests: none`, no `replace`, and a `syncLock` list.  |
 
-Read the last row carefully. Write an `autoVersion` block carrying nothing but `syncLock` to run `go mod tidy` between
-version and build, one package at a time. Nothing is reconciled, so there is no change to key the scripts off. dispat
-runs them every release rather than never.
+For the last case, set `manifests: none`, omit `replace`, and configure `syncLock`. This can run a command such as
+`go mod tidy` between versioning and building, one package at a time. With neither rewriting strategy active, dispat
+runs the lock scripts on every release.
 
 Read [`autoVersion`](../configuration/autoversion.md) for everything the parsing strategy does. Read
 [Manifest tools](./manifests.md) for the two commands that read and write manifests directly.

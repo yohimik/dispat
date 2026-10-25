@@ -1,11 +1,9 @@
 # Releasing part of the monorepo
 
-A normal `dispat` release takes every package that changed and releases all of them. You usually want this. Sometimes
-you need to ship a hotfix in one library today and leave the rest for the weekly release. A publish target might be
-down, or you might want to try the pipeline on a single package first.
+By default, dispat releases all packages with pending changes. Select a smaller set when you need to ship one hotfix,
+wait for a publish target to recover, or try the pipeline on a single package.
 
-Pass one of three selection flags to `dispat release` or `dispat status` to narrow the run. Every other dispat command
-takes these same flags:
+Use `--package`, `--space`, or `--group` to narrow `dispat release` or inspect the same selection with `dispat status`:
 
 ```sh
 dispat release --package core        # release core and nothing else
@@ -23,7 +21,7 @@ are in [Choosing the packages](../../cli/run.md#choosing-the-packages), and they
 Pass no flags to select the folder you are standing in. Run `dispat release` inside `packages/core` to release core
 alone. Run it at the top of the repository to release everything.
 
-A term that matches no package is an error. dispat stops before releasing nothing because of a typo.
+A name or pattern that matches no package is an error, so a typo does not become an empty release.
 
 ## The versions do not change
 
@@ -58,8 +56,8 @@ dispat releases nothing. The message says why and what to do about it. You have 
 The rule follows the whole dependency chain. If `app` depends on `web` and `web` depends on `core`, selecting `app` and
 `web` without `core` holds both of them back. The `web` package cannot go either.
 
-A provider only holds a package back when that provider is releasing in this run. A provider with nothing pending is
-nothing to wait for. A provider held by a `Release-As: none` directive also lets you select the consumer alone.
+A provider blocks this selection only if it is releasing in the plan. An unchanged provider, or one held by
+`Release-As: none`, does not stop you selecting the consumer alone.
 
 A provider can go alone in the other direction, with one exception: the commit a consumer it still owes was itself
 released on. A consumer is owed its provider's version when it released a change of its own while the provider's
@@ -79,10 +77,9 @@ $ dispat release -p one
 WRN selection releases part of a versioning group; the rest catches up on the next run code=W231 group=libs releasing=["one"] leftBehind=["two"]
 ```
 
-Nothing publishes out of order, so this is a warning rather than a refusal. The group's shared version is briefly
-untrue with `one` at 0.2.0 and `two` still at 0.1.0. The next full release fixes this automatically. A member that
-falls behind its group releases to catch up, at the group's published version when that version already carries its
-pending work. The catch-up is a ride (`W234`) only when the member has nothing pending of its own.
+This preserves dependency order, but temporarily leaves the group at different versions: `one` at 0.2.0 and `two` at
+0.1.0. The next full release catches up the remaining member. It uses the group's published version if that version
+already accounts for the member's pending work. `W234` marks a catch-up with no pending changes of its own.
 
 You have two options to avoid this state entirely. Name the group instead of its members with `dispat release -g libs`
 to release every member at once. Or pass `--strict` to refuse the split outright.
@@ -102,8 +99,8 @@ $ echo $?
 1
 ```
 
-Notice that `site` was perfectly releasable, but it did *not* release either. Either the selection goes out exactly *as
-written*, or nothing does. This guarantee makes a narrowed release safe to run unattended in CI.
+Here, `site` could have released, but `--strict` stops the whole selection. Use this in CI when a partial result
+should fail before execution.
 
 dispat still prints the plan before the refusal so you can see what failed and why.
 

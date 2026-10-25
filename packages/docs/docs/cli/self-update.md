@@ -1,19 +1,10 @@
 # The self-update command
 
-Run `dispat self-update` to replace your running binary with the latest stable release of dispat. You do not need a
-config file or a git repository. This command updates the tool itself, regardless of the directory you are in.
+Run `dispat self-update` to install the latest stable dispat release. Use `dispat self-update --check` to see the
+available version and changes first. Neither command needs a configuration file or Git repository.
 
-dispat downloads the binary for your platform from the GitHub release, verifies the published size and checksum, and
-runs it once to prove it works. When it replaces an existing binary, it keeps that binary as `<name>.backup` and removes
-it during a future run a week later. Because nothing moves until every check passes, a failed update leaves your
-working binary exactly where it was. If something other than a file, such as a folder, stands at `<name>.backup`,
-dispat names it before downloading anything and asks you to move or remove it; `--check` reports the same obstruction.
-On a later update, dispat keeps the existing rollback copy until the new binary is installed. If the final swap fails,
-it restores the working binary and that copy; a restoration failure reports their remaining paths. A cleanup warning
-after installation means the new binary and its immediate backup are ready, but an older copy needs manual cleanup.
-If a failed download cannot be removed, the warning names the staged file that remains for manual cleanup. When an
-update is interrupted before it finishes, the next update or rollback puts the rollback copy it left aside back in
-place and removes its staged download.
+The updater downloads the binary for your platform, checks its published size and checksum, and runs it once before
+replacing the installed binary. The previous binary is kept as `<name>.backup` for rollback.
 
 After the new binary is in place, dispat prints the changes and links to the changelog for the installed tag. Run with
 `--check` to see this information before you download anything.
@@ -46,11 +37,25 @@ dispat refuses to replace a binary installed with `go install`, because your nex
 Instead, `--check` prints the exact `go install` command you need. dispat also refuses to update a local `dev` build
 for the same reason.
 
-Most other dispat commands check for a newer stable release and report it before exiting, without ever waiting for
-the network response. The shell helpers `if` and `exec` never start the check, because they are glue that may run
-dozens of times in one script, and neither does a command printing JSON. To disable the check elsewhere, set
+## Update notices from other commands
+
+Most other commands check for a newer stable release in the background and report it before exiting if the result
+is ready. They do not wait for the network. The `if` and `exec` helpers, and commands printing JSON, skip this check. To disable the check elsewhere, set
 [`updateCheck`](../configuration/README.md) to `false` in your config file, or set `DISPAT_UPDATE_CHECK=0` in your
 environment. Read the full guide at [Updating dispat](../reference/self-update.md).
+
+## Backups and interrupted updates
+
+A later run removes a backup after one week. Until the new binary is installed, dispat keeps both the current binary
+and any existing rollback copy. If the final swap fails, it restores both; if restoration fails too, the error reports
+their remaining paths.
+
+If `<name>.backup` is a folder or another non-file entry, the updater stops before downloading and asks you to move
+or remove it. `--check` reports the same obstruction.
+
+A cleanup warning after installation means the new binary and its immediate backup are ready, but an older copy needs
+manual removal. If a failed download cannot be removed, the warning identifies its staged path. After an interrupted
+update, the next update or rollback restores any rollback copy left aside and removes the staged download.
 
 ## Flags
 

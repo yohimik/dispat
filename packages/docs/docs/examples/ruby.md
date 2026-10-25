@@ -1,7 +1,7 @@
 # Ruby gems
 
-You can manage gems in one repository and build and push them to RubyGems. This works even when the version lives in a
-`version.rb` constant rather than in the gemspec.
+This example builds and publishes two gems. One declares its version in the gemspec; the other reads a constant from
+`version.rb`. The configuration updates both before `gem build` runs.
 
 ## The layout
 
@@ -41,9 +41,8 @@ Two settings handle Ruby conventions.
 **`range: "~> {version}"`.** The keywords `caret` and `tilde` map to npm operators. Ruby writes pessimistic constraints
 as `~> 1.3.0`, so you provide the policy as a template and dispat fills in `{version}`.
 
-**The `replace` rule.** A gemspec that says `s.version = Acme::Core::VERSION` hands the number to Ruby, and dispat will
-not overwrite a constant with a literal because the indirection exists on purpose. The rule writes the constant
-instead. It targets whichever `version.rb` the glob finds.
+**The `replace` rule.** dispat does not evaluate `Acme::Core::VERSION` or replace that reference in the gemspec.
+The rule updates the constant in the `version.rb` files matched by the glob.
 
 ## A release
 
@@ -60,8 +59,8 @@ $ dispat autoversion
 12:45:10 INF auto-versioning finished failed=0 ran=2 skipped=0 stage=autoversion
 ```
 
-dispat updates two packages using two different mechanisms in one pass. The `file reconciled` output shows the replace
-rule in action, and the `manifest reconciled` output shows the parsing strategy. The command produces these results:
+`file reconciled` shows the replacement in `version.rb`. `manifest reconciled` shows the native edit to the other
+gem's manifest. The resulting files are:
 
 ```ruby
 module Acme
@@ -111,18 +110,12 @@ reader reports what the file says rather than following the constant.
 
 - **`gem push` cannot be undone.** The `gem yank` command removes a version from the index, but it never frees the
   number.
-- **The gem file name contains the version**, so the publish script builds the filename out of `$DISPAT_NEW_VERSION`
-  rather than globbing. A glob would happily push last week's build.
+- **Publish the file for this version.** The script uses `$DISPAT_NEW_VERSION` in the filename so it cannot pick up
+  an older `.gem` left in the output folder.
 - **`Gemfile.lock` follows the manifests.** Add `bundle lock` as a [`syncLock`](../configuration/autoversion.md) script
   if your deployable application commits its lockfile.
 - **Credentials go in `~/.gem/credentials` or `GEM_HOST_API_KEY`.** Write that file once per space using the
   [`flow.login` slot](./login.md). This saves you from authenticating once per gem.
-
-## See also
-
-- [The replacer](../editing/replacer.md) explains the find-and-write strategy in full.
-- [autoVersion](../configuration/autoversion.md) covers `range` templates and the two strategies together.
-- [An iOS app and a CocoaPods library](./apple.md) shows the other ecosystem built on Ruby files.
 
 ## Recover each publication destination
 
@@ -134,3 +127,9 @@ For a native gem, the expected destination is a set of platform variants rather 
 accepted platform and digest, then reconcile missing variants without claiming the release complete. Authentication,
 signing and registry ownership remain publisher constraints. See
 [integration findings](./release-integration.md#make-success-mean-available-to-the-next-stage).
+
+## See also
+
+- [The replacer](../editing/replacer.md) explains the find-and-write strategy in full.
+- [autoVersion](../configuration/autoversion.md) covers `range` templates and the two strategies together.
+- [An iOS app and a CocoaPods library](./apple.md) shows the other ecosystem built on Ruby files.

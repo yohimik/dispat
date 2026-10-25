@@ -1,9 +1,13 @@
 # Release records
 
-A successful release leaves behind the per-package changelog file, the GitHub release, and the optional end-of-run
-release commit, besides the tag. `changelog` and `github` are top-level policies. A single package may
-[override field by field](./packages.md). You can disable one record for one package, or point one package's releases
-at another repository.
+Use this page to configure what dispat records after a package publishes:
+
+- [`changelog`](#changelog) writes release notes into a file in the package.
+- [`github`](#github) creates a GitHub release when the package opts in, or for all packages when configured.
+- [`commit`](#commit) optionally commits generated files, places the release tags on that commit, and pushes them.
+
+Set `changelog` and `github` defaults at the root, then [override individual fields](./packages.md) for a space or
+package. The two records share the formatting options below.
 
 ## Entry format options (shared by `changelog` and `github`)
 
@@ -28,8 +32,8 @@ at another repository.
 
 ## Attributing an entry to its authors
 
-`authors` adds the commit authors to a changelog entry and a GitHub release body. It is off by default, so a
-repository that says nothing records exactly what it recorded before.
+Enable `authors` to credit commit authors in changelog entries and GitHub release bodies. Attribution is off by
+default.
 
 | Key         | Default    | Description                                                                                                                                       |
 |-------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -42,16 +46,15 @@ repository that says nothing records exactly what it recorded before.
 
 ### Where the identity comes from
 
-The identity is git's own: the name and email a commit was authored under, plus everyone its `Co-authored-by`
-trailers name. No forge is asked who that is, so the attribution costs no API call, works on a repository that has
-never seen GitHub, and cannot change under a record that has already been published.
+dispat reads the author's name and email from Git, plus names in `Co-authored-by` trailers. It makes no API calls to
+look up identities, so attribution also works outside GitHub and does not depend on later profile changes.
 
 dispat reads the *author* rather than the committer. A rebase, a cherry-pick or a squash-merge rewrites the committer
 and leaves the author alone, so the committer would credit whoever last moved the commit. A `Co-authored-by` trailer
 repeating the commit's own author adds nothing, which is the shape a squash-merge of one person's own branch produces.
 
-One person is one entry. Two commits under one address are one author, whatever the name beside each of them says,
-and the case of neither an address nor a name is significant.
+Authors are deduplicated by email address, ignoring case. Two commits with the same address count as one author even
+if the recorded names differ. Name comparisons also ignore case.
 
 ### `ccme` against `all`
 
@@ -95,8 +98,8 @@ change each of them happened to make.
 
 ## Linking a dependency line to its release
 
-`dependencyLink` turns each line of the dependencies section into a link to the release the provider moved to. It is
-empty by default, so a repository that says nothing writes the plain line it always wrote.
+Set `dependencyLink` to link providers in the dependencies section to their new releases. With no setting, dependency
+lines are plain text.
 
 ```yaml
 changelog:
@@ -172,8 +175,7 @@ changelog:
     link: auto
 ```
 
-The reference follows the description and the correction note and precedes the authors attribution. The note and the
-reference are part of what the line says about the work, and who did it comes after what was done:
+The reference appears after the description and any correction note, before author attribution:
 
 ```markdown
 - read the manifest before the lock file ([a1b2c3d](https://github.com/acme/monorepo/commit/a1b2c3d)) (by Ada Lovelace)
@@ -225,10 +227,9 @@ changelog:
 | `types` | The commit types this section claims, matched case-insensitively against the type each commit was written with. An element carrying types is a section of your own. |
 | `bump`  | Optional, and only on a section of your own: the bump those types carry (`none`, `patch`, `minor` or `major`), merged into the [parser's type table](./parser.md#parser). |
 
-Sections render in the order the list gives them. **A built-in the list omits is not removed.** It is appended after the
-listed ones in the default relative order, because a section dropped in silence would take released work out of the
-record with it. A list naming one section of your own and nothing else therefore renders that section above all four
-built-ins.
+Sections render in the order you list them. **Omitted built-in sections are appended**, in their default relative
+order. For example, a list containing one custom section puts it above all four built-in sections; it does not hide
+any release notes.
 
 Three things are refused when the config loads: a built-in listed twice, an element with no `types` whose title is not
 a built-in's key, and one commit type claimed by two sections of the same destination.
@@ -313,16 +314,19 @@ dispat prepends new entries below the title, newest first. A file that does not 
 everything above its first entry heading where it is, and the new entry goes below that. See
 [Existing changelogs and history](../examples/adopting.md#existing-changelogs-and-history).
 
-**What an entry contains: the release-notes windowing.** An entry holds the release's notes grouped by bump (breaking
-changes, features, fixes) plus the provider-updates section. On the stable channel that is every pending commit since
-the package's last release. On a prerelease train each prerelease's entry contains **only its own changeset**. These
-are the commits the train's earlier prereleases have not already published, so `beta.1` does not repeat `beta.0`'s
-notes. The **graduation** then collects the whole train (everything since the last stable tag) into its one entry,
-which is what readers of the stable line actually see. That includes the provider-updates section. A provider that
-moved while the train ran appears in the graduation's entry with its movement over the whole train. This happens even
-when a prerelease entry already documented it piecewise. The version is still computed over the whole train either way,
-because a breaking change shipped in `beta.0` keeps the graduation at the next major, and only the notes narrow. The
-same windowing drives the [GitHub release body](#github) and the
+### Which changes appear in the notes
+
+Entries group notes into breaking changes, features, fixes, and provider updates. The commits included depend on the
+release:
+
+- A stable release includes pending commits since the package's last release.
+- Each prerelease includes **only its new changeset**. For example, `beta.1` does not repeat `beta.0`'s notes.
+- A graduation to stable includes **the whole prerelease train**, back to the last stable tag. Provider updates show
+  their movement over that whole period, even when earlier prerelease entries documented each step.
+
+Only the notes use this narrower prerelease window. The version calculation still includes the whole train, so a
+breaking change in `beta.0` keeps the graduation at the next major. The same note windows apply to the
+[GitHub release body](#github) and the
 [`DISPAT_BREAKING_CHANGES` / `DISPAT_FEATURES` / `DISPAT_FIXES` variables](../reference/environment.md#release-notes-data).
 Run [`dispat preview`](../cli/preview.md) to see exactly what the next entry would contain.
 
@@ -354,9 +358,8 @@ release stage's own recorder finds it and skips.
 
 ### The seam between entries
 
-dispat closes the new entry on a single newline and writes exactly `entrySpacing` blank lines between it and the entry
-below. Left to each entry's own tail the seam varied with whatever the last section happened to be, so a file recorded
-the shape of every release rather than one rule.
+`entrySpacing` controls the blank lines between a new entry and the one below it. dispat ends the new entry with a
+single newline, then adds exactly that many blank lines.
 
 The count applies at that seam alone. Nothing already in the file is rewritten: the entries below keep the spacing and
 the line endings they were written with, and lowering the setting today closes up no gap last year's releases left.
@@ -376,9 +379,10 @@ the line endings they were written with, and lowering the setting today closes u
 | `tokenEnv` | `GITHUB_TOKEN`            | Name of the environment variable holding the API token.                                                                                                                                                                                                                |
 | *format*   |                           | All entry format options above. The release body contains the sections, with `header` and `footer` around them. The `## pkg@version (date)` header line used in changelog files is omitted, since GitHub shows the release's name and its own date, so `dateFormat` has no effect here. `releaseName` sets the release's name, which otherwise is the tag. |
 
-The release is **opt-in per package and per run**. dispat creates it exactly when one of the package's scripts exported
-[`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs). A published package without the export is skipped
-with an info-level notice, so a script decides at run time which packages get a GitHub release.
+By default, GitHub releases are **opt-in per package and per run**. A package opts in by exporting
+[`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs) from one of its scripts. Without that export,
+dispat skips the package with an info-level notice. Set `allPackages: true` to create a GitHub release for every
+published package; the export then only supplies assets.
 
 The release is named after the tag (`pkg@1.3.0`). Its body is the rendered changelog sections under the same
 [release-notes windowing](#changelog). A prerelease's release documents only its own changeset, and a graduation
@@ -425,7 +429,8 @@ The export's value names the **release assets**. This is a whitespace-separated 
 files. dispat uploads each one (named after the file, `application/octet-stream`) right after the release is created,
 even in `commit` mode where the release itself moves to the finalize phase. An invalid entry (a relative path, a
 missing file, a directory) is skipped with a warning while the release and the remaining files go through. A failed
-upload of a valid file still fails the package like any other recording failure.
+upload of a valid file is a [critical recording failure](../internals/architecture.md#after-the-point-of-no-return).
+The package stays published, and the run exits `1`.
 
 **Creating a release twice.** A release the repository already carries for the planned tag is a skip (`W224`), not the
 API's duplicate-tag rejection. Run a release again after a later stage failed, and the
@@ -434,9 +439,8 @@ through the repository's release listing rather than the tag it names, which dis
 
 ## Your own words around an entry
 
-Everything dispat writes about a release is the notes it read out of your commits. `header`, `footer`, `releaseName`
-and `fileTitle` are where you add your own text. You can add an install line, a link back to the package, a horizontal
-rule between entries, or a name for the release that reads better than a tag.
+Use `header`, `footer`, `releaseName`, and `fileTitle` to add text around the notes generated from commits. Common uses
+include installation instructions, a package link, a separator between entries, or a descriptive release name.
 
 Here is where each one lands in a changelog file:
 
@@ -567,7 +571,7 @@ look for what a package writes.
 
 Core writes `core only`. Every other package writes `shared`.
 
-There are no command-line flags for `header` and `footer`, because a filtered list of lines is not a flag-shaped thing.
+Configure `header` and `footer` in the file; they have no command-line flags.
 `releaseName` and `fileTitle` do have flags on the step commands, `--release-name` and `--file-title`. Each flag
 replaces the configured value for that one invocation.
 
@@ -603,8 +607,7 @@ Three sources answer, in this order:
    This is how a footer links an artifact the run itself produced.
 3. The process environment.
 
-A name that none of the three defines expands to nothing, the way a shell expands an unset variable. Half-written
-`${...}` in a published release reads worse than the gap it would have filled.
+A variable absent from all three sources expands to an empty string.
 
 ### The variables a line adds
 

@@ -92,7 +92,7 @@ func (f *fakeRemote) buildHere(ctx context.Context, request StageRequest, here L
 	return StageOutcome{}, nil
 }
 
-func (f *fakeRemote) Guard(_ context.Context, stage string) (func(), error) {
+func (f *fakeRemote) Guard(_ context.Context, stage, _ string) (func(), error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.guardErr != nil {

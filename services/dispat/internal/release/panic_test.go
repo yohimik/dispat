@@ -103,15 +103,17 @@ func TestExecuteContainsAPanicWhileAdmitHoldsTheLock(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	p.Providers["a"] = []string{"ghost"}
 	var stopped error
+	changed := map[string]bool{"a": true}
 	r := &run{
 		Executor: newExecutor(execSpec{Runner: &fakeRunner{}, Build: 1, Publish: 1}),
 		plan:     p,
+		plans:    newStagePlans(p, changed),
 		results: map[string]*Result{
 			"a":     {Name: "a"},
 			"ghost": {Name: "ghost", Status: StatusFailed},
 		},
 		started:             map[string]time.Time{},
-		publishReach:        newPublishReach(newStageEdges(p, map[string]bool{"a": true})),
+		publishReach:        newPublishReach(newStageEdges(p, changed, newStagePlans(p, changed))),
 		reachedProviders:    map[string][]string{},
 		avChanged:           map[string]bool{},
 		reconciledProviders: map[string][]string{},
@@ -121,7 +123,7 @@ func TestExecuteContainsAPanicWhileAdmitHoldsTheLock(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		r.execute(context.Background(), task{"a", taskBuild})
+		r.execute(context.Background(), task{"a", taskBuild, ""})
 		close(done)
 	}()
 	select {

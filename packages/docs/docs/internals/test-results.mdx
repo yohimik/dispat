@@ -2,7 +2,8 @@ import {ReportStamp, SuiteSummary, SuiteTable} from '@site/src/components/TestRe
 
 # Test results
 
-What dispat's test suite did, as opposed to [what it reached](./coverage.mdx).
+This report shows which suites ran and their results. See [coverage](./coverage.mdx) for the production statements
+those tests executed.
 
 <ReportStamp />
 
@@ -14,13 +15,10 @@ What dispat's test suite did, as opposed to [what it reached](./coverage.mdx).
 
 Each row is one `go test` invocation: the `tests` script of one package, run through
 [`testreport test`](https://github.com/yohimik/dispat/blob/main/tools/testreport), which keeps the run's
-`go test -json` stream for exactly this. `tests` and `fuzz` count test *functions*, never subtests. A suite that counts
-every `t.Run` as a test reports a number several times the one it can defend, so the subtests are counted beside them
-instead.
+`go test -json` stream for this report. `tests` and `fuzz` count test functions. Subtests are counted separately.
 
-The integration suite appears twice: once instrumented for coverage, once under the race detector. CI runs it that way
-too, rather than with `-count`. The totals above count it once, because the race pass is the same tests again and
-adding it in would claim several hundred tests this repository does not have.
+The integration suite runs twice: once with coverage instrumentation and once under the race detector, matching CI.
+Both passes appear in the table, but the totals count each test only once.
 
 Each of those two passes runs in six `go test` processes, each running an exact round-robin share of the suite's
 tests. The suite spends most of its time waiting on the processes it drives, so a single process inside the release
@@ -31,7 +29,7 @@ reports is the longest shard's rather than the sum of all six.
 
 ## The two layers
 
-The failure semantics are the tool's main promise, so they are tested at two independent layers.
+Two test layers check release behavior, including what happens when part of a run fails.
 
 **Unit tests** live in each module and run against in-memory fakes. What they assert is stated in each test's own name
 and doc comment; there is no separate catalogue.
@@ -50,9 +48,9 @@ Every composition claim lives there and nowhere else. `services/dispat` hosts no
 
 ## Stability
 
-Ordering assertions are structural, so they cannot flake. Overlap assertions use sleeps one to two orders of magnitude
-above process-launch jitter. Every concurrency claim is verified three independent ways before it is believed.
-Repeated runs (`go test ./... -count 5`) are the manual stability check.
+Ordering assertions check the recorded dependency structure. Overlap assertions use sleeps one to two orders of
+magnitude above process-launch jitter, and concurrency claims have three independent checks. Repeated runs
+(`go test ./... -count 5`) provide a manual check for timing-related failures.
 
 ## What the suite covers
 

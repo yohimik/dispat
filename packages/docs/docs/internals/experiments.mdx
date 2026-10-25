@@ -45,14 +45,12 @@ and every cell has its own registry state.
 A cell records what a tool left behind in the three places a release writes: the local clone, the origin, and the
 registry. After every step of the protocol, those three are read and joined into one state per package.
 
-For dispat, some of those readings are expectations, and a cell that misses one fails the release that ran it. For
-lerna, nx and changesets the same readings are recorded either way. A row below that reads 3/5 is a description of that
-tool under this fault, not a failure of the run and not a claim that the tool is broken: the expectations are dispat's
-own, written from what dispat promises, and holding another tool to a promise it never made would be a comparison of
-nothing.
+For dispat, some observations are release requirements: a missed expectation fails the release running the experiment.
+For lerna, nx, and changesets, the harness records the same observations without treating them as requirements. A
+score such as 3/5 shows how that tool behaved under this particular fault. The expectations come from dispat's contract
+and may not be promises the other tool makes.
 
-A cell whose injected fault never fired recorded no answer to that fault, so the harness fails the cell rather than
-publishing its row.
+The injected fault must actually occur. If it does not, the harness fails the cell and does not publish its row.
 
 ## By experiment
 
@@ -76,6 +74,8 @@ publishing produces: the tag says a version shipped that nobody can install.
 Each reading also records the manifest the checkout holds at that moment, its version and its dependency ranges. The
 registry says what shipped and the tags say what was recorded; a range a release reconciled, or a version rewrite it
 rolled back, appears in neither.
+
+### Propagation and recovery scenarios
 
 The `build` and `publish` propagation cells start with a patch to `core` that remains inside the consumers' `~1.0.0`
 dependency range, so semver alone asks for no consumer release. dispat receives `fix(core)^: correct reader`, whose
@@ -138,6 +138,8 @@ catch-up is the tool's own release again; a `deferred` catch-up is the recovery 
 `nx release publish` instead whenever a version it tagged is missing from the registry. These rows are held to
 dispat's sentences about what shipped, never to dispat's own diagnostic codes.
 
+### A push during the release
+
 The colleague's push lands at a point in the tool's own sequence rather than on a timer. A shim placed first on `PATH`
 for the duration of the release command records every git call the tool makes and fires the colleague's commit and push
 once, right before the first `git push` that is neither the release lock's nor a commit. The interleaving is therefore
@@ -150,10 +152,9 @@ The comparison this measures against the documented behaviour of each tool is in
 
 ## Reading the Catch-up column
 
-The Catch-up column says what finishing a release took once its fault was removed, counted from the protocol's own
-steps. Every step is typed: one of the tool's own release commands, a step done by hand such as a checkout, a commit
-or a push, or a read-only question such as `dispat status` or `lerna changed`, which is never counted. A run is an
-uninterrupted pass of the tool's own commands, and a step done by hand or a command that failed ends it.
+The Catch-up column counts the work needed to finish after the fault was removed. It separates release commands from
+manual steps such as a checkout, commit, or push. Read-only checks such as `dispat status` or `lerna changed` are not
+counted. A run is an uninterrupted sequence of the tool's commands; a failed command or manual step ends that run.
 
 | Reading                        | Meaning                                                                            |
 |--------------------------------|------------------------------------------------------------------------------------|
@@ -298,12 +299,9 @@ by hand, as above, measures any released version without reaching this page.
 
 ## What this is for
 
-These are not benchmarks and they are not a scoreboard. They exist because the claims dispat makes about recovery are
-claims about failure, and a claim about failure that has only ever been tested against a stub is a claim about the
-stub. Publishing before tagging, re-running rather than querying a registry, joining a branch that moved instead of
-refusing it: each of those is a sentence in the documentation, and each of these cells is that sentence executed
-against a registry and a remote that really do refuse.
+The experiments check documented recovery behavior against a registry and Git remote that can really reject writes.
+They cover details such as publishing before tagging, retrying an incomplete release, and recovering from a branch
+that moved during the run.
 
-The compared tools are here for the same reason a control is: a result that only ever ran against one tool cannot say
-whether what it measured was the tool or the fixture. Running four tools through one fixture with one fault says which
-differences are the tools'.
+Running other tools through the same fixture helps distinguish tool behavior from fixture behavior. The results
+describe these versions, configurations, and fault scenarios; they are not a general ranking of release tools.

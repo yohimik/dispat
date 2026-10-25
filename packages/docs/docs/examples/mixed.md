@@ -1,8 +1,7 @@
 # npm and Docker in one graph
 
-This is the polyglot monorepo release dispat exists for. You have a TypeScript library, a service that uses it, and a
-Docker image that ships the service. Each space brings its own scripts and its own ordering rule, and the dependency
-edges connect them into one graph.
+This example releases a TypeScript SDK, a service that uses it, and a Docker image that installs the service. npm
+packages and images use different commands, so they have separate spaces. Dependency edges connect their releases.
 
 ```json
 {
@@ -39,9 +38,10 @@ edges connect them into one graph.
 }
 ```
 
-Look at how `sdk` and `service` live under `packages/` for npm, while `service-image` lives under `images/` for Docker.
+Put `sdk` and `service` under `packages/`, and `service-image` under `images/`.
 Write a `feat(sdk)^^: ...` commit to release all three.
 
-The `service` package builds as soon as `sdk` has *built* because the npm space has no waiting flag. The
-`service-image` package waits until `service` is *published* so the image build can pull the published package. You
-declare your intent once per space, and the scheduler works out the rest per run.
+`service` can build once `sdk` has built. The image must wait longer: it installs the service from a registry, so
+`isBuildWaitingPublish` is set on the `service` provider. `service-image` builds only after that publish succeeds.
+The flag on the image space applies the same rule to any consumers of its images. See
+[build boundaries](./release-integration.md#choose-the-build-boundary) when deciding where to put the flag.

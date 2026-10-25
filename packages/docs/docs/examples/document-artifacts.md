@@ -1,13 +1,12 @@
 # Releasing skills, specifications and TeX documentation
 
-Treat documents as deliverables when another tool or person relies on a particular revision. A skill includes its
-referenced guides and scripts; a protocol specification includes its schema and compatibility policy; a TeX manual
-includes the compiled PDF and any files required to rebuild it. These are release packages in the graph, not extra
-native manifest ecosystems.
+A document needs a release when someone depends on a particular revision. That might be a skill with supporting
+scripts, a protocol specification with a schema, or a TeX manual with its PDF and sources. Give it a package in the
+release graph and keep its existing build and distribution commands.
 
 ## Identify the actual distribution
 
-Different document types have different distribution contracts:
+First decide what users should receive:
 
 | Deliverable | Useful integration rule |
 |---|---|
@@ -30,15 +29,15 @@ Do not add an npm manifest solely to coordinate a PDF or skill folder. Keep the 
 commands in the package's scripts. dispat plans SemVer versions; a project's date-based protocol or CTAN revision
 needs an explicit mapping in those scripts and metadata, rather than pretending a date is an interchangeable SemVer.
 
-Test the contract from the released artifact. Check that relative references exist, that CLI help links reach the
+Test the files you plan to distribute. Check that relative references exist, that CLI help links reach the
 intended immutable documentation snapshot, and that the document's compatibility declaration matches the installed
 tool. Publish the complete file set before advancing a mutable discovery link such as `latest`.
 
 ## Keep document quality checks explicit
 
-A zero TeX exit status does not establish that the layout meets a project's publication requirements. Keep bad-box
-checking and acceptance rules explicit. Preserve the project's chosen setting and its engine limitations; do not
-report every warning as a publishing failure or claim that release orchestration validates PDF layout.
+A successful TeX command does not tell you whether the PDF layout is ready to publish. Keep the project's bad-box
+checks and acceptance rules in its build scripts, accounting for the chosen engine. Decide which warnings should
+block publication and inspect the document itself.
 
 For a manual, build in a clean directory, inspect the generated document and retain its source revision and file
 inventory. For a schema, validate examples with the schema that will actually ship. For a skill, check the referenced

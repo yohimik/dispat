@@ -291,11 +291,11 @@ func TestOrderProviderFailureSkipsTheWaitingConsumer(t *testing.T) {
 	assert.True(t, r.IsTagged("consumer@0.1.0"), "tags: %v", r.TagList())
 }
 
-// TestOrderSignStageWaitsForProviders: a consumer's sign stage is its first
-// task, so it is what waits for a provider, exactly as the version stage does
-// when it comes first: under isBuildWaitingPublish the consumer signs only
-// once the provider's publish has finished, and it builds after it signs.
-func TestOrderSignStageWaitsForProviders(t *testing.T) {
+// TestOrderSignStageRunsAheadOfProviders: a consumer's sign stage reads no
+// provider, so it waits for none (§19.2a): under isBuildWaitingPublish the
+// consumer signs while the provider is still publishing, and it is the
+// consumer's build that waits for the provider's publish, after the sign.
+func TestOrderSignStageRunsAheadOfProviders(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{
@@ -321,6 +321,13 @@ func TestOrderSignStageWaitsForProviders(t *testing.T) {
 
 	tl := r.Timeline("timeline.log")
 	consumerSign := harness.Find(t, tl, "consumer-sign")
-	harness.AssertSequential(t, harness.Find(t, tl, "provider-publish"), consumerSign)
-	harness.AssertSequential(t, consumerSign, harness.Find(t, tl, "consumer-build"))
+	providerPublish := harness.Find(t, tl, "provider-publish")
+	consumerBuild := harness.Find(t, tl, "consumer-build")
+	// The sign waits for nothing and the provider's publish sleeps, so the
+	// sign starting before that publish ends is no race.
+	assert.True(t, consumerSign.Start.Before(providerPublish.End),
+		"the consumer signs while the provider publishes: sign starts %s, publish ends %s",
+		consumerSign.Start.Format(time.RFC3339Nano), providerPublish.End.Format(time.RFC3339Nano))
+	harness.AssertSequential(t, providerPublish, consumerBuild)
+	harness.AssertSequential(t, consumerSign, consumerBuild)
 }

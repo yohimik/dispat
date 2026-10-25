@@ -186,8 +186,7 @@ type File struct {
 	// StageRelation describes.
 	IsBuildWaitingPublish *StageRelation `json:"isBuildWaitingPublish,omitempty"`
 	RevertOnFail          *bool          `json:"revertOnFail,omitempty"`
-	// Publish is this level's publish policy; see PublishConfig.
-	Publish *PublishConfig `json:"publish,omitempty"`
+	Publish               *PublishConfig `json:"publish,omitempty"`
 	// Versioning is the default versioning mode. It applies under each
 	// space's own implicit group, so `fixed` here means every space versions
 	// its own packages as one, not that all spaces share a version. Joining
@@ -798,9 +797,7 @@ func (c *CommitConfig) IsEnabled() bool { return c != nil && c.Enabled != nil &&
 // meaningful with the commit enabled. Nil-safe.
 func (c *CommitConfig) IsPushEnabled() bool { return c.IsEnabled() && c.Push }
 
-// IsTagPushEnabled reports whether a run that makes no release commit pushes
-// each release tag right after it is written: push is on and the commit is
-// off. Nil-safe.
+// IsTagPushEnabled is the durable tag path when there is no release commit.
 func (c *CommitConfig) IsTagPushEnabled() bool { return c != nil && c.Push && !c.IsEnabled() }
 
 // IsForceEnabled reports whether tags are written over ones that already exist
@@ -930,11 +927,10 @@ type SpaceConfig struct {
 	// The scalar options are pointers for the same reason SpaceFile's and
 	// PackageConfig's are: the root file now states defaults for them, and a
 	// space that cannot say "false" could not override a root "true".
-	IsBuildWaitingPublish *StageRelation `json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool          `json:"revertOnFail,omitempty"`
-	// Publish is this level's publish policy; see PublishConfig.
-	Publish *PublishConfig   `json:"publish,omitempty"`
-	Flow    *SpaceFlowConfig `json:"flow,omitempty"`
+	IsBuildWaitingPublish *StageRelation   `json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
+	Publish               *PublishConfig   `json:"publish,omitempty"`
+	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
 	// TagFormat overrides the repository-wide tagFormat for this space.
 	TagFormat string `json:"tagFormat,omitempty"`
 	// AliasTags replaces the inherited alias list for this level; see
@@ -1055,12 +1051,11 @@ type SpaceConfig struct {
 // the scalar options are pointers here where SpaceConfig's are plain: an
 // override must be able to say nothing.
 type SpaceFile struct {
-	IsBuildWaitingPublish *StageRelation `json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool          `json:"revertOnFail,omitempty"`
-	// Publish is this level's publish policy; see PublishConfig.
-	Publish   *PublishConfig   `json:"publish,omitempty"`
-	Flow      *SpaceFlowConfig `json:"flow,omitempty"`
-	TagFormat string           `json:"tagFormat,omitempty"`
+	IsBuildWaitingPublish *StageRelation   `json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
+	Publish               *PublishConfig   `json:"publish,omitempty"`
+	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
+	TagFormat             string           `json:"tagFormat,omitempty"`
 	// AliasTags replaces the inherited alias list for this level; see
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.
@@ -1171,13 +1166,12 @@ type PackageConfig struct {
 	// Like `src` it narrows file-derived scope resolution alone: a commit
 	// naming the package by scope still addresses it, the release commit
 	// still stages the whole folder, and manifest discovery is untouched.
-	Ignore                []string       `json:"ignore,omitempty"`
-	IsBuildWaitingPublish *StageRelation `json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool          `json:"revertOnFail,omitempty"`
-	// Publish is this level's publish policy; see PublishConfig.
-	Publish   *PublishConfig   `json:"publish,omitempty"`
-	Flow      *SpaceFlowConfig `json:"flow,omitempty"`
-	TagFormat string           `json:"tagFormat,omitempty"`
+	Ignore                []string         `json:"ignore,omitempty"`
+	IsBuildWaitingPublish *StageRelation   `json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
+	Publish               *PublishConfig   `json:"publish,omitempty"`
+	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
+	TagFormat             string           `json:"tagFormat,omitempty"`
 	// AliasTags replaces the inherited alias list for this level; see
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.
@@ -1453,11 +1447,15 @@ func (c *AutoSignConfig) IsEnabled() bool {
 }
 
 // SpaceFlowConfig is a space's `flow` object: what runs at which stage, keyed
-// by stage or hook name with no decoration. All entries are optional — a
-// stage with no script still runs, an unset hook is a no-op — and every one
-// accepts a single script name or an array of names run in order (weak
-// decoding lifts the scalar into a one-element slice, the same way a scalar
-// concurrency becomes a pair).
+// by stage or hook name with no decoration. All entries are optional. A
+// package runs the stages its flow gives something to do, a script or a hook,
+// and has no task, hook or event for the others; an unset hook is a no-op.
+// Every entry accepts a single script name or an array of names run in order
+// (weak decoding lifts the scalar into a one-element slice, the same way a
+// scalar concurrency becomes a pair), and a stage entry also accepts the
+// object form StageConfig describes, which is how a stage gets a label and a
+// place in the order. A key that is neither a built-in stage nor a hook
+// defines a stage of that name; see Stages and StageHooks.
 type SpaceFlowConfig struct {
 	Build []string `json:"build,omitempty"`
 	// Tests is the optional tests stage, run after the build and before the
@@ -1483,9 +1481,11 @@ type SpaceFlowConfig struct {
 	// Login runs once per space before its first publish; every other
 	// publish of the space waits for it, and its failure fails them all.
 	Login []string `json:"login,omitempty"`
-	// Announce is a fourth stage after a successful publish: pushing the
-	// release out to update channels, with the release-notes variables in its
-	// environment. The whole frame — hooks included — only warns on failure.
+	// Announce is the stage after the release records by default: pushing
+	// the release out to update channels, with the release-notes variables in
+	// its environment. There the whole frame — hooks included — only warns on
+	// failure; a flow that places it before the publish makes it gate like
+	// the stages around it.
 	Announce []string `json:"announce,omitempty"`
 	// Hooks around the package stages. The before*/post* hooks up to
 	// beforePublish fail the package's release when they fail; postPublish and
@@ -1515,6 +1515,20 @@ type SpaceFlowConfig struct {
 	// failed.
 	OnFail []string `json:"onFail,omitempty"`
 	OnSkip []string `json:"onSkip,omitempty"`
+	// Stages is the object half of the stage entries, keyed by stage name as
+	// the file wrote it: the label and the ordering constraints of a built-in
+	// stage written in its object form, whose scripts stay in the typed field
+	// above, and every stage the configuration defines whole, scripts
+	// included. The ladder overlays an entry field by field, so a nearer level
+	// stating only a constraint keeps the inherited scripts. The marshallers
+	// fold the map back into the stage keys, which is why it has no key of
+	// its own.
+	Stages map[string]StageConfig `json:"-"`
+	// StageHooks are the hooks of the stages the configuration defines, keyed
+	// by the hook name as the file wrote it: `beforeLint` and `postLint` for
+	// a stage `lint`. They merge entry by entry like the built-in hooks, and
+	// gate the release like them where the stage does.
+	StageHooks map[string][]string `json:"-"`
 }
 
 // DependencyConfig is one consumer -> provider relation: the decoded form of

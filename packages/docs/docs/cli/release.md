@@ -1,7 +1,10 @@
 # The release command
 
-Run `dispat release` to plan your release and print the graph. The command runs version, build, and publish steps for
-every changed package, then records releases and tags. Running a bare `dispat` does exactly the same thing.
+Run `dispat release` to publish the pending release. It prints the plan, runs each changed package's version, build,
+and publish steps, then records the releases and tags. Running `dispat` without a command does the same thing.
+
+Use [`dispat status`](./status.md) to inspect the plan first and [`dispat preview`](./preview.md) to read the pending
+release notes.
 
 ## Releasing part of the graph
 
@@ -66,21 +69,21 @@ Beside the [global flags](./README.md#global-flags):
 
 ### `--package`, `-p`
 
-Narrows the eleven package-selecting commands (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`,
-`autowriter`, `autoreplacer`, `commit`, `github`, `compute`) to the named packages. This flag is repeatable,
-comma-separated, matches case-insensitively, and accepts `*` globs, where `-p '*'` is every package. Read
-[Choosing the packages](./run.md#choosing-the-packages).
+Select named packages. Repeat the flag or separate names with commas. Names are case-insensitive and accept `*`
+globs; quote them so the shell does not expand them first. For example, `-p core,web` selects two packages and `-p '*'`
+selects every package. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--space`, `-s`
 
-Narrows the same eleven commands to every package in the named spaces using the same spellings. A standalone package
-belongs to no space. Read [Choosing the packages](./run.md#choosing-the-packages).
+Select every package in the named spaces. This accepts the same lists and globs as `--package`. Standalone packages
+do not belong to a space, so `-s '*'` does not include them. See
+[Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--group`, `-g`
 
-Narrows the same eleven commands to every package in the named
-[versioning groups](../reference/releasing/versioning.md) using the same spellings. A group is a `versionGroups` entry
-or a space that versions as one, so it can cross spaces. Read [Choosing the packages](./run.md#choosing-the-packages).
+Select every package in a named [versioning group](../reference/releasing/versioning.md), using the same lists and
+globs as `--package`. A group may be a `versionGroups` entry or a space that versions together, and may span several
+spaces. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--strict`
 

@@ -1,15 +1,16 @@
 # The status command
 
-Run `dispat status` to plan and print the graph with its computed version bumps. dispat exits without executing,
-tagging, or writing anything. You can pass the same selection flags that a release takes.
+Run `dispat status` to see which packages would release and which versions they would get. It prints the dependency
+graph and stops without running scripts, writing files, or creating tags. Use the same selection flags you plan to
+pass to `dispat release`.
 
 dispat computes the plan for the whole repository and narrows it exactly as a release would. This means the printed
 graph shows exactly what `dispat release` will do with the same flags. See
 [Releasing part of the graph](./release.md#releasing-part-of-the-graph) for selection rules and `--strict` refusals,
 and [Exit codes](./README.md#exit-codes) for exit values.
 
-Run this command first when a release refuses to start. Every diagnostic a release would raise appears here, and you
-can run it safely as many times as you need. Read [Diagnostic codes](../reference/plan-errors.md) to understand what
+Start here when a release refuses its plan. You can inspect the planning diagnostics and rerun the command as you
+make corrections. Read [Diagnostic codes](../reference/plan-errors.md) to understand what
 each error means.
 
 ## Flags
@@ -18,22 +19,21 @@ You can use these flags alongside the [global flags](./README.md#global-flags):
 
 ### `--package`, `-p`
 
-Narrows the plan to the named packages. You can repeat this flag, pass a comma-separated list, and use `*` globs
-(`-p '*'` selects every package). dispat matches names case-insensitively across every package-selecting command
-(`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`,
-`compute`). See [Choosing the packages](./run.md#choosing-the-packages).
+Select named packages. Repeat the flag or separate names with commas. Names are case-insensitive and accept `*`
+globs; quote them so the shell does not expand them first. For example, `-p core,web` selects two packages and `-p '*'`
+selects every package. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--space`, `-s`
 
-Narrows the plan to every package in the named spaces. You can use the same spelling rules and globs as `--package`
-across the same eleven commands. A standalone package belongs to no space. See
+Select every package in the named spaces. This accepts the same lists and globs as `--package`. Standalone packages
+do not belong to a space, so `-s '*'` does not include them. See
 [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--group`, `-g`
 
-Narrows the plan to every package in the named [versioning groups](../reference/releasing/versioning.md). You can use
-the same spelling rules across the same eleven commands. A group is a `versionGroups` entry or a space that versions as
-one, so it can cross spaces. See [Choosing the packages](./run.md#choosing-the-packages).
+Select every package in a named [versioning group](../reference/releasing/versioning.md), using the same lists and
+globs as `--package`. A group may be a `versionGroups` entry or a space that versions together, and may span several
+spaces. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--strict`
 

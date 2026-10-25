@@ -429,16 +429,40 @@ func refuseSynonymKeys(prefix string, autoVersion, autoPropagate *AutoVersionCon
 		canonical, synonym   string
 		isCanonical, isAlias bool
 	}{
-		{"flow.version", "flow.propagate", flow.Version != nil, flow.Propagate != nil},
+		{"flow.version", "flow.propagate",
+			flow.Version != nil || hasStageObject(flow, "version"), flow.Propagate != nil || hasStageObject(flow, "propagate")},
 		{"flow.beforeVersion", "flow.beforePropagate", flow.BeforeVersion != nil, flow.BeforePropagate != nil},
 		{"flow.postVersion", "flow.postPropagate", flow.PostVersion != nil, flow.PostPropagate != nil},
 	} {
 		if pair.isCanonical && pair.isAlias {
-			return fmt.Errorf("%s%s and %s are mutually exclusive (they are two names for one entry)",
-				prefix, pair.canonical, pair.synonym)
+			return WithDiagnostic(DiagnosticExecution, fmt.Errorf("%s%s and %s are mutually exclusive (they are two names for one entry)",
+				prefix, pair.canonical, pair.synonym))
 		}
 	}
 	return nil
+}
+
+// hasStageObject reports whether a flow wrote a stage entry in its object
+// form, which states the stage as surely as its script list does.
+func hasStageObject(flow *SpaceFlowConfig, name string) bool {
+	_, isStated := flow.Stages[name]
+	return isStated
+}
+
+// fieldOf is the typed script list of one built-in stage entry.
+func fieldOf(flow *SpaceFlowConfig, name string) *[]string {
+	switch name {
+	case public.FlowStageBuild:
+		return &flow.Build
+	case public.FlowStageTests:
+		return &flow.Tests
+	case public.FlowStagePublish:
+		return &flow.Publish
+	case public.FlowStageSign:
+		return &flow.Sign
+	default:
+		return &flow.Announce
+	}
 }
 
 // validateWeights checks a stage-budget weight: at most a [build, publish]
@@ -574,9 +598,12 @@ func mergePackageOverride(sc SpaceConfig, po PackageConfig) SpaceConfig {
 	return sc
 }
 
-// mergePublish overlays one level's publish object onto the inherited one
-// field by field. adoptPublished replaces whole: its verify list means nothing
-// beside an enabled flag some other level wrote.
+// boolValue reads a tri-state option that has reached the bottom of the
+// ladder with nobody having set it: nil means the default, which for the
+// space-shaped boolean is false.
+func boolValue(b *bool) bool { return b != nil && *b }
+
+// mergePublish overlays each stated policy field; adoption replaces whole.
 func mergePublish(base, over *PublishConfig) *PublishConfig {
 	if over == nil {
 		return base
@@ -585,16 +612,17 @@ func mergePublish(base, over *PublishConfig) *PublishConfig {
 	if base != nil {
 		out = *base
 	}
+	if over.OrderKinds != nil {
+		out.OrderKinds = over.OrderKinds
+	}
+	if over.BlockingKinds != nil {
+		out.BlockingKinds = over.BlockingKinds
+	}
 	if over.AdoptPublished != nil {
 		out.AdoptPublished = over.AdoptPublished
 	}
 	return &out
 }
-
-// boolValue reads a tri-state option that has reached the bottom of the
-// ladder with nobody having set it: nil means the default, which for the
-// space-shaped boolean is false.
-func boolValue(b *bool) bool { return b != nil && *b }
 
 // rootDefaults renders the root file's space-shaped keys as the base of the
 // ladder every space and every standalone package is folded through. Making
@@ -750,7 +778,9 @@ func applyLayers(c *File, base SpaceConfig, pkg string, layers []overrideLayer,
 
 // mergeFlow overlays flow entries one by one: a nil entry inherits, a
 // non-nil one — the explicit empty array included — replaces, which is how
-// an override clears an inherited stage.
+// an override clears an inherited stage. A stage entry is one value in both
+// its forms, so a layer that writes a stage key in either form replaces the
+// whole inherited entry, scripts, label and constraints alike (§13.11).
 //
 // The version stage's entries have a second name each (propagate), and a pair
 // is one entry: a layer stating either spelling replaces both inherited values,
@@ -779,13 +809,31 @@ func mergeFlow(base, over *SpaceFlowConfig) *SpaceFlowConfig {
 			*dst, *dstSynonym = src, srcSynonym
 		}
 	}
-	pick(&out.Build, over.Build)
-	pick(&out.Tests, over.Tests)
-	pick(&out.Publish, over.Publish)
-	pickPair(&out.Version, &out.Propagate, over.Version, over.Propagate)
-	pick(&out.Sign, over.Sign)
+	// A stage entry is restated when the layer wrote its key in either form:
+	// the whole inherited entry then goes, its object half included, and the
+	// version pair goes together under both spellings.
+	restated := make(map[string]bool)
+	for _, stage := range []struct {
+		name string
+		list []string
+	}{
+		{public.FlowStageBuild, over.Build}, {public.FlowStageTests, over.Tests},
+		{public.FlowStagePublish, over.Publish}, {public.FlowStageSign, over.Sign},
+		{public.FlowStageAnnounce, over.Announce},
+	} {
+		if stage.list != nil || hasStageObject(over, stage.name) {
+			restated[stage.name] = true
+			*fieldOf(&out, stage.name) = stage.list
+		}
+	}
+	if over.Version != nil || over.Propagate != nil ||
+		hasStageObject(over, public.FlowStageVersion) || hasStageObject(over, public.FlowStagePropagate) {
+		restated[public.FlowStageVersion], restated[public.FlowStagePropagate] = true, true
+		out.Version, out.Propagate = over.Version, over.Propagate
+	}
+	out.Stages = replaceStages(out.Stages, over.Stages, restated)
+	out.StageHooks = overlayStageHooks(out.StageHooks, over.StageHooks)
 	pick(&out.Login, over.Login)
-	pick(&out.Announce, over.Announce)
 	pick(&out.BeforeAll, over.BeforeAll)
 	pick(&out.BeforeSign, over.BeforeSign)
 	pick(&out.PostSign, over.PostSign)

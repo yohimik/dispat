@@ -3,8 +3,7 @@
 `github.com/yohimik/dispat/pkg/ccme` is a Go parser for Conventional Commits. Further parser releases are on hold.
 The published unsuffixed module remains at v1.0.0. Its message grammar and parser behavior are retained by Conventional
 Commits, Monorepo Extension 2.0.0, a strict superset of Conventional Commits 1.0.0 that adds scopes as packages,
-propagation depth, and prerelease channels. The package parses commit messages and nothing else: no git, no workspace,
-no versions.
+propagation depth, and prerelease channels. The package reads message text; it does not inspect Git history, discover packages, or plan release versions.
 
 The parser uses no regular expressions. It runs a single left-to-right index scan with one byte of lookahead, no
 backtracking, and no recursion. This gives O(n) time and O(1) working space, which matters when you feed it untrusted
@@ -74,8 +73,8 @@ Call `DefaultParser()` as a shorthand for `MustNewParser(Config{})`. Call `Defau
 spelled out when you want a populated struct.
 
 A nil slice or map selects the default, but a non-nil empty one forbids all values. Both propagation depths default to
-a literal `0`, which is the specification default rather than an unset marker. A unit reaches nobody until it says
-otherwise.
+`0`: changes do not propagate to dependent packages unless the message requests it. Here, `0` is a configured value,
+not an unset field.
 
 ## Diagnostics
 
@@ -93,9 +92,9 @@ The package emits only the codes decidable from a message on its own. Anything n
 or git history belongs to the release engine. You can find the full numbered list of both sets in
 [Diagnostic codes](../reference/plan-errors.md).
 
-Handle `W155` and `W156` carefully, because they mean the message says something other than what its author meant, like
-a miscapitalised `BREAKING CHANGE` footer. You cannot suppress them. `SilentFailureCodes()` returns them so your
-commit-lint tooling can reject what the release engine tolerates.
+`W155` and `W156` flag text that may not do what the author intended, such as a miscapitalised `BREAKING CHANGE`
+footer. These warnings cannot be suppressed. Use `SilentFailureCodes()` if your commit-lint tool should reject these
+messages even when the release engine accepts them.
 
 ## Versions
 
@@ -109,9 +108,9 @@ v.Compare(other)
 
 ## Bulk parsing
 
-The parser holds no mutable state, so you can scale it across goroutines. Each message produces a couple of kilobytes
-of short-lived garbage, making the garbage collector the limit past roughly a million messages per second. Raise `GOGC`
-for a tool that sweeps a history once and exits, as this costs nothing but peak memory.
+You can parse messages concurrently with the same parser. At high throughput, temporary allocations can make garbage
+collection the bottleneck. For a tool that reads a history once and exits, a higher `GOGC` can trade more peak memory
+for less collection work. Measure that tradeoff with your own messages before changing it.
 
 Copy a description to keep it from a large message, because a `Result` retains the whole message string. Treat
 `Directives.Kinds` as read-only, because it aliases the parser configuration.

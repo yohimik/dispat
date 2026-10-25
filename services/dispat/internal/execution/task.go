@@ -199,6 +199,7 @@ type framePermitx func(ctx context.Context, exports []plan.Output) taskOutcome
 func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
 	permit framePermitx, log zerolog.Logger) taskOutcome {
 	assignment := task.assignment
+	mappings := workerOutputPathMappings(assignment, dir)
 	// carried is everything the run had exported before this frame plus
 	// everything the frame exports, which is what the scripts read; produced is
 	// this frame's own, which is what travels back.
@@ -236,12 +237,13 @@ func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
 			Dir:      dir,
 			Stage:    part.stage,
 			Commands: part.commands,
-			Env:      w.formatTaskEnv(assignment, part.stage, carried),
+			Env:      w.formatTaskEnv(assignment, part.stage, carried, mappings...),
 			Log:      log.With().Str("package", assignment.Package.Name).Str("stage", part.stage).Logger(),
 			FailFast: true,
 		}
 		log.Info().Str("stage", part.stage).Int("commands", len(part.commands)).Msg("stage started")
 		exported, err := sequence.RunCollectingOutputs(ctx, assignment.Package.Name+":"+part.stage)
+		release.RemapCapturedOutputs(exported, mappings)
 		release.MergeOutputs(carried, exported)
 		release.MergeOutputs(produced, exported)
 		if err == nil {
@@ -321,12 +323,23 @@ func formatStageTitle(stage string) string {
 // DISPAT_* variable always wins a name clash; then this node's authority,
 // which nothing may override; then the blanking of the workspace context this
 // process may have inherited from whoever started it.
-func (w *Worker) formatTaskEnv(assignment Assignment, stage string, carried *plan.Release) []string {
+func (w *Worker) formatTaskEnv(assignment Assignment, stage string, carried *plan.Release,
+	mappings ...release.OutputPathMapping) []string {
 	computed := append(append([]string{}, assignment.Env...), "DISPAT_STAGE="+stage)
 	computed = append(computed, carried.OutputVars()...)
+	computed = release.RemapOutputEnvironment(computed, mappings)
 	env := release.StaticEnv(assignment.StaticEnv, computed)
 	env = append(env, FormatWorkerAuthorityEnv(w.Node)...)
 	return append(env, formatInheritedBlanks(os.Environ())...)
+}
+
+func workerOutputPathMappings(assignment Assignment, dir string) []release.OutputPathMapping {
+	if assignment.Package == nil || assignment.Package.SourceDir == "" ||
+		len(assignment.Package.OutputRoots) == 0 {
+		return nil
+	}
+	return []release.OutputPathMapping{{SourceRoot: assignment.Package.SourceDir,
+		TaskRoot: canonicalPackageDir(dir), Roots: assignment.Package.OutputRoots}}
 }
 
 // formatInheritedBlanks empties the composed-workspace variables this process

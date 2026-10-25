@@ -1,15 +1,10 @@
 # The release lock
 
-Running two releases of the same repository at the same time causes problems. Both runs read the same tags and decide
-on the same next versions. Both build and publish, but only one writes the result. The other run publishes packages
-that nothing records.
+Two simultaneous releases can read the same tags and choose the same next versions. The release lock prevents that:
+`dispat release` must claim the repository before it plans. If another run holds the lock, the new run stops.
 
-This happens easily. A merge to the main branch triggers a release, and another merge a minute later starts a second CI
-job. You might re-run a stuck job while the first attempt is still going, or release from a laptop while a pipeline
-runs.
-
-`dispat release` avoids this race entirely. It claims the repository before planning anything. If dispat cannot claim
-the repository, it stops.
+The lock coordinates CI jobs and local releases through the same Git remote. It applies even when the runs select
+different packages.
 
 ## How the claim works
 
@@ -59,11 +54,9 @@ succeeded remains published and is still counted that way in the summary; the cl
 `failed`, or `interrupted` if the run was cancelled. A refusal before execution emits no completion webhook. In a fleet, cleanup continues in reverse order so one damaged repository does not strand the locks of
 the remaining repositories too.
 
-The claim is unconditional. No flag moves the plan ahead of it, because whether there is work to do is not known
-until after planning, and planning is the thing the lock exists to serialise. A run that turns out to have nothing to
-publish therefore takes the lock, gives it straight back, and exits as it otherwise would. To ask whether a release
-would publish anything without touching the lock, run `dispat status --require-release`, which plans without ever
-writing to the remote.
+Every release takes the lock before planning, including `--require-release`. If the plan is empty, the run gives the
+lock back and exits. To check for pending work without taking the lock or writing to the remote, use
+`dispat status --require-release`.
 
 ## What a blocked run looks like
 
@@ -77,9 +70,9 @@ second run gets the repository, sees the versions the first run released, and pi
 
 ## A push or a delete whose answer was lost
 
-A push can land on the remote and still report a failure, because the connection broke before the answer came back.
-A refusal and a lost answer look the same from here, so dispat reads the lock back from the remote before it decides,
-on a bound of its own that an interrupt does not cut short:
+A connection can fail after the remote accepts a push. To distinguish that from a rejected push, dispat reads the
+remote lock before deciding what to do. This check has its own timeout and continues even if the release was
+interrupted:
 
 | The remote carries | Outcome |
 | --- | --- |
@@ -123,7 +116,7 @@ is the run id every coordination branch of that run carries, and it is the place
 which ended holding its lock can be found from the lock. A later run refused by this lock quotes the same facts,
 including the run.
 
-Confirm that run is genuinely gone. A lock that names a run is cleared in the order
+Confirm that the named run has stopped. A lock that names a run is cleared in the order
 [a lock a distributed run retained](#a-lock-a-distributed-run-retained) gives, because a worker of that run may hold
 a publication it was authorized to start. Any other lock is cleared by deleting the tag and releasing again:
 
@@ -131,8 +124,8 @@ a publication it was authorized to start. Any other lock is cleared by deleting 
 git push origin --delete dispat-release-lock
 ```
 
-Deleting the lock is a decision you make. dispat does not time out and delete the lock for you. It cannot tell a dead
-run from a slow one, so an expiring lock would let a second release run over the first.
+Locks do not expire automatically. dispat cannot distinguish a stopped run from a slow one, so you must confirm that
+the owner has stopped before removing its lock.
 
 ## Things worth knowing
 
@@ -148,9 +141,8 @@ collide whether or not either of them pushes.
 The lock is a name other runs may hold, so dispat never forces the lock push. A repository that forces everything still
 stops at a lock somebody else holds.
 
-**It covers the whole repository, not one package.** Running `dispat release -p core` and `dispat release -p web` at
-the same time serialises the runs. The second waits for the first. They would otherwise write two release commits over
-each other.
+**It covers the whole repository.** If `dispat release -p core` and `dispat release -p web` start together, only one
+acquires the lock. The other stops and must be retried after the first finishes.
 
 **It is not a release tag.** The `dispat-release-lock` tag carries no version and dispat never reads it back as one. It
 stays out of every package's history even under a tag format broad enough to match the name.
@@ -162,7 +154,7 @@ workspace, so independent per-repository locks do not make two fleet runs safe.
 
 ## Turning it off
 
-Turn the lock off in the config file for a repository that is always in this situation:
+For a repository with no remote to coordinate through, disable the lock in its configuration:
 
 ```yaml
 unsafeDisableLock: true
@@ -174,12 +166,10 @@ Or turn it off in the environment for one invocation:
 DISPAT_UNSAFE_DISABLE_LOCK=true dispat release
 ```
 
-Either setting is enough, and neither overrides the other. The lock is on only while both stay quiet. That is the
-default, so a config file that never mentions the key gets the lock.
+Either setting disables the lock. The default is enabled when neither setting requests a bypass.
 
-These settings exist for repositories that have no remote to coordinate through at all. This includes a scratch clone,
-a fixture, or a local experiment where the alternative is no release. They are spelled unsafe because they are. With
-the lock off, nothing stops a second release starting beside the first.
+This is intended for scratch clones, test fixtures, or local experiments without a remote. With the lock disabled,
+dispat cannot prevent another release from running at the same time.
 
 Only a value that plainly reads as true switches the variable on (`true`, `TRUE`, `1`). Anything else leaves the lock
 in place, including a typo, an empty value, or an unset variable. Releasing unguarded is not a state you want to end up
@@ -197,12 +187,11 @@ and the lock is the only thing that stops a second run authorizing the same publ
 
 ## A lock a distributed run retained
 
-A distributed run leaves one thing behind on purpose. When it authorized a publication on a worker node and the node
-never reported back, the outcome of that publication cannot be established from here: the registry may hold the
-version or it may not, and the publisher may still be running. The run reports `E228`, fails that package, blocks its
+If a worker was authorized to publish but never reports a result, dispat cannot tell whether the version reached the
+registry or whether the publisher is still running. The run reports `E228`, fails that package, blocks its
 dependents and exits non-zero. If the node never acknowledged the withdrawal either, the release lock of the
-repository it was publishing into is **retained** rather than given back, because handing that repository to the next
-run would be handing over an exclusion that does not exclude.
+repository it was publishing into is **retained** rather than given back, to prevent another run from publishing while the first
+publisher may still be active.
 
 The log line says so, names the run and points here:
 

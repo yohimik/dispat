@@ -20,10 +20,12 @@ import (
 //	runOnly: orchestrator          # build and publish stay here
 //	runOnly: [worker, orchestrator] # build on a node, publish here
 //
-// `build` and `publish` are the only stages a run ever delegates. The version
-// stage, the lock-file preparation, the space login, the recording and every
-// run-level hook always run on the orchestrator, so there is nothing for this
-// key to say about them and it says nothing.
+// `build` and `publish` are the two values because they are the two placements
+// a run has: the tests stage and the stages a flow defines before the records
+// follow the build's value. The version stage, the lock-file preparation, the
+// space login, the recording, the stages after the records and every run-level
+// hook always run on the orchestrator, so there is nothing for this key to say
+// about them and it says nothing.
 
 // The three places a stage may be allowed to run. They are matched exactly,
 // as the execution role and logLevel are, so a misspelling is refused rather

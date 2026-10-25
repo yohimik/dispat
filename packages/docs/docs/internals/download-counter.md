@@ -1,10 +1,15 @@
 # Landing-page distribution counter
 
-The landing page shows the sum of two public distribution measurements: downloads of every asset attached to every
-published release in `yohimik/dispat`, including prereleases, and the repository pull totals reported by Docker Hub for
-`yohimik/dispat-alpine`, `yohimik/dispat-debian`, `yohimik/dispat-ubuntu`, and `yohimik/dispat-dind`. Draft GitHub
-releases are excluded. Repeated downloads, automated downloads and repeated image pulls all count, so this is a count
-of distribution events rather than people or installations.
+The landing-page counter adds GitHub release-asset downloads and Docker Hub pulls. Repeated and automated downloads
+count, so the total measures distribution events, not people or installations.
+
+## What is counted
+
+GitHub contributes every asset download from published `yohimik/dispat` releases, including prereleases and excluding
+drafts. Docker Hub contributes the pull totals for `yohimik/dispat-alpine`, `yohimik/dispat-debian`,
+`yohimik/dispat-ubuntu`, and `yohimik/dispat-dind`.
+
+## How it stays up to date
 
 A scheduled GitHub Actions workflow collects a complete snapshot every 15 minutes, at minutes 11, 26, 41 and 56 of
 each UTC hour. Changes to the workflow or collector on `main` also trigger an immediate refresh, and
@@ -21,11 +26,15 @@ places instead of being truncated, and reduced-motion preferences disable the an
 independently of site releases, excluded from the release deployment's deleting sync, and absent from the PWA
 precache.
 
+## Local development and credentials
+
 No credential reaches the browser. GitHub Actions supplies its repository token and authenticates the upload with the
 site's existing Google Cloud Workload Identity Federation; Docker Hub's public repository endpoint needs no token. To
 populate the counter during local development, run `pnpm --filter dispat-docs downloads:refresh` from the repository
 root before `pnpm docs:start`. The helper uses an exported `GITHUB_TOKEN` or an existing authenticated `gh` CLI session,
 runs the collector in Docker, and writes only a gitignored development snapshot.
+
+## Collector failures
 
 The collector bounds each request to 20 seconds and the complete run to two minutes. It rejects incomplete responses,
 pagination loops and values outside JavaScript’s safe integer range. JSON logs report collection and file publication

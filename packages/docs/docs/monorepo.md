@@ -1,147 +1,126 @@
 # One repository or many
 
-dispat does not decide whether you keep everything in one repository or give each project its own. This page explains
-the differences between the two setups. It covers which differences dispat removes and how you can move between them
-without losing your published versions.
-
-dispat works either way. It exists because the release side of a monorepo is genuinely harder, and it is perfectly
-happy in a repository holding one thing.
+You can use dispat with one package, a monorepo, or linked repositories. Choose the layout that fits how your team
+changes, reviews, and grants access to the code. Release automation can help with coordination, but it does not remove
+those tradeoffs.
 
 ## The two shapes
 
-**One repository.** Every project is a folder. You get one checkout, one history, and one CI configuration. You have
-one place to change something that crosses two projects.
+**One repository:** projects live in folders within a shared checkout and history. A change spanning several projects
+can be reviewed together. Packages can still have separate versions and release schedules.
 
-**A repository each.** Every project is its own repository with its own history, permissions, and pipeline. Projects
-talk to each other only through published versions.
+**Separate repositories:** projects have their own histories, permissions, and pipelines. Consumers usually pick up
+changes through published dependency versions. You can also link repositories when their releases need coordination.
 
-Both are legitimate, and plenty of teams run a mixture. They use a repository per product, and each repository holds
-the several packages that make up the product.
+You can mix these approaches—for example, one repository per product, with several packages inside each product.
 
 ## What each one costs
 
-| | One repository | A repository each |
-|---|---|---|
-| A change crossing two projects | one commit, one review, one CI run | one pull request per repository, merged in the right order |
-| Knowing what works with what | the checkout is a tested combination | you find out when someone installs the published versions |
-| Release ordering | the tool's problem, if the tool understands the graph | yours, by hand or by waiting |
-| Access control | mostly all or nothing | per repository, naturally |
-| Checkout and CI cost | grows with the whole repository unless jobs are selective | small, always |
-| Release pipelines to maintain | one | one per repository |
-| Independent cadence | needs per-package versions | free |
-
-Read that table as the honest version of the argument. A monorepo trades convenience across projects for size and
-coupling. Separate repositories trade coordination cost for independence.
+| Concern | One repository | Separate repositories |
+| --- | --- | --- |
+| Changes across projects | Can share a commit and review | Need coordinated changes across repositories |
+| Testing a compatible set | Test projects from the same checkout | Assemble and test the intended source or published versions |
+| Release ordering | One declared dependency graph can order the work | Independent pipelines need coordination or dependency updates |
+| Access control | Usually managed at repository level | Can be different for each repository |
+| Checkout and CI work | May grow with the shared history; selective jobs help | Each job checks out its own project and any linked sources |
+| Pipeline maintenance | Shared setup can serve several packages | Each repository needs a setup, even if it uses a common template |
+| Release cadence | Independent or shared package versions | Usually independent; linked releases can coordinate them |
 
 ## Which of those costs dispat removes
 
-dispat targets exactly three rows of that table.
+dispat handles the release work described by its configuration:
 
-**Release ordering.** dispat reads the dependency graph in one repository and releases in topological order. A library
-publishes before the service that consumes it, and packages with no relation publish in parallel. You do not schedule
-that by hand.
+- **Dependency ordering.** Providers publish before their consumers publish. Independent branches can run in parallel.
+  The dependency settings also determine whether a consumer's build waits for a provider's build or publication.
+- **Package versions.** Each package can have its own version, tags, and changelog. Use
+  [shared versions](./reference/releasing/versioning.md) when packages should move together.
+- **Selecting work.** [`dispat run --since`](./cli/run.md) and
+  [`dispat if --changed`](./cli/if.md#changed-packages) help a pipeline run scripts for affected packages, including
+  dependants as described by the selection rules. Existing build caches can still speed up those scripts.
 
-**Independent cadence in one repository.** Each package keeps its own version, tag, and changelog. One commit can
-release one package, several packages, or the whole repository, which stops a monorepo from meaning that everything
-ships at once. [Shared versions](./reference/releasing/versioning.md) covers the opposite choice for packages that
-should move together.
-
-**CI cost.** A monorepo only gets expensive if every job does everything. Run [`dispat run --since`](./cli/run.md) and
-[`dispat if --changed`](./cli/if.md#changed-packages) to execute a script only in the packages a change reached. This
-includes dependants, so the pipeline scales with the diff rather than with the repository.
-
-Without a control repository, each dispat run still sees one repository and one graph.
+An ordinary local run sees the graph in its checkout. A control repository or choreographed fleet can combine linked
+repositories into that graph.
 
 ## Joining repositories through a control checkout
 
-Independent runs cannot order releases or propagate a version between two projects in different repositories. There is
-no graph spanning those runs.
+A [control repository](./control-repository.md) holds the shared configuration and links source repositories as Git
+submodules. The source histories stay separate, while one release run coordinates the combined graph.
 
-Separate repositories mean the only connection is a published version, and picking that version up is the consumer's
-own decision. This is the definition of the choice rather than a gap to work around. A bot like Renovate opens a pull
-request for dispat to release, and the
-[reconciliation pickup](./configuration/autoversion.md#picking-up-providers-released-without-you) handles this
-situation automatically inside one repository.
+Choose which history carries release intent:
 
-You can get the graph back without merging histories by using a repository that holds the control configuration and
-links the sources as git submodules. In source-history mode, dispat reads each source's commits and tags under one fixed
-gitlink snapshot. In pointer-history mode, control commits describe pointer moves. Both modes order releases and
-propagate versions across the combined graph while the code stays where it is.
-[A control repository for many repositories](./control-repository.md) explains this pattern and its costs.
+- **Source-history mode:** dispat reads each linked repository's commits and tags at the pinned source snapshot.
+- **Pointer-history mode:** commits in the control repository describe source pointer updates and their release intent.
+
+Without a combined graph, independent runs do not order each other's releases. A consumer must adopt a published
+dependency update through its own workflow. Within a configured graph, dispat's
+[reconciliation pickup](./configuration/autoversion.md#picking-up-providers-released-without-you) handles versions
+published by a provider in an earlier run.
 
 ## Joining repositories as peers
 
-You do not have to add a control repository to get the graph. With a `repository` identity, every repository is a peer
-that optionally names the others in its `repositories` roster and keeps
-its own configuration and release records, two-sided submodule links join the peers, and a run started in any of them
-composes the whole fleet. The trade is symmetry against central control: no commit can address the fleet as a whole,
-because every unit is read against the repository that carries it.
-[A choreographed fleet](./choreographed-repositories.md) explains the keys, the links and the boundaries.
+A [choreographed fleet](./choreographed-repositories.md) coordinates linked repositories without an extra control
+repository. Each peer declares a `repository` identity, can list neighbours in `repositories`, and keeps its own
+configuration and release records.
+
+Two-sided submodule links connect the peers. A run started in any peer follows those links and composes the fleet's
+release graph. Commit scopes are interpreted within the repository that contains the commit; a peer's commit cannot
+address the whole fleet as if it were one local workspace.
+
+Choose this arrangement when ownership should stay with the individual projects. Choose a control repository when a
+central release policy and entry point are useful.
 
 ## dispat in a single-project repository
 
-dispat does not require more than one package. A repository delivering one thing declares one standalone entry to get
-automatic versioning, changelogs, tags, and releases from its commits. [A single package](./examples/single-package.md)
-shows this setup in full.
+One standalone package entry is enough for automatic version planning and release recording. You do not need a space.
+The [single-package example](./examples/single-package.md) shows a complete setup.
 
-Two details are different at that size:
+Two settings often help:
 
-- Set `tagFormat: "v{version}"` to get `v1.4.0` rather than `app@1.4.0`. You do not need the prefix because there is no
-  second package to disambiguate from.
-- Set `path` to `.` when the manifest, the sources and the changelog live at the top of the repository: the package is
-  then the repository itself, and its scripts run there. See
-  [The repository as the package](./configuration/packages.md#the-repository-as-the-package). Set it to a directory
-  such as `src`, `lib`, or `app` when the deliverable sits in one, in which case
-  [the root-manifest example](./examples/single-package.md#one-root-manifest) runs npm commands from the root while
-  source changes belong to the configured folder.
+- `tagFormat: "v{version}"` produces tags such as `v1.4.0`. A package prefix is optional when there is only one package.
+- `path: "."` makes the repository root the package folder. Scripts run there, alongside the manifest, source, and
+  changelog. If the package lives in `src`, `lib`, or another subdirectory, use that path instead. The
+  [root-manifest example](./examples/single-package.md#one-root-manifest) shows how to run npm at the root while
+  attributing source changes to a subdirectory.
 
-A fleet of small repositories each running dispat is a completely ordinary setup. Every repository gets its own
-[release lock](./reference/releasing/release-lock.md). The lock is a tag on that repository's own remote, so they never
-wait for each other.
+Independent repositories running separate releases each use their own
+[release lock](./reference/releasing/release-lock.md). Linked repositories participating in one coordinated release
+also follow that setup's fleet-lock rules.
 
 ## Moving from many repositories to one
 
-The work is mostly git, and the dispat portion is one command.
+1. Move each project into its own folder. Decide whether to preserve its Git history—for example with `git subtree
+   add`—or copy the files and record its starting version explicitly.
+2. Configure the package folders. [Configuration beside the code](./examples/layout.md) shows how to split a large
+   configuration across local files.
+3. Run [`dispat compute`](./cli/compute.md) to review inferred dependencies and `initials` from the manifests. Use
+   `--write` when you are ready to save them.
+4. Check `dispat status` before releasing. Confirm package names, starting versions, and the proposed dependency order.
 
-1. Bring the histories together using `git subtree add` or a plain copy so each project ends up in its own folder.
-2. Write a config naming the folders. [Keeping configuration beside the code](./examples/layout.md) shows a layout
-   where each space and package holds its own file to keep a big repository readable.
-3. Run [`dispat compute --write`](./cli/compute.md). It reads the manifests and writes the `dependencies` edges between
-   the packages, alongside the `initials` each package starts from. This ensures you do not lose the versions you
-   already published.
-4. Run `dispat status` before you release anything. It reports what a release would do and changes nothing.
-
-The versions carry over because a baseline is a tag or an `initials` entry. Both survive the move.
-[Adopting dispat](./examples/adopting.md) shows the same procedure with transcripts.
+A package needs a usable release tag or an `initials` entry to continue from its published version. Moving files alone
+does not preserve that information. [Adopting dispat](./examples/adopting.md) walks through the setup with transcripts.
 
 ## Moving from one repository to many
 
-The reverse is no harder. Extract the folder into its own repository, and keep the tags for that package if the history
-came with it, or state `initials` if it did not. The package's next release continues from the version it was on rather
-than starting at zero.
+Extract the package folder into its new repository. If you preserve its history, keep the relevant release tags. If
+you do not, configure `initials` so planning starts from the version already published.
 
-Separate dispat runs lose ordering and propagation between the split-off project and what remains. A control repository
-can retain them by linking both sources and declaring the cross-repository edge. This is an extra shared pipeline and
-lock, so choose it only when that coordination is useful.
+Independent releases no longer share ordering or propagation across the split. A control repository or choreographed
+fleet can restore that coordination by linking the sources and declaring the cross-repository dependencies. Review the
+extra checkout, permissions, and locking requirements before choosing a linked setup.
 
 ## Choosing
 
-These questions decide the shape faster than a general argument:
+Use these questions to narrow the choice:
 
-- **Do changes routinely touch two projects at once?** If yes, one repository saves you the coordination every time.
-- **Do the projects release on genuinely unrelated schedules, for unrelated audiences?** If yes, separate repositories
-  cost you little.
-- **Does anybody need access to one project and not the others?** This is the strongest argument for separate
-  repositories. It is also the hardest to work around.
-- **Is the repository large enough that a full checkout is a problem?** Measure before deciding. It usually happens
-  later than people expect.
-- **Are you splitting to make releases simpler?** This is the one reason worth re-examining. dispat already handles the
-  release complexity.
+- **Do changes often span projects?** A shared repository makes those changes easier to review together.
+- **Do projects need different access permissions?** Separate repositories usually give you a clearer boundary.
+- **Do projects release together or independently?** Either is possible in one repository; linked repositories need an
+  explicit coordination setup when their releases depend on each other.
+- **Is checkout or CI time already a problem?** Measure where the time goes. Selective jobs may help without moving code.
+- **Who owns the shared release process?** That helps decide between local releases, a control repository, and peers.
 
 ## Where to go next
 
-- [From one package to many](./examples/one-to-many.md) walks through growth in one repository. You start with one
-  deliverable today and add four more later without restructuring.
-- [Examples](./examples/README.md) provides a complete setup per ecosystem. Most of them are a handful of lines.
-- [Concepts](./concepts.md) explains versions, propagation, and channels. The rest of the documentation uses this
-  vocabulary.
+- [From one package to many](./examples/one-to-many.md): add deliverables without renaming existing packages.
+- [Examples](./examples/README.md): find a setup for your ecosystem or publish target.
+- [Concepts](./concepts.md): understand versions, dependency propagation, and prerelease channels.

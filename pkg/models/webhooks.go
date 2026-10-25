@@ -150,6 +150,8 @@ func WebhookScriptEvent(word string) string { return "script." + word }
 // a {field} token: the scalar payload fields, spelled exactly as the JSON
 // payload spells them. The list-valued `packages` field is deliberately
 // absent: a template renders one line, and a list has no one rendering.
+// `label` is the display name the flow gave a stage, beside the `stage` it
+// runs under, and is empty for a stage given none.
 //
 // The last three name the machines a release ran on. `role` and `node` say
 // which process sent the event, and `worker` says which node the event is
@@ -160,7 +162,7 @@ func WebhookScriptEvent(word string) string { return "script." + word }
 func WebhookFormatFields() []string {
 	return []string{
 		"event", "timestamp",
-		"package", "stage", "version", "previousVersion", "channel", "tag",
+		"package", "stage", "label", "version", "previousVersion", "channel", "tag",
 		"status", "failedStage", "error", "code", "blockedBy",
 		"progress", "message",
 		"root", "published", "failed", "skipped", "cancelled",

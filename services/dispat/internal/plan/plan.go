@@ -564,6 +564,9 @@ const (
 	// CodeDependencyCycle rejects a configured dependency graph with a cycle
 	// (§16): no publish order exists. Repository-scoped.
 	CodeDependencyCycle = "E200"
+	// CodeStageWorkspaceCycle rejects a configured execution relation with no
+	// possible order after the E200 publication and propagation check.
+	CodeStageWorkspaceCycle = "E233"
 )
 
 // repositoryScoped is the §16 bucket whose members mean the run cannot produce
@@ -583,6 +586,7 @@ var repositoryScoped = map[string]bool{
 	CodeVersionNotGreater:    true, // E195
 	CodeShallowRepository:    true, // E196
 	CodeDependencyCycle:      true, // E200
+	CodeStageWorkspaceCycle:  true, // E233
 	CodeRepositoryBoundary:   true, // E333
 	CodeRepositoryPrecedence: true, // E334
 }
@@ -1038,10 +1042,15 @@ func (r *Release) IsFreshOwnBump() bool {
 
 // Plan is the full release plan for the repository.
 type Plan struct {
-	Order       []string            // topological order, providers before consumers
-	Releases    map[string]*Release // one entry per package
-	Providers   map[string][]string // consumer -> its providers
-	Diagnostics []Diagnostic
+	Order     []string            // topological order, providers before consumers
+	Releases  map[string]*Release // one entry per package
+	Providers map[string][]string // consumer -> its providers
+	// PublishProviders contains only edges selected by publish.orderKinds.
+	// Nil is reserved for hand-built plans that use Providers for both views.
+	PublishProviders map[string][]string `json:"-"`
+	// BlockingProviders is the subset selected by publish.blockingKinds.
+	BlockingProviders map[string][]string `json:"-"`
+	Diagnostics       []Diagnostic
 	// RepositoryHeads is the immutable source snapshot planning read, keyed by
 	// stable repository identity. The release recorder uses it to detect an
 	// intervening checkout mutation before any script or tag-only record can
@@ -1174,6 +1183,12 @@ type Options struct {
 	Packages []*model.Package
 	// Dependencies are the graph edges.
 	Dependencies []model.Dependency
+	// PublishOrderKinds selects the manifest edge kinds that order release
+	// records. Nil uses the specification default; an empty slice selects none.
+	PublishOrderKinds []model.DepKind
+	// PublishBlockingKinds selects the manifest edges over which a failed
+	// provider can block a consumer. Nil uses the specification default.
+	PublishBlockingKinds []model.DepKind
 	// InactiveExternalDependencies are syntactically valid external edges
 	// whose providers are absent from the current workspace snapshot.
 	InactiveExternalDependencies []model.Dependency
@@ -1285,14 +1300,16 @@ type computation struct {
 	// which is what makes a remedy naming a control repository wrong advice.
 	linkedFleet bool
 
-	pkgs       []*model.Package
-	scopeDirs  []scopeDir       // prepared once; see prepareScopeDirs
-	scopeByDir map[string][]int // scope folder -> indices into scopeDirs, in order
-	byName     map[string]*model.Package
-	byFold     map[string]string
-	order      []string
-	providers  map[string][]string
-	edges      map[string][]edge
+	pkgs              []*model.Package
+	scopeDirs         []scopeDir       // prepared once; see prepareScopeDirs
+	scopeByDir        map[string][]int // scope folder -> indices into scopeDirs, in order
+	byName            map[string]*model.Package
+	byFold            map[string]string
+	order             []string
+	providers         map[string][]string
+	publishProviders  map[string][]string
+	blockingProviders map[string][]string
+	edges             map[string][]edge
 
 	parser *ccme.Parser
 
@@ -1524,7 +1541,7 @@ func (cp *computation) prepare(opts Options) error {
 	if err := cp.indexOptions(opts); err != nil {
 		return err
 	}
-	if err := cp.loadWorkspace(opts.Dependencies); err != nil { // §13.1
+	if err := cp.loadWorkspace(opts); err != nil { // §13.1
 		return err
 	}
 	for _, dependency := range opts.InactiveExternalDependencies {
@@ -1730,6 +1747,8 @@ func (cp *computation) emitPlan() *Plan {
 		Order:                cp.order,
 		Releases:             cp.rel,
 		Providers:            cp.providers,
+		PublishProviders:     cp.publishProviders,
+		BlockingProviders:    cp.blockingProviders,
 		Diagnostics:          cp.diags,
 		RepositoryHeads:      cp.repositoryHeads,
 		RepositoryInputOrder: repositoryInputOrder,
@@ -1812,7 +1831,7 @@ func PackagesChangedSince(ctx context.Context, git TagInventoryGitx, opts Option
 	for _, s := range opts.NonPackageScopes {
 		cp.nonPackage[s] = true
 	}
-	if err := cp.loadWorkspace(opts.Dependencies); err != nil {
+	if err := cp.loadWorkspace(opts); err != nil {
 		return nil, err
 	}
 	parser, err := ccme.NewParser(opts.ParserConfig)

@@ -36,10 +36,10 @@ func BenchmarkAdmission(b *testing.B) {
 			p, changed := mkOverlappingGapsPlan(shape.gaps, 200)
 			r := newAdmissionRun(p, changed)
 			if shape.isAnyDying {
-				elsewhere := &taskCtx{run: r, t: task{"elsewhere", taskBuild}}
+				elsewhere := &taskCtx{run: r, t: task{"elsewhere", taskBuild, ""}}
 				elsewhere.settleFailure(r.results["elsewhere"], errors.New("build failed"), false)
 			}
-			tc := &taskCtx{run: r, t: task{"app", taskBuild}, rel: p.Releases["app"]}
+			tc := &taskCtx{run: r, t: task{"app", taskBuild, ""}, rel: p.Releases["app"]}
 			res := r.results["app"]
 			ctx := context.Background()
 			b.ReportAllocs()
@@ -76,7 +76,7 @@ func mkOverlappingGapsPlan(k, m int) (*plan.Plan, map[string]bool) {
 // releasing package but `app` published.
 func newAdmissionRun(p *plan.Plan, changed map[string]bool) *run {
 	e := &Executor{Log: zerolog.Nop()}
-	_, publishReach := e.buildTaskGraph(p, changed)
+	_, publishReach := e.buildTaskGraph(p, changed, newStagePlans(p, changed))
 	results := make(map[string]*Result, len(changed))
 	for name := range changed {
 		results[name] = &Result{Name: name, Status: StatusPublished}

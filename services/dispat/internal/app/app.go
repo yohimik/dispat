@@ -291,6 +291,12 @@ func (a *App) selectedPlan(ctx context.Context, opts ReleaseOptions) (*plan.Plan
 		a.log.Error().Err(ErrNothingToRelease).Msg("refusing to release")
 		return nil, ErrNothingToRelease
 	}
+	if !pl.IsFatal() {
+		if err := release.ValidateExecutionGraph(pl); err != nil {
+			a.logError(err).Msg("refusing unrealizable execution plan")
+			return nil, err
+		}
+	}
 	// The plan both commands work from is settled here, selection included, so
 	// this is where a distributed run fixes it and says which one it is. With
 	// no worker links nothing is computed and nothing is written.
@@ -327,6 +333,11 @@ func (a *App) planOptions(ctx context.Context) (plan.Options, error) {
 	var deps, inactiveExternal []model.Dependency
 	if err == nil {
 		deps, inactiveExternal, err = config.ValidatePlanDependencies(found.packages, found.declared, a.workspace)
+	}
+	if err == nil {
+		// Every package's stage graph has to be realisable before any command
+		// runs, whether or not the package is in the plan (§13.11).
+		err = config.CheckStageGraphs(found.packages)
 	}
 	if err != nil {
 		a.logError(err).Msg("package discovery failed")

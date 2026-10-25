@@ -1,15 +1,29 @@
 # Concepts
 
-This page explains how dispat decides what to release, at what version, and what happens when something fails. It forms
-the mental model behind every command: semantic versioning driven by conventional commits, across a monorepo where the
-packages depend on each other. The reference pages ([configuration](./configuration/README.md),
-[commits](./reference/commits.md), [environment](./reference/environment.md)) spell out the details.
+A release starts with three inputs: your configuration, Git commits, and release tags. dispat uses them to decide
+which packages need work, compute their versions, and order the build and publish steps.
+
+Keep these terms in mind:
+
+| Term | Meaning |
+| --- | --- |
+| Package | A configured folder with its own version and release work. |
+| Space | A group of packages that share settings. Standalone packages do not need one. |
+| Provider | A package another package depends on. |
+| Consumer | A package using a provider. In `app → core`, `app` consumes `core`. |
+| Plan | The packages selected for a release, their proposed versions, and the reasons they were selected. |
+| Stage | One part of a package's release, such as build or publish. Your configuration supplies its commands. |
+
+For a first read, follow [versions](#versions-live-in-tags), [commits](#commits-carry-the-intent), and
+[the pipeline](#the-pipeline). If you are dealing with a stopped release, go to
+[failure and recovery](#failure-and-recovery). The reference pages cover the individual settings and commands.
 
 ## Versions live in tags
 
-Versions live exclusively in annotated git tags, formatted as `package@MAJOR.MINOR.PATCH` by default or whatever the
-space's [`tagFormat`](./configuration/versions.md#tagformat) says. You will not find a version database or a state
-file. For each package, the planner resolves two tags:
+Annotated Git tags record published package versions. The default name is `package@MAJOR.MINOR.PATCH`; change it with
+[`tagFormat`](./configuration/versions.md#tagformat). Planning does not need a separate version database.
+
+For each package, the planner looks up two baselines:
 
 - **baseline**: the highest tag by semver precedence, prereleases included. This marks what the package last published.
   dispat reads the channel from it, so `1.5.0-beta.3` is on `beta` and `1.4.2` is on `stable`.
@@ -24,26 +38,23 @@ When the newest tag exists but cannot be parsed, like a stray `core@0.0.1.0`, di
 tags either. The baseline then comes from the optional top-level `initials` config map. This maps a package name to a
 version and defaults to `0.0.0`, while commits are still scanned from the unparseable tag.
 
-### Which is also why there is no cache
+### Planning and build caches {#which-is-also-why-there-is-no-cache}
 
-Everything dispat needs is already in the repository, because tags say what published and commits say what changed. The
-plan is computed from the selected history, release records and resolved configuration. Given the same inputs,
-dispat computes the same versions. Planning time depends on the size of the history and dependency graph.
+The planner reads the selected history, release records, and resolved configuration. The same inputs produce the same
+versions. Packages with no release work are left out, so their stage scripts do not run. Planning cost depends on the
+history and dependency graph.
 
-This removes the need for a task cache, which would otherwise require hashing inputs and offering you a way to clear
-invalid hits. dispat skips work a different way: a package with nothing in its window is not in the plan, so its
-scripts never start. You get no cache directory, no state file, and no daemon.
-
-dispat composes with whatever you already cache rather than replacing it. BuildKit layers, an Nx, Turborepo or Bazel
-cache, ccache and the Gradle build cache all live *inside* a stage script, where they speed up a build dispat
-scheduled. None of them can affect which versions get computed, what publishes in which order, or what gets tagged,
-because none of that is downstream of a build.
+That selection is separate from caching build output. Keep using BuildKit layers, Nx, Turborepo, Bazel, ccache, or
+Gradle caches inside your stage commands. They can speed up a scheduled build; they do not decide dispat's version
+plan or release order.
 
 ## Commits carry the intent
 
-[`pkg/ccme`](./go/ccme.md) parses your commit messages. It implements Conventional Commits with a monorepo extension,
-regex-free and in a single pass. A commit may hold several units separated by `---`, each with its own scope,
-directives and footers:
+Commit messages tell dispat what changed and which packages should release. The
+[`pkg/ccme`](./go/ccme.md) parser reads Conventional Commits plus dispat's package and propagation directives.
+
+A commit can contain several **units**, separated by a line of `---`. Each unit has its own header, body, and footers.
+These headers cover the common cases:
 
 | Header                    | Own bump | Reaches                                    |
 |---------------------------|----------|--------------------------------------------|
@@ -84,7 +95,7 @@ dispat derives a package's channel from its baseline tag alone, using no side fi
 puts its packages on the beta line, while `%%` and `++N` propagate a channel to dependants. The `%beta>stable` syntax
 is a transition that graduates whatever still matches.
 
-A stable consumer is not dragged into a release by a provider's prerelease, since it could not resolve it anyway.
+A provider's prerelease does not automatically move a stable consumer onto that prerelease channel.
 `feat(core)^%beta` releases `core` alone and reports why, but you can take the consumers along by putting them on the
 line too with `feat(core)^%beta++1`. Trains converge on their own, so once a package is on `beta`, a directive saying
 `beta` proposes nothing.
@@ -122,10 +133,9 @@ Whether the members also share the prerelease counter and the channel is two fur
 [`versionGroups` entry](./configuration/spaces.md#the-sharing-axes) and shared by default. The paragraphs below and the
 page they link to describe that default.
 
-A member released with nothing of its own gets one "no changes" changelog entry naming what is shared, labelled `W234`
-in the plan. Under a plain mode, a member left behind by a failed ride is re-aligned on the next run. Commit and file
-scopes keep exactly one job in every shared mode: deciding which changelog entries and GitHub release notes each
-package receives.
+When a group member releases only to follow the shared version, the plan reports `W234` and its changelog explains
+that there are no changes of its own. Under a plain shared mode, a member that missed the release is brought back
+into alignment on a later run. Commit and file scopes still decide which release-note entries belong to each package.
 
 Here are two commits under each mode, for a space of `a` and `b` both at `1.0.0`, where only `a` ever changes:
 
@@ -155,104 +165,84 @@ reaches an already-published tag.
 
 ### When a provider fails or is skipped
 
-Failures never abort the run. Once a package publishes, nothing can fail it at all.
+A package failure can leave independent branches of the release running. A successful publication cannot be undone
+by a later error; failures in recording or announcements are reported separately. Errors that prevent a valid run,
+such as a failed gating run hook, can still stop the whole run.
 
-A provider that failed at any stage (version, build, or publish) or was skipped taints its consumers. dispat skips a
-consumer only when *every* reason it is in the plan comes from a package that failed or was blocked. One reason that
-does not is enough to release it: its own conventional commits, a channel change, or a version it picks up from another
-provider. That other provider may have published in this run or in an earlier one, because a consumer discharging an
-earlier run's publication is releasing for something the failure cannot invalidate.
+For a failed or skipped provider, the consumer's next step depends on its release reasons and the
+[provider relation](./configuration/spaces.md#the-provider-relation):
 
-A provider under a blocking [provider relation](./configuration/spaces.md#the-provider-relation) outranks every reason
-of the consumer's own. Under `publish` the relation declares that consumers' builds take the provider's published
-release as their input, so when that publish never happened the input does not exist, and no pending work of the
-consumer's substitutes for it. Under `none` the consumer's publication is the whole of what was supposed to follow the
-provider, so a deployment onto infrastructure that was never applied is the same mistake one stage later. Such
-consumers are skipped unconditionally and catch up on the next run. Only `build` leaves the own-reason rule standing by
-default, which is what `isBuildWaitingPublish: false` has always done.
+| Relation | How the failure affects the consumer |
+| --- | --- |
+| `publish` | The consumer needs the provider's published output before building. It is blocked even if it has changes of its own. |
+| `none` | The consumer can build without waiting. By default, an independent release reason can keep it eligible after a provider fails. |
+| `build` | An independent reason can keep the consumer eligible to proceed. The publication and manifest checks below still apply. |
 
-The publish half holds under all three relations, because a consumer's publish always waits for its providers'
-publishes. Even a consumer that already built, which `false` allows while the provider is still publishing and `none`
-allows from the start, gets skipped at its publish once the provider's publish failure is known. dispat never publishes
-against an unpublished provider version, and skips cascade down the dependency chain by the same rule.
+For `none` and `build`, set `isBlocking: true` if a provider failure must always block consumers. Under `publish`,
+blocking is required and cannot be disabled.
 
-The chain is the dependency graph, not the plan. A provider a consumer reaches only through a package with nothing to
-release publishes before that consumer does, and skips it when the publish fails, exactly as a provider the consumer
-declares itself would. A package with no bump this run is the commonest shape an incremental release has, and it is no
-gap in the chain: the consumer still resolves what lies behind it at install time. The `blockedBy` field of a skipped
-package names the provider that actually failed rather than whatever stands between them.
+An independent reason can be the consumer's own commits, a channel change, or a version it needs to adopt from another
+successful provider. If every reason came from failed or blocked providers, the consumer is skipped.
 
-Such a provider orders and blocks, and that is all. The release reason a consumer may carry is still its own commits or
-a provider it declares that published, because those are the versions it picks up: a publication on the far side of a
-package with nothing to release is no substitute for a declared provider that failed.
+Publication always respects provider publication order, including dependencies reached through a package that has no
+release this time. An unchanged intermediate package does not break the chain. When a provider failure blocks a
+consumer, `blockedBy` names the provider that failed. An indirect provider can order or block work, but it does not
+create a new release reason for a consumer that does not declare it.
 
-A consumer that proceeds on its own reason runs its pipeline normally, with three adjustments. First, failed and
-skipped providers are filtered out of the `DISPAT_UPDATED_*` variables. Second, if it had providers to pick up and none
-survive, the version script does not execute at all.
+When a consumer remains eligible, dispat checks the versions it is about to publish:
 
-Third, what it publishes names each provider's version **as published**. A version stage writes a provider's planned
-version because at that moment the provider is still going to publish it, so a provider that dies afterwards leaves the
-manifests naming a version that will never exist. dispat therefore redoes the reconciliation before the consumer's
-publish, against the providers that are still alive: native auto-versioning writes the provider's baseline back, and a
-space that reconciles through scripts runs its `flow.version` scripts again with the dead providers already out of
-`DISPAT_UPDATED_*`. A manifest naming a version nobody published is never published, whatever was computed up front.
+1. Failed and skipped providers are removed from `DISPAT_UPDATED_*`.
+2. If no provider update remains, a version script that existed only to pick up those updates is skipped.
+3. Before publishing, manifests are reconciled against the providers that actually published. Native auto-versioning
+   restores a failed provider's baseline; script-based reconciliation reruns `flow.version` with the updated provider
+   set.
 
-One case cannot be repaired that way. If the consumer's build has already run over the reconciled manifests, whatever
-it produced may have the provider's planned version baked into it, and rewriting a manifest does not reach a built
-artefact. dispat blocks such a consumer with `W194` naming the provider instead of rebuilding behind your back; the
-reason says that the build had already embedded the planned version, and the next run builds it against what the
-provider actually published.
+Rewriting a manifest cannot repair an artifact that already embedded an unavailable provider version. In that case,
+dispat blocks the consumer with `W194` rather than rebuilding it implicitly. The next run can build against the
+provider versions that are available.
 
-Spaces with `revertOnFail: true` additionally roll back every local change inside a failing package's folder. This
-restores tracked files and removes untracked ones, so a half-finished release leaves no residue in the worktree.
+With `revertOnFail: true`, dispat also restores tracked files and removes untracked files inside the failing package's
+folder. This local cleanup does not undo uploads to registries or changes outside that package folder.
 
 ### Catch-up: failed consumers are never lost
 
-Publishing is not atomic, so a run can end with some packages published and others not. Catch-up is not a repair pass
-bolted on for this case. It is exactly what the ordinary rule does when asked against the right window.
+A release can publish some packages and stop before others finish. The next plan uses release tags to identify work
+that still needs to reach a consumer. The plan calls this **catch-up**.
 
-A commit propagates to a dependant until a release of the provider **delivered** it, and nothing about the provider's
-own progress changes that on its own. A consumer that missed a run is still owed its release on the next one. This
-happens with no state file, no timestamp comparison, and no second traversal.
+For example, `feat(core)^` requests a release of `core` and its direct consumers. If `core` publishes but `app` fails,
+`app` still needs the change on the next run. dispat passes `core`'s already-published version to `app` through
+`DISPAT_UPDATED_*`, so its manifest can adopt the right version.
 
-Delivered has a precise meaning: some release of the provider sits on a commit that carries the propagating commit, and
-the dependant's own last release reached that release. Almost always the dependant's pending window answers this by
-itself, because a dependant that has released nothing past the commit has been delivered nothing. The finer question is
-asked only about a dependant that got *ahead* of the commit, which is what a consumer does when it releases on a reason
-of its own while its provider's publish fails or is held. Such a consumer used to be lost: its own window no longer held
-the commit, so it was never planned again and kept the provider's previous version for ever. It is now released again
-when the provider publishes, and bumped for the delivery.
+The rule also covers a less obvious case: `app` releases for its own changes while `core` is held or fails. `app`'s
+newer tag does not prove it received the pending provider change. When `core` eventually publishes, dispat checks
+whether a consumer release actually incorporated that provider release and schedules catch-up if needed.
 
-When the provider publishes in a run the consumer sits out, dispat still reads the history after the provider's last
-release that the consumer reached, so the next run finds the debt. The one state ancestry cannot order, the provider
-released alone on the very commit its owed consumer released on, is refused before anything publishes
-([`E201`](./reference/plan-errors.md#after-the-plan-before-any-releasing)): release the consumer in the same run, or the
-provider after a new commit.
+This check uses commit ancestry, not tag dates. If a provider is released alone on the exact commit where its consumer
+already released, ancestry cannot establish the delivery order. dispat refuses that case with
+[`E201`](./reference/plan-errors.md#after-the-plan-before-any-releasing). Release both together, or release the provider
+after a new commit.
 
-Four properties explain safe [failure recovery](#failure-and-recovery):
+The recovery rules have four practical limits:
 
-- **No orphans.** A contribution remains owed until a release of the provider delivered it to the dependant, while its
-  corrected source set and channel eligibility remain unchanged. A dependant that released past the commit for its own
-  reasons is owed it still.
-- **Once in the release ledger.** The successful baseline tag removes the contribution from the dependant's fresh
-  window. Publication and tagging are separate external operations, so recovery may reconcile an artefact that already
-  exists rather than promise exactly-once network delivery.
-- **Same version under the same inputs.** A catch-up keeps its reviewed version while its baseline, corrected sources,
-  and resolved source and target channels remain unchanged. If those inputs move, dispat surfaces the recomputed plan.
-- **No widening under the same admission inputs.** Targets only shrink while sources, traversal, and channel eligibility
-  stay fixed. A newly eligible source or channel can expose a finite follow-up, which must be reviewed before publishing.
+- **Pending delivery stays pending.** A consumer still needs a propagated contribution until it receives the provider
+  release, provided the corrected source set and channel eligibility have not changed.
+- **A recorded contribution is not repeated.** Its successful baseline tag removes it from the consumer's fresh window.
+  Uploading and tagging are separate operations, though: an interrupted upload may already exist at the destination
+  without a corresponding tag. Check that destination before retrying.
+- **Unchanged inputs keep the reviewed version.** If the baseline, corrected sources, or source and target channels
+  change, review the recomputed plan.
+- **Unchanged selection inputs do not add new targets.** New source or channel eligibility can expose follow-up work;
+  it needs review before publication.
 
-dispat labels such a release a **catch-up** in the plan and reports it with the origin's *published* version. A package
-appearing with no commits of its own and no releasing dependency is otherwise baffling to review. Its version stage
-receives the provider's already-released version in the `DISPAT_UPDATED_*` variables, so manifests still sync.
-
-To stop a catch-up you no longer want, act on the **consumer**. `cancel(<consumer>)` drops it and a hold defers it.
-Acting on the provider does nothing, because its version is already public and cancellation never reaches a published
-release.
+To stop unwanted catch-up, act on the **consumer**: `cancel(<consumer>)` discards its pending contribution, while a
+hold defers it. Cancelling the provider cannot retract a version it already published. See the
+[recovery guide](./reference/releasing/recovery.md) for commands and worked failures.
 
 ## The pipeline
 
-**Per released package**, dispat runs up to six stages, and each is optional to script:
+**Per released package**, dispat runs the stages of its flow's graph: a version stage and a build for every package,
+the other built-in ones where the flow configures them, and any
+[stages of your own](./configuration/spaces.md#stages-of-your-own). By default they run in this order:
 
 1. **sign**: runs only for a package whose space configures it, with [`autoSign`](./configuration/autosign.md) or a
    `flow.sign`, `flow.beforeSign` or `flow.postSign` entry. It writes the package's own version wherever that version
@@ -261,12 +251,13 @@ release.
    releasing package of a space with [`autoVersion`](./configuration/autoversion.md) (or `autoPropagate`), where native
    reconciliation checks the baselines too. It runs right before the build, after the sign stage when there is one.
    It runs and reports under the name its configuration gave it: `propagate` for `flow.propagate` or `autoPropagate`,
-   `version` otherwise.
-   What the package's first stage waits for on each moving provider is that provider's
+   `version` otherwise. It writes planned versions and waits for no provider.
+   What every later stage of the package waits for on each moving provider is that provider's
    [relation](./configuration/spaces.md#the-provider-relation): the provider's build *and publish* under
    `isBuildWaitingPublish: true`, the provider's *build* only under `false`, and nothing of the provider at all under
-   `{build: none}`.
-3. **build**: the package's build command. Like every script, it may export outputs by appending
+   `{build: none}`. A stage that reads a provider build that never happened fails there, naming the provider.
+3. **build**: the package's build command. Every package has a build stage, and one with no `build` entry runs no
+   command there. Like every script, it may export outputs by appending
    `DISPAT_OUTPUT_NAME=value` (or bare `NAME=value`) lines to the file `$DISPAT_OUTPUT` points at. Each value travels
    to every later script of the package as `DISPAT_OUTPUT_<NAME>`, with `DISPAT_OUTPUT_SOURCE_<NAME>` naming the
    exporter. One export is special: `DISPAT_EXPORT_GITHUB` holds absolute file paths and opts the package into a GitHub
@@ -275,7 +266,7 @@ release.
    checks what the build produced, after the build and before the publish, so a package whose artefact fails its
    checks is never published. It reads the build's exports and hands its own to the publish. A package without that
    configuration has no tests stage at all.
-5. **publish**: waits for the package's own build, through its tests stage when it has one, and always for its
+5. **publish**: for a package whose flow configures a publish or one of its hooks. It waits for every stage before it, and always for its
    providers' publishes. A space with a `flow.login`
    authenticates **once per space** before its first publish, failing all publishes on error, while successful login
    exports reach every package of the space. On success, the release recorders run (the changelog file, and a GitHub
@@ -285,7 +276,7 @@ release.
    it off, pushing is left to CI. The publish script succeeding is the point of no return: from there nothing can fail the package, and a
    record or a tag that cannot be written is
    [reported instead](./internals/architecture.md#after-the-point-of-no-return).
-5. **announce**: runs after the publish frame, pushing the release out to update channels such as a Slack message, a
+6. **announce**: runs after the publish frame, pushing the release out to update channels such as a Slack message, a
    webhook, or a docs feed. It gets the release notes as `DISPAT_BREAKING_CHANGES`, `DISPAT_FEATURES` and
    `DISPAT_FIXES`, which is the same grouped data the changelog and the GitHub release render. The whole frame,
    including its `flow.beforeAnnounce` and `flow.postAnnounce` hooks, only warns on failure because the release is
@@ -294,9 +285,17 @@ release.
 Every script option accepts a single script name or an array of names run in sequence. A failing command in a
 release-gating sequence stops it and fails the package, while warn-only sequences keep running and only log.
 
-The build, tests and publish frames are the ones a release can place on another machine. With
-[worker nodes](./distributed-execution.md) configured, they run where the run placed them and everything else stays on
-the machine the release was started on; with none, every stage runs where it always did.
+A package's stages form a graph: every package has a version stage and a build, the other stages are there where
+the flow gives them something to do, and a stage you define sits beside the tests, unordered with them, so a run with
+room starts them at once. A package with no publish stage is recorded, tagged and reported published once its other
+stages have completed. A stage entry written as an object places its stage with `before` or `after`, and `parallel` says two stages are
+unordered: `announce: { script: announce, after: build }` runs the announce before the publication, where it gates. Everything before the release records gates the release; everything after
+them observes a release that is out and only warns. A configuration no order realises is refused before any command
+runs. See [the order of the stages](./configuration/spaces.md#the-order-of-the-stages).
+
+The build, tests and publish frames, and the frames of your own stages before the records, can run on
+[worker nodes](./distributed-execution.md). The orchestrator keeps the preparing stages, the stages after the records
+and release coordination. Without configured workers, all stages run on the machine that started the release.
 
 You can bracket the stages with per-space hooks. `flow.beforeAll`, `flow.beforeSign`, `flow.postSign`,
 `flow.beforeVersion`, `flow.postVersion`, `flow.beforeBuild`, `flow.postBuild`, `flow.beforeTests`, `flow.postTests`
@@ -307,9 +306,9 @@ Run-level hooks observe the whole run instead. A gating `run.beforeAll` runs onc
 failure aborts the run. The warn-only `run.postAll` and commit and push hooks run after, exporting the outcome as
 `DISPAT_PUBLISHED/FAILED/SKIPPED/CANCELLED/UNPLANNED_PACKAGES` and per-package `DISPAT_RESULT_*` variables.
 
-dispat versions and tags everything released, whatever its build produces. An exception there would cost convergence,
-because a package whose window never advances reappears in every plan forever. Packages held by `Release-As: none` are
-the one thing that legitimately persists across runs, and they are excluded from the pipeline entirely.
+Every successful package release needs its version tag, regardless of the artifact it produces. That tag advances
+the package's baseline so later plans can distinguish completed work from pending work. A package held with
+`Release-As: none` keeps its pending changes and does not enter the pipeline.
 
 The run can optionally end with a *finalize phase*, which is disabled by default. The `commit` option creates one
 release commit capturing every published package's changelog and manifest changes, pointing tags at that commit and
@@ -323,9 +322,9 @@ would be rejected anyway.
 The warn-only run hooks `run.beforeCommit`, `run.afterCommit`, `run.postCommit` (after the commit and the tags),
 `run.beforePush`, and `run.afterPush` bracket this phase.
 
-Build and publish have independent concurrency budgets (`concurrency: [build, publish]`), and version tasks share the
-build budget. A stage with no configured script still runs, keeping ordering, statuses, tags and release records
-intact. It executes no shell command.
+Build and publish have independent concurrency budgets (`concurrency: [build, publish]`). The sign, version and tests
+stages and your own stages share the build budget wherever they sit; the publish, the records and the announce share
+the publish budget.
 
 ### Running scripts outside a release
 
@@ -338,5 +337,5 @@ The run honours the dependency graph and stays inside the build concurrency budg
 the first value given to `--concurrency`. The `--on-error` flag decides whether a failure skips the dependents. Scripts
 get the same `DISPAT_*` environment they get during a release, but nothing is released or tagged.
 
-It uses the same three-level `scripts` lookup the stages use. Where you define a name, whether in the file, on a space,
-or on one package, decides how far the run reaches.
+Scripts are resolved at the configuration, space, and package levels. Define a script at the level whose packages
+should use it; a package can override a shared definition.

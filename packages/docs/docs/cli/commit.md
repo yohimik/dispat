@@ -1,6 +1,7 @@
 # The commit command
 
-Use `dispat commit -m` to write a source commit with a checked CCME message. Use `dispat commit` without authoring flags to run the existing per-package release step.
+The commit command has two uses. Pass `-m` or another authoring flag to create a source commit after checking its
+CCME message. Run it without authoring flags to create the per-package release commits described below.
 
 To check a string without staging files or creating a commit, use [`dispat diagnostics`](./diagnostics.md).
 
@@ -68,31 +69,20 @@ makes the history easier to read.
 
 ## The selection it shares
 
-The `dispat changelog`, `dispat autoversion`, `dispat commit`, and `dispat github` commands expose native release
-pipeline steps to your custom flows. Run a step inside a stage script exactly when your flow needs it. When the release
-stage runs later, it sees the completed work and skips it.
+`changelog`, `autoversion`, `commit`, and `github` let you run individual release steps from a custom flow or stage
+script. The later release step recognises completed work and skips it.
 
-All four commands share the run command's [selection](./run.md#choosing-the-packages) *and* its release window. Run
-them without flags to cover every releasing package in dependency order. Use `--package`, `--space`, `--group`, or your
-current folder to narrow that list.
+These commands use the run command's [package selection](./run.md#choosing-the-packages) and release window. By
+default, they process releasing packages in dependency order. Narrow the selection with `--package`, `--space`,
+`--group`, or your current folder. Use `--since` to change the window, `--consumers` to include dependent packages,
+and `--on-error` to choose how failures affect them.
 
-Pass `--since` to replace the time window entirely. Use `--consumers` to expand the selection downstream, and
-`--on-error` to decide what happens to dependent packages if one fails.
+A name that matches no package is an error. A selected package with no release to perform is a logged no-op. After
+`dispat commit --tag`, the tagged package is no longer in the release window; pass `--since all` to include it again.
 
-Selection follows two rules. If a term matches no package, the command fails. If a *selected* package is not releasing,
-dispat logs a no-op.
-
-This ensures your flow never fails over a converged or held package. This second rule explains why a step run after
-`dispat commit --tag` covers nothing. You must pass `--since all` to put the tagged package back into the selection.
-
-These four command words are reserved. Like all built-in commands, they win the `dispat <script>` shorthand over a
-custom [script](../configuration/spaces.md#scripts-and-dispat-run) with the same name. This means `dispat commit`
-always triggers the native command.
-
-Type `dispat run commit` to run your custom script instead.
-
-Every config value these commands use is also available as a flag. Pass the flag to override the config for a single
-run, as shown in [Flags](#flags).
+Built-in command names take precedence over script names. For example, `dispat commit` runs this built-in step;
+`dispat run commit` runs a [script](../configuration/spaces.md#scripts-and-dispat-run) named `commit`.
+Use the flags below to override configuration for this invocation.
 
 ## Flags
 
@@ -100,39 +90,36 @@ These flags apply alongside the [global flags](./README.md#global-flags):
 
 ### `--package`, `-p`
 
-Pass this to narrow every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`,
-`autowriter`, `autoreplacer`, `commit`, `github`, `compute`) to the named packages. You can repeat the flag or separate
-names with commas. dispat matches names case-insensitively and supports `*` globs, so `-p '*'` selects every package.
-See [Choosing the packages](./run.md#choosing-the-packages).
+Select named packages. Repeat the flag or separate names with commas. Names are case-insensitive and accept `*`
+globs; quote them so the shell does not expand them first. For example, `-p core,web` selects two packages and `-p '*'`
+selects every package. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--space`, `-s`
 
-Pass this to narrow the same eleven commands to every package in the named spaces. This flag uses the same spelling
-rules as `--package`. Standalone packages belong to no space. See
+Select every package in the named spaces. This accepts the same lists and globs as `--package`. Standalone packages
+do not belong to a space, so `-s '*'` does not include them. See
 [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--group`, `-g`
 
-Pass this to narrow the same eleven commands to every package in the named
-[versioning groups](../reference/releasing/versioning.md). This flag uses the same spelling rules. A group is a
-`versionGroups` entry or a space that versions as one, meaning it can cross spaces. See
-[Choosing the packages](./run.md#choosing-the-packages).
+Select every package in a named [versioning group](../reference/releasing/versioning.md), using the same lists and
+globs as `--package`. A group may be a `versionGroups` entry or a space that versions together, and may span several
+spaces. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--since`
 
-Pass this to the same seven commands to cover packages modified by commits since a specific git revision. This
-overrides the release window. Pass `all` to cover every package. See [the run command](./run.md).
+Use commits since a Git revision to choose packages, replacing the default release window. Pass `all` to include
+every package. See [how the run command selects packages](./run.md).
 
 ### `--consumers`
 
-Pass this to the same seven commands to also cover every package that transitively depends on a selected one. See
-[the run command](./run.md).
+Also include packages that depend on the selected packages, directly or indirectly. See
+[how the run command expands a selection](./run.md).
 
 ### `--on-error`
 
-The default is `skip`. Pass `skip` or `continue` to every sweeping command (`run`, `autowriter`, `autoreplacer`,
-`changelog`, `autoversion`, `commit`, `github`) to decide what a failed package does to its dependents. The `skip`
-option is transitive. The command exits `1` on any failure regardless of this setting.
+Choose what happens to dependent packages when a package fails. The default, `skip`, skips its direct and indirect
+dependents. `continue` lets them run. Either way, any package failure makes the command exit `1`.
 
 ### `--tag`
 

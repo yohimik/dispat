@@ -1,7 +1,8 @@
 # .NET packages
 
-You pack and push projects to NuGet. **dispat** writes `<Version>` and every `PackageReference` between them before
-`dotnet pack` runs.
+This example packs two projects and pushes them to NuGet. dispat updates their literal `<Version>` and
+`PackageReference` values before `dotnet pack` runs. If references share a root `Directory.Packages.props`, use the
+[central package management setup](#central-package-management) below.
 
 ## The layout
 
@@ -12,7 +13,7 @@ dispat.json
 ```
 
 Give your folders plain names like `core` instead of `Acme.Core`, because folder names become package names and a dot
-in a configuration key reads as nesting. **dispat** reads the NuGet id out of the project file to connect the two. If a
+in a configuration key reads as nesting. dispat reads the NuGet ID from the project file to connect the two. If a
 project declares no `PackageId`, state the id under [`manifestNames`](../configuration/packages.md#manifestnames).
 
 ## The configuration
@@ -33,8 +34,8 @@ project declares no `PackageId`, state the id under [`manifestNames`](../configu
 }
 ```
 
-Set `range: exact` in your configuration because NuGet already resolves a bare version as "this or newer". Writing
-`1.3.0` says exactly what you mean and keeps the diff readable.
+Set `range: exact` to write a bare NuGet version such as `1.3.0`. In NuGet, that means "this version or newer"; the
+dispat setting controls the text written to the file, not NuGet's resolution rules.
 
 ## A release
 
@@ -73,7 +74,7 @@ src/web/Acme.Web.csproj  nuget  Acme.Web@0.4.1
 2 manifest(s), 2 dependency declaration(s)
 ```
 
-**dispat** reads `PackageId` for the name, falling back to `AssemblyName` and then to the file name. A
+dispat reads `PackageId` for the name, falling back to `AssemblyName` and then to the file name. A
 `ProjectReference` reports as a link to that folder, so `compute` finds an edge even when no version is declared
 anywhere. Writes go to the first `<Version>` and to each `PackageReference`, whether the version sits in an attribute
 or in a child element:
@@ -86,9 +87,8 @@ src/web/Acme.Web.csproj
 1 manifest(s): 1 applied, 0 skipped, 0 missing
 ```
 
-**dispat** skips a version written as an MSBuild property like `$(AcmeCoreVersion)` and leaves it alone. It covers four
-file names in all: `*.csproj`, `*.fsproj`, and `*.vbproj`, plus `*.nuspec`, `Directory.Packages.props`, and
-`packages.config` for the projects that keep their versions in one of those.
+Versions expressed as MSBuild properties, such as `$(AcmeCoreVersion)`, are left unchanged. The writer supports
+`*.csproj`, `*.fsproj`, `*.vbproj`, `*.nuspec`, `Directory.Packages.props` and `packages.config`.
 
 ## Central package management
 
@@ -158,16 +158,10 @@ publish. That ordering is the only reason the versions it just wrote resolve.
   `FileVersion` from `Version` unless you set them, which is usually what you want. Set them explicitly if your
   consumers bind strictly.
 - **A pushed version is permanent.** Unlisting hides a package on NuGet, but it does not free the number.
-- **`--skip-duplicate` makes a re-run survivable.** Add this flag to turn a conflict into a no-op. After a failure
-  partway through a run, the next run may re-push a package that already landed.
-- **Nothing above needs the .NET SDK to be reasoned about.** Run `dispat scanner` and `dispat writer` to read and edit
-  the project files directly, so a CI step can check them before any restore happens.
-
-## See also
-
-- [Run-level hooks](../configuration/run-hooks.md) for the seam the central pin uses.
-- [Script environment variables](../reference/environment.md#workspace-data) for the workspace listing.
-- [Manifest tools](../editing/manifests.md) for the scanner and writer on their own.
+- **`--skip-duplicate` turns a version conflict into a no-op.** It can help when retrying a package that already
+  landed, but first check that the feed contains the expected package and artifact. The flag does not verify that.
+- **Manifest edits do not require the .NET SDK.** `dispat scanner` and `dispat writer` read and edit the files directly,
+  so CI can inspect them before restore.
 
 A project using `VersionPrefix`, `VersionSuffix` or computed MSBuild properties needs its existing build-time version
 injection or a targeted version script. The native writer does not evaluate these inputs. Inspect the packed version
@@ -181,3 +175,9 @@ does not verify an editor destination. When a previous push result is unknown, r
 command before retrying. See [integration guidance](./release-integration.md#test-the-distributed-artifact).
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.
+
+## See also
+
+- [Run-level hooks](../configuration/run-hooks.md) for the seam the central pin uses.
+- [Script environment variables](../reference/environment.md#workspace-data) for the workspace listing.
+- [Manifest tools](../editing/manifests.md) for the scanner and writer on their own.

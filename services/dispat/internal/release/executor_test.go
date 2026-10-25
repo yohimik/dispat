@@ -418,8 +418,7 @@ func TestRunFailureSkipsConsumer(t *testing.T) {
 	require.Equal(t, StatusFailed, res["a"].Status)
 	assert.Error(t, res["a"].Err)
 	require.Equal(t, StatusSkipped, res["b"].Status, "b has no changes of its own")
-	assert.Equal(t, -1, r.indexOf("version b"), "skipped consumer must not run its version script")
-	assert.Equal(t, -1, r.indexOf("build b"), "skipped consumer must not run any script")
+	assert.Equal(t, -1, r.indexOf("build b"), "skipped consumer must not build")
 	assert.Empty(t, tg.tags)
 
 	// W194: planned, not attempted. A package that was in the plan and
@@ -450,10 +449,12 @@ func TestRunChannelChangeIsItsOwnReason(t *testing.T) {
 }
 
 func TestRunFailureConsumerWithOwnChangesProceeds(t *testing.T) {
-	// Non-waiting provider: own changes proceed. The waiting counterpart is
-	// TestRunBuildWaitsPublishFailureSkipsTheOwnChangesConsumer.
+	// Non-waiting provider that failed after it built: own changes proceed.
+	// The waiting counterpart is
+	// TestRunBuildWaitsPublishFailureSkipsTheOwnChangesConsumer, and the
+	// build that failed is TestRunProviderBuildFailureBlocksTheOwnChangesConsumer.
 	p := mkPlan(planSpec{OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
-	r := &fakeRunner{fail: map[string]bool{"build a": true}}
+	r := &fakeRunner{fail: map[string]bool{"publish a": true}}
 	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
 
 	require.Equal(t, StatusFailed, res["a"].Status)
@@ -489,8 +490,8 @@ func TestRunSkipCascades(t *testing.T) {
 
 	assert.Equal(t, StatusSkipped, res["b"].Status)
 	assert.Equal(t, StatusSkipped, res["c"].Status)
-	assert.Equal(t, -1, r.indexOf("version b"))
-	assert.Equal(t, -1, r.indexOf("version c"))
+	assert.Equal(t, -1, r.indexOf("build b"))
+	assert.Equal(t, -1, r.indexOf("build c"))
 }
 
 func TestRunConcurrencyLimits(t *testing.T) {
@@ -776,10 +777,10 @@ func TestRunVersionTaskOrderingAndEnv(t *testing.T) {
 	// Only the provider-bumped package runs the version stage.
 	assert.Equal(t, -1, r.indexOf("version a"), "a has no provider updates")
 	require.NotEqual(t, -1, r.indexOf("version b"), "b must run the version stage")
-	assert.Less(t, r.indexOf("publish a"), r.indexOf("version b"),
-		"version runs after provider tasks (waitPublish)")
+	assert.Less(t, r.indexOf("publish a"), r.indexOf("build b"),
+		"the build runs after the provider's publish (waitPublish); the version stage waits for nothing")
 	assert.Less(t, r.indexOf("version b"), r.indexOf("build b"),
-		"version runs exactly before the consumer's build")
+		"version runs before the consumer's build")
 
 	env := r.envs["version b"]
 	assert.Equal(t, "b", envValue(t, env, "DISPAT_PACKAGE"))
@@ -796,9 +797,9 @@ func TestRunVersionTaskOrderingAndEnv(t *testing.T) {
 		"empty (not unset) when nothing was updated")
 }
 
-func TestRunVersionOrderingNoWaitPublish(t *testing.T) {
-	// isBuildWaitingPublish=false: the version stage only waits for provider
-	// builds, not their publishes.
+func TestRunVersionPickupWaitsForProviderRecordWithoutBuildWaitPublish(t *testing.T) {
+	// The build relation is still build, while the version frame that picks up
+	// a provider's version waits for its actual publication outcome.
 	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	p.Releases["b"].Pkg.Space.VersionScript = []string{"version"}
 	r := &fakeRunner{}
@@ -806,18 +807,20 @@ func TestRunVersionOrderingNoWaitPublish(t *testing.T) {
 
 	require.Equal(t, StatusPublished, res["b"].Status, "%v", res["b"].Err)
 	require.NotEqual(t, -1, r.indexOf("version b"))
-	assert.Less(t, r.indexOf("build a"), r.indexOf("version b"),
-		"version waits for the provider's build")
+	assert.Less(t, r.indexOf("publish a"), r.indexOf("version b"),
+		"the version script reads an actual published provider version")
+	assert.Less(t, r.indexOf("build a"), r.indexOf("build b"),
+		"the consumer's build waits for the provider's build")
 	assert.Less(t, r.indexOf("version b"), r.indexOf("build b"),
-		"version runs exactly before the consumer's build")
+		"version runs before the consumer's build")
 	// The consumer's publish still waits for the provider's publish.
 	assert.Less(t, r.indexOf("publish a"), r.indexOf("publish b"))
 }
 
-func TestRunVersionSkippedOnProviderBuildFailureNoWait(t *testing.T) {
-	// isBuildWaitingPublish=false: the provider's BUILD failure is final
-	// before the consumer's version stage, so the consumer (no own changes)
-	// is skipped and neither version nor build run.
+func TestRunVersionWaitsForProviderOutcomeBeforePickup(t *testing.T) {
+	// A version script that would write a provider's planned version waits for
+	// that provider's outcome. A failed provider leaves no version to pick up,
+	// and the consumer with no cause of its own is skipped without running it.
 	p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	p.Releases["b"].Pkg.Space.VersionScript = []string{"version"}
 	r := &fakeRunner{fail: map[string]bool{"build a": true}}
@@ -825,7 +828,7 @@ func TestRunVersionSkippedOnProviderBuildFailureNoWait(t *testing.T) {
 
 	require.Equal(t, StatusFailed, res["a"].Status)
 	require.Equal(t, StatusSkipped, res["b"].Status)
-	assert.Equal(t, -1, r.indexOf("version b"))
+	assert.Equal(t, -1, r.indexOf("version b"), "the version stage never reads a failed provider's planned version")
 	assert.Equal(t, -1, r.indexOf("build b"))
 }
 
@@ -841,35 +844,35 @@ func TestRunVersionScriptFailureFailsPackage(t *testing.T) {
 }
 
 func TestRunVersionSkippedWhenAllProvidersFailed(t *testing.T) {
-	// b has its own bump AND a provider bump; the provider fails. b still
+	// b has its own bump AND a provider bump, and the provider has failed
+	// after it built by the time b's version stage is admitted. b still
 	// releases (own changes), but the version script must NOT run: there is
-	// no successfully updated provider to sync manifests to.
-	// Non-waiting provider, failed at its build so the consumer's version
-	// task, which waits on that build, sees the settled outcome.
+	// no successfully updated provider to sync manifests to. The version
+	// stage waits on no provider, so the settled outcome is staged by hand.
 	p := mkPlan(planSpec{OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
 	p.Releases["a"].Pkg.Space.VersionScript = []string{"version"}
-	r := &fakeRunner{fail: map[string]bool{"build a": true}}
-	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
+	r := &fakeRunner{}
+	run := newRunFor(p, map[string]bool{"a": true, "b": true}, r)
+	run.results["a"].Status, run.results["a"].FailedStage = StatusFailed, "publish"
 
-	require.Equal(t, StatusFailed, res["a"].Status)
-	require.Equal(t, StatusPublished, res["b"].Status, "%v", res["b"].Err)
+	run.execute(context.Background(), task{"b", taskVersion, ""})
+	assert.Equal(t, StatusPending, run.results["b"].Status, "the own-bump release goes on")
 	assert.Equal(t, -1, r.indexOf("version b"), "version script must not run when every provider failed")
-	assert.NotEqual(t, -1, r.indexOf("build b"), "build still runs for the own-bump release")
 }
 
 func TestRunVersionFiltersFailedProviders(t *testing.T) {
-	// b consumes a1 (fails) and a2 (succeeds) and has its own bump: the
-	// version script runs, but only a2 appears in DISPAT_UPDATED_*.
-	// Non-waiting providers, a1 failed at its build so the consumer's
-	// version task, which waits on both builds, sees the settled outcome.
+	// b consumes a1 (failed after it built) and a2 (published) and has its
+	// own bump: the version script runs, but only a2 appears in
+	// DISPAT_UPDATED_*. The version stage waits on no provider, so the
+	// settled outcomes are staged by hand.
 	p := mkPlan(planSpec{OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a1", "a2"}}, Names: []string{"a1", "a2", "b"}})
 	p.Releases["b"].Pkg.Space.VersionScript = []string{"version"}
-	r := &fakeRunner{fail: map[string]bool{"build a1": true}}
-	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 4, Publish: 4}).Run(context.Background(), p)
+	r := &fakeRunner{}
+	run := newRunFor(p, map[string]bool{"a1": true, "a2": true, "b": true}, r)
+	run.results["a1"].Status, run.results["a1"].FailedStage = StatusFailed, "publish"
+	run.results["a2"].Status = StatusPublished
 
-	require.Equal(t, StatusFailed, res["a1"].Status)
-	require.Equal(t, StatusPublished, res["a2"].Status)
-	require.Equal(t, StatusPublished, res["b"].Status, "%v", res["b"].Err)
+	run.execute(context.Background(), task{"b", taskVersion, ""})
 	require.NotEqual(t, -1, r.indexOf("version b"))
 
 	env := r.envs["version b"]
@@ -877,6 +880,24 @@ func TestRunVersionFiltersFailedProviders(t *testing.T) {
 		"failed provider must be filtered out")
 	assert.Equal(t, "a2", envValue(t, env, "DISPAT_UPDATED_A2_NAME"))
 	assertEnvUnset(t, env, "DISPAT_UPDATED_A1_NAME", "a1 failed, its version was never released")
+}
+
+// TestRunOwnChangesProceedPastAProviderBuildThatFailed: blocking is §19.3's
+// alone, so a consumer with changes of its own proceeds past a provider whose
+// build failed. Its version stage, which waits for no provider, runs behind
+// that failure with one slot and so has no live provider to run its scripts
+// for; its build and its publish run on what the providers published.
+func TestRunOwnChangesProceedPastAProviderBuildThatFailed(t *testing.T) {
+	p := mkPlan(planSpec{OwnBump: map[string]ccme.Bump{"b": ccme.BumpPatch}, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+	p.Releases["b"].Pkg.Space.VersionScript = []string{"version"}
+	r := &fakeRunner{fail: map[string]bool{"build a": true}}
+	res := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1}).Run(context.Background(), p)
+
+	require.Equal(t, StatusFailed, res["a"].Status)
+	require.Equal(t, StatusPublished, res["b"].Status, "b must proceed on its own changes: %v", res["b"].Err)
+	assert.False(t, res["b"].Blocked)
+	assert.Equal(t, -1, r.indexOf("version b"), "no live provider to sync the manifests to")
+	assert.NotEqual(t, -1, r.indexOf("build b"))
 }
 
 func TestRunScriptEnv(t *testing.T) {
@@ -1010,7 +1031,7 @@ func (g *gatedRunner) Run(ctx context.Context, dir, command string, env []string
 	return err
 }
 
-// TestRunRevertsASkippedFolderTheRunOwns: a consumer skipped after its version
+// TestRunRevertsASkippedFolderTheRunOwns: a consumer skipped after its build
 // stage ran is restored when the run owns its folder, whatever revertOnFail
 // says, and keeps its edits otherwise. The failed provider keeps the
 // revertOnFail rule alone, so it is not restored in either case.
@@ -1025,13 +1046,12 @@ func TestRunRevertsASkippedFolderTheRunOwns(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := mkPlan(planSpec{Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
-			p.Releases["b"].Pkg.Space.VersionScript = []string{"version"}
 			rv := &fakeReverter{}
 			r := &fakeRunner{fail: map[string]bool{"publish a": true}}
 			ex := newExecutor(execSpec{Runner: r, Build: 4, Publish: 4})
-			// The provider's publish fails only once the consumer's version
-			// stage has run, so the skip always follows a stage that wrote.
-			ex.Runner = &gatedRunner{fakeRunner: r, gated: "publish a", after: "version b", passed: make(chan struct{})}
+			// The provider's publish fails only once the consumer's build has
+			// run, so the skip follows work in its folder.
+			ex.Runner = &gatedRunner{fakeRunner: r, gated: "publish a", after: "build b", passed: make(chan struct{})}
 			ex.Tagger, ex.Recorders = &fakeTagger{}, []ReleaseRecorderx{&fakeChangelog{}}
 			ex.Reverter = rv
 			ex.IsRunOwnedFolder = func(*plan.Release) bool { return tc.isOwned }
@@ -1039,7 +1059,7 @@ func TestRunRevertsASkippedFolderTheRunOwns(t *testing.T) {
 
 			require.Equal(t, StatusFailed, res["a"].Status)
 			require.Equal(t, StatusSkipped, res["b"].Status)
-			require.Less(t, r.indexOf("version b"), r.indexOf("publish a"), "the consumer's version stage ran first")
+			require.Less(t, r.indexOf("build b"), r.indexOf("publish a"), "the consumer's build ran first")
 			assert.Equal(t, tc.want, rv.dirs)
 		})
 	}
@@ -1970,7 +1990,7 @@ func TestShouldSkipReadsTheFreshChangeset(t *testing.T) {
 		Releases:  map[string]*plan.Release{"app": rel},
 		Providers: map[string][]string{"app": {"core"}},
 	}
-	results := map[string]*Result{"core": {Status: StatusFailed}}
+	results := map[string]*Result{"core": {Status: StatusFailed, FailedStage: "publish"}}
 
 	skip, prov := shouldSkip("app", p, results, nil)
 	assert.True(t, skip, "published train work is not a reason to release beside a failed provider")
@@ -1985,6 +2005,41 @@ func TestShouldSkipReadsTheFreshChangeset(t *testing.T) {
 	rel.Channel = "stable" // a graduation proceeds whatever the provider did
 	skip, _ = shouldSkip("app", p, results, nil)
 	assert.False(t, skip)
+}
+
+func TestOptionalFailureDoesNotBlockOwnCauseButLeavesPropagatedCauseOwed(t *testing.T) {
+	app := &plan.Release{Pkg: &model.Package{Name: "app", Space: &model.Space{}},
+		Updates: []plan.ProviderUpdate{{Name: "core"}}}
+	core := &plan.Release{Pkg: &model.Package{Name: "core", Space: &model.Space{}}}
+	p := &plan.Plan{Releases: map[string]*plan.Release{"app": app, "core": core},
+		Providers:         map[string][]string{"app": {"core"}},
+		BlockingProviders: map[string][]string{}}
+	results := map[string]*Result{"core": {Status: StatusFailed, FailedStage: "publish"}}
+	skip, blocker := shouldSkip("app", p, results, nil)
+	assert.True(t, skip, "the sole propagated cause remains owed by the failed optional provider")
+	assert.Equal(t, "core", blocker)
+
+	app.FreshUnits = []*ccme.Unit{{Bump: ccme.BumpPatch, Valid: true}}
+	skip, _ = shouldSkip("app", p, results, nil)
+	assert.False(t, skip, "an independent fresh cause can proceed past an optional provider failure")
+
+	app.FreshUnits = nil
+	app.Updates = nil
+	app.DueTo = []string{"core"}
+	p.Providers["app"] = []string{"unchanged-relay"}
+	skip, blocker = shouldSkip("app", p, results, nil)
+	assert.True(t, skip, "a failed cause reached through an unreleasing optional relay is still owed")
+	assert.Equal(t, "core", blocker)
+	app.Channel, app.ChannelFrom = "beta", "core"
+	skip, _ = shouldSkip("app", p, results, nil)
+	assert.True(t, skip, "a channel inherited from the failed provider is not an own cause")
+	app.ChannelFrom = ""
+	skip, _ = shouldSkip("app", p, results, nil)
+	assert.False(t, skip, "a direct channel directive remains an independent cause")
+	app.Channel = ""
+	app.Pinned = true
+	skip, _ = shouldSkip("app", p, results, nil)
+	assert.False(t, skip, "an applicable exact Release-As is an independent cause")
 }
 
 // TestShouldSkipBuildWaitsPublishOutranksOwnWork: a failed provider whose
@@ -2011,7 +2066,7 @@ func TestShouldSkipBuildWaitsPublishOutranksOwnWork(t *testing.T) {
 		Releases:  map[string]*plan.Release{"app": rel, "core": core},
 		Providers: map[string][]string{"app": {"core"}},
 	}
-	results := map[string]*Result{"core": {Status: StatusFailed}}
+	results := map[string]*Result{"core": {Status: StatusFailed, FailedStage: "publish"}}
 
 	skip, prov := shouldSkip("app", p, results, nil)
 	assert.True(t, skip, "own work cannot substitute for the publish the build consumes")

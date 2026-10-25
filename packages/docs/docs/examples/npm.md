@@ -1,7 +1,10 @@
 # An npm monorepo
 
-Save this configuration to define the smallest real npm monorepo release setup. It contains one space of packages, a
-build and a publish command, and versions computed from your commits.
+This example gives every package under `packages/` the same build and publish commands. dispat decides which packages
+release and computes their versions from commits and tags.
+
+Start with the configuration and release walkthrough below. The later sections cover upload checks, moving from
+Changesets and correcting a note before it ships.
 
 ```json
 {
@@ -52,8 +55,8 @@ logger@0.1.0
 Push the annotated tag to finish the release. This tag is the record that the publish happened, but you can also
 configure dispat to push it for you (see [release records](../configuration/records.md)).
 
-Stamp the computed version into your package before packing. Your `package.json` version field does not drive anything.
-dispat computes the version from commits and tags, and hands it to your scripts as `$DISPAT_NEW_VERSION`:
+Before using this setup for publication, make the build command write `$DISPAT_NEW_VERSION` into `package.json`.
+dispat computes that value from commits and tags; npm packs the version in the manifest:
 
 ```sh
 npm version "$DISPAT_NEW_VERSION" --no-git-tag-version && npm ci && npm run build
@@ -61,8 +64,8 @@ npm version "$DISPAT_NEW_VERSION" --no-git-tag-version && npm ci && npm run buil
 
 ## Verify uploads and channel updates
 
-Treat publication of an exact version and an npm dist-tag update as distinct operations. If a later destination fails,
-reconcile the already-published version outside the publish command before retrying it. See
+Publishing a package version and updating an npm dist-tag are separate operations. If a later step fails, check the
+version already accepted by the registry before retrying the publish command. See
 [release recovery](../reference/releasing/recovery.md).
 
 Do not use the presence of `.changeset/*.md` as a proxy for publication readiness. Ignored packages can retain change
@@ -74,9 +77,9 @@ Check each ref and push result; dispat sees the script's process status but cann
 
 ### Compare the planned components with the parsed release record
 
-dispat computes its package plan from Git and does not parse or validate another tool's release record. When a release
-script emits a multi-component record, compare the intended component names with the names parsed back from that record
-before publication. Reconcile registry versions outside the publish command when recovering an ambiguous result.
+dispat computes its package plan from Git. If your script also writes a release record for several components, check
+that it contains the expected component names before publishing. dispat does not validate another tool's records.
+If a publish result is unclear, check the registry outside the publish command before retrying.
 
 ## Moving release intent out of Changeset files
 

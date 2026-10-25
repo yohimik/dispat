@@ -1,10 +1,7 @@
 # Pipeline patterns
 
-These CI/CD shapes get the most out of dispat. You can test only what a commit changed, test against the working tree
-with local links, and build a gated release pipeline. Write permission, full tests, and a human trigger sit exactly
-where they belong.
-
-This repository releases itself using these exact pipelines. Every pattern here runs on every dispat release.
+Use these patterns to test changed packages, test against local workspace dependencies, and separate release planning
+from publication. The examples show the approach used by this repository's own CI.
 
 Read [dispat in CI](./ci.md) to get the binary onto a runner before you start.
 
@@ -18,14 +15,13 @@ dispat run tests --since HEAD~1 --consumers
 ```
 
 Pass `--since HEAD~1` to select the packages the last commit addresses, reading written scopes first and then changed
-files for scopeless commits. This single value covers both triggers in a test workflow because a push lands one commit
-and a pull request checks out as a merge commit with the base branch tip as its first parent. `HEAD~1` spans exactly
-the pull request's changes, so you do not have to compute a base revision.
+files for scopeless commits. This covers a one-commit push. It also covers a pull request when CI checks out a merge
+commit whose first parent is the base branch tip. For a push containing several commits, use the previous branch tip;
+for other pull-request checkout strategies, choose the base revision explicitly.
 
-Pass `--consumers` to expand the selection to every package that transitively depends on a selected one, testing
-everything built on top of a shared library. This expansion routes the work through dispat instead of a shell loop. The
-run honours the dependency graph and the build concurrency budget, and a failing package skips its dependents unless
-you pass `--on-error continue`.
+Add `--consumers` to test packages that depend on the changed ones, directly or indirectly. The run follows dependency
+order and the build concurrency limit. If a package fails, its dependents are skipped unless you pass
+`--on-error continue`.
 
 You can use the same window for other scripts with different trade-offs. This repository's build job runs
 `dispat run build --since HEAD~1` **without** `--consumers` because every container image depends on the CLI, and
@@ -49,16 +45,15 @@ dispat autowriter --unlink-local --since all --sync-lock=false  # close it, even
 dispat scanner --root-only --verify-unlinked                    # prove it closed
 ```
 
-Four details make the bracket safe:
+Keep the link and unlink steps together:
 
 - **Close it unconditionally.** Put `if: always()` on the unlink step in GitHub Actions. Unlinking is idempotent, so a
   failed test run never leaves redirects behind.
 - **`--sync-lock=false` on both sides.** Never run a lock-file regeneration like `go mod tidy` while redirects are in
   place. A local folder needs no checksum, so a sync would delete `go.sum` entries that you need again the moment you
   unlink.
-- **Prove it, do not trust it.** Run [`dispat scanner --verify-unlinked`](../cli/scanner.md) to turn a closed bracket
-  into a gate. It exits `1` if any manifest still carries a redirect, and its inverse, `--verify-linked`, gates the
-  opposite state.
+- **Check that unlinking completed.** [`dispat scanner --verify-unlinked`](../cli/scanner.md) exits `1` if a manifest
+  still carries a redirect. Use `--verify-linked` when a check must find a redirect instead.
 - **A link must never publish.** A release never removes a link. Put the bracket in test jobs, and put the verify gate
   in front of any job that packs or publishes.
 
@@ -90,8 +85,7 @@ these alternatives in this order:
 
 ## The gated release pipeline
 
-The robust shape has four stages. Each stage answers one question and gates the next. dispat releases itself with this
-pipeline.
+This pipeline separates planning, approval, full tests, and release into four stages.
 
 **Stage 1: is there anything to release?** Run a plan job with `dispat status --require-release` to find out. The job
 publishes the answer as an output:
@@ -118,10 +112,9 @@ jobs:
           esac
 ```
 
-Two details carry the safety. Map the exit code through a `case` statement because exit `3` is the *answer*, whereas a
-bare command fails the job and a plain `if` reads a broken configuration as an empty release. The job needs only
-`contents: read` because `status` takes no release lock, which keeps write permission out of every job except the one
-that releases.
+Handle exit `3` separately: it means the plan is valid but has nothing to release. A bare command would fail the job,
+and a simple success/failure `if` could mistake a configuration error for an empty plan. The plan job needs only
+`contents: read`, because `status` takes no release lock.
 
 **Stage 2: the human gate.** Trigger the release workflow on `workflow_dispatch` so a person decides when a release run
 starts, and use a `concurrency` group with `cancel-in-progress: false` to queue a second dispatch behind the first. A
@@ -140,9 +133,8 @@ Pass `--since all` deliberately here. This run gates a release of the whole grap
 not it changed, making this the only run that can produce a complete coverage measurement.
 
 **Stage 4: the release, and its outcome as an output.** Give the release job `contents: write` permissions and run
-`dispat --log-format json` to turn what happened into outputs for the jobs after it. The `--require-release` flag
-composes here too, answering *before* taking the release lock so an empty run never makes a real release queue behind
-it. Use the run hooks and [`dispat if`](../cli/if.md) to export the outcome:
+`dispat --log-format json` to turn what happened into outputs for the jobs after it. You can also pass `--require-release`, which checks the plan after the release lock is taken. Use the earlier
+`status` job for a check that does not take the lock. Run hooks and [`dispat if`](../cli/if.md) can export the outcome:
 
 ```yaml title="dispat.yaml"
 scripts:
@@ -177,7 +169,7 @@ on:
 ```
 
 Leave the input empty to release everything. Pass `-p core,web` to release a subset at exactly the versions a full
-release would give it. The safety rails hold when you pass arguments from outside:
+release would give it. The same selection rules apply to values supplied by CI:
 
 - A selection only narrows the plan. A typo in a name causes an error instead of an empty release, and the
   `--require-release` flag still fails a selection that publishes nothing.

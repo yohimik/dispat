@@ -415,10 +415,16 @@ func ComputedCommandEnv(p *plan.Plan, pkg, stage string, wsVars []string) []stri
 // record text interpolates as well; everything below it is what a release
 // alone cannot answer — the stage, the workspace, the live provider updates.
 func packageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpdate, stage string) []string {
+	return releaseEnv(p.Releases[pkg], wsVars, updates, stage)
+}
+
+// releaseEnv is packageEnv for a release as one task sees it: the release's
+// own fields and the exports visible to that task (see run.visibleRelease).
+func releaseEnv(rel *plan.Release, wsVars []string, updates []providerUpdate, stage string) []string {
 	// The configuration's static env, already resolved for this package (the
 	// top-level, space and package layers merged at load time), goes in front
 	// so every computed variable below wins a name clash.
-	return StaticEnv(p.Releases[pkg].Pkg.Space.Env, computedPackageEnv(p, pkg, wsVars, updates, stage))
+	return StaticEnv(rel.Pkg.Space.Env, computedReleaseEnv(rel, wsVars, updates, stage))
 }
 
 // computedPackageEnv is packageEnv without the configuration's own static
@@ -431,7 +437,11 @@ func packageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpd
 // command, from that node's own environment, which is why the expansion is
 // the caller's last step rather than this function's.
 func computedPackageEnv(p *plan.Plan, pkg string, wsVars []string, updates []providerUpdate, stage string) []string {
-	rel := p.Releases[pkg]
+	return computedReleaseEnv(p.Releases[pkg], wsVars, updates, stage)
+}
+
+// computedReleaseEnv is computedPackageEnv for a release as one task sees it.
+func computedReleaseEnv(rel *plan.Release, wsVars []string, updates []providerUpdate, stage string) []string {
 	env := append(rel.Vars(), "DISPAT_STAGE="+stage)
 	// The release notes, grouped exactly as the changelog and the GitHub
 	// release group their sections: units bumping major are breaking changes,

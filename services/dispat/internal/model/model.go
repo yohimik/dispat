@@ -207,14 +207,10 @@ type AliasTag struct {
 	Force    bool
 }
 
-// AdoptPublished is a package's §19.4 policy, resolved. The zero value is
-// the default: adoption on, with identity established only by the built-in
-// npm check.
+// AdoptPublished is a package's resolved policy for a destination that
+// already holds the planned version.
 type AdoptPublished struct {
-	// IsDisabled makes a publish the destination refuses an ordinary failure.
-	IsDisabled bool
-	// VerifyScript is the resolved commands that compare the destination's
-	// copy of the version with the artefact this run would have published.
+	IsDisabled   bool
 	VerifyScript []string
 }
 
@@ -290,10 +286,12 @@ type Space struct {
 	// RevertOnFail: when true, all local changes inside the package folder
 	// are rolled back (tracked files restored, untracked files removed) if
 	// the package fails during its version, build or publish stage.
-	RevertOnFail bool
-	// AdoptPublished is the space's CCME §19.4 policy for a publish the
-	// destination refuses because it already holds the version.
-	AdoptPublished AdoptPublished
+	RevertOnFail            bool
+	AdoptPublished          AdoptPublished
+	PublishOrderKinds       []DepKind
+	PublishOrderKindsSet    bool
+	PublishBlockingKinds    []DepKind
+	PublishBlockingKindsSet bool
 	// BuildScript, PublishScript and VersionScript are sequences of resolved
 	// shell commands (not script names) executed in order inside the package
 	// folder. Any of them may be empty: the corresponding pipeline stage still
@@ -401,6 +399,52 @@ type Space struct {
 	// never writes the own version (its WriteVersion is false), so the sign
 	// stage is the one writer of it.
 	AutoSign *AutoSign
+	// UserStages are the stages the flow defines beyond the built-in ones,
+	// resolved to commands, sorted by name. Each runs under its own name, with
+	// its before and post hooks, and is placed the way the build is unless the
+	// order puts it after the records.
+	UserStages []UserStage
+	// StageLabels are the display names the flow gives stages, keyed by the
+	// name the stage runs under. DISPAT_STAGE and the hook names keep the
+	// stage name; the logs, the events and the summary show the label.
+	StageLabels map[string]string
+	// StageGraph is the package graph of §13.11: every stage the package has,
+	// the record included, and the precedence edges the flow's constraints,
+	// the default chain and the engine's own needs resolve to. Empty for a
+	// space built by hand, which runs its stages in the default chain, and
+	// for a package whose configuration no order realises, whose refusals
+	// StageRefusals carries.
+	StageGraph StageGraph
+	// StageRefusals are the diagnostics the package's configuration was
+	// refused with, in the order §19.2a gives them; nil when StageGraph was
+	// resolved. They are carried rather than returned so that every package
+	// of the workspace is read before the first is refused, and the refusals
+	// are reported by package name.
+	StageRefusals []StageDiagnostic
+}
+
+// UserStage is one stage a flow defines: its name, its commands and the two
+// hooks that bracket it.
+type UserStage struct {
+	Name     string
+	Commands []string
+	// BeforeHook and PostHook are the resolved `before<Name>` and
+	// `post<Name>` entries.
+	BeforeHook []string
+	PostHook   []string
+}
+
+// Title is the stage name as it appears inside its hook names.
+func (s UserStage) Title() string { return public.FlowStageTitle(s.Name) }
+
+// FindUserStage answers the user stage of this name, if the flow defines one.
+func (s *Space) FindUserStage(name string) (UserStage, bool) {
+	for _, stage := range s.UserStages {
+		if stage.Name == name {
+			return stage, true
+		}
+	}
+	return UserStage{}, false
 }
 
 // VersionStage is the name a package's version stage runs under. The stage

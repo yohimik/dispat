@@ -8,19 +8,23 @@ package release
 // A stage is a descriptor rather than a code path: what it is called, which
 // budget its tasks hold, where it may run, what a node running it must be
 // given and whether it produces an output set. The executor reads every one
-// of those questions off the descriptor, so a stage added to the table runs,
-// reports, gates, fails, reverts and travels to a worker the way the stages
-// beside it do. What a stage's commands are, and when a package has the stage
-// at all, are the two answers read from the package's own configuration.
+// of those questions off the descriptor, so a stage added to the table, or
+// defined by a configuration, runs, reports, gates, fails, reverts and travels
+// to a worker the way the stages beside it do. What a stage's commands are,
+// which stages a package has and in which order they run are the answers
+// read from the package's own configuration (see stageplan.go).
 
 import (
+	public "github.com/yohimik/dispat/pkg/models"
+
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
 // StageBudget is the run-wide budget a stage's tasks hold a slot of: the
 // build budget, shared by everything that prepares, builds or checks a
-// package; the publications' own; or the one serializing lock-file writers.
+// package; the publications' own, shared by what records and observes a
+// release; or the one serializing lock-file writers.
 type StageBudget uint8
 
 const (
@@ -31,8 +35,9 @@ const (
 
 // StagePlacement is where a stage's frame may run: on the orchestrator alone,
 // under the snapshot guard, because it writes the working tree delegated
-// frames are snapshotted from; or where the package's runOnly value for the
-// build or for the publish places it.
+// frames are snapshotted from or observes a release the orchestrator
+// recorded; or where the package's runOnly value for the build or for the
+// publish places it.
 type StagePlacement uint8
 
 const (
@@ -59,12 +64,19 @@ type Stage struct {
 	// call the stage, and Title is the spelling inside its hook names:
 	// beforeTitle and postTitle.
 	Name, Title string
+	// Label is the display name the configuration gave the stage, shown
+	// beside Name in the log, the events and the summary; empty for a stage
+	// that was given none.
+	Label string
 	// Budget is the run-wide budget its tasks hold a slot of.
 	Budget StageBudget
 	// Placement is where its frame may run.
 	Placement StagePlacement
 	// Inputs is what a node is given before the frame runs.
 	Inputs StageInputs
+	// OwnOutputStages names graph ancestors whose admitted output sets this
+	// stage consumes. Their order is the package's stable stage order.
+	OwnOutputStages []string
 	// IsProducingOutputs says the frame's declared outputs are captured and
 	// admitted as the package's output set.
 	IsProducingOutputs bool
@@ -75,48 +87,71 @@ type Stage struct {
 	// IsPreparing says the stage writes release files ahead of the build,
 	// which the release commit may share with other packages.
 	IsPreparing bool
+	// IsObserving says the stage runs after the release records: it observes
+	// a release that is already out, so its whole frame only warns.
+	IsObserving bool
 
 	kind taskKind
-	// isPresent answers whether a package's release runs the stage at all.
-	isPresent func(*plan.Release) bool
+	// isPresent answers whether a space's packages run the stage at all, as
+	// far as the configuration alone decides it.
+	isPresent func(*model.Space) bool
 	// frame is the stage's hooks and commands as the package's space
 	// configures them.
 	frame func(*model.Space) stage
 }
 
-// stageTable is every stage in the order a package's release runs them. The
-// task graph chains the stages a package has in this order.
+// userName is the stage name a task carries for a stage the configuration
+// defines, which its kind alone cannot name; empty for every built-in stage.
+func (s Stage) userName() string {
+	if s.kind == taskUser {
+		return s.Name
+	}
+	return ""
+}
+
+// stageTable is every built-in stage in the order a package's release runs
+// them by default. The preparing stages always come first, in this order; the
+// others take the places the package's flow gives them.
 var stageTable = []Stage{
-	{Name: "sign", Title: "Sign", Budget: BudgetBuild, IsPreparing: true, kind: taskSign,
-		isPresent: hasSignTask,
+	{Name: public.FlowStageSign, Title: "Sign", Budget: BudgetBuild, IsPreparing: true, kind: taskSign,
+		isPresent: hasSignStage,
 		frame: func(s *model.Space) stage {
 			return stage{before: s.BeforeSignScript, commands: s.SignScript, after: s.PostSignScript}
 		}},
 	{Name: string(model.StageVersion), Title: model.StageVersion.Title(), Budget: BudgetBuild,
-		IsPreparing: true, kind: taskVersion, isPresent: hasVersionTask,
+		IsPreparing: true, kind: taskVersion, isPresent: isConfigured,
 		frame: func(s *model.Space) stage {
 			return stage{before: s.BeforeVersionScript, commands: s.VersionScript, after: s.PostVersionScript}
 		}},
-	{Name: "syncLock", Title: "SyncLock", Budget: BudgetSyncLock, IsPreparing: true, kind: taskSyncLock,
-		isPresent: hasSyncLockTask,
+	{Name: public.FlowStageSyncLock, Title: "SyncLock", Budget: BudgetSyncLock, IsPreparing: true, kind: taskSyncLock,
+		isPresent: hasSyncLockStage,
 		frame:     func(s *model.Space) stage { return stage{commands: s.AutoVersion.SyncLock} }},
-	{Name: "build", Title: "Build", Budget: BudgetBuild, Placement: PlacementByBuild,
+	{Name: public.FlowStageBuild, Title: "Build", Budget: BudgetBuild, Placement: PlacementByBuild,
 		Inputs: InputsProviderOutputs, IsProducingOutputs: true, kind: taskBuild,
-		isPresent: isAlwaysPresent,
+		isPresent: hasBuildStage,
 		frame: func(s *model.Space) stage {
 			return stage{before: s.BeforeBuildScript, commands: s.BuildScript, after: s.PostBuildScript}
 		}},
-	{Name: "tests", Title: "Tests", Budget: BudgetBuild, Placement: PlacementByBuild,
-		Inputs: InputsOwnOutputs, kind: taskTests, isPresent: hasTestsTask,
+	{Name: public.FlowStageTests, Title: "Tests", Budget: BudgetBuild, Placement: PlacementByBuild,
+		Inputs: InputsOwnOutputs, kind: taskTests, isPresent: hasTestsStage,
 		frame: func(s *model.Space) stage {
 			return stage{before: s.BeforeTestsScript, commands: s.TestsScript, after: s.PostTestsScript}
 		}},
 	// postPublish is not part of the publish frame: it only runs after the
 	// package is fully published, in the publish tail.
-	{Name: "publish", Title: "Publish", Budget: BudgetPublish, Placement: PlacementByPublish,
-		Inputs: InputsOwnOutputs, IsAuthorized: true, kind: taskPublish, isPresent: isAlwaysPresent,
+	{Name: public.FlowStagePublish, Title: "Publish", Budget: BudgetPublish, Placement: PlacementByPublish,
+		Inputs: InputsOwnOutputs, IsAuthorized: true, kind: taskPublish, isPresent: hasPublishStage,
 		frame: func(s *model.Space) stage {
 			return stage{before: s.BeforePublishScript, commands: s.PublishScript}
+		}},
+	// The announce stage observes a release that is out, by default: it runs
+	// after the records, on the machine that wrote them, and only warns. A
+	// flow that places it before the publish makes it gate like the stages
+	// around it.
+	{Name: public.FlowStageAnnounce, Title: "Announce", Budget: BudgetPublish, kind: taskAnnounce,
+		isPresent: hasAnnounceStage,
+		frame: func(s *model.Space) stage {
+			return stage{before: s.BeforeAnnounceScript, commands: s.AnnounceScript, after: s.PostAnnounceScript}
 		}},
 }
 
@@ -125,7 +160,8 @@ var stageTable = []Stage{
 // does not release.
 func BuildStage() Stage { return stageOf(taskBuild) }
 
-// stageOf is the descriptor of one task kind, as stageTable states it.
+// stageOf is the descriptor of one built-in task kind, as stageTable states
+// it.
 func stageOf(kind taskKind) Stage {
 	for _, descriptor := range stageTable {
 		if descriptor.kind == kind {
@@ -135,40 +171,50 @@ func stageOf(kind taskKind) Stage {
 	panic("release: no stage descriptor for a task kind")
 }
 
-// resolveStage is the descriptor a task of this kind of this release runs
-// under. The version stage is the one stage with two names, and the package's
-// space says which one it was configured under.
-func resolveStage(rel *plan.Release, kind taskKind) Stage {
-	descriptor := stageOf(kind)
-	if kind == taskVersion {
-		descriptor.Name, descriptor.Title = rel.Pkg.Space.VersionStage.String(), rel.Pkg.Space.VersionStage.Title()
-	}
-	return descriptor
-}
+// isConfigured is the version stage's presence as far as the configuration
+// decides it: every space may have one, and the plan says which package does
+// (see hasVersionTask).
+func isConfigured(*model.Space) bool { return true }
 
-// presentStages are the stages one package's release runs, in table order.
-func presentStages(rel *plan.Release) []Stage {
-	present := make([]Stage, 0, len(stageTable))
-	for _, descriptor := range stageTable {
-		if descriptor.isPresent(rel) {
-			present = append(present, descriptor)
-		}
-	}
-	return present
-}
-
-// isAlwaysPresent is the build's and the publish's presence: every releasing
-// package runs them, with or without a command.
-func isAlwaysPresent(*plan.Release) bool { return true }
-
-// hasSignTask reports whether the package's release runs a sign task: its
-// space enables autoSign, or configures any of the sign stage's three
-// sequences, so a hook somebody configured never goes silent. A package with
-// none of them has no sign task at all, and nothing about its run changes.
-func hasSignTask(rel *plan.Release) bool {
-	space := rel.Pkg.Space
+// hasSignStage reports whether a space's packages run a sign stage: the space
+// enables autoSign, or configures any of the sign stage's three sequences, so
+// a hook somebody configured never goes silent.
+func hasSignStage(space *model.Space) bool {
 	return space.AutoSign != nil ||
 		len(space.SignScript) > 0 || len(space.BeforeSignScript) > 0 || len(space.PostSignScript) > 0
+}
+
+// hasSyncLockStage reports whether a space regenerates lock files between
+// its version stage and its build: its autoVersion names syncLock scripts.
+// Whether a package runs it this run follows its version stage.
+func hasSyncLockStage(space *model.Space) bool {
+	return space.AutoVersion != nil && len(space.AutoVersion.SyncLock) > 0
+}
+
+// hasBuildStage reports whether a space's packages run a build stage: any of
+// its three sequences is configured. A package with none of them has no build
+// task, no build hook and no build event.
+func hasBuildStage(space *model.Space) bool {
+	return len(space.BuildScript) > 0 || len(space.BeforeBuildScript) > 0 || len(space.PostBuildScript) > 0
+}
+
+// hasTestsStage reports whether a space's packages run a tests stage, on the
+// same terms as the build.
+func hasTestsStage(space *model.Space) bool {
+	return len(space.TestsScript) > 0 || len(space.BeforeTestsScript) > 0 || len(space.PostTestsScript) > 0
+}
+
+// hasPublishStage reports whether a space's packages run a publish stage: its
+// commands or either of its hooks are configured. A package without one is
+// recorded after its last stage instead.
+func hasPublishStage(space *model.Space) bool {
+	return len(space.PublishScript) > 0 || len(space.BeforePublishScript) > 0 || len(space.PostPublishScript) > 0
+}
+
+// hasAnnounceStage reports whether a space's packages run an announce stage,
+// on the same terms as the build.
+func hasAnnounceStage(space *model.Space) bool {
+	return len(space.AnnounceScript) > 0 || len(space.BeforeAnnounceScript) > 0 || len(space.PostAnnounceScript) > 0
 }
 
 // hasVersionTask reports whether the package's release runs a version task:
@@ -188,15 +234,5 @@ func hasVersionTask(rel *plan.Release) bool {
 // files between its version stage and its build: it has a version stage and
 // its space's autoVersion names syncLock scripts.
 func hasSyncLockTask(rel *plan.Release) bool {
-	av := rel.Pkg.Space.AutoVersion
-	return hasVersionTask(rel) && av != nil && len(av.SyncLock) > 0
-}
-
-// hasTestsTask reports whether the package's release runs a tests task: its
-// space configures any of the tests stage's three sequences, so a hook
-// somebody configured never goes silent. A package with none of them has no
-// tests task at all, and nothing about its run changes.
-func hasTestsTask(rel *plan.Release) bool {
-	space := rel.Pkg.Space
-	return len(space.TestsScript) > 0 || len(space.BeforeTestsScript) > 0 || len(space.PostTestsScript) > 0
+	return hasVersionTask(rel) && hasSyncLockStage(rel.Pkg.Space)
 }

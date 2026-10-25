@@ -1,8 +1,11 @@
 # Python without uv, including Pants
 
-Keep your existing Python build and GitHub Actions workflow. dispat can coordinate its releases without a uv
-workspace. The integration depends on where distribution metadata comes from: a `pyproject.toml` version is a
-different input from a Pants BUILD target or a plugin that reads a shared `VERSION` file.
+You can keep a build/Twine or Pants workflow when adopting dispat. First find where each distribution gets its
+version: `pyproject.toml`, a BUILD target, or a shared `VERSION` file. That determines what the version stage needs
+to edit.
+
+The first example publishes packages with build and Twine. The Pants example covers packaging and version updates;
+you will need to connect your existing publisher.
 
 ## Identify the version source
 
@@ -36,8 +39,8 @@ folder. Use a fresh `dist/` directory per package and run; upload only the artif
 upload command above is a first-attempt example. Before a retry, reconcile accepted filenames and hashes with the
 index as described in [the Python guide](./python.md#check-the-release-file-set).
 
-The parent layout matters. A root-only project is wrapped by a standalone entry whose `path` is `"."`, which makes the
-repository itself the package; releases from dispat 1.10 and earlier need a package folder below the root instead. See
+For a project at the repository root, use a standalone package with `path: "."`. dispat 1.10 and earlier require a
+package folder below the root instead. See
 [single-package layout](./single-package.md).
 
 ## Pants adapter
@@ -87,9 +90,9 @@ For a repository plugin that reads a shared version source, update that source o
 matching [shared version policy](../reference/releasing/versioning.md). Do not run independent package replacements
 against the same shared file.
 
-This configuration has no publish stage. Adapt the existing publisher to select only the current distribution’s
-expected files from Pants’ shared `dist/`, validate their package/version and hashes, then upload them. Do not make
-each package invocation upload every wheel in that shared folder. That would cross package completion boundaries.
+To add a publish stage, select only the current distribution's files from Pants' shared `dist/`. Check their package,
+version and hashes, then upload them. Uploading every wheel for each package would make it unclear which package's
+publication completed.
 
 ## Keep the GitHub Actions release boundary
 

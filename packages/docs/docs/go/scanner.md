@@ -4,14 +4,13 @@ description: Use the standalone Go scanner package to read dependency manifests 
 
 # scanner: the manifest reader
 
-`github.com/yohimik/dispat/pkg/scanner` reads dependency manifests into one ecosystem-neutral shape. You get the
-package's declared identity, its declared dependencies, their ranges, and any local-path signals. It is a dependency
-manifest parser for Go covering thirty-six formats across twenty-one ecosystems.
+Use `github.com/yohimik/dispat/pkg/scanner` to read package names, versions, and dependencies from manifest files.
+It returns one Go model for thirty-six formats across twenty-one ecosystems, including dependency ranges and local
+paths.
 
-It only reads. Rewriting is [the writer's](./writer.md) job. This package has no SBOM machinery, no lockfile
-resolution, and no network access.
-
-The recognised formats are fixed at build time. Fence tests hold the reader and the writer to the same list.
+The scanner reads declarations from files. It does not resolve lockfiles, generate an SBOM, or access the network.
+Use [writer](./writer.md) to edit the files. Supported formats are fixed at build time; tests check that the reader and
+writer cover the same list.
 
 ```sh
 go get github.com/yohimik/dispat/pkg/scanner
@@ -30,11 +29,11 @@ mans, err = scanner.Scan(ctx, "packages/web") // the package-level conveniences
 Use the `Scanner` interface to substitute a fake in tests when you wire the reader and the writer together. Call the
 package-level functions to do the same work without an interface.
 
-Both entry points share an error contract worth relying on. A manifest that fails to parse is skipped, and its error
-joins the returned error. The manifests that did parse come back regardless.
+Check both the result and the error. If one manifest fails to parse, the scanner returns the successfully parsed
+manifests along with the combined errors. You can report the bad file and still use the rest of the scan.
 
-You can report the problem and keep the partial result rather than losing a whole scan to one malformed file. Reads are
-capped at 16 MiB per file. A larger file returns `ErrManifestTooLarge`, and the output order is deterministic.
+Reads are capped at 16 MiB per file. A larger file returns `ErrManifestTooLarge`. Results are returned in a
+deterministic order.
 
 ## What comes back
 
@@ -92,8 +91,7 @@ Docker has no version field, so identity comes from the images a file names. A c
 section and a tagged `image` is producing that image. Failing that, the reader takes the tagged repository the most
 services name.
 
-A file that only wires third-party services together declares no identity. This is the honest answer rather than a
-guess.
+A compose file containing only third-party services has no package identity.
 
 The exact fields each format contributes are in the
 [package README](https://github.com/yohimik/dispat/blob/main/pkg/scanner/README.md). This document also lists the
@@ -101,7 +99,7 @@ shapes deliberately left unread.
 
 ## Helpers for callers building a graph
 
-Four exported helpers do the work the CLI needs on top of a scan. `NameIndex` maps a manifest name onto its owning
+Use these helpers when turning a scan into a dependency graph. `NameIndex` maps a manifest name onto its owning
 package. It prefers stated names, then root manifests, then nested ones, and reports a same-rank collision instead of
 guessing.
 
@@ -129,8 +127,8 @@ dispat scanner packages/web --root-only  # only the folder's own
 dispat scanner --log-format json         # one JSON object per manifest
 ```
 
-Run [`dispat compute`](../cli/compute.md) to use the reader for its intended purpose. This derives a monorepo's
-dependency graph and starting versions from the manifests already on disk.
+Run [`dispat compute`](../cli/compute.md) to derive a monorepo's dependency graph and starting versions from the
+manifests already on disk.
 
 ## Further reading
 

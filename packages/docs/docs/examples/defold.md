@@ -1,7 +1,9 @@
 # Defold projects
 
-A Defold project’s own version can be written in `game.project`. Its library archive URLs need separate handling.
-Use [From one package to many](./one-to-many.md) when the project gains extensions, a server or a website.
+dispat can update an existing version in `game.project`. Library archive URLs need a replacement rule or version
+script. This guide covers those edits; keep your Defold build and store upload commands in the release workflow.
+
+For extensions, a server or a website released alongside the game, see [From one package to many](./one-to-many.md).
 
 ## Version and dependency boundaries
 
@@ -29,11 +31,11 @@ For a Defold project in `game/`, the graph and versioning part of a configuratio
 }
 ```
 
-This is a configuration fragment for version planning. Add your existing Defold build and publisher under `scripts`
-and `flow`; it is not a complete release configuration. `initials` supplies a semantic baseline until there is a
-matching release tag. In an established repository, preserve its real release baseline and tag format instead.
+The fragment configures version planning only. Add your Defold build and publisher under `scripts` and `flow` before
+using it to release. `initials` supplies a semantic baseline until a matching release tag exists. For an established
+project, use its actual starting version and tag format.
 
-Run status and version reconciliation in a disposable checkout, then inspect the native artifact’s version. Ensure
+Try the plan and version edits in a disposable checkout, then inspect the built artifact's version. Ensure
 `[project] version` already exists when choosing native rewriting. The writer changes existing values, not absent
 keys. A short native version such as `0.9` may also differ from a three-part semantic release baseline.
 

@@ -3658,6 +3658,11 @@ recomputation or succinct bookkeeping changes the space model. Deterministic rea
 in the linear readiness claim. Durable records and task payloads are accounted for separately. Multiple executors
 can attain the same asymptotic task-time bound while using different state and different schedules.
 
+If a configured-stage compiler materializes every producing ancestor's identity in each task descriptor,
+a chain of `k` producing stages writes `Theta(k²)` such identities even though its graph has `O(k)` edges.
+Validation and transfer of admitted output sets also cost at least the entries and bytes actually processed.
+Those costs are outside the failure-free task-duration and linear readiness bounds above.
+
 The task compiler and scheduler are separate algorithms. Given a materialized provider graph with `P`
 packages and `E` edges, and a required materialized compiled graph with `Tk` vertices and `Dk` edges,
 retaining both costs `Theta(P + E + Tk + Dk)` words under those explicit representations. Writing the
@@ -3862,8 +3867,8 @@ record is written, since a stage after the publication follows the record. Where
 it is accepted only where `publish` places itself too, as `publish {after: build}` does, since otherwise the default
 edges into `publish` close a cycle (*Defaults*, above).
 
-With conditions 1 to 4, the transitive closure of each `G_p` realises the configuration of `p`, and the compiled plan is
-acyclic. By condition 2 and the lemma `G_p` is acyclic, so its transitive closure is a strict partial order that
+With conditions 1 to 4, the transitive closure of each `G_p` realises the configuration of `p`, and the base task graph
+is acyclic. By condition 2 and the lemma `G_p` is acyclic, so its transitive closure is a strict partial order that
 contains `G_p`, and by condition 3 it leaves every `parallel` pair incomparable. For the plan, map each task to its
 package. Every cross-package edge runs from a task of a provider to a task of a consumer that reaches the provider in
 the graph of condition 4 by a path of at least one edge: the publication-order and record edges along the edge kinds of
@@ -3872,7 +3877,14 @@ each taken
 over the whole graph and so through packages outside the plan as well. A cycle of tasks that uses a cross-package edge
 therefore maps to a closed walk of at least one edge in that graph, which contains a cycle, against condition 4. A cycle
 that uses none lies in one `G_p`. The same projection shows that no path between two stages of `p` leaves `p`, so the
-order the compiled plan puts on `S_p ∪ {rec_p}` is the closure of `G_p`, which realises the configuration of `p`.
+order the base task graph puts on `S_p ∪ {rec_p}` is the closure of `G_p`, which realises the configuration of `p`.
+
+The base graph in this proof contains the configured stage, publication-order and build-readiness edges. A particular
+release plan can also need provider outcome edges before a consumer's record or version preparation. These depend on
+which packages release and on whether the version frame consumes selected provider versions. They can form a cycle
+even when conditions 1 to 4 hold. The implementation checks the full plan task graph before dispatch and refuses a
+cycle as `E233` under `execution-configuration`. Thus condition 4 is sufficient for the stated base graph, while the
+plan check establishes acyclicity for the graph actually executed. This adds no claim about its makespan.
 
 A configuration that is not realisable is refused before any effect, under the `execution-configuration` identifier of
 §28.9, with diagnostics in the order §19.2a gives. `S_p`, `E_p` and `G_p` are functions of the resolved configuration
@@ -4982,17 +4994,19 @@ deployment order: infrastructure before the application that runs on it, a schem
   only `O(P)` package edges. A memoised index of the nearest building
   packages each package reaches without a `none` edge costs its visits plus the size of the sets it unions, the
   same bound only while those sets stay small; a search per pair is neither.
-* **No new cycle.** Every build constraint runs along a dependency path and every package builds before it publishes, so
-  the task graph stays acyclic for every choice of relations, and weakening a relation only removes constraints. `E197`
-  cannot arise from a relation, because the publication order does not depend on it. Under configured stages a cycle
-  through a build dependency whose kind is outside the edge kinds of §13.1 is refused by condition 4 of §13.11,
-  although the task graph may be acyclic.
-* **Failure is §19.3's.** Under `build` and `none`, `C` may be prepared and built against `P`'s planned version
-  (§19.5) before the outcome of `P`'s publication is known. That is sound because §19.3 then either blocks `C` or, where
-  `C` has a cause of its own, reconciles its manifest to `P`'s published version before `C` publishes and leaves `P`'s
-  contribution owed (§13.4a): a manifest naming a version that was never published is never published itself. A build
-  that embedded the planned version is rebuilt, or `C` is blocked; a build finished for a blocked consumer confers
-  nothing. It is not published, discharges no obligation, and the next run builds again or reuses it under the identity
+* **Cycle checks.** A build constraint runs along a dependency path, and the base task graph is acyclic under condition
+  4 of §13.11. `E197` cannot arise from a relation, because the publication order does not depend on it. Configured
+  stages also need a plan-specific check of the task graph including required provider outcome waits. An implementation
+  that offers them MUST refuse a cycle in that actual graph before dispatch, as `E233` under
+  `execution-configuration` (§28.9). A build dependency whose kind is outside the edge kinds of §13.1 can make
+  condition 4 fail even when the task graph would be acyclic.
+* **Failure is §19.3's.** Under `build` and `none`, `C` may prepare or build while `P`'s publication is pending when no
+  stage of `C` consumes a selected provider version. A version frame that consumes a changed pickup waits for `P`'s
+  record before that frame. Where `P`'s outcome is ordered before `C` publishes by `publish.orderKinds`, a required
+  blocking edge or a selected sole cause, §19.3 and §19.5 skip `C` or reconcile its manifests to the settled published
+  state. An arbitrary script reading a pending provider version outside those declared waits is outside this guarantee;
+  its configured readiness needs to put `P`'s record before the reading stage. A blocked consumer's completed build
+  confers nothing. It is not published and discharges no obligation. The next run builds again or reuses it under the
   rules of §28.5. Restoring the working tree of a blocked consumer is the implementation's business.
 * **Under §28.** A `build` edge is the local-output dependency of §28.5 and a `publish` edge its registry-availability
   edge. A `none` edge carries no output into the consumer's build task; the requirement that task inputs include every

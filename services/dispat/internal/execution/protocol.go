@@ -354,6 +354,10 @@ type AssignmentPackage struct {
 	Version    string `json:"version,omitempty"`
 	Repository string `json:"repository,omitempty"`
 	Dir        string `json:"dir,omitempty"`
+	// SourceDir and OutputRoots remap a declared-root path export between
+	// the orchestrator's package and this task's private checkout.
+	SourceDir   string   `json:"sourceDir,omitempty"`
+	OutputRoots []string `json:"outputRoots,omitempty"`
 }
 
 // AssignmentFrame is the script frame of one stage, in execution order. It is

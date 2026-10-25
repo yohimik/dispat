@@ -1,17 +1,19 @@
 # The run command
 
-Run `dispat run <script>` to plan and execute a named [script](../configuration/spaces.md#scripts-and-dispat-run)
-inside each changed package that has one, honouring the dependency graph. Nothing is released or tagged. If a script
-fails, dispat skips its dependents or keeps them running according to `--on-error`.
+Run `dispat run <script>` to execute a declared [script](../configuration/spaces.md#scripts-and-dispat-run) in each
+changed package that provides it. Packages run in dependency order. The command does not release packages or create
+tags; `--on-error` controls whether dependent packages continue after a script fails.
 
-Each package looks the name up in its own `scripts`, then its space's, then the file's. The level you define a name at
-decides its reach, so a file-level script runs in every changed package, a space's script runs in that space's
-packages, and a package's script runs in that package alone. A selected package with no command for the name does
-nothing, and a name no level defines exits `1`, because a run that silently does nothing is how a typo hides. When the
-name exists but none of the covered packages resolves it, the outcome depends on how they were chosen: a selection you
-named yourself, with `--package`, `--space`, `--group` or by invoking the command from a package or space folder,
-exits `1`, since naming packages claims the script reaches them, while a selection the window assembled on its own
-completes as a no-op and reports at info level that no covered package resolves the script.
+Script lookup starts at the package, then checks its space, then the top-level configuration. A package can therefore
+override a shared script with its own command.
+
+A package without that script is skipped. A name that is not declared anywhere exits `1`. If the script exists but
+none of the selected packages has it, the result depends on the selection:
+
+- An explicit selection (`--package`, `--space`, `--group`, or your current package or space folder) exits `1`.
+- A selection based only on changed packages succeeds as a no-op and logs that no covered package has the script.
+
+## How the selection works
 
 Selection happens in three steps, in this order:
 
@@ -129,11 +131,10 @@ With `"test": "vitest run"` in your config, both of those commands run `vitest r
 **appended to the command text**, matching what `npm run test -- --watch` does. You do not have to rewrite anything in
 your config to accept them.
 
-Three things follow from that. Know them before you rely on this feature.
+Arguments are forwarded according to these rules:
 
-**Every covered package gets them.** A run is one intent about a selection, so `dispat run test -- --watch` puts
-`--watch` on the test script of every covered package. Narrow the selection with `--package` if you only want to target
-one.
+**Every covered package gets them.** `dispat run test -- --watch` adds `--watch` to each selected package's test
+script. Use `--package` to target just one.
 
 **They land at the end of the command.** A script that is a single command takes them where you expect. A script that
 ends in something else does not:
@@ -151,9 +152,8 @@ The second script still works, but only because the argument landed on the comma
 in a command that should not receive arguments, wrap the part that should. Use `sh -c 'vitest run "$@"' _` to control
 where the arguments go.
 
-**On a [multi-command script](../configuration/scripts.md#one-name-several-commands), only the last command takes
-them.** The last command does the script's work. The commands before it are prerequisites, and they would break if they
-took the arguments too:
+**For a [multi-command script](../configuration/scripts.md#one-name-several-commands), only the last command receives
+them.** Earlier commands run as written:
 
 ```json
 {

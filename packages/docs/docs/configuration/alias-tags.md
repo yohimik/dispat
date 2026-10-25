@@ -7,9 +7,8 @@ monorepo that tag usually carries a path prefix to show which package released a
 services/dispat/v1.4.2
 ```
 
-That is the right name for a record, but it is the wrong name for a *pointer*. Consumers often want to follow a release
-line instead of naming an exact version. A GitHub Action is the clearest example because the Marketplace only accepts
-this ref shape:
+Consumers may also need a tag that follows a release line, such as `v1`. For a GitHub Action, that gives users a short
+ref to put in their workflow:
 
 ```yaml
 uses: yohimik/dispat@v1
@@ -96,9 +95,8 @@ specific channel and ignores case. You also use this field to configure
 dispat finds a package's history by listing the tags its `tagFormat` matches. It writes aliases but never reads them,
 so they take no part in that history.
 
-This distinction is load-bearing, and dispat enforces it. A moving alias is always the newest tag by creation date, so
-if dispat could read one back as a release tag it would find it first while looking for the package's baseline, and a
-bare `v1.4.2` beside a `v{version}` release format would quietly become that package's released version.
+An alias must never become a package's baseline. A moving alias can be the newest tag by creation date, and an exact
+alias such as `v1.4.2` can match another package's `v{version}` format. Either could be mistaken for release history.
 
 dispat refuses the configuration at load if any package's alias reads back as a release tag of any package:
 
@@ -107,9 +105,8 @@ config: package "dispat": alias tag "v1.4.2" would be read back as a release tag
 (tagFormat "v{version}"); an alias must never be readable as a release tag, or it becomes that package's history
 ```
 
-Reads back, not looks alike. A name that carries no version is never a release of anything, so it is legal even when
-it shares the release format's prefix. This is what lets a single-package repository releasing as `v1.4.2` publish the
-`v1` a GitHub composite is consumed through:
+The check asks whether the alias can be parsed as a release version. Sharing a prefix is fine. For example, a
+single-package repository can release as `v1.4.2` and also publish a moving `v1` alias:
 
 ```json
 {
@@ -132,9 +129,9 @@ If two packages tag as `{name}@{version}` and both want bare aliases, give the a
 
 ## Failures
 
-An alias is a convenience ref, not the record of a release. If dispat cannot write one, it warns (`W232`) and carries
-on because the release tag is already there. You or the next release can re-point the alias later, which differs from
-the release tag itself, where a failure is a [critical](../internals/architecture.md#after-the-point-of-no-return).
+If dispat cannot write an alias, it warns (`W232`) and continues. The release tag already exists, so you can repair the
+alias later or let the next release update it. Failure to write the release tag itself is
+[critical](../internals/architecture.md#after-the-point-of-no-return).
 
 ## Pushing
 

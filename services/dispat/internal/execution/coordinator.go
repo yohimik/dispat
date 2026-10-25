@@ -580,6 +580,9 @@ func (c *Coordinator) isFirstParentSuccessor(ctx context.Context, node, earlier,
 // deliberately. A different ref left behind by failed cleanup is reported as
 // a warning with the retained code; the run's own error stays its error.
 func (c *Coordinator) Close(ctx context.Context) error {
+	if c.snapshots != nil {
+		defer c.snapshots.closeBaselines()
+	}
 	// Bounded here whatever the caller handed in: close runs detached from the
 	// run's cancellation, and a mailbox that hangs must not keep a finished
 	// run, and the locks it gives back afterwards, waiting for ever. Every

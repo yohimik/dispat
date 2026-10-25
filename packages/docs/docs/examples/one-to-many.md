@@ -1,8 +1,8 @@
 # From one package to many
 
-Start with one library, application, game or service. Add a CLI, container image, documentation site or SDK when
-you need it. Each independently released deliverable becomes another package in the same configuration, with its
-own commands, release records and dependencies.
+This example starts with a library and adds a CLI, container, documentation site and marketing site. Each gets a
+package entry when it needs its own release, commands and records. You can use the same pattern for an application,
+game or service.
 
 You can keep each package’s folder and published tags while the graph grows. The package name, path and tag format
 are part of its identity: preserve them when adding neighbours. A space can share commands later without requiring
@@ -22,7 +22,8 @@ a library in `core/` starts with:
 
 These examples isolate package layout and release planning. Keep your existing `scripts`, `flow`, version edits
 and record settings alongside them before running a release. A configuration with no build/publish stages does
-not ship an artifact. Packages must occupy folders below the repository root.
+not ship an artifact. This example gives each package its own folder below the repository root; a single project
+can also use [the root itself](./single-package.md#the-repository-itself-as-the-package).
 
 Once `core@1.2.0` exists as a release record, that tag supplies the baseline. Adding other packages does not reset
 it to zero or require moving its source. For an existing project with a different tag format, keep that format and
@@ -90,9 +91,9 @@ job runs. Independent versions let a library, application and site evolve at dif
 
 ## Keep recovery aligned with deliverables
 
-One package can publish several files, but its publisher must reconcile partial uploads before reporting success.
-Give a destination its own package when it needs an independent release record and retry boundary. Do not split
-packages merely because they use different commands; choose boundaries that make completion meaningful.
+One package can publish several files, but its publisher needs to check which uploads succeeded before retrying a
+partial release. Give a destination its own package when it needs an independent release record or retry. Different
+commands alone are not a reason to split a package.
 
 Adding a package does not require moving existing source or resetting tags. Changes to shared build scripts and
 root configuration still need explicit release attribution; they are not automatically changes inside every

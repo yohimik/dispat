@@ -1,11 +1,10 @@
 # Go packages
 
-dispat is assembled from six Go modules, and you can import each one on its own. Parsing commit messages, reading
-configuration files and rewriting dependency manifests are problems older than releases. These modules are packages
-first and dispat internals second, so none of them needs the CLI, a git repository, or a network.
+The six Go modules below can be used independently of the dispat CLI. Import them to parse commit messages, load
+configuration, or read and edit dependency manifests in your own tools. None requires a Git repository or network
+access.
 
-Everything else the CLI does lives under `services/dispat/internal`. Go makes this unreachable from outside the module.
-The six packages below are the whole of the importable surface.
+The rest of the CLI lives under `services/dispat/internal` and cannot be imported from another Go module.
 
 ## The packages
 
@@ -20,16 +19,15 @@ The six packages below are the whole of the importable surface.
 
 ## How they fit together
 
-The dependency shape is deliberately shallow, and `ccme` depends on nothing outside the standard library. Both
-`scanner` and `writer` import `manifest` to keep them covering exactly the same formats. `models` imports `ccme`
-because a resolved configuration carries a parser configuration inside it. `config` imports neither: it is a loader
-for any Go program's configuration, and it knows nothing about dispat's own model.
+Choose the packages for the work you need:
 
-That leaves two natural pairs and one that stands alone. `scanner` and `writer` are the manifest halves, where one
-reads a version and the other writes it, and both agree byte for byte on where the value sits because `manifest`
-decides for them. `ccme` and `models` are the input halves, where one reads the commit messages and the other
-describes the file configuring how they are read. `config` is what reads that file: `models` says what a
-configuration means, and `config` says how a configuration is loaded at all.
+- **Read and edit manifests:** `scanner` reads the files, `writer` edits them, and both use `manifest` for format names,
+  dependency kinds, and byte positions.
+- **Parse commit messages:** `ccme` works on message text and uses only the standard library.
+- **Generate dispat configurations:** `models` provides the structs. It imports `ccme` for parser settings.
+- **Load your own configuration:** `config` works with your structs and does not depend on dispat's configuration model.
+
+You can combine these packages, but importing one only brings in the modules it depends on.
 
 ## Installing
 
@@ -51,11 +49,11 @@ Taking one package does not pull the others in unless it needs them. None of the
 
 ## The same work from the command line
 
-Three of the packages have a command that wraps the package with a report attached. You do not need a configuration
-file or a git repository to run them:
+You can try the manifest tools on your own files before using the Go API. These commands need no configuration file
+or Git repository:
 
 - [`dispat scanner`](../cli/scanner.md) prints what a folder's manifests declare.
 - [`dispat writer`](../cli/writer.md) applies manifest edits in place.
 - [`dispat replacer`](../cli/replacer.md) replaces literal text in any file.
 
-Run these commands to see what a package does with your own files before you import it.
+See [Manifest tools](../editing/manifests.md) for examples and supported formats.

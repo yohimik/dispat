@@ -1,16 +1,10 @@
 # The if command
 
-`dispat if` chooses between shell scripts by testing a condition. This lets a
-stage branch without depending on the shell it runs under. The condition asks
-the environment (`CI`, `ENV=prod`), the filesystem (`-f data/report.json`,
-`-d build`), or the repository (`--changed`). It plans no release and sweeps no
-packages.
+Use `dispat if` to choose a shell command based on an environment variable,
+a file or directory, or changed packages. It is useful for a conditional step
+inside a JSON or YAML configuration.
 
-Everything dispat runs is a shell command. Stages, hooks, and `run` scripts are
-strings handed to `/bin/sh -c`. This works well until your script needs to
-branch on a variable, call another script, or loop over a list.
-
-Three small commands cover those needs.
+For related tasks, `exec` calls a declared script and `for` repeats a command:
 
 ```console
 $ dispat if CI --then 'make ci' --else 'make dev'
@@ -18,8 +12,8 @@ $ dispat exec build --for pkg:core
 $ dispat for core web --do 'make "$DISPAT_ITEM"'
 ```
 
-None of the three plans a release, sweeps your packages, or touches the
-dependency graph. They run your script and exit.
+These helpers run the commands you provide without starting a release. Options
+such as `--changed` read the repository to decide which work is needed.
 
 ## Which command do I want
 
@@ -66,17 +60,14 @@ The first condition that holds wins. dispat skips the rest without looking at
 them. A chain of `--elif` flags acts as a switch, and `--else` is its default
 case.
 
-If nothing matches and you provide no `--else`, nothing runs. The command exits
-`0`. A guard that finds nothing to do has done its job.
+If nothing matches and you omit `--else`, nothing runs and the command exits `0`.
 
-The scripts are shell text, not script names. This acts like the shell's own
-if/elif/else. dispat spells it this way so it fits on one line inside a JSON or
-YAML config file.
+Write each branch as a full shell command. To call a declared script from a
+branch, use `dispat exec <script>`.
 
-The leading condition comes from exactly one place. You provide a positional
-condition, `--changed`, `--file`, or `--dir`. Passing two is a usage error,
-because dispat would have to silently ignore one. Every `--elif` is an
-environment condition.
+Choose one leading condition: positional text, `--changed`, `--file`, or
+`--dir`. Combining them is a usage error. Every `--elif` tests an environment
+condition.
 
 ### Environment conditions
 
@@ -89,10 +80,8 @@ environment condition.
 | `NAME~glob`     | it matches the pattern, where `*` matches anything  |
 | `NAME!~glob`    | it does not match the pattern                       |
 
-"Set" means set and not empty. This matches what `[ -n "$NAME" ]` means in the
-shell. CI systems export empty variables often, and an empty value rarely means
-yes. Use `NAME=` to ask whether a variable is empty. An unset variable expands
-to nothing, exactly as it does in a shell.
+Here, "set" means non-empty, like `[ -n "$NAME" ]` in a shell. To test for an
+empty value, use `NAME=`. An unset variable also expands to an empty value.
 
 The value can contain anything, including operators. Only the first operator
 ends the variable name. The condition `URL=a~b` asks whether `URL` equals the
@@ -134,9 +123,9 @@ File tests read no config file and need no repository.
 
 ### Changed packages
 
-The `--changed` flag asks the repository. It holds when changed packages are
-selected. The selection works exactly like [`dispat run`'s](./run.md). A gate
-and the run it guards never disagree about what changed.
+Use `--changed` to run a branch when the selected packages have changes. It
+uses [`dispat run`'s](./run.md) change detection and selection rules, with one
+difference in how `--consumers` is applied, explained below.
 
 ```sh
 dispat if --changed -p docs --since origin/main --then 'dispat run build-docs'
@@ -206,21 +195,19 @@ Pass a folder path or any of the [place names](./locations.md) `dispat exec`
 takes. A relative `--file` or `--dir` path moves with it. The test asks about
 the folder the script actually runs in.
 
-The `dispat if` command reads no config file. This makes it cheap enough to
-call in a loop. Passing a path or `cwd` keeps it cheap, because your command
-line provides everything needed.
-
-Naming `pkg:`, `space:`, or `root` forces dispat to read your config, because
-it must find out where a package lives. You pay this cost only when you ask.
+Environment and file conditions need no configuration when `--in` is a path
+or `cwd`. Naming `pkg:`, `space:`, or `root` requires the configuration to
+resolve that location. The `--changed` condition also reads configuration and
+Git history.
 
 A folder that does not exist stops the command and prints a message naming the
 folder.
 
 ## Exit codes
 
-Both commands return the exit code of the script they run. The command
-`dispat if CI --then 'exit 7'` exits `7`. This keeps them transparent in a
-pipeline, so your gated command still works with a helper in the middle.
+`if` returns the chosen branch's exit code. For example,
+`dispat if CI --then 'exit 7'` exits `7` when `CI` is set and non-empty.
+[`dispat exec`](./exec.md) follows the same rule.
 
 The `--on-failure` flag changes this behavior. It runs when the chosen script
 fails. Its own exit code becomes the command's exit code.

@@ -36,6 +36,8 @@ type digestPackage struct {
 	AliasFormats   []digestAliasFormat `json:"aliasFormats"`
 	Commands       digestCommands      `json:"commands"`
 	VersionStage   string              `json:"versionStage"`
+	Stages         []digestStage       `json:"stages"`
+	StageGraph     digestStageGraph    `json:"stageGraph"`
 	Env            []string            `json:"env"`
 	BuildOutputs   []string            `json:"buildOutputs"`
 	BuildPlatforms []string            `json:"buildPlatforms"`
@@ -106,6 +108,37 @@ type digestCommands struct {
 
 	OnFail []string `json:"onFail"`
 	OnSkip []string `json:"onSkip"`
+}
+
+// digestStage is one stage the flow defines: its name and every command it
+// runs, hooks included, which are semantic for the reason the built-in
+// commands are. Its label is absent, like every other display name: a label
+// changes how the run is read and nothing about what it releases.
+type digestStage struct {
+	Name       string   `json:"name"`
+	Commands   []string `json:"commands"`
+	BeforeHook []string `json:"beforeHook"`
+	PostHook   []string `json:"postHook"`
+}
+
+// digestStageGraph is the package graph of §13.11: its stages in the stage
+// order, which of them gate the release, and the edges between them. The
+// graph decides which commands run before which and whether a stage gates
+// the release or observes it, so a flow that moves a stage is a different
+// plan.
+type digestStageGraph struct {
+	Stages []digestStageNode `json:"stages"`
+	Edges  []digestStageEdge `json:"edges"`
+}
+
+type digestStageNode struct {
+	Name     string `json:"name"`
+	IsGating bool   `json:"gating"`
+}
+
+type digestStageEdge struct {
+	Before string `json:"before"`
+	After  string `json:"after"`
 }
 
 type digestAliasFormat struct {
@@ -194,6 +227,8 @@ func canonicalPackage(name string, release *Release, root string) digestPackage 
 		AliasFormats:   canonicalAliasFormats(space.AliasTags),
 		Commands:       canonicalCommands(space),
 		VersionStage:   space.VersionStage.String(),
+		Stages:         canonicalUserStages(space.UserStages),
+		StageGraph:     canonicalStageGraph(space.StageGraph),
 		Env:            append([]string(nil), space.Env...),
 		BuildOutputs:   append([]string(nil), space.BuildOutputs...),
 		BuildPlatforms: append([]string(nil), space.BuildPlatforms...),
@@ -262,6 +297,35 @@ func canonicalCommands(space *model.Space) digestCommands {
 		OnFail:         append([]string(nil), space.OnFailScript...),
 		OnSkip:         append([]string(nil), space.OnSkipScript...),
 	}
+}
+
+// canonicalUserStages flattens the stages the flow defines, which the space
+// already holds in name order.
+func canonicalUserStages(stages []model.UserStage) []digestStage {
+	out := make([]digestStage, 0, len(stages))
+	for _, stage := range stages {
+		out = append(out, digestStage{
+			Name:       stage.Name,
+			Commands:   append([]string(nil), stage.Commands...),
+			BeforeHook: append([]string(nil), stage.BeforeHook...),
+			PostHook:   append([]string(nil), stage.PostHook...),
+		})
+	}
+	return out
+}
+
+// canonicalStageGraph flattens the package's resolved stage graph, whose
+// nodes and edges the resolver already orders.
+func canonicalStageGraph(graph model.StageGraph) digestStageGraph {
+	out := digestStageGraph{Stages: make([]digestStageNode, 0, len(graph.Nodes)),
+		Edges: make([]digestStageEdge, 0, len(graph.Edges))}
+	for _, node := range graph.Nodes {
+		out.Stages = append(out.Stages, digestStageNode{Name: node.Name, IsGating: node.IsGating})
+	}
+	for _, edge := range graph.Edges {
+		out.Edges = append(out.Edges, digestStageEdge{Before: edge.Before, After: edge.After})
+	}
+	return out
 }
 
 func canonicalAliasFormats(aliases []model.AliasTag) []digestAliasFormat {

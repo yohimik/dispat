@@ -217,6 +217,7 @@ func (s Sequence) capture(ctx context.Context, source string) (outs []plan.Outpu
 // sequences warn).
 func (s Sequence) RunMergingOutputs(ctx context.Context, rel *plan.Release) error {
 	outs, err := s.RunCollectingOutputs(ctx, rel.Pkg.Name+":"+s.Stage)
+	RemapCapturedOutputs(outs, s.OutputPaths)
 	MergeOutputs(rel, outs)
 	return err
 }

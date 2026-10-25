@@ -17,6 +17,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -36,16 +37,93 @@ import (
 // composed run's nested dispat has to see the same context and the same pins
 // it would see in any other script of the same repository.
 func (a *App) openDispatch(ctx context.Context, coordinator *execution.Coordinator,
-	pl *plan.Plan, runner script.Runnerx) {
-	coordinator.Start(ctx, execution.Dispatch{
-		Concurrency:    a.cfg.Execution.ResolveConcurrency(),
-		Sources:        a.resolveInputSources(pl),
-		Inputs:         a.resolveOutputProviders(pl),
-		Prepare:        a.resolvePreparedProviders(pl, runner),
-		Shell:          a.resolveShell,
-		OpenRepository: a.openRepository,
-		Store:          a.git,
+	pl *plan.Plan, runner script.Runnerx) error {
+	coordinatorSources := a.resolveInputSources(pl)
+	coordinatorRoots, packageRoots, err := a.dispatchOutputRoots(pl, coordinatorSources)
+	if err != nil {
+		return err
+	}
+	packageRepositories := make(map[string]string, len(pl.Releases))
+	for name, rel := range pl.Releases {
+		packageRepositories[name] = rel.Pkg.Repository
+	}
+	return coordinator.Start(ctx, execution.Dispatch{
+		Concurrency:         a.cfg.Execution.ResolveConcurrency(),
+		Sources:             coordinatorSources,
+		InitialSources:      a.dispatchInitialSources(pl, coordinatorSources),
+		OutputRoots:         coordinatorRoots,
+		PackageOutputRoots:  packageRoots,
+		PackageRepositories: packageRepositories,
+		Inputs:              a.resolveOutputProviders(pl),
+		Prepare:             a.resolvePreparedProviders(pl, runner),
+		Shell:               a.resolveShell,
+		OpenRepository:      a.openRepository,
+		Store:               a.git,
 	})
+}
+
+// dispatchInitialSources lists each repository once so its original output
+// root entries are frozen before any task can admit generated files.
+func (a *App) dispatchInitialSources(pl *plan.Plan,
+	sources func(string) []execution.Source) []execution.Source {
+	names := make([]string, 0, len(pl.Releases))
+	for name := range pl.Releases {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	seen := make(map[string]bool)
+	var initial []execution.Source
+	for _, name := range names {
+		for _, source := range sources(name) {
+			if !seen[source.Dir] {
+				seen[source.Dir] = true
+				initial = append(initial, source)
+			}
+		}
+	}
+	return initial
+}
+
+// dispatchOutputRoots names package output roots relative to their source
+// repository. Those roots retain their pre-execution source entries in each
+// task snapshot; only admitted graph predecessors overlay them.
+func (a *App) dispatchOutputRoots(pl *plan.Plan,
+	sources func(string) []execution.Source) (map[string][]string, map[string][]string, error) {
+	roots := make(map[string][]string)
+	packages := make(map[string][]string)
+	for _, rel := range pl.Releases {
+		if rel == nil || rel.Pkg == nil || rel.Pkg.Space == nil {
+			continue
+		}
+		space := rel.Pkg.Space
+		if len(space.BuildOutputs) == 0 {
+			continue
+		}
+		repo := ""
+		for _, source := range sources(rel.Pkg.Name) {
+			if source.Name == rel.Pkg.Repository {
+				repo = source.Dir
+				break
+			}
+		}
+		if repo == "" {
+			return nil, nil, fmt.Errorf("execution: source repository of %s is absent from its input closure", rel.Pkg.Name)
+		}
+		pkgPath, err := filepath.Rel(repo, rel.Pkg.Dir)
+		if err != nil || pkgPath == ".." || strings.HasPrefix(pkgPath, ".."+string(filepath.Separator)) {
+			return nil, nil, fmt.Errorf("execution: output roots of %s lie outside source repository %s", rel.Pkg.Name, repo)
+		}
+		for _, output := range space.BuildOutputs {
+			path := filepath.ToSlash(filepath.Join(pkgPath, output))
+			roots[repo] = append(roots[repo], path)
+			packages[rel.Pkg.Name] = append(packages[rel.Pkg.Name], path)
+		}
+	}
+	for repo := range roots {
+		sort.Strings(roots[repo])
+		roots[repo] = slices.Compact(roots[repo])
+	}
+	return roots, packages, nil
 }
 
 // resolveOutputProviders answers, for one package, the providers whose build

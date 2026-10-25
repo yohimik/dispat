@@ -63,13 +63,15 @@ type Result struct {
 	// Channel is the channel the package is being released on (§11.1).
 	Channel string
 	Status  Status
-	// FailedStage names the stage that failed ("sign", "version" or
-	// "propagate", "syncLock", "build", "tests" or "publish"); empty unless
-	// Status is StatusFailed.
-	// Informational (shown in the summary).
-	FailedStage string
-	Err         error
-	Duration    time.Duration
+	// FailedStage names the stage that failed, under the name it ran as:
+	// "sign", "version" or "propagate", "syncLock", "build", "tests",
+	// "publish" or a stage the flow defines; empty unless Status is
+	// StatusFailed. FailedStageLabel is the label the flow gave that stage,
+	// empty where it gave none. Both are informational (shown in the summary).
+	FailedStage      string
+	FailedStageLabel string
+	Err              error
+	Duration         time.Duration
 	// Blocked reports that the package was planned but never attempted
 	// because a dependency failed to publish in this run (W194, §19.3). It is
 	// the "absence" half of the non-suppressible diagnostics: a package that
@@ -158,19 +160,23 @@ type Reverterx interface {
 	RevertDir(ctx context.Context, dir string) error
 }
 
-// Executor runs the sign, version, build, tests and publish stages of every
-// changed package.
+// Executor runs the stages of every changed package: the preparing ones
+// (sign, version, syncLock), then the stages its flow configures in the order
+// the flow gives them, the records, and the stages that observe the release.
 //
-// Scheduling model: each changed package contributes a build and a publish
-// task; packages bumped because of provider updates additionally get a
-// version task that runs exactly before their build (its job is syncing
+// Scheduling model: each changed package contributes one task per stage it
+// has (see stageplan.go). Packages bumped because of provider updates get a
+// version task before everything the flow configures (its job is syncing
 // manifests to the new provider versions), and a package whose space
 // configures a sign stage gets a sign task before all of them (its job is
-// writing the package's own version). Publish always depends on the
-// package's own build, through its tests stage when its space configures one
-// (its job is checking what the build produced). What a consumer's first task (sign, then version,
-// when present, otherwise build) waits for on each changed provider is the
-// provider space's isBuildWaitingPublish relation: nothing at all under
+// writing the package's own version). The flow's stages run in the order of
+// the package's stage graph (CCME §13.11, resolved as the configuration
+// loads): by default the build, then the tests and the user stages at once,
+// then the publish and the announce. The publish records the release in its
+// tail, and a package with no publish records it in a task of its own after
+// its last gating stage. What a consumer's stages after the preparing ones
+// wait for on each changed provider is the provider space's
+// isBuildWaitingPublish relation: nothing at all under
 // `none`, the provider's build under `build`, its build and its publish under
 // `publish`. A consumer's publish always waits for its providers' publishes
 // under all three, since publishing against a not-yet-published provider
@@ -185,16 +191,19 @@ type Reverterx interface {
 // (§19.3): a provider reached only through a package with nothing to release
 // still publishes first, and still blocks the consumers behind it.
 //
-// A stage with no configured script still runs — orderings, statuses,
-// changelogs and tags are preserved — it just executes no shell command.
-// Scripts receive DISPAT_* environment variables (package, space, versions,
+// Every package has a version and a build task; the tests, the publish, the
+// announce and the user stages exist where the flow gives them a script or a
+// hook, and a package with no publish is recorded by a task of its own.
+// Scripts receive DISPAT_* environment
+// variables (package, space, versions,
 // bump, stage, tag, plus the workspace and updated-provider listings at every
 // stage as per-package DISPAT_WORKSPACE_* / DISPAT_UPDATED_* variables).
 //
 // Build and publish stages have independent parallelism budgets: at most
-// BuildConcurrency sign/version/build/tests scripts and PublishConcurrency publish
-// scripts run at any moment. A package never runs two of its tasks
-// concurrently.
+// BuildConcurrency sign/version/build/tests/user-stage scripts and
+// PublishConcurrency publish, record and announce scripts run at any moment.
+// A package runs two of its tasks at once only where its graph leaves two
+// stages unordered.
 type Executor struct {
 	BuildConcurrency   int
 	PublishConcurrency int
@@ -277,19 +286,49 @@ const (
 	// and is placed the way the build is, and only for a package whose space
 	// configures it (see hasTestsTask).
 	taskTests
-	// taskPassBuild and taskPassPublish are the pass-through nodes of a
-	// package this run does not release, through which its consumers wait for
-	// the builds and the publishes behind it (see stageGaps). Nothing runs
-	// them, so they have no stage.
+	// taskAnnounce is the announce stage, which observes a release that is
+	// out by default and gates like its neighbours when the flow places it
+	// before the publish.
+	taskAnnounce
+	// taskUser is a stage the flow defines. Its task carries the stage's
+	// name, since the kind alone names none.
+	taskUser
+	// taskBeforeAll runs the package's beforeAll hook, as a task of its own
+	// so that several first stages wait for one hook. It reports
+	// under the name of the first stage after it, the one a failed beforeAll
+	// keeps the package from entering.
+	taskBeforeAll
+	// taskRecord writes the records of a package that has no publish stage,
+	// after its last gating stage, and is the whole release of a package with
+	// no stage at all.
+	taskRecord
+	// Pass-through nodes carry build, publish and failure-outcome waits across
+	// packages this run does not release (see stageGaps). Nothing runs them.
 	taskPassBuild
 	taskPassPublish
+	taskPassBlock
 )
 
-func (k taskKind) String() string { return stageOf(k).Name }
+func (k taskKind) String() string {
+	switch k {
+	case taskUser:
+		return "stage"
+	case taskBeforeAll:
+		return "beforeAll"
+	case taskRecord:
+		return "record"
+	case taskPassBuild, taskPassPublish, taskPassBlock:
+		return "pass"
+	}
+	return stageOf(k).Name
+}
 
+// task is one node of the task graph: a package's stage, named by its kind
+// and, for a stage the flow defines, by the stage's name.
 type task struct {
 	pkg  string
 	kind taskKind
+	name string
 }
 
 // spaceLogin is the once-per-space login gate. sync.Once gives the two
@@ -333,6 +372,11 @@ type Sequence struct {
 	Env      []string // the full environment the commands receive
 	Log      zerolog.Logger
 	FailFast bool
+	// OutputPaths translates declared output paths for an isolated local frame.
+	OutputPaths []OutputPathMapping
+	// Warned is told of each command a warn-only sequence went on past, so a
+	// caller that only warns can still answer whether everything succeeded.
+	Warned func()
 }
 
 // Run executes the sequence's commands in order inside its directory.
@@ -368,6 +412,9 @@ func (s Sequence) Run(ctx context.Context) error {
 			return err
 		}
 		s.Log.Warn().Err(err).Str("stage", s.Stage).Msg(s.Stage + " script failed (not fatal)")
+		if s.Warned != nil {
+			s.Warned()
+		}
 	}
 	return nil
 }
@@ -387,7 +434,8 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	// environment.
 	wsVars := WorkspaceEnv(p, e.Log)
 	logins := newSpaceLogins(p)
-	sched, publishReach := e.buildTaskGraph(p, changed)
+	plans := newStagePlans(p, changed)
+	sched, publishReach := e.buildTaskGraph(p, changed, plans)
 
 	// The tasks run under a context of their own, so that a task that
 	// panicked can stop the rest of the graph without cancelling the run that
@@ -395,13 +443,17 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	// to see to (see containPanic).
 	tasks, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
-	r := &run{Executor: e, plan: p, wsVars: wsVars, logins: logins, stop: stop,
+	r := &run{Executor: e, plan: p, plans: plans, wsVars: wsVars, logins: logins, stop: stop,
 		publishReach:     publishReach,
 		reachedProviders: make(map[string][]string),
 		results:          results, started: make(map[string]time.Time), scan: e.Scanner,
 		avChanged:           make(map[string]bool),
 		reconciledProviders: make(map[string][]string, len(changed)),
-		builtPackages:       make(map[string]bool, len(changed))}
+		builtPackages:       make(map[string]bool, len(changed)),
+		exports:             make(map[task][]plan.Output),
+		failedTasks:         make(map[task]bool),
+		inFlight:            make(map[string]int, len(changed)),
+		outcomes:            make(map[string]*pendingOutcome)}
 
 	r.prepareNativeWrites(ctx, changed)
 	if err := r.drain(tasks, sched, changed); err != nil {
@@ -457,7 +509,8 @@ func newSpaceLogins(p *plan.Plan) map[spaceLoginKey]*spaceLogin {
 // the skip cascade reads: §19.3 computes its closure over the full workspace
 // graph, so the providers that can block a package are the same set that
 // orders it.
-func (e *Executor) buildTaskGraph(p *plan.Plan, changed map[string]bool) (*graph.Scheduler[task], *stageReach) {
+func (e *Executor) buildTaskGraph(p *plan.Plan, changed map[string]bool,
+	plans map[string]*stagePlan) (*graph.Scheduler[task], *stageReach) {
 	// Sorted iteration: the scheduler hands nodes out in insertion order, so
 	// building the edges in name order is what makes launch order — not just
 	// completion semantics — deterministic run to run (§17.2).
@@ -471,37 +524,86 @@ func (e *Executor) buildTaskGraph(p *plan.Plan, changed map[string]bool) (*graph
 	// (§19.2): `app` resolves `core` through an unreleasing `ui` at install
 	// time, so publishing `app` first would record a range reconciled against
 	// a version nobody published.
-	edges := newStageEdges(p, changed)
-	buildGaps := newBuildGaps(edges, names)
-	publishGaps := newPublishGaps(edges, names)
+	buildEdges := newStageEdges(p, changed, plans)
+	publishEdges := publicationStageEdges(p, changed, plans)
+	blockingEdges := blockingStageEdges(p, changed, plans)
+	blockingReach := newPublishReach(blockingEdges)
+	buildGaps := newBuildGaps(buildEdges, names)
+	publishGaps := newPublishGaps(publishEdges, names)
+	var blockingGaps *stageGaps
+	if blockingNeedsOutcomeEdges(blockingEdges, publishEdges) {
+		blockingGaps = newBlockingGaps(blockingEdges, names)
+	}
 	buildGaps.addPassThroughs(sched)
 	publishGaps.addPassThroughs(sched)
+	if blockingGaps != nil {
+		blockingGaps.addPassThroughs(sched)
+	}
 	for _, name := range names {
-		pub := task{name, taskPublish}
-		first := addStageChain(sched, p.Releases[name])
+		sp := plans[name]
+		sp.addEdges(sched)
+		first := sp.readinessTargets()
+		versionTask := task{name, taskVersion, ""}
+		if _, hasVersionTask := sp.byTask[versionTask]; hasVersionTask {
+			for _, prov := range versionPickupProviders(p.Releases[name], changed) {
+				sched.AddEdge(plans[prov].recording, versionTask)
+			}
+		}
 		for _, prov := range p.Providers[name] {
 			if !changed[prov] {
 				continue
 			}
-			for _, waited := range resolveFirstTaskWaits(p.Releases[prov].Pkg.Space.ProviderRelation, prov) {
-				sched.AddEdge(waited, first)
+			for _, waited := range resolveFirstTaskWaits(p.Releases[prov].Pkg.Space.ProviderRelation, plans[prov]) {
+				addEdges(sched, waited, first)
 			}
-			sched.AddEdge(task{prov, taskPublish}, pub)
+		}
+		for _, prov := range publishEdges.providers[name] {
+			if changed[prov] {
+				sched.AddEdge(plans[prov].recording, sp.recording)
+			}
+		}
+		if blockingGaps != nil {
+			for _, prov := range blockingEdges.providers[name] {
+				if changed[prov] {
+					sched.AddEdge(plans[prov].recording, sp.recording)
+				}
+			}
+		}
+		// A selected cause, version pickup, or blocking provider must have a
+		// settled outcome before this package decides what it may publish.
+		// Publication kinds may omit those edges, but that cannot turn a
+		// still-running provider into a successful one at admission.
+		for _, prov := range releaseOutcomeProviders(name, p, changed) {
+			sched.AddEdge(plans[prov].recording, sp.recording)
 		}
 		buildGaps.addConsumerEdges(sched, name, first)
-		publishGaps.addConsumerEdges(sched, name, pub)
+		publishGaps.addConsumerEdges(sched, name, []task{sp.recording})
+		if blockingGaps != nil {
+			blockingGaps.addConsumerEdges(sched, name, []task{sp.recording})
+		}
 	}
 	buildGaps.addGapEdges(sched)
 	publishGaps.addGapEdges(sched)
-	if e.PublishGroup != nil {
-		e.addPublishGroupEdges(sched, p, changed)
+	if blockingGaps != nil {
+		blockingGaps.addGapEdges(sched)
 	}
-	return sched, newPublishReach(edges)
+	if e.PublishGroup != nil {
+		e.addPublishGroupEdges(sched, p, changed, plans)
+	}
+	return sched, blockingReach
 }
 
-// addPublishGroupEdges chains the publishes of each publish group in plan
-// order.
-func (e *Executor) addPublishGroupEdges(sched *graph.Scheduler[task], p *plan.Plan, changed map[string]bool) {
+// addEdges states that every one of the after tasks waits for before.
+func addEdges(sched *graph.Scheduler[task], before task, after []task) {
+	for _, t := range after {
+		sched.AddEdge(before, t)
+	}
+}
+
+// addPublishGroupEdges chains the recording tasks of each publish group in
+// plan order.
+func (e *Executor) addPublishGroupEdges(sched *graph.Scheduler[task], p *plan.Plan, changed map[string]bool,
+	plans map[string]*stagePlan) {
 	last := make(map[string]string)
 	for _, name := range p.Order {
 		if !changed[name] {
@@ -512,7 +614,7 @@ func (e *Executor) addPublishGroupEdges(sched *graph.Scheduler[task], p *plan.Pl
 			continue
 		}
 		if previous := last[group]; previous != "" {
-			sched.AddEdge(task{previous, taskPublish}, task{name, taskPublish})
+			sched.AddEdge(plans[previous].recording, plans[name].recording)
 		}
 		last[group] = name
 	}
@@ -533,14 +635,14 @@ func (r *run) drain(tasks context.Context, sched *graph.Scheduler[task], changed
 		BudgetSyncLock: syncLockBudget(r.plan, changed),
 	}
 	return graph.Drain(tasks, sched,
-		func(t task) StageBudget { return stageOf(t.kind).Budget },
+		func(t task) StageBudget { return r.plans[t.pkg].stage(t).Budget },
 		func(b StageBudget) int { return budgets[b] },
 		// A package's configured weight is how many stage slots its tasks
 		// occupy. syncLock keeps the ordinary cost: its budget exists to
 		// serialise lock-file writers, not to price packages.
 		func(t task) int {
 			pkg := r.plan.Releases[t.pkg].Pkg
-			switch stageOf(t.kind).Budget {
+			switch r.plans[t.pkg].stage(t).Budget {
 			case BudgetPublish:
 				return pkg.PublishWeight
 			case BudgetSyncLock:
@@ -628,7 +730,11 @@ func (r *run) cancelPending() []string {
 // built it.
 type run struct {
 	*Executor
-	plan   *plan.Plan
+	plan *plan.Plan
+	// plans are the releasing packages' stage plans, read-only once Run has
+	// built them: which stages each runs, in which order, and under which
+	// descriptor.
+	plans  map[string]*stagePlan
 	wsVars []string
 	logins map[spaceLoginKey]*spaceLogin
 	// stop cancels the tasks' own context with a cause, which is how a task
@@ -666,38 +772,165 @@ type run struct {
 	// command has since run over them. See recordReconciliation.
 	reconciledProviders map[string][]string
 	builtPackages       map[string]bool
-	// isPublicationRefused (guarded by mu) is set once a publication met an
-	// artefact this run may not adopt (E198): no publication starts after it.
+	// exports (guarded by mu) are what each finished task's scripts could see
+	// and exported: its predecessors' exports and its own. A task reads the
+	// exports of the tasks that reach it and nothing else (§13.11), so two
+	// stages of one package that run at once never write one list.
+	exports map[task][]plan.Output
+	// failedTasks (guarded by mu) are the tasks that failed without failing
+	// their package: the stages that do not precede the record. What waits on
+	// one does not run.
+	failedTasks map[task]bool
+	// inFlight (guarded by mu) counts each package's running tasks, and
+	// outcomes holds the revert and the outcome hook a failed or skipped
+	// package owes once its last running task has ended, so a folder is never
+	// restored under a stage that is still writing it.
+	inFlight map[string]int
+	outcomes map[string]*pendingOutcome
+	// touched (guarded by mu) records the packages a hook, a command or a
+	// native step ran for, which is what a skip restores the folder of: a
+	// task that ran nothing wrote nothing.
+	touched map[string]bool
+	// A refused existing publication prevents later publish attempts in this run.
 	isPublicationRefused bool
 }
 
-// addStageChain states the edges between the stages one package's release
-// runs, in stageTable's order, and answers the package's first task, which is
-// where its provider waits attach.
-//
-// The order is sign, version, syncLock, build, tests, publish, and a package
-// has the stages whose presence its configuration answers: the build and the
-// publish always, the others only where they are configured or, for the
-// version stage, where a provider moved or the space auto-versions (§9.4
-// reconciles against every workspace dependency, including providers
-// released by an earlier run, so it cannot be conditional on this run's
-// updates). The first stage a package has is the one that waits for its
-// providers, and the tests stage, when there is one, is the last thing on the
-// only path from the build to the publish.
-func addStageChain(sched *graph.Scheduler[task], rel *plan.Release) task {
-	present := presentStages(rel)
-	for index := 1; index < len(present); index++ {
-		sched.AddEdge(task{rel.Pkg.Name, present[index-1].kind}, task{rel.Pkg.Name, present[index].kind})
+// touch records, under mu, that something ran in a package's folder.
+func (r *run) touch(pkg string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.touched == nil {
+		r.touched = make(map[string]bool)
 	}
-	return task{rel.Pkg.Name, present[0].kind}
+	r.touched[pkg] = true
 }
 
-// resolveFirstTask answers the kind of a package's first task, the one
-// beforeAll runs at and its provider waits attach to. It is the one place the
-// question is answered, so the graph and the hook can never disagree about
-// it.
-func resolveFirstTask(rel *plan.Release) taskKind {
-	return presentStages(rel)[0].kind
+// pendingOutcome is what a package that failed or was skipped still owes once
+// nothing of it is running: restoring its folder, and its outcome hook.
+type pendingOutcome struct {
+	rel           *plan.Release
+	log           zerolog.Logger
+	isReverted    bool
+	isInterrupted bool
+	hook          string
+	commands      []string
+	extra         []string
+}
+
+// enter counts one task of a package as running. The maps are made on first
+// use as well as in Run, for a run a test assembles by hand.
+func (r *run) enter(pkg string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.inFlight == nil {
+		r.inFlight = make(map[string]int)
+	}
+	if r.exports == nil {
+		r.exports = make(map[task][]plan.Output)
+	}
+	if r.outcomes == nil {
+		r.outcomes = make(map[string]*pendingOutcome)
+	}
+	if r.failedTasks == nil {
+		r.failedTasks = make(map[task]bool)
+	}
+	r.inFlight[pkg]++
+}
+
+// finishTask ends one task: it remembers what the task could see and
+// exported, and, as the package's last running task, settles the outcome the
+// package owes.
+func (tc *taskCtx) finishTask(ctx context.Context, res *Result) {
+	tc.mu.Lock()
+	tc.exports[tc.t] = tc.rel.Outputs
+	tc.inFlight[tc.t.pkg]--
+	owed := tc.outcomes[tc.t.pkg]
+	if tc.inFlight[tc.t.pkg] > 0 || owed == nil {
+		tc.mu.Unlock()
+		return
+	}
+	delete(tc.outcomes, tc.t.pkg)
+	tc.mu.Unlock()
+	tc.run.settleOutcome(ctx, owed)
+}
+
+// owe records the outcome a package owes, keeping the first: a package fails
+// or is skipped once, however many of its tasks were running.
+func (r *run) owe(pkg string, outcome *pendingOutcome) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.outcomes == nil {
+		r.outcomes = make(map[string]*pendingOutcome)
+	}
+	if _, isOwed := r.outcomes[pkg]; !isOwed {
+		r.outcomes[pkg] = outcome
+	}
+	if r.inFlight[pkg] > 0 {
+		return
+	}
+	// Nothing of the package is running: a task settled outside execute,
+	// which a test assembling a run by hand does, so the outcome is owed to
+	// nobody and settles now.
+	owed := r.outcomes[pkg]
+	delete(r.outcomes, pkg)
+	r.mu.Unlock()
+	r.settleOutcome(context.Background(), owed)
+	r.mu.Lock()
+}
+
+// settleOutcome restores the folder and runs the outcome hook of a package
+// nothing is running for any more. The hook observes an outcome that has
+// already settled, so it only warns.
+func (r *run) settleOutcome(ctx context.Context, owed *pendingOutcome) {
+	if owed.isReverted {
+		revertCtx := ctx
+		if owed.isInterrupted {
+			revertCtx = context.WithoutCancel(ctx)
+		}
+		r.revert(revertCtx, owed.rel, owed.log)
+	}
+	if owed.hook == "" || len(owed.commands) == 0 || owed.isInterrupted {
+		return
+	}
+	tc := &taskCtx{run: r, t: task{owed.rel.Pkg.Name, taskBuild, ""}, rel: owed.rel, log: owed.log}
+	tc.updates = liveProviderUpdates(owed.rel.Pkg.Name, r.plan, r.results)
+	_ = tc.hook(ctx, owed.hook, owed.commands, false, owed.extra...)
+}
+
+// visibleRelease is the release as one task sees it: a copy whose outputs are
+// the exports of the tasks that reach it, merged in the stage order, so that
+// what a stage reads is a function of the graph and never of which of two
+// unordered stages finished first.
+func (r *run) visibleRelease(t task, rel *plan.Release) *plan.Release {
+	visible := *rel
+	// What the release carried into the run, an export a caller handed it,
+	// is seen by every task; what tasks export is seen along the edges.
+	visible.Outputs = append([]plan.Output(nil), rel.Outputs...)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	sp := r.plans[t.pkg]
+	if sp == nil {
+		return &visible
+	}
+	for _, before := range sp.predecessors(t) {
+		MergeOutputs(&visible, r.exports[before])
+	}
+	return &visible
+}
+
+// hasFailedPredecessor reports, with mu held, whether a task waits on a task
+// that failed without failing the package.
+func (r *run) hasFailedPredecessor(t task) (task, bool) {
+	sp := r.plans[t.pkg]
+	if sp == nil {
+		return task{}, false
+	}
+	for _, before := range sp.predecessors(t) {
+		if r.failedTasks[before] {
+			return before, true
+		}
+	}
+	return task{}, false
 }
 
 // syncLockBudget resolves the run-wide syncLock concurrency: the smallest
@@ -780,16 +1013,17 @@ func (tc *taskCtx) finishPublishGuard() {
 	}
 }
 
-// env builds the DISPAT_* environment of the task's scripts and hooks; stage
-// is what DISPAT_STAGE carries.
+// env builds the DISPAT_* environment of the task's scripts and hooks, over
+// the exports this task sees; stage is what DISPAT_STAGE carries.
 func (tc *taskCtx) env(stage string) []string {
-	return packageEnv(tc.plan, tc.t.pkg, tc.wsVars, tc.updates, stage)
+	return releaseEnv(tc.rel, tc.wsVars, tc.updates, stage)
 }
 
 // sequence assembles the task's command sequence in its package folder.
-func (tc *taskCtx) sequence(stage string, commands []string, failFast bool) Sequence {
-	return Sequence{Runner: tc.Runner, Dir: tc.rel.Pkg.Dir, Stage: stage,
-		Commands: commands, Env: tc.env(stage), Log: tc.log, FailFast: failFast}
+func (tc *taskCtx) sequence(ctx context.Context, stage string, commands []string, failFast bool) Sequence {
+	dir, runner, env, mappings := ResolveLocalStageExecution(ctx, tc.rel.Pkg.Dir, tc.Runner, tc.env(stage))
+	return Sequence{Runner: runner, Dir: dir, Stage: stage,
+		Commands: commands, Env: env, Log: tc.log, FailFast: failFast, OutputPaths: mappings}
 }
 
 // critical records a failure that happened after this package published: it
@@ -807,12 +1041,20 @@ func (tc *taskCtx) critical(res *Result, code string, err error, msg string) {
 // and DISPAT_STAGE naming the hook. extra entries ("KEY=value") are appended
 // on top — the outcome scripts use them for the failure and skip specifics.
 func (tc *taskCtx) hook(ctx context.Context, name string, commands []string, failFast bool, extra ...string) error {
+	return tc.runHook(ctx, name, commands, failFast, nil, extra...)
+}
+
+// runHook is hook with a warned callback for a warn-only sequence, so a
+// caller that only warns can still answer whether every command succeeded.
+func (tc *taskCtx) runHook(ctx context.Context, name string, commands []string, failFast bool,
+	warned func(), extra ...string) error {
 	if len(commands) == 0 {
 		return nil
 	}
 	tc.log.Debug().Str("hook", name).Msg("hook started")
-	seq := tc.sequence(name, commands, failFast)
+	seq := tc.sequence(ctx, name, commands, failFast)
 	seq.Env = append(seq.Env, extra...)
+	seq.Warned = warned
 	return seq.RunMergingOutputs(ctx, tc.rel)
 }
 
@@ -860,6 +1102,25 @@ func (r *run) settleAdmission(ctx context.Context, tc *taskCtx, res *Result) adm
 	t := tc.t
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if tc.stage.IsObserving {
+		// A stage that does not precede the record never withholds it: it
+		// runs beside or after the package's release and settles nothing.
+		if res.Status != StatusPending && res.Status != StatusPublished || ctx.Err() != nil {
+			return admission{}
+		}
+		if res.RecordBlocked {
+			r.failedTasks[t] = true
+			tc.log.Warn().Msg(tc.stage.Name + " not run: the package's release record is blocked")
+			return admission{}
+		}
+		if failed, isBlocked := r.hasFailedPredecessor(t); isBlocked {
+			r.failedTasks[t] = true
+			tc.log.Warn().Str("failedStage", r.plans[t.pkg].stage(failed).Name).
+				Msg(tc.stage.Name + " not run: a stage it waits on failed")
+			return admission{}
+		}
+		return admission{isAdmitted: true}
+	}
 	if res.Status != StatusPending { // failed or skipped at an earlier stage
 		return admission{}
 	}
@@ -883,8 +1144,9 @@ func (r *run) settleAdmission(ctx context.Context, tc *taskCtx, res *Result) adm
 	// A consumer proceeding past a provider that died after its version stage
 	// publishes what that provider actually published, never the planned
 	// version the stage wrote up front (§19.5). Whether that is achievable is
-	// decided here, before anything of the publish runs.
-	if t.kind == taskPublish {
+	// decided here, before anything of the publish, or of the records of a
+	// package with no publish, runs.
+	if t.kind == taskPublish || t.kind == taskRecord {
 		if dead := r.resolveDeadPickups(t.pkg); len(dead) > 0 {
 			if r.builtPackages[t.pkg] {
 				return r.markBlocked(tc, res, dead[0], formatEmbeddedSkipReason(dead[0]))
@@ -895,7 +1157,7 @@ func (r *run) settleAdmission(ctx context.Context, tc *taskCtx, res *Result) adm
 	if _, ok := r.started[t.pkg]; !ok {
 		r.started[t.pkg] = time.Now()
 	}
-	if stageOf(t.kind).IsPreparing {
+	if tc.stage.IsPreparing {
 		res.IsPrepared = true
 	}
 	// Resolve which provider updates are still live at this moment: providers
@@ -942,9 +1204,8 @@ func (r *run) markBlocked(tc *taskCtx, res *Result, blocker, reason string) admi
 	res.Blocked, res.BlockedBy = true, blocker
 	r.isAnyDead = true
 	res.RecordBlocked = r.results[blocker].RecordBlocked
-	_, isStarted := r.started[tc.t.pkg] // earlier stages already modified the folder?
 	tc.updates = liveProviderUpdates(tc.t.pkg, r.plan, r.results)
-	return admission{blocker: blocker, reason: reason, isStarted: isStarted}
+	return admission{blocker: blocker, reason: reason, isStarted: r.touched[tc.t.pkg]}
 }
 
 // reportBlocked tells every observer of a package markBlocked recorded, outside
@@ -959,13 +1220,13 @@ func (r *run) reportBlocked(ctx context.Context, tc *taskCtx, verdict admission)
 	ev := packageEvent(t.pkg, rel, EventPackageSkipped)
 	ev.Status, ev.Code, ev.BlockedBy = StatusSkipped.String(), plan.CodeBlocked, verdict.blocker
 	r.notify(ev)
-	if verdict.isStarted && r.isRevertedOnSkip(rel) {
-		r.revert(ctx, rel, log)
-	}
-	// onSkip observes a skip that has already settled, so it only warns;
-	// DISPAT_BLOCKED_BY names the provider responsible.
-	_ = tc.hook(ctx, "onSkip", rel.Pkg.Space.OnSkipScript, false,
-		"DISPAT_BLOCKED_BY="+verdict.blocker)
+	// The revert and the onSkip hook wait for the package's last running
+	// task; onSkip observes a skip that has already settled, so it only
+	// warns, and DISPAT_BLOCKED_BY names the provider responsible.
+	r.owe(t.pkg, &pendingOutcome{rel: rel, log: log,
+		isReverted: verdict.isStarted && r.isRevertedOnSkip(rel),
+		hook:       "onSkip", commands: rel.Pkg.Space.OnSkipScript,
+		extra: []string{"DISPAT_BLOCKED_BY=" + verdict.blocker}})
 }
 
 // resolveDeadPickups lists, with mu held, the providers this package's version
@@ -1060,7 +1321,7 @@ func (tc *taskCtx) reconcileToPublished(ctx context.Context) error {
 	// stage with nothing left to sync: there a script that would write nothing
 	// is not worth a subprocess, while here it is the only thing that can
 	// unwrite what the first pass wrote.
-	if err := tc.sequence(resolveStage(tc.rel, taskVersion).Name, space.VersionScript, true).
+	if err := tc.sequence(ctx, space.VersionStage.String(), space.VersionScript, true).
 		RunMergingOutputs(ctx, tc.rel); err != nil {
 		return fmt.Errorf("re-running %s version scripts against its published providers: %w", tc.t.pkg, err)
 	}
@@ -1115,19 +1376,26 @@ func (tc *taskCtx) stageFor() stage {
 	return frame
 }
 
-// execute runs a single sign, version, syncLock, build, tests or publish task
-// to completion.
+// execute runs a single task to completion: a stage of the package, its
+// beforeAll hook, or the records of a package with no publish.
 func (r *run) execute(ctx context.Context, t task) {
 	rel := r.plan.Releases[t.pkg]
 	res := r.results[t.pkg]
-	label := resolveStage(rel, t.kind)
+	descriptor := r.plans[t.pkg].stage(t)
 	log := r.Log.With().
 		Str("package", t.pkg).
-		Str("stage", label.Name).
+		Str("stage", descriptor.Name).
 		Str("version", rel.Next.String()).
 		Logger()
-	tc := &taskCtx{run: r, t: t, rel: rel, stage: label, log: log}
-	// The first defer, so it runs last: after the publish guard and the
+	if descriptor.Label != "" {
+		log = log.With().Str("label", descriptor.Label).Logger()
+	}
+	r.enter(t.pkg)
+	tc := &taskCtx{run: r, t: t, rel: r.visibleRelease(t, rel), stage: descriptor, log: log}
+	// The first defer, so it runs last: once the panic container has settled
+	// a task that panicked, the package's last task settles what it owes.
+	defer tc.finishTask(ctx, res)
+	// After it, so it runs before it: after the publish guard and the
 	// snapshot guard have been given back by their own defers, which a
 	// panic unwinds through like any other return.
 	defer tc.containPanic(ctx, res)
@@ -1136,13 +1404,19 @@ func (r *run) execute(ctx context.Context, t task) {
 		return
 	}
 
-	// beforeAll runs at the package's first task: sign when the package has
-	// one, then version, then build.
-	if t.kind == resolveFirstTask(rel) {
+	switch t.kind {
+	case taskBeforeAll:
+		// beforeAll runs before the package has a stage at all, so its
+		// failure ends the package under the name of the stage it never
+		// entered.
+		r.touch(t.pkg)
 		if err := tc.hook(ctx, "beforeAll", rel.Pkg.Space.BeforeAllScript, true); err != nil {
 			tc.failTask(ctx, res, err, "beforeAll hook failed")
-			return
 		}
+		return
+	case taskRecord:
+		tc.recordWithoutPublish(ctx, res)
+		return
 	}
 
 	if t.kind == taskPublish && tc.PendingRecord != nil {
@@ -1154,6 +1428,9 @@ func (r *run) execute(ctx context.Context, t task) {
 
 	frame := tc.stageFor()
 	tc.recordReconciliation(frame)
+	if frame.native != nil || len(frame.before)+len(frame.commands)+len(frame.after) > 0 {
+		r.touch(t.pkg)
+	}
 
 	// The event reports the task starting, not a script: a stage with no
 	// configured command still runs and still transitions, so it is still
@@ -1161,8 +1438,20 @@ func (r *run) execute(ctx context.Context, t task) {
 	// because a frame is placed on a node while it waits for one: at this
 	// moment there is no node to name, and the event that follows carries it.
 	stageEv := packageEvent(t.pkg, rel, EventStageStarted)
-	stageEv.Stage = tc.stage.Name
+	stageEv.Stage, stageEv.Label = tc.stage.Name, tc.stage.Label
 	r.notify(stageEv)
+
+	if tc.stage.IsObserving {
+		if !tc.observe(ctx, frame) {
+			r.mu.Lock()
+			r.failedTasks[t] = true
+			r.mu.Unlock()
+			return
+		}
+		stageEv.Name = EventStageSucceeded
+		r.notify(stageEv)
+		return
+	}
 
 	if len(tc.deadPickups) > 0 {
 		// Before anything of the publication, and on this machine whatever the
@@ -1179,15 +1468,11 @@ func (r *run) execute(ctx context.Context, t task) {
 			tc.failTask(ctx, res, err, "login failed")
 			return
 		}
-		if tc.AcquirePublish != nil {
-			releasePublish, err := tc.AcquirePublish(ctx, rel)
-			if err != nil {
-				tc.failTask(ctx, res, err, "acquiring publish repository guard failed")
-				return
-			}
-			tc.publishRelease = releasePublish
-			defer tc.finishPublishGuard()
+		if err := tc.guardPublish(ctx); err != nil {
+			tc.failTask(ctx, res, err, "acquiring publish repository guard failed")
+			return
 		}
+		defer tc.finishPublishGuard()
 	}
 
 	what, err := tc.runStage(ctx, frame)
@@ -1217,6 +1502,67 @@ func (r *run) execute(ctx context.Context, t task) {
 	tc.publishTail(ctx, res)
 }
 
+// guardPublish takes the repository guard the publish and the records run
+// under, when the run has one.
+func (tc *taskCtx) guardPublish(ctx context.Context) error {
+	if tc.AcquirePublish == nil {
+		return nil
+	}
+	releasePublish, err := tc.AcquirePublish(ctx, tc.rel)
+	if err != nil {
+		return err
+	}
+	tc.publishRelease = releasePublish
+	return nil
+}
+
+// recordWithoutPublish is the record task of a package with no publish stage:
+// the records follow its last gating stage under the repository guard, and a
+// package with no stage at all is recorded at once.
+func (tc *taskCtx) recordWithoutPublish(ctx context.Context, res *Result) {
+	if len(tc.deadPickups) > 0 {
+		if err := tc.reconcileToPublished(ctx); err != nil {
+			tc.failTask(ctx, res, err, "reconciling to the providers that published failed")
+			return
+		}
+	}
+	if err := tc.guardPublish(ctx); err != nil {
+		tc.failTask(ctx, res, err, "acquiring publish repository guard failed")
+		return
+	}
+	defer tc.finishPublishGuard()
+	tc.publishTail(ctx, res)
+}
+
+// observe runs the frame of a stage that does not precede the record: the
+// hooks and the commands each only warn, and no failure among them stops the
+// others, because the stage can never withhold the record and failing the
+// package would report an unpublished release for a published one. It answers
+// whether every part succeeded; what waits on a failed one does not run.
+func (tc *taskCtx) observe(ctx context.Context, s stage) bool {
+	label := tc.stage
+	isSucceeded := true
+	note := func() { isSucceeded = false }
+	if tc.runHook(ctx, "before"+label.Title, s.before, false, note) != nil {
+		note()
+	}
+	if len(s.commands) > 0 {
+		tc.log.Info().Msg(label.Name + " started")
+		seq := tc.sequence(ctx, label.Name, s.commands, false)
+		seq.Warned = note
+		if seq.RunMergingOutputs(ctx, tc.rel) != nil {
+			note()
+		}
+	}
+	if tc.runHook(ctx, "post"+label.Title, s.after, false, note) != nil {
+		note()
+	}
+	if !isSucceeded {
+		tc.log.Warn().Msg(label.Name + " failed; the release stands and the stages waiting on it do not run")
+	}
+	return isSucceeded
+}
+
 // failTask settles a task of execute that stopped with err, msg being what
 // the log reports as having failed: the status, the event, the revert and
 // the onFail hook.
@@ -1228,19 +1574,22 @@ func (tc *taskCtx) failTask(ctx context.Context, res *Result, err error, msg str
 	// from the cancellation, because a half-modified folder is exactly what
 	// revertOnFail promises to clean up.
 	interrupted := ctx.Err() != nil
-	tc.settleFailure(res, err, interrupted)
+	if !tc.settleFailure(res, err, interrupted) {
+		// A sibling stage running at the same time settled the package first.
+		tc.log.Error().Err(err).Msg(msg)
+		return
+	}
 	if interrupted {
 		ev := packageEvent(tc.t.pkg, tc.rel, EventPackageCancelled)
 		ev.Status, ev.Error = StatusCancelled.String(), err.Error()
 		tc.notify(ev)
 		tc.log.Warn().Err(err).Msg(tc.stage.Name + " interrupted")
-		if tc.rel.Pkg.Space.RevertOnFail {
-			tc.revert(context.WithoutCancel(ctx), tc.rel, tc.log)
-		}
+		tc.owe(tc.t.pkg, &pendingOutcome{rel: tc.rel, log: tc.log,
+			isReverted: tc.rel.Pkg.Space.RevertOnFail, isInterrupted: true})
 		return
 	}
 	ev := packageEvent(tc.t.pkg, tc.rel, EventPackageFailed)
-	ev.Status, ev.FailedStage, ev.Error = StatusFailed.String(), tc.stage.Name, err.Error()
+	ev.Status, ev.FailedStage, ev.Label, ev.Error = StatusFailed.String(), tc.stage.Name, tc.stage.Label, err.Error()
 	// Where the package's work was placed, which the reader of a failure
 	// needs first: a build that failed on one node of several is a
 	// failure somebody has to go and look at on that node.
@@ -1255,32 +1604,39 @@ func (tc *taskCtx) failTask(ctx context.Context, res *Result, err error, msg str
 		event.Str("code", ev.Code)
 	}
 	event.Msg(msg)
-	if tc.rel.Pkg.Space.RevertOnFail {
-		tc.revert(ctx, tc.rel, tc.log)
-	}
-	// onFail observes a failure that has already settled — it runs after
-	// the status and the revert, in the folder's final state, and only
-	// warns. It fires once: later tasks of a failed package return before
-	// reaching any script.
-	_ = tc.hook(ctx, "onFail", tc.rel.Pkg.Space.OnFailScript, false,
-		"DISPAT_FAILED_STAGE="+tc.stage.Name, "DISPAT_ERROR="+err.Error())
+	// The revert and the onFail hook wait for the package's last running
+	// task, so a folder is never restored under a stage still writing it.
+	// onFail observes a failure that has already settled — it runs after the
+	// status and the revert, in the folder's final state, and only warns.
+	// It fires once: later tasks of a failed package return before reaching
+	// any script.
+	tc.owe(tc.t.pkg, &pendingOutcome{rel: tc.rel, log: tc.log,
+		isReverted: tc.rel.Pkg.Space.RevertOnFail,
+		hook:       "onFail", commands: tc.rel.Pkg.Space.OnFailScript,
+		extra: []string{"DISPAT_FAILED_STAGE=" + tc.stage.Name, "DISPAT_ERROR=" + err.Error()}})
 }
 
 // settleFailure records, under mu, how a task that stopped with err ended:
-// cancelled when the run was interrupted, failed at its stage otherwise.
-func (tc *taskCtx) settleFailure(res *Result, err error, isInterrupted bool) {
+// cancelled when the run was interrupted, failed at its stage otherwise. It
+// answers false when another task of the package settled it first, which two
+// stages that run at once can do.
+func (tc *taskCtx) settleFailure(res *Result, err error, isInterrupted bool) bool {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
+	if res.Status != StatusPending {
+		return false
+	}
 	if isInterrupted {
 		res.Status = StatusCancelled
 		res.Err = err
 	} else {
 		res.Status = StatusFailed
-		res.FailedStage = tc.stage.Name
+		res.FailedStage, res.FailedStageLabel = tc.stage.Name, tc.stage.Label
 		res.Err = fmt.Errorf("%s: %w", tc.stage.Name, err)
 		tc.isAnyDead = true
 	}
 	res.Duration = time.Since(tc.started[tc.t.pkg])
+	return true
 }
 
 // loginGate runs the space's once-per-space login before its first publish;
@@ -1371,7 +1727,7 @@ func (tc *taskCtx) stageFrame(ctx context.Context, s stage) (what string, err er
 		tc.log.Debug().Msg(label.Name + ": no script configured, nothing to execute")
 	} else {
 		tc.log.Info().Msg(label.Name + " started")
-		if err := tc.sequence(label.Name, s.commands, true).RunMergingOutputs(ctx, tc.rel); err != nil {
+		if err := tc.sequence(ctx, label.Name, s.commands, true).RunMergingOutputs(ctx, tc.rel); err != nil {
 			return label.Name + " script failed", err
 		}
 	}
@@ -1391,10 +1747,12 @@ func formatNativeFailure(kind taskKind) string {
 }
 
 // markPublished flips a package's status to published under mu, blocking
-// its consumers when required records are missing.
+// its consumers when required records are missing, and hands the release the
+// exports its record saw, which is what the closing phase reads of them.
 func (tc *taskCtx) markPublished(res *Result) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
+	tc.plan.Releases[tc.t.pkg].Outputs = tc.rel.Outputs
 	res.Status = StatusPublished
 	res.RecordBlocked = tc.requiredRecordFailed || (tc.BlockOnRecordFailure && len(res.Critical) > 0)
 	if res.RecordBlocked {
@@ -1410,9 +1768,11 @@ func (tc *taskCtx) markPublished(res *Result) {
 // answering, never to cut short one that is merely slow.
 const RecordTimeout = 5 * time.Minute
 
-// publishTail finishes a successful publish: the required tag or receipt,
-// optional recorders (changelog file, GitHub release, ...), the status flip, then the warn-only
-// postPublish hook and the announce frame.
+// publishTail finishes a successful publish, or stands in for one on a
+// package with no publish stage: the release recorders (changelog file,
+// GitHub release, ...), the tag, the status flip, then the warn-only
+// postPublish hook of a publish. The stages that observe the release follow
+// as tasks of their own.
 //
 // It takes no failure callback, and that is the point: past the publish there
 // is no failure left that may fail the package. Everything here records a
@@ -1503,8 +1863,9 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	// need not remain serialized while postPublish/announce runs.
 	tc.finishPublishGuard()
 
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || tc.t.kind != taskPublish || res.RecordBlocked {
 		// Interrupted: the release is out and recorded; observers stay silent.
+		// Recorded without a publish: there is no publish for a hook to follow.
 		return
 	}
 
@@ -1512,26 +1873,6 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	// runs after the status settles and only warns: failing the package now
 	// would report an unpublished release for a published one.
 	_ = tc.hook(ctx, "postPublish", space.PostPublishScript, false)
-
-	// The announce frame: a fourth stage after the publish, for pushing the
-	// release out to update channels (a Slack message, a webhook, a docs
-	// feed). It has the gating stages' hook structure but none of their
-	// authority — the release is out, so the stage and both hooks only warn,
-	// and no failure among them stops the others from running.
-	_ = tc.hook(ctx, "beforeAnnounce", space.BeforeAnnounceScript, false)
-	if len(space.AnnounceScript) > 0 {
-		// Unlike the graph stages, announce is observed only when a script is
-		// configured: it is a tail of the publish rather than a task of its
-		// own, and an empty announce transitions nothing worth reporting.
-		annEv := packageEvent(tc.t.pkg, rel, EventStageStarted)
-		annEv.Stage = "announce"
-		tc.notify(annEv)
-		tc.log.Info().Msg("announce started")
-		_ = tc.sequence("announce", space.AnnounceScript, false).RunMergingOutputs(ctx, rel)
-		annEv.Name = EventStageSucceeded
-		tc.notify(annEv)
-	}
-	_ = tc.hook(ctx, "postAnnounce", space.PostAnnounceScript, false)
 }
 
 // finishPendingRecord settles the publish task of a package an earlier run
@@ -1715,7 +2056,7 @@ func (e *Executor) revert(ctx context.Context, rel *plan.Release, log zerolog.Lo
 		return
 	}
 	if e.Remote != nil {
-		releaseGuard, err := e.Remote.Guard(ctx, "revert")
+		releaseGuard, err := e.Remote.Guard(ctx, "revert", "")
 		if err != nil {
 			log.Error().Err(err).Msg("reverting package folder failed: the working tree could not be guarded")
 			return
@@ -1769,30 +2110,51 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []
 	// Made on the first dead provider: an admission with none, which is
 	// nearly every admission, then allocates nothing.
 	var bad map[string]bool
-	for _, providers := range [...][]string{p.Providers[pkg], reached} {
-		for _, prov := range providers {
-			r, ok := results[prov]
-			if !ok { // unchanged provider
-				continue
-			}
-			if r.RecordBlocked {
-				return true, prov
-			}
-			if r.Status != StatusFailed && r.Status != StatusSkipped {
-				continue
-			}
-			if bad == nil {
-				bad = make(map[string]bool)
-			}
-			bad[prov] = true
-			badProvider = prov
-			if pr := p.Releases[prov]; pr != nil && pr.Pkg.Space.ProviderRelation.IsBlocking {
-				blockingProvider = prov
-			}
+	// Failure blocking is narrower than cause accounting: an optional edge
+	// does not block a consumer with its own cause, but a propagated release
+	// owed only to that failed provider has no surviving cause to publish.
+	markDead := func(prov string) {
+		r, ok := results[prov]
+		if !ok || (!r.RecordBlocked && r.Status != StatusFailed && r.Status != StatusSkipped) {
+			return
 		}
+		if bad == nil {
+			bad = make(map[string]bool)
+		}
+		bad[prov] = true
+		badProvider = prov
+	}
+	for _, providers := range [...][]string{p.Providers[pkg], reached, rel.DueTo} {
+		for _, prov := range providers {
+			markDead(prov)
+		}
+	}
+	for _, update := range rel.Updates {
+		markDead(update.Name)
+	}
+	if rel.ChannelFrom != "" {
+		markDead(rel.ChannelFrom)
 	}
 	if badProvider == "" {
 		return false, ""
+	}
+	direct := p.BlockingProviders
+	if direct == nil {
+		direct = p.Providers
+	}
+	for _, providers := range [...][]string{direct[pkg], reached} {
+		for _, prov := range providers {
+			if !bad[prov] {
+				continue
+			}
+			if results[prov].RecordBlocked {
+				return true, prov
+			}
+			pr := p.Releases[prov]
+			if pr != nil && pr.Pkg.Space.ProviderRelation.IsBlocking {
+				blockingProvider = prov
+			}
+		}
 	}
 	if blockingProvider != "" {
 		return true, blockingProvider
@@ -1824,7 +2186,8 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []
 // orders the two and never excuses a provider of the consumer's own that
 // failed; Updates holds direct providers only, which is exactly that rule.
 func hasCauseOfItsOwn(rel *plan.Release, bad map[string]bool) bool {
-	if rel.IsFreshOwnBump() || rel.IsChannelChanged() {
+	if rel.IsFreshOwnBump() || rel.Pinned ||
+		(rel.IsChannelChanged() && (rel.ChannelFrom == "" || !bad[rel.ChannelFrom])) {
 		return true
 	}
 	for _, u := range rel.Updates {

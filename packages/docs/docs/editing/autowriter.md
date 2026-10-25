@@ -1,10 +1,7 @@
 # Editing manifests across the monorepo
 
-`dispat writer` edits the manifests you name. That works well for one file, but fails for forty. You would have to know
-which packages exist, where each keeps its manifest, and which ones declare the dependency you are changing.
-
-`dispat autowriter` asks the same question the rest of dispat asks. It works out which packages the run covers. It
-finds each manifest and applies your edits to all of them:
+Use `dispat autowriter` to make the same manifest edit across several packages. It selects packages from the plan,
+finds their manifests, and applies the edits you request. Use `dispat writer` when you already know the file paths.
 
 ```console
 $ dispat autowriter --set @acme/core=^1.3.0
@@ -16,8 +13,7 @@ packages/core/package.json
 2 package(s): 2 applied, 0 skipped, 0 missing
 ```
 
-The edits are `dispat writer`'s, spelled identically. The packages are `dispat run`'s, chosen identically. You have
-nothing new to learn.
+Edit flags use the same syntax as `dispat writer`. Package selection follows the same rules as `dispat run`.
 
 ## Which packages it covers
 
@@ -48,8 +44,8 @@ goes:
 | `root` (default) | The manifests sitting directly in the package folder                     |
 | `all`            | Every manifest anywhere under the package folder                         |
 
-You want `root` almost always. Use `all` for a package that keeps a second manifest inside itself. An example project
-or a fixture has to move with the rest.
+Keep `root` for the package's main manifests. Use `all` when nested examples or fixtures should receive the same
+dependency edits.
 
 Under `all`, dispat leaves a manifest belonging to another package to that package. This applies even when its folder
 sits inside this one. A file is only ever written by the package that owns it.
@@ -80,11 +76,8 @@ release version into it would be wrong however far the scan went.
 
 ## Letting it work out the edits itself
 
-Everything above needs you to name a dependency. That is often the tedious part in a monorepo. You know that every
-package depending on something here should follow it, and typing them out is just bookkeeping.
-
-Pass one of three flags to derive the edits instead. Each one looks at what the manifests already declare. It acts on
-every dependency that names another package in this workspace:
+To update workspace dependencies without listing their names, use one of the three flags below. Each derives edits
+from dependencies already declared in the manifests:
 
 ```sh
 dispat autowriter --set-local                 # every workspace range follows its provider
@@ -160,9 +153,8 @@ link --unlink-local
 grep -q '^replace github.com/acme' go.mod && exit 1
 ```
 
-The `trap` closes the bracket on the paths that never reach the end, including an interrupt. The explicit
-`--unlink-local` closes it before the stage reports success, which happens before anything is published. The `grep`
-fails the build if a directive survived anyway, which costs a release run but saves a bad tag.
+The `trap` removes links if the script exits early or is interrupted. The explicit `--unlink-local` removes them before
+the stage succeeds and anything is published. The final `grep` fails the build if a matching directive remains.
 
 `--package` narrows which manifest dispat writes, not which providers are linked. Every provider that package declares
 is redirected inside its own `go.mod` either way. Writing the *providers'* manifests as well achieves nothing for the
@@ -205,9 +197,8 @@ run's packages. It leaves a range that had fallen behind an earlier release as i
 Each edit ends in one of the three states [the writer reports](./manifests.md#applied-skipped-and-missing). One of them
 reads differently once a whole monorepo is involved.
 
-**Missing** means this package's manifest does not declare that dependency. When you name one file, that usually means
-a typo. When one invocation covers twenty packages and three declare the dependency, seventeen missing edits are the
-shape of the monorepo and none is a problem.
+**Missing** means the package's manifest does not declare that dependency. This is expected in a broad edit: if three
+of twenty packages use the dependency, the other seventeen have nothing to change.
 
 Pass `--strict` to ask the question across the whole run instead of per file. It fails when an edit matched no manifest
 anywhere, which is a stale pattern. It stays quiet about an edit that landed somewhere:
@@ -245,8 +236,8 @@ $ dispat autowriter --package core --set left-pad=^2.0.0
 INF package is outside the window, nothing to do  package=core
 ```
 
-That is a success, not a failure. It stops a flow breaking on a quiet day. Name the window yourself when you meant to
-reach the package anyway:
+The command succeeds without changing anything. To include that package regardless of its release window, use
+`--since all`:
 
 ```sh
 dispat autowriter --package core --set left-pad=^2.0.0 --since all

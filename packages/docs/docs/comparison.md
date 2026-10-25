@@ -1,167 +1,142 @@
 # dispat beside other release tools
 
-Monorepo release tools compute versions from the same raw material: conventional commits, per-package git tags, and a
-dependency graph. Version arithmetic does not separate them. The difference lies in how each tool handles a partially
-successful release. A release is never a single operation. A run that publishes eleven packages performs eleven
-independent, individually fallible writes to registries the tool does not control. It might finish having done only
-seven. Published versions are immutable. Republishing an existing version is a hard error, so rolling back those
-seven is impossible. Any recovery mechanism must therefore complete the remaining four.
+When comparing release tools, look beyond the first successful run. Ask what happens when one package publishes and
+the next one fails: how do you find the unfinished work, and what do you run to finish it?
 
-dispat treats the run as a saga: a sequence of independently committed legs with recovery by completion rather than
-rollback. The ledger of that saga is the release tags themselves. dispat writes a package's tag strictly after its
-publish succeeds. The tags never claim more than was delivered, and whatever a run still owes remains visible to the
-next run as pending work. Recovery means running the same command again.
+This page describes the behavior observed in dispat's checked-in experiment campaign. It covers Lerna 10.0.1,
+Nx 23.1.2, Changesets 3.0.1, and the dispat binary under test. A separate history replay examines repositories released
+with release-please and Lerna. These are specific versions and configurations, not claims about every setup or future
+release of those tools.
 
-This page describes how lerna, nx, release-please and changesets (Turborepo's documented release path) handle these
-same situations. It also details the experiments that observed the differences on the tools themselves.
+The [experiment report](./internals/experiments.mdx) links the commands, fixtures, and recorded results. Use it when you
+want to reproduce a finding or check whether it applies to your project.
 
 ## Where the tag is written
 
-The structural difference is the order of tag and artifact.
+A tag and an uploaded artifact are separate writes. Their order affects what a later run can infer from Git.
 
-lerna, nx release and release-please write tags before artifacts exist. `lerna version` commits and tags before
-`lerna publish` uploads anything. nx release's version step tags before its publish step runs. release-please tags
-when the release PR merges, leaving publication to a CI job that runs afterwards. Once the tag exists, the tool
-considers the version released regardless of upload success. The tag store cannot represent "planned but not yet
-published". Delivery is at most once. A publish failure after tagging leaves consumers with nothing and the tool with
-no memory of the debt.
+In the tested Lerna and Nx flows, versioning creates tags before publication. If an upload then fails, the tag alone
+does not prove that the artifact exists. Recovery checks the npm registry for versions still missing. For example,
+`lerna publish from-package` compares manifest versions with the registry. A release-please workflow similarly needs
+its publishing job to track publication after the release PR is merged and tagged.
 
-Recovery for those three consults state outside the tags. `lerna publish from-package` diffs every manifest version
-against the npm registry and publishes what is missing. This is a correct convergence procedure exactly where a
-queryable registry exists, per ecosystem. No such query exists for a Docker tag, a GitHub release, or an applied
-Terraform plan.
+Changesets and dispat tag successful publications after uploading. In the failed-upload fixture, neither wrote a tag
+for the failed package. Changesets uses the npm registry to find what remains to publish. dispat uses release tags,
+commit history, and resolved configuration to plan the remaining work.
 
-changesets sits on the other side of that line, alongside dispat. It tags strictly after each successful publish, so
-a failed upload leaves no orphaned tag. `changeset publish` asks the npm registry what remains, making its recovery
-idempotent where that query exists. Its plan, however, is a function of mutable workspace files rather than of the
-repository's history. The bump intent lives in human-written changeset files that `changeset version` consumes and
-deletes. A past release can therefore not be recomputed from history. Its propagation is range-gated: a dependent
-bumps only when the released version leaves the dependent's declared semver range.
-
-dispat tags after publish and reads its plan from commit messages and tags alone. The same plan can be recomputed at
-any commit. A re-run can recover work whose successful publish was recorded by a tag without asking the registry.
-There is still a narrow ambiguous interval between a publisher succeeding and its tag being written; after a hard
-interruption there, check the destination before retrying that package.
+This does not make upload and tagging atomic. If an upload succeeds and the process stops before recording its tag,
+dispat cannot infer the result from Git alone. Check the destination before retrying that package. Custom publish
+commands must handle their own partial writes, whether they publish npm packages, images, or infrastructure changes.
 
 ## Blast radius
 
-lerna in independent mode, nx release, and release-please with its node-workspace plugin patch-bump the dependents
-of a released package transitively and unconditionally. A `fix` in one package releases everything downstream of it.
-changesets bumps dependents only until their declared ranges hold again. dispat makes the radius part of the commit
-itself. A plain `fix(x)` releases one package, `fix(x)^` reaches the direct consumers, and `fix(x)^^` reaches the
-transitive ones. The `+N` modifier bounds the depth, so two changes in one window can carry two different radii.
+A dependency update does not always mean every consumer needs a new release. The tools in the fixture make that
+choice differently:
 
-| | lerna / nx / release-please | changesets | dispat |
-|---|---|---|---|
-| bump source | commit text | changeset files | commit text |
-| tag written | before publish | after publish | after publish |
-| blast radius | all dependents | until ranges hold | per commit: `^`, `^^`, `+N` |
-| delivery | at most once | registry-aware retry, npm only | tag-based forward recovery; ambiguous publish gap |
-| recovery | npm query or CI re-run | npm query | re-run, any target |
-| replayable from history | yes | no, files consumed | yes |
-| prerelease channels | global switch | global mode | per commit |
-| retractions | none | unreleased only | `cancel`, `Edits`, holds |
+| In the tested setup | Which consumers release? |
+| --- | --- |
+| Lerna independent mode and Nx release | All downstream consumers in the fixture were bumped. |
+| Changesets | Consumers were bumped where needed to satisfy the configured dependency ranges. |
+| dispat | The commit specified the propagation depth: `^`, `^^`, or `+N`. |
+
+For dispat, `fix(x)` changes `x` alone. `fix(x)^` also reaches direct consumers, and `fix(x)^^` reaches transitive
+consumers. This makes propagation a per-commit decision. Changesets expresses bump intent in changeset files instead.
+Those files are consumed during versioning, so replaying its input requires the relevant workspace state, not only
+commit-message parsing.
+
+Choose the behavior that fits how your team describes changes. A broader automatic cascade can be useful; explicit
+propagation gives reviewers a separate decision to make in the commit message.
 
 ## The experiments
 
-The readings above start as documentation. The experiments below execute them against the tools themselves, using the
-latest published version of each: lerna 10.0.1, nx 23.1.2, changesets 3.0.1, which is the release step Turborepo
-delegates to, and dispat as the binary copied out of the image the release under test published. Fault injection
-requires a registry the experiment is allowed to break, so every cell is a container of its own holding a fresh
-verdaccio behind a proxy that answers 502 to the upload of one named package and forwards everything else untouched.
-No cell shares a registry, a clone or an origin with another, and every commit is dated from a fixed clock, so a cell
-run twice produces the same shas and two transcripts that diff against each other.
+The tools are pinned in
+[`tests/experiments/tools/package.json`](https://github.com/yohimik/dispat/blob/main/tests/experiments/tools/package.json).
+The harness gives each test case its own registry, clone, and origin. A proxy in front of Verdaccio can reject one
+named package's upload with HTTP 502 while allowing the others through. Fixed commit times make repeated transcripts
+comparable.
 
-Every release reruns every cell of the campaign against the image it has just published, and what they recorded is on
-[release experiments](./internals/experiments.mdx). The same cells run by hand for any released version, as
-[reproducing](./internals/experiments.mdx#reproducing) shows. The harness that runs them, the fixture, the observer and the fault proxy are in
+The release campaign runs against the dispat image it has published. See the
+[recorded results](./internals/experiments.mdx) and [reproduction instructions](./internals/experiments.mdx#reproducing).
+The harness, fixture, observer, and fault proxy live in
 [`tests/experiments`](https://github.com/yohimik/dispat/blob/main/tests/experiments/README.md).
 
 ### One denied upload
 
-The fixture is six npm packages: `core`; `cli`, `ui` and `api` depending on `core`; `theme` and `docs` depending on
-`ui`. One change is pending on `core`.
+The fixture has six npm packages. `cli`, `ui`, and `api` depend on `core`; `theme` and `docs` depend on `ui`. One
+feature is pending in `core`.
 
-Blast radius, observed. `lerna version --conventional-commits` and `nx release` both bumped `core` to 1.1.0 and all
-five dependents to 1.0.1. This included `theme` and `docs`, whose only dependency `ui` did not change. changesets,
-given a minor changeset for `core`, bumped exactly until the ranges held again. It bumped `cli`, `ui` and `api` to
-1.0.1, because the fixture declares its dependencies as tilde ranges and `~1.0.0` no longer admits 1.1.0. It left
-`theme` and `docs` untouched, because `ui`'s patch stays inside their ranges. dispat, under an explicit `feat(core)^`,
-planned four: `core` at 1.1.0 and its three direct consumers.
+The initial plans differed:
 
-The orphan. With `cli`'s upload denied, lerna and nx had already written all six tags at their version steps. After
-the failed publish, the tag `cli@1.0.1` exists while the registry still serves 1.0.0. changesets and dispat, tagging
-after publish, wrote no `cli` tag at all.
+- Lerna and Nx selected `core` at `1.1.0` and all five consumers at `1.0.1`.
+- Changesets selected `core` and its three direct consumers. Their `~1.0.0` ranges did not accept `core@1.1.0`.
+  `theme` and `docs` stayed unchanged because their ranges still accepted the new patch of `ui`.
+- With `feat(core)^`, dispat selected `core` and its three direct consumers.
 
-Recovery. lerna's documented recovery, `lerna publish from-package`, refused to run at first. Its own failed publish
-had left the working tree dirty on the rewritten manifests. Only after a manual `git checkout` did the registry diff
-publish `cli@1.0.1`. nx recovered without that block. Re-running `nx release publish` skipped the four published
-packages by registry query and uploaded `cli`. `changeset publish` likewise reported five packages already published
-and delivered the sixth. Both recoveries are npm queries, correct where such a query exists, and only there. dispat's
-recovery was re-running the same command. The second run published `cli` at the same 1.0.1, and the third run planned
-nothing. No flags, no cleanup, no registry query.
+When the proxy rejected `cli`'s upload, Lerna and Nx had already created its new tag. Changesets and dispat had not.
+The registry still had the old `cli` version in every case.
 
-release-please was not part of this run. It has no publish step to deny, because publication is delegated to CI. Its
-versioning decisions were instead checked against real history, below.
+All tested recovery paths eventually completed:
+
+| Tool | What recovery did in this fixture |
+| --- | --- |
+| Lerna | `lerna publish from-package` first refused the dirty working tree. After the fixture restored the rewritten files, the registry comparison found and published the missing version. |
+| Nx | `nx release publish` skipped versions already in the registry and uploaded the missing package. |
+| Changesets | `changeset publish` found the missing publication, uploaded it, and tagged it. |
+| dispat | A second release run published `cli` at its planned version. A third run had an empty plan. |
+
+The cleanup described here is an experiment observation, not a recommendation to discard files from your own failed
+run. Inspect those files and the registry before taking recovery action.
+
+release-please was not included in this upload-failure test because it delegates publication to a separate CI job.
+Its version decisions were examined through history replay instead.
 
 ### A patch that asks direct consumers to release
 
-The propagation cells use `fix(core)^` for dispat: `core@1.0.1` remains inside every direct consumer's `~1.0.0`
-range, but the caret requests a consumer release. dispat releases `core`, `cli`, `ui` and `api`. lerna and nx receive
-an ordinary `fix(core)` and choose all six packages, including the indirect consumers `theme` and `docs`. changesets
-receives explicit patch entries for `core` and its three direct consumers; it does not read the caret syntax.
+This test uses `fix(core)^`. The new `core@1.0.1` still fits each consumer's `~1.0.0` range, but dispat's caret explicitly
+requests consumer releases. For the corresponding Changesets test, the fixture supplies explicit patch entries for
+`core` and its three direct consumers. Lerna and Nx receive `fix(core)` and select all six packages in their tested
+configurations.
 
-The consumer's build or upload then fails in the first run, and every tool meets that fault the same way: its own
-documented release, with the fault armed before it and nothing published by hand, then its own documented recovery
-once the fault is gone, with no new commit. Where each tool builds decides what the first run leaves. dispat builds
-`cli` only after `core` has published, so `core`, `ui` and `api` ship and `cli` does not. changesets publishes side by
-side and leaves the same three published and tagged in the clone. lerna runs every `prepack` before it publishes
-anything, and nx runs its build before it versions, so under the build fault neither publishes at all; under the
-refused upload both publish the five packages the registry accepts and leave `cli` tagged without a publication.
+The harness then fails a consumer build or upload, removes the fault, and runs each tool's recovery command without
+adding a commit. Where the build sits in the pipeline matters:
 
-The recorded catch-ups differ. dispat's is one `dispat release`, which plans `cli` alone as a `W193` catch-up at the
-version it was owed, publishes it without publishing `core` again, and leaves an empty plan: one run of one command.
-lerna's `changed` is empty because `version` tagged all six; `lerna publish from-package` first refuses the working
-tree its own failed publish left rewritten, and after a checkout by hand it publishes what the registry is missing:
-two runs and three commands, one of them manual. nx finishes the publication with `nx release publish`, or with
-`nx release` when its first run versioned nothing, and the release commit it leaves on the clone is pushed by hand:
-one run and two commands, one of them manual. changesets' `status` is empty once `version` has consumed the changeset
-file; `changeset publish` uploads the missing `cli` and tags it, and the tags leave the clone with the push changesets
-never makes: one run and two commands, one of them manual. Every one of these catch-ups converged, and every tool
-published `core` exactly once.
+- dispat's fixture builds `cli` after `core` publishes. A failed `cli` build leaves successful independent
+  publications in place.
+- Lerna's fixture runs `prepack` before publication, and Nx's runs the build before versioning. Their build-failure
+  cases publish nothing. Their upload-failure cases can leave tags for missing publications.
+- The Changesets upload flow leaves the successful packages published and tagged.
 
-Further cells take the same catch-up through the other ways a consumer comes to be owed its provider: with every
-build on a worker node reached through the repository being released, after the consumer sat out its provider's
-selected release, and after an operator held the consumer while the provider shipped and then resumed it. Two more
-cells test a consumer that published its own fix against the old provider after the provider failed and then sat out
-the provider's release. With no build command, dispat's next full plan carries the missed delivery although the
-consumer's own tag already contains the propagation commit. With a real build that finished against the planned
-provider, dispat withholds that artifact with `W194`, and the next run builds the still-pending fix against the
-published provider. Each of dispat's catch-ups is one run of one command.
+The recorded dispat catch-up selects `cli` alone with `W193` and does not republish `core`. The other tools recover
+through their registry-aware publish paths, with the cleanup or Git pushes shown in the transcripts. Every tested
+catch-up converged, and every tool published `core` once in these fixtures.
 
-lerna, nx and changesets run every one of these cells too, each through its nearest mechanism: no tool has a
-self-hosted worker, so the distributed cell repeats the build fault where the tool builds; nx selects with
-`--projects` and changesets with `--ignore`, while `lerna version` takes no selection; a hold is `"private": true`
-under `lerna version --no-private`, an excluding `release.projects` pattern for nx, and the `ignore` list for
-changesets. The [experiment record](./internals/experiments.mdx) shows the commands and states used to check every
-tool.
+Additional cases cover a consumer omitted from a selected release, a held consumer that is later resumed, and a
+consumer that releases its own fix before a failed provider becomes available. The last case checks two outcomes:
+with no build artifact, the later plan can still find the missed provider delivery; with an artifact already built
+against the unavailable version, dispat blocks it with `W194` and rebuilds on the next run.
+
+A worker case runs dispat builds on a node reached through the release repository. The other tools are exercised
+through the local build, selection, and hold mechanisms configured by the harness. Those mechanisms are not identical:
+Nx uses `--projects`, Changesets uses `--ignore`, and the Lerna fixture uses private-package settings for a hold.
+Read the [experiment record](./internals/experiments.mdx) before treating a result as a direct feature comparison.
 
 ### Replay against real history
 
-For the last five releases of two repositories that follow the commit convention, the experiment checked out each
-release commit's parent. It planned with dispat under a generated configuration and compared the plan against what
-actually shipped. This is expected data the repositories already contain.
+The replay checks five recorded releases from each of two repositories. For each release, it checks out the release
+commit's parent, generates a dispat configuration, and compares the resulting plan with the versions that shipped.
 
-On googleapis/google-cloud-node (released by release-please in manifest mode, 243 packages), dispat reproduced 36 of
-the 42 released package-versions exactly. Every miss classifies: three releases of previously untagged packages
-managed only by the manifest, two initial-version policies for new packages, and one commit-type mapping. dispat also
-planned six to eight packages per release beyond each release PR. This was pending work release-please had not yet
-cut, visible to a planner that reads the tag store.
+For `googleapis/google-cloud-node`, released with release-please in manifest mode, dispat reproduced 36 of 42 released
+package-version pairs. The differences were three previously untagged packages managed through the manifest, two
+initial-version policies, and one commit-type mapping. It also selected six to eight additional packages per release
+whose pending work had not been included in that release PR.
 
-On conventional-changelog (released by lerna in independent mode, replayed without dependency edges configured),
-every package dispat planned matched the released version exactly. The remainder is precisely lerna's implicit
-dependent cascade, now measured rather than asserted. The fifth replayed release diverges wholesale. The repository's
-own history explains why: a documented manual force release after a publication error.
+For `conventional-changelog`, released with Lerna independent mode, every package dispat selected in the matching
+replays had the released version. The replay did not configure dependency edges, so Lerna's dependent cascade accounted
+for additional packages. The fifth replay diverged after a documented manual force release following a publication
+error.
+
+These results show how history, configuration, and release policy affect a replay. They do not establish that one
+tool can reproduce another tool's releases without matching those inputs.
 
 ### Planning and release time
 
@@ -179,20 +154,27 @@ read the ratio and why the absolute seconds of one container are not the figures
 
 ### Scale and recovery growth
 
-On synthetic layered workspaces, planning takes 0.6 s at 100 packages, 2.8 to 6.7 s at 1,000, and 110 to 149 s at
-10,000 packages with roughly 20,000 edges. The curve is super-linear at the top end, where per-package git subprocess
-costs dominate. A 1,000-package chain, the worst dependency depth, costs the same as the layered shape at that size.
+The recorded synthetic planning runs took:
 
-For recovery growth, the real executor ran against a local origin with failures injected in the publish script: 24
-episodes over 20- and 100-package workspaces at per-publish failure probabilities of 0.1 and 0.3. Every sequence
-converged to an empty plan in at most 5 runs against first plans of up to 45 packages. Blocked dependents reappeared
-at their originally planned versions.
+| Workspace size | Observed planning time |
+| --- | --- |
+| 100 packages | 0.6 seconds |
+| 1,000 packages | 2.8–6.7 seconds |
+| 10,000 packages, roughly 20,000 edges | 110–149 seconds |
+
+At the largest size, per-package Git subprocess costs dominated and growth was super-linear. A 1,000-package chain
+had a similar cost to the layered graph at that size. These measurements describe the test environment; they are not
+a timing guarantee for another repository or machine.
+
+The recovery campaign ran 24 episodes with 20- and 100-package workspaces and per-publication failure probabilities
+of 0.1 and 0.3. Each sequence reached an empty plan within five runs, starting with plans of up to 45 packages. Blocked
+consumers returned at the versions planned for them under those unchanged inputs.
 
 ## Two runs at once
 
-One more difference does not need an experiment to state. dispat's mutual exclusion between concurrent runs needs no
-lock service. A run pushes a reserved annotated tag to each participating git remote before planning. Normal cleanup
-deletes the owned locks; an uncertain authorized worker publication can retain one for operator recovery. The remote's
-compare-and-swap on tag creation makes the loser's push fail before it plans against the same records. The
-[release lock](./reference/releasing/release-lock.md) page describes it. The failure model behind all of this is the
-subject of [Recovering from a failed run](./reference/releasing/recovery.md).
+dispat also coordinates concurrent runs through Git. Before planning, it claims a reserved annotated lock tag on each
+participating remote. If another run owns a required lock, the new run stops rather than planning a competing release.
+
+Normal cleanup removes the locks the run owns. If an authorized worker may still be publishing and its outcome is
+uncertain, a lock can remain for operator recovery. See [The release lock](./reference/releasing/release-lock.md) for
+that procedure and [Recovery](./reference/releasing/recovery.md) for partially completed releases.

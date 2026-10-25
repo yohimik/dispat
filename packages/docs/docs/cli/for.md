@@ -1,29 +1,24 @@
 # The for command
 
-`dispat for` runs a script once for each item of a list. It is the shell's own
-`for x in ...; do ...; done`, spelled so that it means the same thing under
-every shell your configuration names. The list is a set of words you type, the
-packages, spaces or versioning groups you select, or the packages that changed.
+Use `dispat for` to run a shell command once per item. Supply the items yourself,
+select packages, spaces, or versioning groups, or ask for changed packages.
+dispat handles the loop; your configured shell runs the command for each item.
 
-Everything dispat runs is a shell command. A loop written inside one is the
-first thing that breaks when the `shell` setting moves, because the loop syntax
-belongs to the shell rather than to dispat.
+A shell loop depends on the shell's syntax. For example:
 
 ```sh
 for pkg in core web api; do npm publish "$pkg"; done
 ```
 
-That line runs under `sh` and `bash`. It does not run under `cmd /C`, and it
-does not survive being pasted into a JSON config file without care. The same
-work as a dispat loop reads:
+That loop works in `sh` and `bash`, but not in `cmd /C`. With dispat handling
+the iteration, the command becomes:
 
 ```sh
 dispat for core web api --do 'npm publish "$DISPAT_ITEM"'
 ```
 
-dispat splits nothing and interprets nothing. Each item is one argument, and
-each `--do` script is one shell string, run through the shell your config
-names.
+Each positional item is one argument. Each `--do` value is a shell command;
+its quoting and variable syntax still need to match the shell that runs it.
 
 ## Which command do I want
 
@@ -49,8 +44,7 @@ or when the list is not packages at all.
 
 ## Where the list comes from
 
-A loop takes exactly one source. Two sources would leave one of the lists
-silently unvisited, so naming two is a usage error.
+Choose one source for the list. Combining sources is a usage error.
 
 ```
 dispat for <item>...          --do <script>
@@ -72,10 +66,9 @@ dispat for --since <rev>      [--consumers] [-p|-s|-g <globs>] --do <script>
 | `--unchanged`         | the packages `--changed` leaves out, in dependency order         |
 | `--since <rev>`       | `--changed --since <rev>`, spelled as [`dispat run`](./run.md) spells it |
 
-The `-s` and `-g` sources iterate over the spaces and the groups themselves,
-not over the packages inside them. A loop over the three packages of a space is
-not the job a loop over the space is, and `--since all -s libs` is how you ask
-for the first: the window that selects every package, narrowed to the space.
+On their own, `-s` and `-g` produce one item per space or group. To visit the
+packages inside a space, use `--since all -s libs`: select all packages, then
+filter them to `libs`.
 
 In a fleet, a space loop visits each repository's matching space separately.
 Equal names keep separate primary folders in `DISPAT_DIR`; their scripts and
@@ -165,9 +158,8 @@ The publish runs only if the build succeeded, for each item on its own.
 
 ## Failure and exit codes
 
-The loop is sequential. A shell's `for` runs one body at a time, a script
-written against one is entitled to assume it, and concurrency over a selection
-is what [`dispat run`](./run.md) already is.
+Items run one at a time. Use [`dispat run`](./run.md) when you need declared
+package scripts scheduled concurrently in dependency order.
 
 The first failing item ends the loop, and its exit code becomes the command's.
 This keeps the loop transparent in a pipeline.
@@ -209,8 +201,8 @@ $ echo $?
 0
 ```
 
-Pass `--require-items` when the list holding something was the point. An empty
-iteration then exits `1` instead, which is the CI gate.
+Pass `--require-items` when an empty list should fail the command, such as a CI
+check that must find work. It changes the empty-list exit code to `1`.
 
 ```sh
 dispat for --changed --require-items --do 'dispat exec smoke --for "pkg:$DISPAT_ITEM"'
@@ -221,9 +213,9 @@ flag. A loop that quietly ran zero times is how a typo hides.
 
 ## Changed and unchanged packages
 
-The `--changed` source covers what a release would cover. It is the same
-window, filter and consumer expansion every sweeping command uses, so a loop
-and the run it accompanies never disagree about what changed.
+Use `--changed` to visit packages with pending changes. It uses the release
+window by default, or the revision you pass with `--since`. Selection flags
+narrow the resulting list.
 
 ```sh
 dispat for --changed --since origin/main --do 'echo "$DISPAT_ITEM changed"'
@@ -242,8 +234,8 @@ covers the repository between them.
 dispat for --unchanged --do 'echo "$DISPAT_ITEM is up to date"'
 ```
 
-This is the half a sweep never reaches, which is where a staleness report, a
-coverage check or a nightly rebuild belongs.
+Use `--unchanged` for a staleness report, coverage check, or rebuild of packages
+that have no pending changes.
 
 ## What it costs
 
@@ -257,9 +249,8 @@ because which packages exist is a question about the monorepo. The `--changed`,
 `--unchanged` and `--since` sources read the git repository as well, and cost
 what [`dispat status`](./status.md) costs.
 
-Once the config file is read, the loop body runs through the shell your config
-names rather than through `/bin/sh -c`. That is the whole point of the command:
-one loop, one meaning, whichever shell the repository builds with.
+When the command reads a configuration, it uses the configured shell for each
+iteration. Otherwise it uses `/bin/sh -c`.
 
 ## Flags
 

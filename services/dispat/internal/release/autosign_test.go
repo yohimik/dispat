@@ -108,8 +108,8 @@ func TestSignStageAbsentWithoutConfiguration(t *testing.T) {
 		"stage.started:publish", "stage.succeeded:publish",
 		"package.published:",
 	}, obs.forPackage("a"))
-	assert.False(t, hasSignTask(p.Releases["a"]))
-	assert.Equal(t, taskVersion, resolveFirstTask(p.Releases["a"]))
+	assert.False(t, hasSignStage(p.Releases["a"].Pkg.Space))
+	assert.Equal(t, taskVersion, newStagePlan(p.Releases["a"]).sources()[0].kind)
 }
 
 // TestSignStageFromOneHook: a hook alone gives a package a sign stage, so a
@@ -127,7 +127,9 @@ func TestSignStageFromOneHook(t *testing.T) {
 	assert.Less(t, r.indexOf("h-all a"), r.indexOf("h-ps a"))
 	assert.Less(t, r.indexOf("h-ps a"), r.indexOf("build a"))
 	assert.Equal(t, 1, r.countPrefix("h-all"))
-	assert.Equal(t, taskSign, resolveFirstTask(p.Releases["a"]))
+	planned := newStagePlan(p.Releases["a"])
+	assert.Equal(t, taskBeforeAll, planned.beforeAll.kind, "beforeAll runs as the task before the sign stage")
+	assert.Equal(t, []task{{"a", taskSign, ""}}, planned.sources())
 }
 
 // overlapRunner measures how many of the watched commands run at once, across

@@ -1,8 +1,8 @@
 # Unreal Engine
 
-An Unreal plugin stores its version in its `.uplugin` file. A project keeps its version in `Config/DefaultGame.ini`,
-and the Android store fields live in `Config/DefaultEngine.ini`. dispat reads and writes all of these files, and it
-reads the plugin graph declared by a `.uproject`.
+This guide covers Unreal's version and dependency files. Plugins use `.uplugin`; projects use
+`Config/DefaultGame.ini`; Android store fields live in `Config/DefaultEngine.ini`. dispat can update these files and
+read plugin dependencies from `.uproject`. Keep packaging, compatibility tests and publication in your native scripts.
 
 ## The short version
 
@@ -17,8 +17,9 @@ Treat a repository of plugins as a standard workspace. Define your packages in `
 }
 ```
 
-Place each `.uplugin` directly in its package folder so the default manifest scope finds it. Commit your changes and
-run `dispat` to bump the versions.
+Place each `.uplugin` directly in its package folder so the default manifest scope finds it. The fragment above
+configures version updates; add build and publish commands before using it to distribute plugin archives. A feature
+commit produces this version change:
 
 ```console
 $ git commit -m "feat(acmenet): reliable RPC batching"
@@ -69,9 +70,9 @@ already formats the version as a string, dispat keeps that shape. It avoids refo
 }
 ```
 
-A project descriptor declares no version of its own. It declares which plugins it enables, and dispat treats these as
-dependency edges. Release `AcmeNet` first, then release the project that uses it, which `dispat compute` suggests
-automatically.
+A project descriptor has no version of its own. Its plugin declarations supply dependency edges that
+`dispat compute` can propose. They order the project after `AcmeNet`; request propagation when a plugin change should
+also trigger a project release.
 
 ### `Config/DefaultGame.ini` and `Config/DefaultEngine.ini`
 
@@ -96,7 +97,7 @@ that exact text. Normalising the text would cause disagreements with the engine.
 Put both files inside a `Config/` folder so dispat recognises them. A `DefaultEngine.ini` anywhere else acts as
 configuration, not a manifest.
 
-## Plugins have no versions, and that is fine
+## Plugin references have no versions {#plugins-have-no-versions-and-that-is-fine}
 
 An Unreal descriptor names a plugin and stops there:
 
@@ -113,9 +114,8 @@ Server.uproject
 1 manifest(s): 0 applied, 1 skipped, 0 missing
 ```
 
-A skipped dependency exists but carries no version text for a writer to change. A missing dependency means the file
-does not declare it at all, creating a disagreement that fails a `--strict` run. Every healthy Unreal descriptor stays
-permanently in the skipped state, so warnings here would create noise.
+A skipped dependency is declared but has no version text to change. A missing dependency is not declared at all and
+fails a `--strict` run. For Unreal plugin references, skipped is the expected result.
 
 A disabled plugin remains declared and still acts as a dependency edge. A build that turns the plugin back on requires
 a released version.
@@ -148,12 +148,6 @@ alone.
 The `Binaries`, `Intermediate`, `Saved`, and `DerivedDataCache` folders hold generated copies of the descriptors.
 dispat never descends into any of them.
 
-## Where to go next
-
-- Read [From one package to many](./one-to-many.md) for a repository that grows past one project.
-- Check [Unity](./unity.md) and [Godot](./godot.md) for other game engines.
-- Use [compute](../cli/compute.md) to turn the plugin graph into configuration.
-
 ## Test the packaged plugin
 
 Check the native library inventory inside each engine/platform archive, then install that archive into a clean test
@@ -179,3 +173,9 @@ does not validate the stated minimum.
 
 Keep this compatibility build in the native scripts before publishing each plugin archive. dispat can update its
 version fields and order the stages; engine API compatibility still needs the actual engine/compiler check.
+
+## Where to go next
+
+- Read [From one package to many](./one-to-many.md) for a repository that grows past one project.
+- Check [Unity](./unity.md) and [Godot](./godot.md) for other game engines.
+- Use [compute](../cli/compute.md) to turn the plugin graph into configuration.

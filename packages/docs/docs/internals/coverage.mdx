@@ -6,16 +6,18 @@ import {CoverageSummary, CoverageTable, ReportStamp} from '@site/src/components/
 
 <CoverageSummary />
 
-Every number on this page comes from a coverage profile. Module tests produce the unit profiles. Integration
-coverage comes from two sources: real CLI processes running against disposable repositories, and public API scenarios
-that combine parsing, configuration, scanning, and rewriting. The measured production scope includes the CLI and all
-six current public Go modules. The current CCME module has its own public API driver because the CLI still uses the
-previous major version internally.
+The report measures statement coverage for the CLI and all six current public Go modules. Unit profiles come from
+module tests. Integration profiles come from CLI runs against disposable repositories and public API scenarios that
+combine parsing, configuration, scanning, and rewriting. The current CCME module uses its own public API driver
+because the CLI still depends on the previous major version internally.
 
-The report keeps unit, integration, and combined coverage separate. Combined coverage counts each statement once and
-marks it covered when either layer reaches it. It supplies the README badge. The integration gate uses only the
-integration profiles; unit tests cannot satisfy it. A stable release of the measured modules requires both integration
-and combined coverage to reach 95%. A release candidate publishes its figures without that minimum.
+## Reading the totals
+
+Unit and integration coverage are reported separately. Combined coverage counts a statement once if either layer
+executes it, and supplies the README badge.
+
+A stable release requires both integration and combined coverage to reach 95%. Unit tests cannot satisfy the
+integration gate. Release candidates publish their figures without that minimum.
 
 Before calculating a total, the report checks that every expected module and production block is present and that
 profile provenance matches the run. Missing profiles, mixed revisions, and omitted subpackages fail the report rather
@@ -43,7 +45,7 @@ The per-package test inventory (what each package's suite actually asserts) is i
 
 ## Reproducing
 
-The whole measurement is three commands from the monorepo root, and they are the ones the release workflow runs:
+Run these commands from the monorepo root to collect the same reports as the release workflow:
 
 ```sh
 dispat run tests --since all   # every module's profile and go test -json log, into coverage/
@@ -53,9 +55,8 @@ dispat exec test-report        # writes packages/docs/data/report.json, read by 
 
 Every one of them is a build of `Dockerfile.gotest`, so none needs a Go toolchain on the machine running it.
 
-`--since all` is not optional. A run selected by a `--since` window tests part of the monorepo, so a total from it
-would be a number about whichever packages happened to change. That is why the badge is computed by the release
-workflow rather than by the per-commit test workflow.
+Use `--since all` to include every module. A narrower window tests only selected packages and cannot produce a complete
+repository total. The release workflow calculates the badge; the per-commit test workflow does not.
 
 Rebuilding this site with `packages/docs/data/report.json` in place is what puts the figures back on the page; without
 one, the prose stays and the tables are left out.

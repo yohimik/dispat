@@ -1,7 +1,6 @@
 # dispat in CI
 
-dispat is a release tool. You will nearly always run it on a CI runner. Choose an installation method based on
-where your pipeline runs:
+Choose how to install dispat on your CI runner, then configure the job to fetch history and push release records:
 
 | You are on | Use |
 |---|---|
@@ -78,10 +77,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-Set up your stage scripts in steps before this one. If your scripts shell out to `node`, `go`, `cargo`, or `docker`,
-you must install those tools first. dispat itself needs only `git` and a POSIX shell. A runner that needs several of
-them can install them with dispat as well: a list of pinned `dispat install` lines is a shell script, and it is safe to
-run on every boot. See [Install manifests as shell scripts](../cli/install.md#install-manifests-as-shell-scripts).
+Install the tools your stage scripts call, such as `node`, `go`, `cargo`, or `docker`, before the release step.
+dispat itself needs only `git` and a POSIX shell. You can also install tools with pinned `dispat install` commands. See [Install manifests as shell scripts](../cli/install.md#install-manifests-as-shell-scripts).
 
 Grant `contents: write` even for a job that pushes nothing. The run claims the repository with a
 [release lock](../reference/releasing/release-lock.md) tag on the remote before it plans. This refuses a second job
@@ -92,200 +89,40 @@ without them is refused with `E196`: the remote holds release records the checko
 would publish a released version again. The run reads the remote's records under its lock and says which tag is
 missing; the remedy is `git fetch --tags` in the job, because dispat refuses rather than refreshing what it plans from.
 
-## Worker nodes in a pipeline
+## npm in Node pipelines
 
-A release that spreads its builds over [worker nodes](../distributed-execution.md) needs those nodes running while
-it runs. On a hosted CI service that is a second job: the workers start, the release job dispatches to them, and the
-workers end themselves when the work dries up.
-
-```yaml
-name: Release
-on: workflow_dispatch
-
-permissions:
-  contents: write
-
-jobs:
-  workers:
-    strategy:
-      matrix:
-        node: [build-a, build-b]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: yohimik/dispat@v1
-      - run: dispat worker --config .dispat/${{ matrix.node }}.yaml --idle-timeout 900
-        env:
-          DISPAT_EXECUTION_SECRET: ${{ secrets.DISPAT_EXECUTION_SECRET }}
-
-  release:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: yohimik/dispat@v1
-      - run: dispat --log-format json
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DISPAT_EXECUTION_SECRET: ${{ secrets.DISPAT_EXECUTION_SECRET }}
-```
-
-Five details make this work:
-
-- **Both jobs reach the repository being released and hold the same signing secret.** The release job's
-  `execution` object lists `build-a` and `build-b` by name alone, so their coordination branches go to the remote the
-  release takes its lock on; each worker's file names itself and that repository as its endpoint. A job that creates
-  its workers with names the committed file cannot know passes them as `--worker name` instead.
-- **A hosted runner needs no inbound network.** The transport is Git only: a worker polls the repository and pushes
-  its answers back, so it serves from behind NAT with no port open and no address to reach it at.
-- **A worker's Git credential writes coordination branches and nothing else.** The worker jobs reach the repository
-  with the credential their checkout persisted, and the host's branch and tag rules are what keep it from release
-  branches, release tags and the lock tag. A job token is the same identity in every job of a workflow, so those rules
-  cannot tell a worker job from the release job; give the workers a credential of their own, as
-  [a machine the job creates for itself](#a-machine-the-job-creates-for-itself) does, when the rules have to.
-- **The jobs start in parallel.** The release job plans, then probes every configured worker within
-  `execution.timeouts.preflight`, so raise that timeout to cover a runner starting up and pulling its image. A node
-  that has not answered by then fails the release with `E225`, before anything is dispatched.
-- **`--idle-timeout` ends the worker jobs.** They exit `0` once the release is over, so the workflow finishes without
-  a step that cancels them.
-
-The workers need whatever their build commands call, and the secrets those commands read from the environment: a
-value written as `$NPM_TOKEN` in `env` travels as that reference and is expanded on the node. Keep publishing
-credentials off them unless a publish is deliberately delegated, and read
-[the security section](../distributed-execution.md#security-what-distributed-execution-exposes-and-how-to-contain-it)
-before one secret spans machines of different trust levels.
-
-[Worker nodes on Kubernetes](../examples/kubernetes-workers.md) is the same arrangement as an Indexed Job, for a
-cluster that adds and removes machines for the pool.
-
-### A machine the job creates for itself
-
-A job can also be its own pool: create a machine, start a worker on it, run, and delete the machine before the job
-ends. dispat's own release does this for its full suite. The job that runs `dispat run tests --since all` before a
-release creates one Compute Engine instance, starts `dispat worker` on it with a signing secret generated for that run
-alone, and names the machine on the command line by name alone:
+Add `@dispat/bin` to the project's development dependencies and commit its lockfile. Set up a supported Node
+version (`^20.17.0 || >=22.9.0`), then install and run the locked tool:
 
 ```sh
-dispat run tests --since all --worker "ci-worker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+npm ci
+npm exec -- dispat status
+# In the reviewed release job:
+npm exec -- dispat --log-format json
 ```
 
-The link states no endpoint, so the machine's coordination branches go to the repository itself: the job reaches it
-with the credential its checkout persisted, which the job's `contents: write` already covers. The worker needs a
-credential of its own, and it is not the job's `GITHUB_TOKEN`, which can push the release branch and its tags. The job
-mints an installation token of a GitHub App for the run with
-[`actions/create-github-app-token`](https://github.com/actions/create-github-app-token), once the machine exists so
-that the token's hour covers the suite, and the action revokes it when the job ends. The App is configured by a
-repository variable, `CI_WORKER_APP_CLIENT_ID`, and a secret, `CI_WORKER_APP_PRIVATE_KEY`; without them the suite runs
-on the runner alone and the job says so with a warning. The host's rules are what confine that token: give the App's
-identity the right to create and delete `dispat-worker-*` branches and keep it out of the rules' bypass list for the
-release branch, the release tags and the lock tag.
+The install step needs HTTPS access to GitHub release assets in addition to the npm registry. The package carries
+an exact native version and digest, so installation does not resolve `latest` or call the GitHub API. An npm-only
+patch can carry the same binary as its predecessor. Keep npm upgrades in the dependency-update workflow.
 
-The script that does the rest is
-[`scripts/ci-worker.sh`](https://github.com/yohimik/dispat/blob/main/scripts/ci-worker.sh): it keeps an ephemeral ssh
-key pair, learns the instance's host keys from the cloud API rather than from the network, sends the signing secret,
-the token, the repository URL and the commit over ssh into files only the worker's user reads rather than through
-instance metadata, and starts the worker from a launcher that hands Git the token as an `http.<url>.extraheader` scoped
-to this repository's https URL, so the header is sent to no other URL of the host. It deletes the instance in an
-`always()` step, with a lifetime on the instance itself as the backstop for a job that never reaches that step, and
-then deletes any coordination branch of the run's node the sweep could not close, with the job's own credential. The
-machine shares the job's build cache: the script hands it the job's Actions cache credentials over ssh and gives it a
-`docker-container` builder, so a gate placed there replays the layers the runner cached instead of rebuilding them. The
-sweep's test profiles come back to the job through `runOutputs`, so the coverage gate that follows reads them where a
-local run would have left them.
-
-A snapshot of the checkout travels through the repository, and a snapshot carries every untracked file Git does not
-ignore, so the job refuses to start the suite while `git status` shows one, and the credential file the Google Cloud
-authentication step writes into the workspace is ignored. Two risks remain, and both are accepted rather than
-closed. A task's commands inherit the worker's environment, so a test on the machine can read the token as it can
-already read the Actions cache credentials. And `contents: write` also lets the token edit GitHub Releases, which
-branch and tag rules do not cover.
-
-What that release measures on every run, and what it asks of the account it runs as, is in
-[the release workflow](https://github.com/yohimik/dispat/blob/main/.github/workflows/release.yml) and
-[`infra/ci.tf`](https://github.com/yohimik/dispat/blob/main/infra/ci.tf): the identity needs to create, read and
-delete instances, and nothing else, because the instance carries no service account of its own.
-
-## Gating a pipeline on the plan
-
-A repository with nothing pending releases nothing and exits `0`. This keeps your pipeline green when a merge only
-contains a `docs:` commit. But a stage whose *point* is that something shipped needs the opposite. A deploy, an
-announcement, or a downstream trigger will deploy nothing if it passes quietly on an empty plan.
-
-Pass `--require-release` to gate these steps. The `release` and `status` commands exit `3` when the plan releases
-nothing. This gives you a dedicated code separate from exit `1` failures:
+If CI disables installation scripts, or npm 12 has no project approval for this package, invoke the installer
+explicitly before running the CLI:
 
 ```sh
-dispat status --require-release    # 0 releasing, 3 nothing to release, 1 something is wrong
+npm ci --ignore-scripts
+npm explore @dispat/bin -- node build/bin/postinstall.js
+npm exec -- dispat status
 ```
 
-Only packages the run will actually publish count. A package held by `Release-As: none` gets no version this run. A
-package [withheld until its providers release](./releasing/partial-releases.md) or excluded by your
-`--package`/`--space`/`--group` selection also counts as "not releasing".
+For pnpm, retain the workspace's script-approval policy or invoke the same packaged installer after installation.
+Do not enable every dependency's scripts just to repair this package. Keep registry credentials in the CI secret
+store; installing the public binary requires no GitHub token. See [the npm monorepo example](../examples/npm.md)
+for build and publication stages.
 
-The simplest pipeline uses one job that decides and one that acts:
-
-```yaml
-jobs:
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      releasing: ${{ steps.plan.outputs.releasing }}
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: yohimik/dispat@v1
-      - id: plan
-        run: |
-          rc=0
-          dispat status --require-release --log-format json || rc=$?
-          case "$rc" in
-            0) echo "releasing=true" >> "$GITHUB_OUTPUT" ;;
-            3) echo "releasing=false" >> "$GITHUB_OUTPUT" ;;
-            *) exit "$rc" ;;
-          esac
-
-  release:
-    needs: plan
-    if: needs.plan.outputs.releasing == 'true'
-    runs-on: ubuntu-latest
-    # ... the release job above
-```
-
-Run `status` as often as you like. It takes no lock and writes nothing. On `release`, dispat answers the flag before it
-takes the [release lock](./releasing/release-lock.md) and before `beforeAll` runs. This means
-`dispat --require-release` in a single-job pipeline refuses the run without claiming the repository or executing your
-scripts.
-
-Capture and map the exit code in your shell script. Running it bare with `set -e` would end the job on `3` before you
-can read the answer. Use a `case` statement rather than an `if` statement. An `if` statement folds every nonzero code
-together, so a broken configuration would look like "nothing to release" and skip the job instead of failing. Exit `3`
-means nothing released, while everything else is a real failure. Use the bare form only when a step *should* fail the
-pipeline when nothing releases.
-
-## Gating a step on what changed
-
-Use [`dispat if --changed`](../cli/if.md#changed-packages) to gate one step inside a script. This uses the same
-selection `dispat run` covers packages by, while `--require-release` gates a whole job. You can build the docs in a PR
-pipeline only when the docs changed:
-
-```sh
-dispat if --changed -p docs --consumers --since origin/main --then 'dispat run build-docs'
-```
-
-The condition holds when changes reach the selection. It runs the `--then` script and passes the exit code through. It
-runs nothing and exits `0` when nothing relevant changed, keeping the step green. You need `fetch-depth: 0` to count
-changes against a branch base.
-
-File tests gate on artifacts the same way, with no repository involved. You can require a test report before deploying
-the docs:
-
-```sh
-dispat if -f packages/docs/data/report.json \
-  --then 'dispat run deploy-docs' \
-  --else 'echo "no test report; run the test job first" >&2; exit 1'
-```
-
+When a dispat publish script manages npm dist-tags, map `stable` to `latest` and use the planned prerelease channel
+for prerelease versions. Fail the publish when a prerelease version has no prerelease channel instead of allowing it
+to become `latest`. Compare complete semantic versions before retaining or moving an existing tag; numeric
+prerelease identifiers use numeric order, so `rc.10` follows `rc.2`.
 ## The container images
 
 Choose from four images on `linux/amd64` and `linux/arm64`:
@@ -297,8 +134,8 @@ Choose from four images on `linux/amd64` and `linux/arm64`:
 | `yohimik/dispat-debian` | `debian` | 69 MB |
 | `yohimik/dispat-dind` | `docker:dind` | 142 MB |
 
-Each image carries the CLI, `git`, CA certificates, an SSH client and `tzdata`. Add your pipeline's toolchain yourself.
-Every extra package in a base image is one more thing to patch.
+Each image includes the CLI, `git`, CA certificates, an SSH client, and `tzdata`. Add the tools required by your
+pipeline.
 
 ```yaml
 # GitLab CI
@@ -341,8 +178,7 @@ Change the image tag instead. The images set `DISPAT_UPDATE_CHECK=0` to disable 
 
 ## The install script
 
-The container images use this install script. It is the same script [Getting started](../getting-started.md#install)
-hands to a human:
+Use the same [install script](../getting-started.md#install) for a runner or a custom container image:
 
 ```sh title="With curl"
 curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh
@@ -429,14 +265,10 @@ rather than set by a flag, so `GITHUB_TOKEN` alone is deliberately not sent to i
 
 ## Git credentials on the runner
 
-dispat drives the `git` on the runner's `PATH` and hands it the environment the job already has. It does not set
-`GIT_TERMINAL_PROMPT` for you. A local run is a place where being asked for a password is the right behaviour: a
-developer standing at the terminal can answer, and answering no on their behalf would turn an answerable question into
-a failure.
+dispat uses the `git` on the runner's `PATH` and inherits the job's environment. It does not set
+`GIT_TERMINAL_PROMPT`, so Git can still ask for credentials during an interactive local run.
 
-A runner is the opposite case. Nobody is there to answer, so a fetch or a push against a remote whose credential is
-missing or expired waits for input that never arrives. dispat bounds its own waits; it does not bound git's prompt.
-Set the variable in the job:
+In CI, disable those prompts. Otherwise a missing or expired credential can leave Git waiting until the job times out:
 
 ```yaml
 env:
@@ -447,42 +279,198 @@ An unauthenticated remote then fails immediately and the job reports which crede
 until the pipeline's own timeout. If the runner image ships a graphical credential helper, set `GIT_ASKPASS` to an
 empty value as well, so the helper cannot answer the prompt with a dialog nobody will see.
 
+## Gating a pipeline on the plan
+
+An empty release plan normally exits `0`, which is useful when a merge contains no releasable changes. If a later
+stage should deploy, announce, or trigger another job only when a release is planned, check for pending work first.
+
+Pass `--require-release` to gate these steps. The `release` and `status` commands exit `3` when the plan releases
+nothing. This gives you a dedicated code separate from exit `1` failures:
+
+```sh
+dispat status --require-release    # 0 releasing, 3 nothing to release, 1 something is wrong
+```
+
+Only packages the run will actually publish count. A package held by `Release-As: none` gets no version this run. A
+package [withheld until its providers release](./releasing/partial-releases.md) or excluded by your
+`--package`/`--space`/`--group` selection also counts as "not releasing".
+
+The simplest pipeline uses one job that decides and one that acts:
+
+```yaml
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      releasing: ${{ steps.plan.outputs.releasing }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: yohimik/dispat@v1
+      - id: plan
+        run: |
+          rc=0
+          dispat status --require-release --log-format json || rc=$?
+          case "$rc" in
+            0) echo "releasing=true" >> "$GITHUB_OUTPUT" ;;
+            3) echo "releasing=false" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$rc" ;;
+          esac
+
+  release:
+    needs: plan
+    if: needs.plan.outputs.releasing == 'true'
+    runs-on: ubuntu-latest
+    # ... the release job above
+```
+
+`status` takes no lock and writes nothing. `release` takes the [release lock](./releasing/release-lock.md) before
+planning, then checks `--require-release` before `beforeAll`. An empty plan therefore takes and releases the lock
+without executing stage scripts. Use `dispat status --require-release` for a check that never claims the repository.
+
+Capture and map the exit code in your shell script. Running it bare with `set -e` would end the job on `3` before you
+can read the answer. Use a `case` statement rather than an `if` statement. An `if` statement folds every nonzero code
+together, so a broken configuration would look like "nothing to release" and skip the job instead of failing. Exit `3`
+means nothing released, while everything else is a real failure. Use the bare form only when a step *should* fail the
+pipeline when nothing releases.
+
+## Gating a step on what changed
+
+Use [`dispat if --changed`](../cli/if.md#changed-packages) to gate one step inside a script. This uses the same
+selection `dispat run` covers packages by, while `--require-release` gates a whole job. You can build the docs in a PR
+pipeline only when the docs changed:
+
+```sh
+dispat if --changed -p docs --consumers --since origin/main --then 'dispat run build-docs'
+```
+
+The condition holds when changes reach the selection. It runs the `--then` script and passes the exit code through. It
+runs nothing and exits `0` when nothing relevant changed, keeping the step green. You need `fetch-depth: 0` to count
+changes against a branch base.
+
+File tests gate on artifacts the same way, with no repository involved. You can require a test report before deploying
+the docs:
+
+```sh
+dispat if -f packages/docs/data/report.json \
+  --then 'dispat run deploy-docs' \
+  --else 'echo "no test report; run the test job first" >&2; exit 1'
+```
+
+## Worker nodes in a pipeline
+
+For [distributed builds](../distributed-execution.md), start workers in parallel with the release job. The release
+job assigns tasks to them, and an idle timeout stops the worker jobs after the work finishes.
+
+```yaml
+name: Release
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  workers:
+    strategy:
+      matrix:
+        node: [build-a, build-b]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: yohimik/dispat@v1
+      - run: dispat worker --config .dispat/${{ matrix.node }}.yaml --idle-timeout 900
+        env:
+          DISPAT_EXECUTION_SECRET: ${{ secrets.DISPAT_EXECUTION_SECRET }}
+
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: yohimik/dispat@v1
+      - run: dispat --log-format json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPAT_EXECUTION_SECRET: ${{ secrets.DISPAT_EXECUTION_SECRET }}
+```
+
+The worker and release jobs need to agree on these settings:
+
+- **Both jobs reach the repository being released and hold the same signing secret.** The release job's
+  `execution` object lists `build-a` and `build-b` by name alone, so their coordination branches go to the remote the
+  release takes its lock on; each worker's file names itself and that repository as its endpoint. A job that creates
+  its workers with names the committed file cannot know passes them as `--worker name` instead.
+- **A hosted runner needs no inbound network.** The transport is Git only: a worker polls the repository and pushes
+  its answers back, so it serves from behind NAT with no port open and no address to reach it at.
+- **A worker's Git credential writes coordination branches and nothing else.** The worker jobs reach the repository
+  with the credential their checkout persisted, and the host's branch and tag rules are what keep it from release
+  branches, release tags and the lock tag. A job token is the same identity in every job of a workflow, so those rules
+  cannot tell a worker job from the release job; give the workers a credential of their own, as
+  [a machine the job creates for itself](#a-machine-the-job-creates-for-itself) does, when the rules have to.
+- **The jobs start in parallel.** The release job plans, then probes every configured worker within
+  `execution.timeouts.preflight`, so raise that timeout to cover a runner starting up and pulling its image. A node
+  that has not answered by then fails the release with `E225`, before anything is dispatched.
+- **`--idle-timeout` ends the worker jobs.** They exit `0` once the release is over, so the workflow finishes without
+  a step that cancels them.
+
+The workers need whatever their build commands call, and the secrets those commands read from the environment: a
+value written as `$NPM_TOKEN` in `env` travels as that reference and is expanded on the node. Keep publishing
+credentials off them unless a publish is deliberately delegated, and read
+[the security section](../distributed-execution.md#security-what-distributed-execution-exposes-and-how-to-contain-it)
+before one secret spans machines of different trust levels.
+
+[Worker nodes on Kubernetes](../examples/kubernetes-workers.md) is the same arrangement as an Indexed Job, for a
+cluster that adds and removes machines for the pool.
+
+### A machine the job creates for itself
+
+A job can create a worker machine for one run and remove it afterwards. dispat's own release uses this approach for
+its full test suite. The job that runs `dispat run tests --since all` before a
+release creates one Compute Engine instance, starts `dispat worker` on it with a signing secret generated for that run
+alone, and names the machine on the command line by name alone:
+
+```sh
+dispat run tests --since all --worker "ci-worker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+```
+
+The link states no endpoint, so the machine's coordination branches go to the repository itself: the job reaches it
+with the credential its checkout persisted, which the job's `contents: write` already covers. The worker needs a
+credential of its own, and it is not the job's `GITHUB_TOKEN`, which can push the release branch and its tags. The job
+mints an installation token of a GitHub App for the run with
+[`actions/create-github-app-token`](https://github.com/actions/create-github-app-token), once the machine exists so
+that the token's hour covers the suite, and the action revokes it when the job ends. The App is configured by a
+repository variable, `CI_WORKER_APP_CLIENT_ID`, and a secret, `CI_WORKER_APP_PRIVATE_KEY`; without them the suite runs
+on the runner alone and the job says so with a warning. The host's rules are what confine that token: give the App's
+identity the right to create and delete `dispat-worker-*` branches and keep it out of the rules' bypass list for the
+release branch, the release tags and the lock tag.
+
+The script that does the rest is
+[`scripts/ci-worker.sh`](https://github.com/yohimik/dispat/blob/main/scripts/ci-worker.sh): it keeps an ephemeral ssh
+key pair, learns the instance's host keys from the cloud API rather than from the network, sends the signing secret,
+the token, the repository URL and the commit over ssh into files only the worker's user reads rather than through
+instance metadata, and starts the worker from a launcher that hands Git the token as an `http.<url>.extraheader` scoped
+to this repository's https URL, so the header is sent to no other URL of the host. It deletes the instance in an
+`always()` step, with a lifetime on the instance itself as the backstop for a job that never reaches that step, and
+then deletes any coordination branch of the run's node the sweep could not close, with the job's own credential. The
+machine shares the job's build cache: the script hands it the job's Actions cache credentials over ssh and gives it a
+`docker-container` builder, so a gate placed there replays the layers the runner cached instead of rebuilding them. The
+sweep's test profiles come back to the job through `runOutputs`, so the coverage gate that follows reads them where a
+local run would have left them.
+
+A snapshot of the checkout travels through the repository, and a snapshot carries every untracked file Git does not
+ignore, so the job refuses to start the suite while `git status` shows one, and the credential file the Google Cloud
+authentication step writes into the workspace is ignored. Two risks remain, and both are accepted rather than
+closed. A task's commands inherit the worker's environment, so a test on the machine can read the token as it can
+already read the Actions cache credentials. And `contents: write` also lets the token edit GitHub Releases, which
+branch and tag rules do not cover.
+
+What that release measures on every run, and what it asks of the account it runs as, is in
+[the release workflow](https://github.com/yohimik/dispat/blob/main/.github/workflows/release.yml) and
+[`infra/ci.tf`](https://github.com/yohimik/dispat/blob/main/infra/ci.tf): the identity needs to create, read and
+delete instances, and nothing else, because the instance carries no service account of its own.
+
 ## Somewhere other than GitHub Actions
 
 Read [The release job on other providers](./ci-providers.md) for full release jobs on GitLab CI, CircleCI, Jenkins,
 Buildkite and Azure Pipelines. That guide includes the clone settings and tokens each provider needs.
-
-## npm in Node pipelines
-
-Add `@dispat/bin` to the project's development dependencies and commit its lockfile. Set up a supported Node
-version (`^20.17.0 || >=22.9.0`), then install and run the locked tool:
-
-```sh
-npm ci
-npm exec -- dispat status
-# In the reviewed release job:
-npm exec -- dispat --log-format json
-```
-
-The install step needs HTTPS access to GitHub release assets in addition to the npm registry. The package carries
-an exact native version and digest, so installation does not resolve `latest` or call the GitHub API. An npm-only
-patch can carry the same binary as its predecessor. Keep npm upgrades in the dependency-update workflow.
-
-If CI disables installation scripts, or npm 12 has no project approval for this package, invoke the installer
-explicitly before running the CLI:
-
-```sh
-npm ci --ignore-scripts
-npm explore @dispat/bin -- node build/bin/postinstall.js
-npm exec -- dispat status
-```
-
-For pnpm, retain the workspace's script-approval policy or invoke the same packaged installer after installation.
-Do not enable every dependency's scripts just to repair this package. Keep registry credentials in the CI secret
-store; installing the public binary requires no GitHub token. See [the npm monorepo example](../examples/npm.md)
-for build and publication stages.
-
-When a dispat publish script manages npm dist-tags, map `stable` to `latest` and use the planned prerelease channel
-for prerelease versions. Fail the publish when a prerelease version has no prerelease channel instead of allowing it
-to become `latest`. Compare complete semantic versions before retaining or moving an existing tag; numeric
-prerelease identifiers use numeric order, so `rc.10` follows `rc.2`.

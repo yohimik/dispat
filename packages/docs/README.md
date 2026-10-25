@@ -41,6 +41,30 @@ Node comes from [`.nvmrc`](./.nvmrc). The root `package.json` sets pnpm in its `
 tools from these two files. You can also run any pnpm command like `pnpm start` or `pnpm build` from inside this
 folder, because pnpm finds the workspace root automatically.
 
+## Design system
+
+The site is styled as a maintainer's field manual: quiet paper and ink, pine links, thin rules, and mostly square
+edges. The shared tokens live in [`src/css/custom.css`](./src/css/custom.css): `--site-paper`, `--site-ink`,
+`--site-muted`, `--site-rule`, and `--site-wash` define both themes. Infima variables map onto them so the landing
+page and documentation share the same palette. Dark remains the default, and the theme toggle is available.
+
+Body text uses the system sans-serif stack at 16px. `--site-serif` supplies normal-weight Georgia headings;
+`--site-mono` supplies system monospace for commands and small labels. These stacks need no font download.
+Use spacing and rules to separate content; avoid decorative gradients, shadows, and floating cards. Landing-only
+layout belongs in [`src/pages/index.module.css`](./src/pages/index.module.css). Preserve focus outlines, reduced-motion
+behavior, scrollable code blocks, and the mobile sidebar's viewport sizing when changing shared styles.
+
+## Writing and organizing Next docs
+
+Edit the unreleased pages in `docs/` and their navigation in `sidebars.ts`. Group guides by what the reader is trying
+to do; keep command and configuration references available for looking up exact behavior. The FAQ groups common
+questions by setup, planning, recovery, repositories, CI, and design choices.
+
+Start a page with its purpose and the first useful action. Explain a technical term before relying on it, separate
+conditions from instructions, and keep failure or recovery limits beside the action they affect. Preserve command
+syntax, examples, and existing heading anchors when moving sections. If a heading changes, give it its previous
+explicit anchor so old links continue to work. Released snapshots have their own content and saved sidebars.
+
 ## The build is the link checker
 
 The `docusaurus.config.ts` file sets `onBrokenLinks`, `onBrokenAnchors`, and `onBrokenMarkdownLinks` to `throw`. Every

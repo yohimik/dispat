@@ -1,13 +1,15 @@
 # autoVersion
 
-Add an `autoVersion` object to let dispat keep a space's files in sync with released versions. You do not need a
-`flow.version` script. If you run one anyway, it sees the already-reconciled files.
+Use `autoVersion` to update manifest versions and dependency ranges during a release. It runs before any
+`flow.version` script, so your script sees the updated files. You do not need a script for the built-in rewriting.
 
 Write this block on a space. You can also write it at the top level to set the default for every space, or on a single
 package that needs its own rules. Everything below describes one such block. The block has a second name,
 `autoPropagate`; see [Two names for one block](#two-names-for-one-block).
 
-You can use the parsing strategy, the replacing strategy, both, or neither. They are independent.
+## Choose what to update
+
+The block offers two independent strategies. You can enable either, both, or neither.
 
 The **parsing** strategy is the default. dispat scans your package manifests, matches each declared dependency against
 the workspace, and rewrites the declaration to the provider's end-of-run version. A dependency matches by manifest
@@ -35,11 +37,12 @@ A writer never replaces an indirection with a literal. dispat skips a Maven `${p
 because the indirection is deliberate. Use `replace` or a `flow.version` script to edit the file where the number
 actually lives.
 
-Know two consequences before you turn this on. First, the reconciliation rule (§9.4 of the
-[commit specification](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md)) covers *every* workspace
-dependency, including providers released by earlier runs, so an auto-versioning space runs a version task for **every**
-releasing package even when its providers are quiet. Second, a rewriting failure fails the version stage, and
-`revertOnFail` rolls the half-edited folder back.
+Two details matter when enabling this:
+
+- Reconciliation covers every workspace dependency, including providers released in earlier runs (§9.4 of the
+  [commit specification](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md)). Every releasing package
+  in an auto-versioning space gets a version task, even if none of its providers release in the current run.
+- A rewriting failure fails the version stage. With `revertOnFail` enabled, dispat rolls the edited folder back.
 
 ### Two names for one block
 
@@ -152,14 +155,14 @@ spaces:
       syncLock: [ go-mod-tidy ]
 ```
 
-Four warnings narrate what the rewrite did when the commit log alone cannot explain it: `W192` means the manifest's
-declared own version disagreed with the baseline, so dispat writes the authoritative computed version over it. A
-package whose [`autoSign`](./autosign.md) is enabled reports `W192` from its sign stage, the stage that writes that
-version. `W197`
-means a range caught up to a provider released outside this run, and `W203` warns that a stable release now ranges over
-a prerelease provider. `W221` means a rewritten dependency has no configured `dependencies` edge behind it to order
-this package after that provider, so the written version is optimistic about an in-flight publish and `dispat compute`
-derives the missing edge.
+## Understanding rewrite warnings
+
+| Code | What happened |
+|------|---------------|
+| `W192` | The manifest's own version disagreed with the baseline. dispat replaced it with the computed version. With [`autoSign`](./autosign.md) enabled, this warning comes from the sign stage. |
+| `W197` | A dependency range caught up to a provider released in an earlier run. |
+| `W203` | A stable release now depends on a prerelease provider. |
+| `W221` | A rewritten dependency has no configured `dependencies` edge. Nothing orders this package after the provider, so the written version assumes an in-flight publish will succeed. Run `dispat compute` to derive the missing edge. |
 
 The replacing strategy raises `W197` and `W203` on the same terms, plus `W222` when a replace rule finds its text in
 none of the selected files. This usually means a mistyped template or a stale glob. Re-running a release does not

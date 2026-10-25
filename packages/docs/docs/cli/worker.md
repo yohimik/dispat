@@ -1,8 +1,8 @@
 # The worker command
 
-Run `dispat worker` to serve the build and publish tasks another machine's release assigns to this one. A worker
-plans nothing, starts no release and writes no release record: it reads the work addressed to it, runs what its
-assignment authorized, and reports back.
+Run `dispat worker` on a machine that should accept build and publish tasks from an orchestrator. It waits for work
+addressed to its node name, runs the assigned commands, and reports the results. The orchestrator remains responsible
+for planning the release and writing release records.
 
 ```
 dispat worker [--state-dir <dir>] [--idle-timeout <seconds>]
@@ -13,8 +13,8 @@ Read [distributed execution](../distributed-execution.md) for what an orchestrat
 
 ## What it needs
 
-The node is described by the `execution` object of the configuration file this invocation reads. Two of its settings
-are required here, and each is refused by name when it is missing, and a third has a default:
+Configure the node in the file's `execution` object. Set `name` and `secretEnv`; `endpoint` can be omitted when the
+worker runs in a checkout with a suitable release remote:
 
 | Setting                | Why it is needed                                                                     |
 |------------------------|--------------------------------------------------------------------------------------|
@@ -44,14 +44,12 @@ execution:
 logFormat: json
 ```
 
-Nothing else about the repository is needed. A serving node declares no spaces, no packages and no release policy,
-because the assignment carries the commands, the environment names and the exact source state; a file that declares
-no space and no package is complete for this command alone. With `execution.endpoint` stated, the folder the process
-starts in does not have to be a Git repository, and the repository being released does not have to be checked out on
-the node beforehand.
+A worker configuration does not need spaces, packages, or release policy. Each assignment supplies the commands,
+environment variable names, and exact source revision. When `execution.endpoint` is set, the worker can start outside
+a Git repository and fetch the source it needs.
 
-The environment must hold the signing secret, and whatever the commands this node will run need. A value a stage
-reads from the environment is expanded here, on the node, from this node's own environment.
+Set the signing secret and any credentials or variables the assigned commands need. Environment values are expanded
+on the worker, using its own environment:
 
 ```sh
 export DISPAT_EXECUTION_SECRET="$(cat /run/secrets/dispat-execution)"
@@ -63,28 +61,25 @@ dispat worker --config dispat.worker.yaml
 
 ### `--state-dir`
 
-The folder this node keeps its object cache, its task checkouts and its record of already-answered work in. Without
-it, `dispat/worker` under the user cache directory.
+Set the directory used for the object cache, task checkouts, and completed-task records. The default is
+`dispat/worker` under the user cache directory.
 
-The layout is `<state-dir>/<node name>/`, holding `cache/` (one bare repository per endpoint), `seen.json` (the
-answered-work record) and `worker.lock`. Everything in it is reconstructible: a node whose folder was deleted makes
-one again and pays a fetch, so a container may use an empty volume for it. A worker starts by removing every
-coordination branch an earlier process fetched into `cache/`, because no running process remembers those refs and
-each one keeps a task's inputs or an output set on disk. Git's automatic maintenance is off in `cache/`, because a
-fetch would otherwise start it in the middle of a poll. Instead, after a minute with nothing claimed and nothing in
-flight, the worker compacts the cache once before it polls again: it deletes every object no open coordination
-branch reaches, at most once per idle stretch and never while a task runs. A worker killed while it records a claim
-can leave `seen.json` without its closing brace. The next worker reads the claims before the cut, drops a member
-whose value was cut, and rewrites the file on its first claim; until then an older dispat refuses to start on it.
+Each node gets `<state-dir>/<node name>/`, containing `cache/`, `seen.json`, and `worker.lock`. The state can be
+recreated, so a container may start with an empty volume; it will need to fetch the objects again.
 
-Two processes must not serve one node name from one state folder. The second one to start refuses, because two nodes
-sharing a folder would each hold half the record of what has been answered. `worker.lock` holds the serving process's
-id and is removed when that process stops. A worker that finds the id of a process that is gone takes the folder over,
-and so does one that finds its own id, which an earlier process with the same id left: a worker restarted in a
-container is process 1 every time. A crashed worker restarts without anybody deleting the file. A new claim is trusted
-after it has settled for a second, which is how one of several workers started at once against one folder serves and
-the others refuse. A serving worker reads the lock again before it claims each assignment, and stops when another
-process's id is written there.
+**Cache cleanup.** On startup, the worker removes coordination branches left in the cache by an earlier process.
+Git's automatic maintenance is disabled there. After one idle minute with no claimed or running tasks, the worker
+compacts the cache and removes objects unreachable from open coordination branches. It does this once per idle
+period and never while a task is running.
+
+**Interrupted state writes.** If a crash truncates `seen.json`, the next worker recovers complete claims, drops any
+partial last entry, and rewrites the file on its first claim. Older dispat versions refuse that truncated file until
+it has been rewritten.
+
+**One process per node.** Two workers cannot share a node name and state directory. `worker.lock` records the serving
+process ID and is removed on shutdown. A restarted worker can recover a stale lock, including one with its own reused
+process ID, as commonly happens in containers. A new claim settles for one second to resolve simultaneous starts.
+The worker checks the lock before every assignment and stops if another process has taken it.
 
 ### `--idle-timeout`
 
@@ -112,9 +107,9 @@ tick and every ref inspected.
 | the state folder is already held by another process | non-zero, reported as `E225`                                             |
 | another process's id appears in `worker.lock` while serving | non-zero, reported as `E225`, after the tasks already claimed have finished |
 
-A signalled node stops claiming new work, withdraws nothing it has not been asked to withdraw, and lets what it has
-claimed finish before the process ends. Give a supervisor a grace period as long as `execution.timeouts.task` if its
-tasks are long, because a shorter one kills the task with the process.
+On a signal, the worker stops accepting new tasks and waits for claimed tasks to finish. It does not withdraw other
+work unless instructed to do so. Set the supervisor's shutdown grace period to at least `execution.timeouts.task` if
+long-running tasks need time to finish.
 
 Every line the process writes carries `role=worker` and `node=<this node's name>`, so one log of a distributed
 release can be read per machine.

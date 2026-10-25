@@ -1,7 +1,7 @@
 # The `.env` file
 
-dispat reads `.env` from your current folder before doing anything else. It adds these variables to its own
-environment. Every script, hook, and login command inherits them. dispat inherits them too.
+Put local environment variables in `.env` in the folder where you run dispat. dispat loads it at startup, and the
+variables are available both to dispat itself and to its scripts, hooks, and login commands.
 
 ```sh
 # .env
@@ -14,8 +14,8 @@ scripts:
   publish: npm publish --access public   # reads NPM_TOKEN from the environment
 ```
 
-You do not need this file. Most repositories have none, and that is not an error. The format is standard: one
-`NAME=value` per line, `#` for comments, quotes for spaces, and an optional `export` prefix.
+The file is optional. Use one `NAME=value` per line, `#` for comments, quotes around values with spaces, and an optional
+`export` prefix.
 
 dispat reads the file from the **current directory**. This is the folder your shell is in, not `--root` and not the
 monorepo root. The file belongs to the person running the command, not the repository being released.
@@ -47,8 +47,7 @@ You can repeat the flag. A later file wins over an earlier one:
 dispat release --env-file .env.shared --env-file .env.ci
 ```
 
-Naming a file turns the default off, so dispat skips `./.env`. A missing named file stops the run. This works the same
-way a misspelled `--config` does. Asking for a file and silently getting nothing is worse than stopping.
+Once you pass `--env-file`, dispat skips the default `./.env`. Every file you name must exist, or the run stops.
 
 ## dispat's own variables
 
@@ -57,9 +56,8 @@ The file reaches the variables dispat reads for itself. You can set the GitHub t
 [`DISPAT_BIN_DIR`](../cli/install.md#choosing-the-destination), and any variable a record line or
 an `env` value refers to with `$NAME`. Keeping `GITHUB_TOKEN` in `.env` instead of a shell profile works perfectly.
 
-The config's `env` object refuses keys starting with `DISPAT_`. A computed variable could never be shadowed anyway. The
-`.env` file allows them, because reaching those switches is the point. The computed variables still win inside package
-scripts.
+The config's `env` object rejects keys starting with `DISPAT_`. A `.env` file allows them so you can configure dispat's
+own switches. Computed variables, such as `DISPAT_VERSION`, still take precedence inside package scripts.
 
 ## Secrets
 

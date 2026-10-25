@@ -1,8 +1,7 @@
 # A pnpm workspace
 
-Releasing a pnpm workspace takes the same shape as [an npm monorepo](./npm.md). You will notice three differences that
-come from the package manager rather than from dispat. The lock file lives at the workspace root, internal ranges use
-the `workspace:` protocol, and `pnpm publish` checks your git tree state.
+A pnpm release follows the [npm example](./npm.md), with three settings to account for: the shared root lock file,
+`workspace:` dependency ranges, and pnpm's check for a clean Git working tree. This configuration handles all three:
 
 ```json
 {
@@ -49,9 +48,8 @@ the `workspace:` protocol, and `pnpm publish` checks your git tree state.
   [`syncLockConcurrency`](../configuration/autoversion.md) default matters here because every package in the workspace
   regenerates the *same* file.
 - **`--no-git-checks`.** `pnpm publish` refuses to publish from a dirty working tree or an unapproved branch. A dispat
-  run creates exactly that situation, because the version stage rewrites manifests and dispat creates the release
-  commit after the publishes. Pass this flag to bypass the check and rely on the annotated tag as the record of what
-  shipped.
+  version stage changes manifests before publication, while dispat creates the release commit afterwards. Pass this
+  flag to allow those planned edits. The annotated tag records the release.
 
 Yarn workspaces work the same way. Put `yarn.lock` in `commit.include` and use `yarn npm publish` in the publish slot.
 

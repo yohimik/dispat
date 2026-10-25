@@ -1,7 +1,8 @@
 # Maven modules
 
-Keep your Java modules in one repository with a `pom.xml` for each. dispat versions them from commits and deploys them
-in dependency order.
+This example releases a library and a service, each with its own `pom.xml`. Maven still verifies and deploys the
+artifacts; dispat supplies the versions and dependency order. If your modules inherit their versions, use the
+[parent-managed version setup](#if-your-modules-inherit-their-version-from-a-parent) below.
 
 ## The layout
 
@@ -34,9 +35,8 @@ dispat.json
 }
 ```
 
-dispat writes the new version into each `pom.xml` during the version stage. It does this before `mvn` ever runs, so the
-artifact Maven builds already carries the right coordinates. You do not need a `-Dversion` flag, `versions:set`, or a
-`${revision}` property.
+For modules with literal versions, dispat updates `pom.xml` before Maven runs. Maven then builds with those
+coordinates without a `-Dversion` flag, `versions:set`, or `${revision}` property.
 
 ## A release
 
@@ -86,9 +86,9 @@ services/api/pom.xml
 1 manifest(s): 1 applied, 1 skipped, 0 missing
 ```
 
-You set up `${jackson.version}` as an indirection on purpose, so replacing it with a literal would break it. Skipped is
-the healthy answer and never fails a release. The same rule protects `<parent><version>`, because dispat writes a
-project's own `<version>` and never its parent's.
+`${jackson.version}` is skipped because its value is defined elsewhere. Replacing the reference with a literal would
+break that arrangement. A skipped write does not fail the release. dispat also leaves `<parent><version>` alone; it
+writes only the project's own `<version>`.
 
 Look at the colon in `--set com.acme:core=1.3.0`. dispat reads a prefix before the colon as a manifest field only when
 it matches `dependencies`, `devDependencies`, `peerDependencies` or `optionalDependencies`. This means Maven
@@ -96,8 +96,8 @@ coordinates keep their own colon and need no escaping.
 
 ## If your modules inherit their version from a parent
 
-Many multi-module builds give each module its `<version>` through the parent instead of declaring one. dispat then has
-nothing to write in the module. Put the parent's version in the version stage yourself:
+If a module inherits `<version>` from its parent, there is no local value for dispat to edit. Use a version-stage
+script to update the parent and its modules:
 
 ```json title="dispat.json (parent-managed versions)"
 {
@@ -126,12 +126,6 @@ runs and sees the already-reconciled files.
   separate job that never runs `dispat`.
 - **`mvn -B` matters.** A stage runs without a terminal. Maven hangs the run if it decides to be interactive.
 
-## See also
-
-- [A Gradle library and its version catalog](./gradle.md) for the other JVM build tool.
-- [autoVersion](../configuration/autoversion.md) explains what the version stage reconciles.
-- [Release steps](../reference/releasing/steps.md) shows how to run the pieces of a release by hand.
-
 ## Verify promoted coordinates
 
 A local Maven reactor build can succeed while the packaged metadata is incomplete. If a later build resolves the
@@ -146,3 +140,9 @@ Keep registry promotion and secondary outputs distinct. Model a separately deplo
 checked output rather than treating a successful reactor build as proof that every destination completed. The build
 tool and distribution format can also differ. Preserve property-based versioning and inspect the generated POM; a
 literal-value writer is not a substitute for evaluating the publisher's version inputs.
+
+## See also
+
+- [A Gradle library and its version catalog](./gradle.md) for the other JVM build tool.
+- [autoVersion](../configuration/autoversion.md) explains what the version stage reconciles.
+- [Release steps](../reference/releasing/steps.md) shows how to run the pieces of a release by hand.

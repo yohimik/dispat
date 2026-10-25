@@ -1,9 +1,8 @@
 # models: the configuration model
 
-The `github.com/yohimik/dispat/pkg/models` package holds the typed structs that a `dispat.json`, `dispat.yaml`, or
-`dispat.toml` file decodes into. You can use it to write generators, migration scripts, and test suites. It lets you
-author configurations as typed Go values and marshal them to loadable files, so you avoid assembling config text by
-hand.
+Use `github.com/yohimik/dispat/pkg/models` to build dispat configurations as Go values, then marshal them to files.
+The structs represent the settings in `dispat.json`, `dispat.yaml`, and `dispat.toml`. They are useful for configuration
+generators, migrations, and tests.
 
 ```sh
 go get github.com/yohimik/dispat/pkg/models
@@ -73,9 +72,8 @@ verified against. See [A choreographed fleet](../choreographed-repositories.md) 
 
 ## A node that serves tasks, and where a stage runs
 
-`File.Execution` is the [`execution`](../configuration/execution.md) object of a node taking part in
-[distributed execution](../distributed-execution.md). It stays `nil` when the key is absent, which is what keeps a
-configuration that never mentions it exactly as it was:
+Set `File.Execution` to configure a node for [distributed execution](../distributed-execution.md). It maps to the
+[`execution`](../configuration/execution.md) object and stays `nil` when that object is absent:
 
 ```go
 cfg := models.File{
@@ -94,11 +92,10 @@ cfg := models.File{
 }
 ```
 
-`ExecutionConfig`, `ExecutionWorkerConfig`, `ExecutionTimeoutsConfig` and `ExecutionTransferConfig` all read through
-nil-safe resolvers, so a caller asks one question whether or not the object or the key is there: `ResolveRole`,
-`IsWorker`, `IsDistributed`, `ResolveConcurrency`, `ResolveTimeouts` and `ResolveTransfer`. Every unstated bound comes
-back as the documented default (`DefaultExecutionConcurrency`, `DefaultExecutionTaskTimeout` and the rest), and a
-stated value comes back as written, including one the loader will refuse, so a refusal names what the file said.
+Use the nil-safe resolvers to read execution settings: `ResolveRole`, `IsWorker`, `IsDistributed`,
+`ResolveConcurrency`, `ResolveTimeouts`, and `ResolveTransfer`. They work even when the corresponding object is absent.
+Omitted values return the documented defaults, such as `DefaultExecutionConcurrency` and `DefaultExecutionTaskTimeout`.
+Explicit values are returned unchanged, including invalid values; validation happens when the CLI loads them.
 
 `RunOnly` is a pair with a `Build` and a `Publish` placement, and it marshals as the shortest spelling that carries the
 same meaning: one word when the stages agree, a `[build, publish]` list when they differ. `NormalizeRunOnly` expands
@@ -113,12 +110,11 @@ See [The provider relation](../configuration/spaces.md#the-provider-relation).
 
 ## The contract
 
-Every field carries one `json` tag, and that tag is both halves of the contract: the key the CLI decodes the file by,
-and the key the model marshals back into. This guarantees that **a marshalled model is a loadable configuration**, so
-your generators can round-trip through Go types without needing hand-written templates.
+Each field's `json` tag is both its output key and the key the CLI reads. This lets a generator use Go types without
+maintaining a separate text template. The output still has to pass the CLI's validation; the model alone does not
+check that the values form a valid configuration.
 
-Optional sub-objects are pointers. An unset object marshals as an absent key instead of printing `{}` noise to your
-file.
+Optional sub-objects are pointers. An unset object is omitted from the file instead of being written as `{}`.
 
 Tri-state options are `*bool` fields with nil-safe accessors and a `Bool()` helper. This covers `enabled`, `verify`,
 `writeVersion`, and every scalar of a package override. For these fields, an absent value means inherit instead of

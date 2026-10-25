@@ -1,12 +1,10 @@
 # Release steps
 
-A standard `dispat` release runs every stage in a fixed order. It calculates new versions, executes your build and
-publish scripts, updates each package's changelog, creates git commits and tags, and publishes GitHub releases. Most
-repositories can rely on this default sequence without extra configuration.
+A normal release plans versions, runs the configured stages, and writes the enabled release records. Use step commands
+when you need one of those operations at a particular point in your own flow.
 
-Step commands give you direct control when that order does not fit your workflow. You might need the changelog written
-*before* the commit is made so that the commit includes the changelog file. You might also want your own announce
-script to publish the GitHub release right after uploading an artifact.
+For example, write a changelog before a custom commit step so the file is included, or create a GitHub release from
+your announce script after uploading an artifact.
 
 Each step command isolates one part of the release process:
 
@@ -41,8 +39,8 @@ writing:
 | `github`      | the tag already has a release (a draft included) | `W224`      |
 | `autoversion` | the manifests already say the right version      | nothing     |
 
-This idempotency lets later release stages detect completed work and skip duplicate writes or duplicate tag errors. It
-also ensures you can safely re-run failed release jobs.
+The later recording phase uses these checks too, so work completed by a step command is not written twice. Check
+[recovery guidance](./recovery.md) before retrying a failure that may have happened during publication.
 
 **They fire no [run-level hooks](../../configuration/run-hooks.md).** Running `dispat commit --tag --push` creates
 commits, writes tags, and pushes changes without executing `run.beforeCommit` or `run.afterPush`. Those hooks belong to
@@ -50,8 +48,8 @@ commits, writes tags, and pushes changes without executing `run.beforeCommit` or
 configuration, such as `beforePublish: [notify-before, commit, notify-after]`. Read more about this design in the
 [reasoning](../../configuration/run-hooks.md#they-belong-to-dispat-release) section on the hooks page.
 
-**Inside a run, they answer to the run.** A step invoked from a stage script or flow hook calculates a plan, but
-mid-run state can differ because earlier steps have already created tags. The
+**Inside a run, they keep the original release context.** Earlier steps may already have created tags, so a new plan
+can differ from the plan that started the release. The
 [`DISPAT_*` environment](../environment.md) passed to stage scripts preserves the original release context so
 `changelog`, `commit`, and `github` read back those values. When `DISPAT_PACKAGE`, `DISPAT_NEW_VERSION`, and
 `DISPAT_TAG` are present, the step scopes to that package unless you pass an explicit filter.
@@ -104,8 +102,8 @@ concurrently up to your configured build concurrency limit.
 
 ## The pitfall: a tagged package drops off the window
 
-Every step command recalculates its plan based on existing git tags. Once `dispat commit --tag` tags a package, the
-*next* command detects no pending changes and skips that package:
+Outside an active release, each step recalculates its plan from Git tags. Once `dispat commit --tag` tags a package,
+the next standalone command finds no pending changes for it and skips it:
 
 ```console
 $ dispat commit --package core --tag
@@ -224,14 +222,17 @@ The flow executes in this sequence:
 3. **publish** uploads packages to your package registry.
 4. **announce** creates the GitHub release and attaches the exported build file.
 
-When the release recording phase runs at the end, it finds the changelog (`W226`), tag (`W223`), and GitHub release
-(`W224`) already present. These log codes confirm that dispat safely skipped redundant work during the run.
+At the end of the run, the recorder finds the existing changelog (`W226`), tag (`W223`), and GitHub release (`W224`)
+and skips those writes.
 
 ## What to do when something fails
 
-You can recover from interrupted releases by running `dispat` again. If your publish stage fails after creating commits
-and GitHub releases, fix the root cause and rerun the command. dispat detects the existing changelogs, tags, and
-releases, skips them, and resumes by retrying the publish stage.
+Check the release's records before rerunning it. A later run skips work already covered by a release tag, so creating
+tags before publication can make an unfinished package appear released. A successful publish without a tag has the
+opposite problem: the next run may attempt the same version again.
+
+Use [Recovering from a failed run](./recovery.md) to distinguish a failed build, an uncertain publication, and missing
+GitHub metadata. Fixing one of these does not always mean rerunning the whole release.
 
 Artifacts already uploaded to external registries cannot be rolled back by dispat. Ensure your publish scripts handle
 previously published versions according to your registry's rules.

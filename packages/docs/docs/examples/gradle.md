@@ -1,12 +1,14 @@
 # A Gradle library and its version catalog
 
-You can release a published JVM library, an app that consumes it, and their shared `gradle/libs.versions.toml` file in
-one run. They all move to the same new version together.
+This example releases a JVM library and an app that consumes it. Each keeps its own version. The shared
+`gradle/libs.versions.toml` catalog follows the library's version so the app resolves the release it was built for.
 
 ## The layout
 
 ```
 gradle/libs.versions.toml      the shared version catalog, at the repository root
+gradlew                       the repository's Gradle wrapper
+settings.gradle.kts           includes :libs:core and :apps:app
 libs/core/build.gradle.kts     com.acme:core, published with maven-publish
 apps/app/build.gradle.kts      the Android app that depends on it
 dispat.json
@@ -18,8 +20,8 @@ dispat.json
 {
   "scripts": {
     "pin-catalog": "dispat writer gradle/libs.versions.toml --set com.acme:core=$DISPAT_WORKSPACE_CORE_VERSION",
-    "publish-lib": "./gradlew :libs:core:publish -Pversion=$DISPAT_NEW_VERSION",
-    "build-app": "./gradlew assembleRelease"
+    "publish-lib": "cd ../.. && ./gradlew :libs:core:publish -Pversion=$DISPAT_NEW_VERSION",
+    "build-app": "cd ../.. && ./gradlew :apps:app:assembleRelease"
   },
   "run": {"beforeAll": "pin-catalog"},
   "spaces": {
@@ -46,7 +48,14 @@ dispat.json
 }
 ```
 
-Three lines carry most of the weight. Each has a specific purpose.
+Package scripts start in `libs/core` or `apps/app`. Each command moves to the repository root to run its Gradle
+wrapper and selects the intended module explicitly. The `beforeAll` hook already runs at the root.
+
+Run [`dispat compute`](../cli/compute.md) and review the `app -> core` dependency before releasing. If the app resolves
+`core` from a Maven repository, also set `isBuildWaitingPublish: true` on the `libs` space so the app waits for the new
+coordinate to be published. A local project dependency can build against the checkout instead.
+
+Three settings connect the Gradle files to the release plan:
 
 **`manifestNames`.** Set this to connect your package folder to its Gradle coordinate. A Gradle build script declares
 dependencies as coordinates like `com.acme:core`, but your package sits in a folder called `core`. Stating the
@@ -55,9 +64,8 @@ coordinate tells dispat to recognize a declaration anywhere in the repository as
 **`range: exact`.** Set this because a Gradle coordinate takes a plain version. The default policy writes `^1.3.0`.
 That is npm's spelling, and it means nothing to Gradle.
 
-**The `replace` rule.** Use a literal find-and-write because a top-level `version = "1.2.0"` in `build.gradle.kts` is a
-plain Kotlin assignment. It is not a manifest field, so the parsing strategy has nothing to grip. The run fills in
-`{previous}` and `{version}` automatically.
+**The `replace` rule.** A top-level `version = "1.2.0"` in `build.gradle.kts` is a Kotlin assignment that the manifest
+writer does not handle. The literal replacement updates it using `{previous}` and `{version}` from the plan.
 
 ## A release
 
@@ -74,7 +82,7 @@ $ dispat
 12:46:52 INF file reconciled file=build.gradle.kts occurrences=1 package=core stage=version version=1.3.0
 12:46:52 INF version succeeded package=core stage=version version=1.3.0
 12:46:52 INF publish started package=core stage=publish version=1.3.0
-12:46:52 INF ./gradlew :libs:core:publish -Pversion=1.3.0 package=core stage=publish version=1.3.0
+12:46:52 INF cd ../.. && ./gradlew :libs:core:publish -Pversion=1.3.0 package=core stage=publish version=1.3.0
 12:46:52 INF manifest reconciled manifest=build.gradle.kts package=app ranges=1 stage=version version=0.4.2 versionWritten=true
 12:46:52 INF version succeeded package=app stage=version version=0.4.2
 12:46:52 INF build started package=app stage=build version=0.4.2
@@ -100,8 +108,8 @@ acme-core = { module = "com.acme:core", version.ref = "acme-core" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 ```
 
-Notice that the `[libraries]` entry remains untouched. dispat followed the `version.ref` to the `[versions]` table and
-wrote the number where it actually lives. This is the only edit that preserves the reference.
+The `[libraries]` entry stays unchanged. dispat follows `version.ref` and updates the value in `[versions]`, preserving
+the reference.
 
 ## What dispat reads and writes
 
@@ -141,12 +149,6 @@ above, which is exactly why `manifestNames` is in the configuration.
   [`commit.include`](../configuration/records.md#commit). This ensures the release commit carries the change made in
   `beforeAll`.
 
-## See also
-
-- [An Android app](./android.md) covers the app side. This includes `versionCode` and a bundle on the GitHub release.
-- [Maven modules](./java.md) covers the other JVM build tool.
-- [Replacing text across the monorepo](../editing/autoreplacer.md) explains how to handle versions no parser owns.
-
 ## Test repository resolution
 
 Keep a clean consumer check against packed files or a staging repository for the coordinates, Gradle metadata and
@@ -172,3 +174,9 @@ and publish commands and reconcile literal coordinates, but it does not inspect 
 bytecode or compare an AAR with its POM. Add a clean Kotlin consumer compile for the exact remote coordinate to the
 release gate. A bytecode-to-metadata scan can catch the missing annotation dependency before publication; the clean
 consumer build verifies the resolver behavior that users receive.
+
+## See also
+
+- [An Android app](./android.md) covers the app side. This includes `versionCode` and a bundle on the GitHub release.
+- [Maven modules](./java.md) covers the other JVM build tool.
+- [Replacing text across the monorepo](../editing/autoreplacer.md) explains how to handle versions no parser owns.

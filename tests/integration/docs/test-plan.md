@@ -183,6 +183,18 @@ integration suite itself.
     order is taken over the whole dependency graph, so a provider reached through a package with nothing to release
     still builds first.
 
+62. **The stages a flow orders and defines** (`flow_stages_test.go`): every stage of a release is optional and a flow
+    may add its own, so the order the stages run in is configuration rather than a table. A stage entry written as an
+    object moves its stage with `before`, `after` or `parallel`, and a key that is no built-in stage or hook defines a
+    stage with `before<Name>` and `post<Name>` hooks. The claims are that a moved built-in stage runs where the
+    constraint puts it and gates there when that is before the publish; that a defined stage runs under its own name
+    and label with its hooks, reads the earlier exports and hands its own on; that a set of constraints no order
+    satisfies is refused with its code by the release, by status and by a script sweep before any script runs; that a
+    package with no publish stage is still tagged and recorded after its last stage and one with no stage at all at
+    once; that two stages in one tier run at once and the publish waits for both; and that with worker nodes a defined
+    stage after the build is placed the way the build is, on a worker, with the build's bytes installed and its export
+    reaching the publication.
+
 ### Configuration
 
 10. **Config loading, resolution and options** (`config_test.go`): which file the binary picks when no `--config` names
@@ -526,6 +538,7 @@ tests/integration/
   execution_faults_test.go  goal 57 (the git invocations a dispatch and a report are made of, failed one at a time)
   execution_recovery_test.go goal 57 (the two clocks a delegated task lives under, and the branches a node is asked to ignore)
   stage_relation_test.go    goal 60 (what a consumer waits for, and what a failed provider does to it)
+  flow_stages_test.go       goal 62 (the stages a flow orders and defines, and what is recorded when there is no publish)
 
   configuration
   config_test.go            goal 10
@@ -803,7 +816,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestOrderProviderFailureSkipsTheWaitingConsumer`         | A failed `isBuildWaitingPublish` provider skips its consumers unconditionally (W194), their own work notwithstanding — the build consumes the publish that never happened — while without the flag the own-reason rule stands and the consumer releases. |
 | `TestPublishOrderHoldsThroughAPackageThatIsNotReleasing`  | For `app -> ui -> core` with `ui` carrying nothing, the plan holds no edge between the two packages that do release, and `core` still publishes before `app`. The provider's publish is held on a file the consumer's build writes on its way out, so the consumer reaches its publish first and waits there. |
 | `TestPublishOrderBlocksAConsumerBehindAFailedProviderItDoesNotNameDirectly` | A `core` whose publish failed skips an `app` that reaches it only through the unreleasing `ui`: `W194` with `blockedBy` naming `core`, and nothing tagged, when `app` rides a fixed group with no release reason of its own. An `app` with a fresh bump of its own proceeds under the default relation, exactly as it does behind a provider it declares, and so does one with no work of its own whose other *declared* provider published: that is a version it picks up, which a publication behind an unreleasing package is not. |
-| `TestOrderSignStageWaitsForProviders`                     | A consumer's sign stage is its first task, so it is the task that waits for a provider: under `isBuildWaitingPublish: true` the consumer signs only after the provider's publish finished, and builds after it signs. |
+| `TestOrderSignStageRunsAheadOfProviders`                  | A consumer's sign stage reads no provider and waits for none: under `isBuildWaitingPublish: true` the consumer starts signing before the provider's publish has finished, and its build starts only after that publish and after the sign. |
 
 ### Goal 8: interruption (`interrupt_test.go`, `cancel_resources_test.go`, `cancel_workspace_test.go`, `final_execution_boundaries_test.go`)
 
@@ -838,7 +851,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestHooksStageHookAuthoritySplit`                    | Failures in `postPublish` and announce hooks log warnings (exiting 0 and preserving tags), whereas failures in gating hooks like `postBuild` fail the package, prevent tagging, and invoke `onFail` with the failing stage. |
 | `TestHooksRefuseAMalformedExport` | An export line dispat cannot read is an error of its own rather than a silently dropped export: a line that is not `NAME=value`, a name inside the reserved `DISPAT_` namespace, a line with no name and an export file the script removed each fail the package with exit 1 before the point of no return, quoting the line, and nothing is tagged; the same line from an announce hook, where nothing can be taken back, is a warning and the release stands. |
 | `TestHooksBeforeAllFailureEndsThePackageBeforeItsFirstStage` | beforeAll runs before a package has a stage at all, so its failure ends the package there, with no build, no publish and no tag, while the packages beside it release, and the outcome hook names the stage the package never entered. |
-| `TestHooksVersionScriptsSkippedWhenEveryProviderDied` | A consumer with changes of its own is not skipped when its provider fails, but its version stage then has nothing to sync manifests to, so the stage's scripts and their hooks do not run; the same fixture with the provider alive runs both. |
+| `TestHooksVersionScriptsSkippedWhenEveryProviderDied` | A consumer with changes of its own is not blocked when its provider's build fails, and releases; its version stage, which waits for no provider, runs behind that failure in the run's one slot and then has nothing to sync manifests to, so the stage's scripts and their hooks do not run. The same fixture with the provider alive runs both. |
 | `TestHooksStageOutputTruncatesAnOverlongLine` | A stage that writes a megabyte with no newline in it has its line cut with a marker, the rest of that line dropped rather than logged as a line of its own, and the stage's later output still arrives; a line that never ends is dropped on the flush. |
 | `TestHooksCommitModeRestoresASkippedConsumer` | In commit mode, without `revertOnFail`, a consumer skipped after its version stage ran has its folder restored, so the retry starts without a pre-existing-changes refusal and releases the provider and the consumer. |
 | `TestHooksCommitModeRestoresSkippedConsumersConcurrently` | Three consumers skipped by one provider failure are restored from their own tasks at once, serialized by the repository's mutation lock, with no `index.lock` collision and every folder clean. |
@@ -962,6 +975,7 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionOrchestratorOnlyBuildIsNotHeldToTheWorkersPlatforms` | A package pinned to this machine is never offered to a worker, so preflight leaves its `buildPlatforms` alone; whether this machine satisfies them is answered where the frame is placed, and a platform nothing has fails the package at its build stage with E227 rather than refusing the whole run. |
 | `TestExecutionALoginKeepsThePublishHere` | A space that configures a login publishes on the machine the release was started on whatever else is stated, so a release of it with no worker link is not refused for a placement it never asked for and releases here as it always did. |
 | `TestExecutionUnselectedProviderIsPreparedNotReleased` | A consumer's build reads the folder its provider builds whether or not this run releases the provider: with only the consumers changed, the provider is built exactly once for both of them as a `prepare` task, both read the exact bytes it wrote at the version it already carries, and the provider ends the run with no new tag, no changelog file, no delivered event of its own and no entry in the plan a reader was shown. |
+| `TestExecutionPreparedProviderExcludesStaleIgnoredOutputAtEitherPlacement` | A nonreleasing provider built locally or on a worker starts from the same pinned source view: a stale ignored file under its declared output root is absent, the build produces only its declared current bytes, and the consumer receives that admitted set at either placement. |
 | `TestExecutionPreparedProviderFailureBlocksItsConsumers` | A provider that could not be built is a prerequisite that was not met: every consumer of it fails at its build stage with E227 naming the provider, the failed build is not attempted a second time for the second consumer, and a package that reads nothing of it releases as usual. |
 | `TestExecutionDevDependencyOutputReachesConsumer` | A build-only edge supplies bytes exactly as a runtime edge does: a development dependency the propagation kinds exclude does not pull its consumer into the plan when the provider changes, and when that consumer releases for a change of its own its build still receives the provider's declared output, built for it without the provider releasing anything. |
 | `TestExecutionDependencyCycleFailsBeforeDispatch` | A cyclic dependency graph has no publish order, so a run that would have delegated work is refused with E200 before anything happens: no stage script runs, the mailbox is never written to and no lock is left on the remote. |
@@ -1084,6 +1098,18 @@ plausible release instead of an error, so dispat tracks them together in one sui
 | `TestExecutionRunInterruptedSweepMergesNothing` | An interrupted sweep exits non-zero, withdraws the task a node is running, says it merged no run outputs, and leaves the orchestrator's checkout without the folder the task was writing. |
 | `TestExecutionRunOutputsMergeFailureFailsTheSweep` | A set whose later destination is a folder, has a file or symlink parent, or denies writes is refused with E227. Its first file is restored, existing bytes and outside paths are preserved, temporary names are removed, and independent sets still merge. Repairing the obstruction lets the next sweep install the complete set. |
 | `TestExecutionRunSweepUnderRunOnlyWorkerWithoutLinksIsRefused` | A package whose build may only run on a worker cannot have its sweep task run here either: a sweep with no link is refused with E225 and the `execution-configuration` class naming `runOnly`, and no script runs. |
+
+### Goal 62: the stages a flow orders and defines (`flow_stages_test.go`)
+
+| Test | Claim proven |
+|------|--------------|
+| `TestFlowConstraintMovesABuiltInStage` | `announce: {after: build}` runs the announce frame right after the build frame and before the tests and the publish, and there it gates: a failing announce fails the package before anything is published or tagged, and the failure names the `announce` stage. |
+| `TestFlowUserStageRunsWithHooksAndExports` | A stage the flow defines runs under its own name between the build and the publish, its `before<Name>` and `post<Name>` hooks report their names around it and before the publish frame, it reads the build's export and hands its own to the publish under its own source, and its log lines carry the label the flow gave it. |
+| `TestFlowConflictsAreRefusedBeforeAnyWork` | A cycle (`E232`), a stage named under both `before` and `after` (`E231`), a constraint naming a stage the package does not have (`E230`) and a stage beside the publish (`E233`) each exit 1 with the code, the level and the entry named, from the release, from `status` and from `dispat run`, with no tag and no script run. |
+| `TestFlowPackagesWithoutAPublishAreStillRecorded` | A package whose flow has no publish stage is tagged, recorded and reported published after its last stage with no publish stage observed, a package whose flow has no stage at all is recorded at once having run nothing, and `status` plans both. |
+| `TestFlowParallelStagesRunAtOnce` | A stage placed in the tests stage's tier starts while the tests run, proven with the tests waiting for the stage's marker rather than with a sleep, and the publish waits for both. |
+| `TestExecutionUserStageRunsOnAWorkerWithItsOutputs` | A defined stage after the build is placed the way the build is: with the builds pinned to workers every frame of it runs on a worker as a `<package>:<stage>` task of its own, reads exactly the bytes its own build produced, its export reaches the publication on the orchestrator, the orchestrator logs it under its label, and nothing is built twice. |
+| `TestExecutionWorkerStageUsesCleanBaselineAndGraphInputs` | An actual worker build and two unordered worker stages retain a tracked file under an ignored declared output root, receive only their graph predecessor outputs even after a peer is admitted, remap an exported absolute output-root path into each checkout, and publish the joined verified sets on the orchestrator. |
 
 ### Goal 60: the provider relation (`stage_relation_test.go`, `execution_prepare_test.go`)
 
@@ -1946,7 +1972,7 @@ The upload count is the evidence: a version accepted twice is the failure every 
 | `TestReceiptRefusesALocalTagAtAnotherCommit`, `TestReceiptRefusesARemoteTagAtAnotherCommit` | A local or remote tag at a target different from the receipt is not treated as proof of its publication; settlement refuses and retains the receipt. |
 | `TestReceiptBehindTheHeadIsRecordedWhereItWasPlanned` | A receipt on a commit behind the retry's head is tagged at that commit (`W246`) and the plan is computed again from that record, so the commit that landed meanwhile releases as the next version and the receipt's version is accepted once. The kill inside a publish command, before any receipt, is adopted on the retry. |
 | `TestAdoptionRefusesAForeignArtefact` | A lost record whose version the registry holds as another artefact fails the package with `E198`, writes no tag, and cancels an independent package still waiting to publish. With `publish.adoptPublished: false` the verify script is never run and the refusal is an ordinary publish failure. |
-| `TestAdoptionThroughTheNpmRegistryIntegrity` | With no verify script, an exported `sha512-…` `INTEGRITY` is compared with `npm view <name>@<version> dist.integrity`, read through an npm stand-in on `PATH`: a match is adopted and tagged, another integrity is `E198`, and an empty answer leaves the publish failure. |
+| `TestAdoptionThroughTheNpmRegistryIntegrity` | With no verify script, an exported `sha512-…` `INTEGRITY` is compared with `npm view <name>@<version> dist.integrity`, read through an npm stand-in on `PATH`: a match is adopted and tagged, another integrity or a successful empty answer is `E198`, and an npm `E404` absence leaves the publish failure. |
 | `TestTagOnlyPushLeavesARemoteRecordAtAnotherCommit` | The per-package tag push follows the create-only rule: a remote tag at another commit is left where it is and reported `E221`, with the package still `published`. |
 | `TestLeftoverReceiptsAreSettledUnderTheLock` | A receipt whose tag the checkout holds is removed, one on a commit the head does not reach is left with a warning, and the release proceeds as though neither were there. A completed run leaves no receipt behind. |
 

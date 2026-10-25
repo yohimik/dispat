@@ -1,7 +1,7 @@
 # Run-level hooks
 
-Seven hooks observe the run as a whole rather than any one package. They live in the **top-level `run` object** and
-execute in the **monorepo root**. Each is a no-op when unconfigured:
+Use the top-level `run` object for checks and notifications that should happen once per release run. Its seven hooks
+execute in the **monorepo root**. An unconfigured hook does nothing:
 
 ```yaml
 run:
@@ -35,9 +35,7 @@ These seven fire for `dispat release` and nothing else. The [step commands](../r
 fire them. For example, `dispat commit --tag --push` makes the release commit, writes tags, and pushes without ever
 triggering `run.beforeCommit` or `run.afterPush`.
 
-This design is deliberate. A run hook gives you a seam into a moment **dispat** chooses. Inside a release, dispat
-decides when the commit happens, so it offers `beforeCommit`. A script that calls `dispat commit` already owns that
-moment. You bracket the commit by writing the line before and the line after:
+When your script calls a step command, put any checks or notifications directly before and after it. For example:
 
 ```yaml
 scripts:
@@ -50,10 +48,9 @@ spaces:
       beforePublish: [notify-before, commit, notify-after]
 ```
 
-The `run` object also means *once per run*. The `flow.beforePublish` hook executes **per package**, and nesting step
-commands there is the [recommended pattern](../reference/releasing/steps.md). A release of ten packages would fire each
-commit hook ten times from inside itself and once more from its own finalize. Nothing in the environment would
-distinguish one firing from another.
+The `run` hooks stay separate because they execute once per run. In contrast, `flow.beforePublish` executes **per
+package**, and nesting step commands there is a [recommended pattern](../reference/releasing/steps.md). Those nested
+commands do not trigger additional run hooks.
 
 ## The branch guard
 
@@ -89,9 +86,9 @@ $ dispat
 ERR refusing to release  error="the checkout is behind origin/main; pull before releasing"
 ```
 
-dispat computes the plan from the tags your local clone can see. If someone else released in the meantime, your
-checkout plans versions that may already exist. The push at the end would fail after everything was built, published,
-and tagged. Failing at the start costs nothing. Failing at the end costs a release.
+dispat computes the plan from local tags. If someone else has released since you last updated the checkout, that plan
+could reuse an existing version. The early check catches this before building, publishing, and tagging, rather than
+waiting for the final push to fail.
 
 Run `git pull` and try again. dispat ignores this check for a new branch the remote does not have yet and for a
 detached source of a fleet. A single repository never reaches it from a detached HEAD: a release that pushes refuses

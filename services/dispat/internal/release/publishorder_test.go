@@ -88,7 +88,7 @@ func TestPublishOrderReachesThroughAPackageThatIsNotInThePlan(t *testing.T) {
 				map[string]models.StageWait{"app": models.StageWaitBuild, "ui": c.toUI, "core": c.toCore},
 				map[string][]string{"app": {"ui"}, "ui": {"core"}},
 				"app", "core")
-			assert.Equal(t, []string{"core"}, newPublishReach(newStageEdges(p, changed)).Indirect("app"),
+			assert.Equal(t, []string{"core"}, newPublishReach(newStageEdges(p, changed, nil)).Indirect("app"),
 				"no relation declares the publication order away")
 		})
 	}
@@ -113,7 +113,7 @@ func TestPublishOrderConvergesThroughTwoUnreleasingPackages(t *testing.T) {
 		},
 		"app", "core", "util", "direct")
 
-	reach := newPublishReach(newStageEdges(p, changed))
+	reach := newPublishReach(newStageEdges(p, changed, nil))
 	assert.Equal(t, []string{"core", "util"}, reach.Indirect("app"),
 		"one edge per far provider, sorted, and the direct provider is not restated")
 	assert.Empty(t, reach.Indirect("core"), "a package with no providers reaches nothing")
@@ -177,7 +177,7 @@ func TestPublishOrderBlocksAConsumerBehindAReachedProvider(t *testing.T) {
 		"a failed provider skips a consumer with nothing of its own": {
 			models.StageWaitBuild, &Result{Status: StatusFailed}, false, true, false},
 		"a build relation leaves the consumer's own reason standing": {
-			models.StageWaitBuild, &Result{Status: StatusFailed}, true, false, false},
+			models.StageWaitBuild, &Result{Status: StatusFailed, FailedStage: "publish"}, true, false, false},
 		"a blocking relation outranks that reason": {
 			models.StageWaitNone, &Result{Status: StatusFailed}, true, true, true},
 		"a skipped provider blocks as a failed one does": {
@@ -207,6 +207,22 @@ func TestPublishOrderBlocksAConsumerBehindAReachedProvider(t *testing.T) {
 	}
 }
 
+func TestAPropagatedCauseSettlesBeforePublicationWhenOrderKindsOmitIt(t *testing.T) {
+	p := mkPublishOrderPlan(models.StageWaitNone, models.StageWaitNone)
+	p.Providers["app"] = []string{"core"}
+	p.PublishProviders = map[string][]string{"app": {}}
+	p.BlockingProviders = map[string][]string{"app": {}}
+	app := p.Releases["app"]
+	app.OwnBump, app.Units, app.FreshUnits = ccme.BumpNone, nil, nil
+	app.DueTo = []string{"core"}
+	runner := &fakeRunner{fail: map[string]bool{"publish core": true}, delay: 15 * time.Millisecond}
+	result := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{}, Build: 2, Publish: 2}).
+		Run(context.Background(), p)
+	require.Equal(t, StatusFailed, result["core"].Status)
+	assert.Equal(t, StatusSkipped, result["app"].Status)
+	assert.Equal(t, -1, runner.indexOf("publish app"), "the cause cannot be judged while core is pending")
+}
+
 // TestPublishOrderCountsOnlyDeclaredProvidersAsAReleaseReason: a provider that
 // published is a reason to release a consumer because the consumer is picking
 // that version up, and a provider reached through a package this run does not
@@ -224,7 +240,7 @@ func TestPublishOrderCountsOnlyDeclaredProvidersAsAReleaseReason(t *testing.T) {
 		Space: &model.Space{Name: "lib"}}}
 	results := map[string]*Result{
 		"app":  {Name: "app"},
-		"lib":  {Status: StatusFailed},
+		"lib":  {Status: StatusFailed, FailedStage: "publish"},
 		"core": {Status: StatusPublished},
 	}
 
@@ -299,7 +315,7 @@ func TestPublishOrderSkipsAReachedConsumerBehindIncompleteRecords(t *testing.T) 
 func TestPublishOrderListsTheReachedClosureOnlyOnceAProviderDied(t *testing.T) {
 	p := mkPublishOrderPlan(models.StageWaitBuild, models.StageWaitBuild)
 	changed := releasingNames(p)
-	_, publishReach := (&Executor{}).buildTaskGraph(p, changed)
+	_, publishReach := (&Executor{}).buildTaskGraph(p, changed, newStagePlans(p, changed))
 	r := &run{plan: p, publishReach: publishReach, reachedProviders: map[string][]string{},
 		started: map[string]time.Time{},
 		results: map[string]*Result{"app": {Name: "app"}, "core": {Name: "core"}}}
@@ -308,7 +324,7 @@ func TestPublishOrderListsTheReachedClosureOnlyOnceAProviderDied(t *testing.T) {
 	assert.Empty(t, r.publishReach.nearest, "so nothing was walked")
 	assert.Empty(t, r.reachedProviders, "and nothing was listed")
 
-	core := &taskCtx{run: r, t: task{"core", taskBuild}}
+	core := &taskCtx{run: r, t: task{"core", taskBuild, ""}}
 	core.settleFailure(r.results["core"], errors.New("build failed"), false)
 	assert.Equal(t, []string{"core"}, r.resolveReachedProviders("app"))
 	assert.Equal(t, map[string][]string{"app": {"core"}}, r.reachedProviders, "listed once, then read")
@@ -330,7 +346,7 @@ func TestPublishOrderCascadeAnswersAsTheFullClosure(t *testing.T) {
 			outcome := outcomes[random.IntN(len(outcomes))]
 			results[name] = &outcome
 		}
-		edges := newStageEdges(p, changed)
+		edges := newStageEdges(p, changed, nil)
 		upFront := newPublishReach(edges)
 		r := &run{plan: p, publishReach: newPublishReach(edges),
 			reachedProviders: map[string][]string{}, results: results,

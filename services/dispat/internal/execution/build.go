@@ -45,6 +45,12 @@ type Dispatch struct {
 	// Sources answers the repositories one package's input closure needs, the
 	// root first, each with the planned head its snapshot descends from.
 	Sources func(packageName string) []Source
+	// InitialSources and OutputRoots freeze source entries beneath declared
+	// output roots before any stage can write or admit an output set.
+	InitialSources      []Source
+	OutputRoots         map[string][]string
+	PackageOutputRoots  map[string][]string
+	PackageRepositories map[string]string
 	// Shell is the interpreter the commands of a folder run through, which in
 	// a composed workspace is the configuration that owns that folder.
 	Shell func(dir string) []string
@@ -89,11 +95,18 @@ type InputPackage struct {
 // pool that cannot be assembled is a refusal before anything happens, and a
 // run that has passed that check is one that now owns goroutines. Close stops
 // them.
-func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) {
-	watched, stop := context.WithCancel(ctx)
-	c.stopWatching = stop
+func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) error {
 	c.dispatch = dispatch
 	c.snapshots = newSnapshots()
+	if len(dispatch.InitialSources) > 0 {
+		if err := c.snapshots.captureBaselines(ctx, baselineCapture{sources: dispatch.InitialSources,
+			roots: dispatch.OutputRoots, open: dispatch.OpenRepository, log: c.Log}); err != nil {
+			c.snapshots.closeBaselines()
+			return err
+		}
+	}
+	watched, stop := context.WithCancel(ctx)
+	c.stopWatching = stop
 	c.outputs = newOutputRegistry()
 	c.sweepOutputs = newSweepOutputs()
 	c.preparations = map[string]*preparation{}
@@ -113,20 +126,29 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) {
 	}
 	c.Log.Debug().Int("nodes", len(c.Links)).Int("concurrency", max(dispatch.Concurrency, 1)).
 		Str("run", c.Run).Msg("dispatch opened")
+	return nil
 }
 
 // Guard brackets a frame this node keeps for itself.
 //
-// Two things are taken and both are given back together. The shared side of
-// the snapshot guard, so that a dispatch cannot capture a working tree while a
-// version or syncLock frame is writing into it; and one of this node's own
-// slots, so that the frames the orchestrator still runs are bounded by the
-// capacity its configuration states rather than by the size of the plan.
-func (c *Coordinator) Guard(ctx context.Context, stage string) (func(), error) {
+// Before the frame runs, its package's declared roots are restored once from
+// the pinned source while holding the exclusive snapshot guard. Then the
+// shared side prevents a dispatch from capturing a partial preparation write.
+// A local slot also bounds the orchestrator's simultaneous preparing frames.
+func (c *Coordinator) Guard(ctx context.Context, stage, packageName string) (func(), error) {
 	select {
 	case c.local <- struct{}{}:
 	case <-ctx.Done():
 		return nil, fmt.Errorf("waiting for a local slot to run the %s stage: %w", stage, ctx.Err())
+	}
+	if packageName != "" && stage != "revert" {
+		c.guard.Lock()
+		err := c.cleanPreparationRoots(ctx, packageName)
+		c.guard.Unlock()
+		if err != nil {
+			<-c.local
+			return nil, err
+		}
 	}
 	c.guard.RLock()
 	c.Log.Trace().Str("stage", stage).Str("run", c.Run).Msg("stage holds the shared snapshot guard")
@@ -134,6 +156,20 @@ func (c *Coordinator) Guard(ctx context.Context, stage string) (func(), error) {
 		c.guard.RUnlock()
 		<-c.local
 	}, nil
+}
+
+func (c *Coordinator) cleanPreparationRoots(ctx context.Context, packageName string) error {
+	roots := c.dispatch.PackageOutputRoots[packageName]
+	if len(roots) == 0 {
+		return nil
+	}
+	for _, source := range c.dispatch.Sources(packageName) {
+		if source.Name == c.dispatch.PackageRepositories[packageName] {
+			return c.snapshots.cleanPackageRoots(ctx, packageRootState{name: packageName,
+				source: source, roots: roots, git: c.dispatch.OpenRepository(source.Dir), log: c.Log})
+		}
+	}
+	return fmt.Errorf("execution: source repository of %s is absent from its input closure", packageName)
 }
 
 // Stage places one package's frame of a delegable stage and runs it where it
@@ -153,6 +189,11 @@ func (c *Coordinator) Stage(ctx context.Context, request release.StageRequest,
 	here release.LocalFrame, authorize func(context.Context) error) (release.StageOutcome, error) {
 	descriptor := request.Descriptor
 	task := request.Release.Pkg.Name + ":" + request.Stage
+	if !descriptor.IsPreparing {
+		if err := c.refreshPreparedOutputRoots(ctx, request); err != nil {
+			return release.StageOutcome{FailedPart: release.PartInputs}, err
+		}
+	}
 	if descriptor.Inputs == release.InputsProviderOutputs {
 		if err := c.prepareProviderOutputs(ctx, task, request); err != nil {
 			return release.StageOutcome{FailedPart: release.PartInputs}, err
@@ -161,6 +202,11 @@ func (c *Coordinator) Stage(ctx context.Context, request release.StageRequest,
 	space := request.Release.Pkg.Space
 	placement := resolveDescriptorPlacement(descriptor, space)
 	if descriptor.Placement == release.PlacementByPublish && placement != PlacementWorker {
+		if len(space.BuildOutputs) > 0 {
+			if err := c.prepareLocalPublishInputs(ctx, request); err != nil {
+				return release.StageOutcome{FailedPart: release.PartInputs}, err
+			}
+		}
 		return c.publishHere(ctx, here)
 	}
 	preferred := ""
@@ -170,10 +216,35 @@ func (c *Coordinator) Stage(ctx context.Context, request release.StageRequest,
 	return c.placeTask(ctx, task, placement, space.BuildPlatforms, preferred,
 		func(ctx context.Context, lease *Lease, attempt int) (release.StageOutcome, error) {
 			if lease.IsLocal {
+				if len(space.BuildOutputs) > 0 {
+					return c.runIsolatedHere(ctx, localIsolatedFrame{
+						lease: lease, task: task, attempt: attempt, request: request, here: here})
+				}
 				return c.runHere(ctx, lease, task, request, here)
 			}
 			return c.dispatchStage(ctx, lease, resolveStageKind(descriptor), task, attempt, request, authorize)
 		})
+}
+
+func (c *Coordinator) refreshPreparedOutputRoots(ctx context.Context, request release.StageRequest) error {
+	name := request.Release.Pkg.Name
+	roots := c.dispatch.PackageOutputRoots[name]
+	if len(roots) == 0 {
+		return nil
+	}
+	c.guard.Lock()
+	defer c.guard.Unlock()
+	for _, source := range c.dispatch.Sources(name) {
+		if source.Name == request.Release.Pkg.Repository {
+			request := packageRootState{name: name, source: source, roots: roots,
+				git: c.dispatch.OpenRepository(source.Dir), log: c.Log}
+			if err := c.snapshots.cleanPackageRoots(ctx, request); err != nil {
+				return err
+			}
+			return c.snapshots.refreshPackageRoots(ctx, request)
+		}
+	}
+	return fmt.Errorf("execution: source repository of %s is absent from its input closure", name)
 }
 
 // resolveStageKind is the assignment kind a stage's frame travels under. The
@@ -818,10 +889,12 @@ func (c *Coordinator) formatAssignment(node, kind, task string, attempt int, dir
 		Header:       c.formatOrchestratorHeader(kind, task, attempt, node, branch),
 		Repositories: repositories,
 		Package: &AssignmentPackage{
-			Name:       request.Release.Pkg.Name,
-			Version:    request.Release.Next.String(),
-			Repository: request.Release.Pkg.Repository,
-			Dir:        dir,
+			Name:        request.Release.Pkg.Name,
+			Version:     request.Release.Next.String(),
+			Repository:  request.Release.Pkg.Repository,
+			Dir:         dir,
+			SourceDir:   canonicalPackageDir(request.Release.Pkg.Dir),
+			OutputRoots: request.Release.Pkg.Space.BuildOutputs,
 		},
 		Frame: &AssignmentFrame{
 			Before:   request.Frame.Before,
@@ -840,6 +913,14 @@ func (c *Coordinator) formatAssignment(node, kind, task string, attempt int, dir
 		DeadlineSeconds: resolveTaskDeadlineSeconds(c.Timeouts.Task),
 		Limits:          c.Limits,
 	}
+}
+
+func canonicalPackageDir(dir string) string {
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err == nil {
+		return resolved
+	}
+	return filepath.Clean(dir)
 }
 
 // resolveAssignmentStage is the stage an assignment of the generic kind names,

@@ -1,10 +1,8 @@
 # autoSign
 
-Add an `autoSign` object to give a space's packages a sign stage that writes each package's own version. The sign
-stage is the first stage of a package's release. It runs before the version stage (also called the propagate stage)
-and before the build, and its native step writes the version the plan computed for the package into the package's own
-manifests. The version stage after it then propagates the versions the package takes from its providers, and nothing
-else.
+Use `autoSign` to write each package's own version before updating its dependency ranges or building it. The sign
+stage writes the version from the release plan into the package's manifests. The version stage, also called the
+propagate stage, then updates the dependency ranges.
 
 Write this block on a space. You can also write it at the top level to set the default for every space, or on a single
 package. Like [`autoVersion`](./autoversion.md), a level that states the block replaces what it inherits whole, and
@@ -39,9 +37,8 @@ computed version is written over it.
 
 ## The sign stage
 
-A package has a sign stage when its space enables `autoSign` or configures any of `flow.sign`, `flow.beforeSign` and
-`flow.postSign`. A package with none of them has no sign stage at all: no task, no hooks, no events and no log lines,
-so its release runs exactly as it always did.
+A package has a sign stage when its space enables `autoSign` or configures any of `flow.sign`, `flow.beforeSign`, and
+`flow.postSign`. Without those settings, dispat creates no sign task and emits no sign hooks, events, or log lines.
 
 The stage frame runs in this order, and every part of it gates the release:
 
@@ -60,8 +57,8 @@ was started on, because it writes the files every delegated build is snapshotted
 
 ## The sign stage owns the own version
 
-Two stages never write the same field. When a package's `autoSign` is enabled, its `autoVersion` (or `autoPropagate`)
-block writes dependency ranges and replace rules alone:
+When `autoSign` is enabled, it owns the package's version field. `autoVersion` (or `autoPropagate`) then handles only
+dependency ranges and replace rules:
 
 - `writeVersion` defaults to `false` beside an enabled `autoSign`.
 - An explicit `writeVersion: true` beside it is refused when the configuration loads, with both keys named. This

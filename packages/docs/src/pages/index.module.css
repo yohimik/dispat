@@ -1,274 +1,134 @@
-/**
- * Landing page only. Everything here is scoped through the CSS module, and the
- * colours come from Infima variables so light and dark modes both work without
- * a second rule set.
- */
+/* The landing page is a field manual: a fixed reading measure, margin notes,
+   rules, and a small dependency sketch. Shared palette lives in custom.css. */
+.page { color: var(--site-ink); }
+.shell { width: min(100% - 5rem, 1100px); margin-inline: auto; }
+.hero { padding-top: 2.1rem; }
+.heroMasthead { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding-bottom: 1.1rem; border-bottom: 1px solid var(--site-rule); font: .72rem/1.6 var(--site-mono); }
+.heroMasthead p { margin: 0; }
+.heroMasthead p span { color: var(--site-muted); padding-inline: .55rem; }
+.heroMasthead a { color: var(--site-muted); }
+.heroGrid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 3.5rem; align-items: center; padding-block: 4.3rem 4.7rem; }
+.title { margin: 0 0 1.7rem; font: 400 clamp(3.5rem, 5.6vw, 5.3rem)/1.04 var(--site-serif); letter-spacing: -.055em; }
+.title em { font-weight: 400; color: var(--ifm-color-primary); }
+.lead { max-width: 37rem; margin: 0 0 1.75rem; font-size: 1rem; line-height: 1.8; color: var(--site-muted); }
+.lead strong { color: var(--site-ink); font-weight: 600; }
+.buttons { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem 1.75rem; margin-bottom: 1.25rem; }
+.buttons > :global(.button) { min-width: 0; max-width: 100%; white-space: normal; }
+.installButton { display: inline-flex; align-items: center; justify-content: space-between; gap: 2.4rem; border: 1px solid var(--site-ink); border-radius: 2px; padding: .75rem 1rem; background: var(--site-ink); color: var(--site-paper); font: 500 .86rem/1.4 var(--ifm-font-family-base); }
+.installButton:hover { background: var(--ifm-color-primary); border-color: var(--ifm-color-primary); color: var(--site-paper); }
+.textLink { color: var(--site-ink); font-size: .87rem; text-decoration: underline; text-underline-offset: .3em; text-decoration-color: var(--site-rule); }
+.textLink:hover { text-decoration-color: currentColor; }
+.heroNote { margin: 0; font: .68rem/1.7 var(--site-mono); color: var(--site-muted); }
+.heroFootnote { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding-block: 1rem; border-top: 1px solid var(--site-rule); font: .7rem/1.6 var(--site-mono); color: var(--site-muted); }
+.heroFootnote a { color: var(--site-ink); white-space: nowrap; }
+.sketch { margin: 1.1rem 0 0; min-width: 0; }
+.sketch figcaption { font: italic .9rem/1.5 var(--site-serif); color: var(--site-muted); }
+.sketch figcaption span { display: inline-block; margin-right: .5rem; font: .62rem/1.5 var(--site-mono); }
+.sketch svg { display: block; width: 100%; height: auto; overflow: visible; }
+.sketchLines { fill: none; stroke: var(--site-muted); stroke-width: 1; }
+.sketchText { fill: var(--site-ink); font: 14px var(--site-mono); }
+.sketchVersion { fill: var(--ifm-color-primary); font-size: 12px; }
+.sketchMuted { fill: var(--site-muted); }
+.sketchSmall { fill: var(--site-muted); font-size: 10px; }
+.sketchTicks { stroke: var(--ifm-color-primary); stroke-width: 1.5; fill: none; }
+.sketchCommand { display: flex; align-items: baseline; gap: .5rem; padding: .8rem 0; border-top: 1px solid var(--site-rule); border-bottom: 1px solid var(--site-rule); font: .67rem/1.6 var(--site-mono); }
+.sketchCommand > span:first-child { color: var(--ifm-color-primary); }
+.sketchCommand > span:last-child { margin-left: auto; color: var(--site-muted); font-size: .7rem; }
+.sketchCommand code { background: none; border: none; padding: 0; color: var(--site-ink); font-size: inherit; }
+.sketchNote { margin: .6rem 0 0; text-align: right; font: italic .86rem/1.6 var(--site-serif); color: var(--site-muted); }
 
-.hero {
-  padding: clamp(2.5rem, 6vw, 5rem) 0 2.5rem;
-  text-align: center;
-  background:
-    radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--ifm-color-primary) 13%, transparent), transparent 38rem),
-    linear-gradient(180deg, var(--ifm-color-emphasis-100), var(--ifm-background-color));
-  border-bottom: 1px solid var(--ifm-color-emphasis-200);
-}
-
-.title {
-  margin: 0 auto 1.5rem;
-  max-width: 62rem;
-  font-size: clamp(2.4rem, 4.8vw, 4.1rem);
-  line-height: 1.12;
-  letter-spacing: -0.045em;
-}
-
-.heroNote { color: var(--ifm-color-emphasis-700); font-size: .9rem; margin: 0; }
-.installSection { scroll-margin-top: 5rem; }
-.firstRun { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: center; max-width: 64rem; margin: 1.5rem auto; }
+.section { padding-block: 3.5rem; border-top: 1px solid var(--site-rule); }
+.sectionHeading { display: grid; grid-template-columns: 180px minmax(0, 1fr); column-gap: 2rem; align-items: baseline; margin-bottom: 1.8rem; }
+.chip { margin: 0; color: var(--site-muted); font: .66rem/1.7 var(--site-mono); }
+.chip span { color: var(--ifm-color-primary); }
+.sectionTitle { margin: 0; font: 400 clamp(1.8rem, 3vw, 2.65rem)/1.15 var(--site-serif); letter-spacing: -.035em; }
+.sectionLead { max-width: 49rem; margin: 0 0 1.75rem; color: var(--site-muted); font-size: .96rem; line-height: 1.8; }
+.sectionBody { min-width: 0; }
+.sectionBody > .sectionLead { margin-left: 212px; }
+.libraries { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2rem; }
+.feature { min-width: 0; padding-block: 1.25rem; border-top: 1px solid var(--site-rule); text-align: left; }
+.feature h3 { margin-bottom: .85rem; font: 600 .96rem/1.5 var(--ifm-font-family-base); letter-spacing: -.015em; }
+.feature h3 a { text-decoration: none; }
+.feature h3 code { padding: 0; border: 0; background: transparent; }
+.feature p { margin-bottom: 0; color: var(--site-muted); font-size: .9rem; line-height: 1.8; }
+.recoveryNote { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 2rem; margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--site-rule); }
+.recoveryNote h3 { font: italic 1.3rem/1.3 var(--site-serif); }
+.recoveryNote p { margin-bottom: 0; color: var(--site-muted); font-size: .9rem; line-height: 1.8; }
+.projectMeta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem 2rem; margin: 0 0 1.5rem 212px; }
+.projectMeta > a { font-size: .85rem; text-decoration: underline; text-underline-offset: .25em; }
+.projects { margin-top: 1.5rem; }
+.projects .feature { border: none; padding: 0; }
+.disclosure { border-top: 1px solid var(--site-rule); border-bottom: 1px solid var(--site-rule); padding: 1rem 0; margin-top: 1.5rem; }
+.disclosure summary { cursor: pointer; font-size: .85rem; color: var(--site-ink); }
+.disclosure summary::marker { color: var(--ifm-color-primary); font-size: .75rem; }
+.disclosure summary > span { float: right; margin-left: 1rem; font: .65rem/2 var(--site-mono); color: var(--site-muted); }
+.disclosure[open] summary { margin-bottom: 1.5rem; }
+.disclosure .sectionLead { margin-top: 1rem; }
+.manifests { max-width: 100%; overflow-x: auto; }
+.manifests table { display: table; width: 100%; margin-bottom: 1rem; font-size: .84rem; }
+.manifests th, .manifests td { border-inline: none; padding: .75rem .5rem; text-align: left; }
+.manifests th { font-weight: 600; }
+.manifests td code { font-size: .82em; }
+.manifests p { margin: .75rem 0 0; font-size: .86rem; color: var(--site-muted); }
+.installSection { background: var(--site-wash); scroll-margin-top: 5rem; }
+.install { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+.install > * { margin-bottom: 0; min-width: 0; }
+.install pre, .install code { white-space: pre-wrap; word-break: break-all; }
+.firstRun { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2rem; align-items: center; margin-top: 2rem; }
 .firstRun > * { min-width: 0; }
-.firstRun p { color: var(--ifm-color-emphasis-800); }
-.firstRun pre { margin-bottom: 0; }
-.installLinks { text-align: center; margin: 1.5rem 0 0; }
-.recoveryNote { margin-top: 2rem; padding: 1.5rem 2rem; border-left: 3px solid var(--ifm-color-primary); background: var(--ifm-background-surface-color); border-radius: 0 12px 12px 0; }
-.recoveryNote p { margin-bottom: 0; }
-@media (max-width: 650px) { .firstRun { grid-template-columns: 1fr; gap: .5rem; } .desktopBreak { display: none; } .recoveryNote { padding: 1.25rem; } }
+.firstRun h3 { font: 600 1rem/1.5 var(--ifm-font-family-base); }
+.firstRun p { margin-bottom: 0; color: var(--site-muted); font-size: .9rem; }
+.firstRun :global(.theme-code-block) { margin: 0; }
+.installLinks { margin: 1.5rem 0 0; font-size: .85rem; }
+.installLinks > span { padding-inline: .6rem; }
+.reference { margin: 0 0 0 212px; padding: 0; list-style: none; }
+.reference li { padding: .8rem 0; border-top: 1px solid var(--site-rule); font-size: .88rem; line-height: 1.8; color: var(--site-muted); }
+.reference li a { color: var(--site-ink); text-decoration: underline; text-underline-offset: .2em; text-decoration-color: var(--site-rule); }
+.reference li a:hover { color: var(--ifm-color-primary); text-decoration-color: currentColor; }
+.disclosure .reference { margin-left: 0; }
 
-
-/* Readable line length for the long paragraphs on an otherwise wide page. */
-.lead,
-.sectionLead {
-  max-width: 52rem;
-  margin: 0 auto 1.5rem;
-  font-size: 1.07rem;
-  line-height: 1.65;
+@media (min-width: 997px) {
+  .section:last-child .sectionBody > .buttons { margin-left: 212px; }
 }
-
-.badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  justify-content: center;
-  align-items: center;
-  margin-bottom: 1.25rem;
-}
-
-.badges img {
-  display: block;
-  height: 20px;
-}
-
-.buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  justify-content: center;
-  margin-bottom: 2rem;
-}
-
-.buttons > :global(.button) {
-  min-width: 0;
-  max-width: 100%;
-  white-space: normal;
-}
-
-/* Each section opens like a slide: a hairline, the territory chip, and a
-   mono title, so the page below the deck speaks the deck's language. */
-.section {
-  border-top: 1px solid var(--ifm-color-emphasis-200);
-  padding: clamp(3.5rem, 7vw, 6rem) 0;
-}
-
-.chip {
-  margin: 0 0 0.9rem;
-  text-align: center;
-  font-family: var(--ifm-font-family-monospace);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--ifm-color-primary);
-}
-
-.sectionTitle {
-  text-align: center;
-  font-family: var(--ifm-font-family-base);
-  font-size: clamp(1.65rem, 3vw, 2.2rem);
-  margin-bottom: 1.4rem;
-}
-
-.sectionLead {
-  text-align: center;
-  color: var(--ifm-color-emphasis-800);
-}
-
-.features {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1.5rem;
-}
-
-/* The README's projects list is sized by its content, not by a fixed column
-   count: one project takes the whole row rather than leaving an empty half
-   beside it, and each addition packs into columns on its own. */
-.projects {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
-  gap: 1.5rem;
-}
-
 @media (max-width: 996px) {
-  .features {
-    grid-template-columns: 1fr;
-  }
-
-  .title {
-    font-size: 2.25rem;
-  }
+  .heroGrid { gap: 2rem; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); padding-block: 3.5rem; }
+  .title { font-size: clamp(3rem, 6.3vw, 4.8rem); }
+  .sectionHeading, .recoveryNote { grid-template-columns: 140px minmax(0, 1fr); gap: 1.5rem; }
+  .sectionBody > .sectionLead, .projectMeta, .reference { margin-left: 164px; }
+  .libraries { gap: 1.5rem; }
+  .sketchCommand { flex-wrap: wrap; }
+  .sketchCommand > span:last-child { margin-left: 0; width: 100%; }
 }
-
-/* The three modules side by side, the way the deck rows three package
-   cards: equal columns keep every card's measure readable. */
-.libraries {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.25rem;
+@media (max-width: 760px) {
+  .shell { width: calc(100% - 2.5rem); }
+  .hero { padding-top: 1.25rem; }
+  .heroMasthead { font-size: .64rem; flex-wrap: wrap; gap: .35rem; }
+  .heroGrid { grid-template-columns: 1fr; gap: 2.5rem; padding-block: 2.8rem 2rem; }
+  .title { font-size: clamp(2.8rem, 8.9vw, 4.4rem); }
+  .lead { max-width: 36rem; font-size: .94rem; }
+  .sketch { width: min(100%, 360px); justify-self: center; margin-top: 0; }
+  .sketchText { font-size: 16px; }
+  .sketchSmall, .sketchVersion { font-size: 14px; }
+  .sketchCommand { flex-wrap: nowrap; }
+  .sketchCommand > span:last-child { width: auto; margin-left: auto; }
+  .heroFootnote { font-size: .62rem; align-items: center; }
+  .heroFootnote > span { max-width: 28ch; }
+  .section { padding-block: 2.5rem; }
+  .sectionHeading, .recoveryNote { grid-template-columns: 1fr; gap: .75rem; }
+  .sectionHeading { margin-bottom: 1.2rem; }
+  .sectionBody > .sectionLead, .projectMeta, .reference { margin-left: 0; }
+  .libraries { grid-template-columns: 1fr; gap: 0; }
+  .feature { padding-block: 1.1rem; }
+  .feature h3 { margin-bottom: .5rem; }
+  .recoveryNote { margin-top: .75rem; }
+  .recoveryNote h3 { margin-bottom: .25rem; }
+  .install, .firstRun { grid-template-columns: 1fr; gap: 1rem; }
+  .firstRun { margin-top: 1.5rem; }
+  .installLinks { display: flex; flex-direction: column; gap: .6rem; }
+  .installLinks > span { display: none; }
+  .disclosure summary > span { display: block; float: none; margin: .3rem 0 0 1rem; }
+  .projectMeta { align-items: flex-start; flex-direction: column; }
 }
-
-@media (max-width: 996px) {
-  .libraries {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* A card shaped like the deck's package cards: rounded, hairline border,
-   left-set text at a comfortable size. */
-.feature {
-  padding: 1.35rem 1.5rem 1.45rem;
-  border: 1px solid var(--ifm-color-emphasis-200);
-  border-radius: 14px;
-  background: var(--ifm-background-surface-color);
-  text-align: left;
-  /* A grid child's min-width is auto, so one long token inside a card would
-     otherwise size the whole column past a phone's viewport. */
-  min-width: 0;
-  box-shadow: var(--doc-panel-shadow);
-  transition: transform 160ms ease, border-color 160ms ease;
-}
-
-.feature:hover {
-  transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--ifm-color-primary) 45%, var(--ifm-color-emphasis-200));
-}
-
-.feature p {
-  margin-bottom: 0;
-  font-size: 0.92rem;
-  line-height: 1.65;
-  color: var(--ifm-color-emphasis-800);
-}
-
-.featureTitle {
-  font-family: 'JetBrains Mono', var(--ifm-font-family-monospace);
-  font-size: 0.98rem;
-  margin-bottom: 0.75rem;
-}
-
-.tableTitle {
-  margin-top: 2.25rem;
-  text-align: center;
-  font-family: 'JetBrains Mono', var(--ifm-font-family-monospace);
-  font-size: 1.05rem;
-}
-
-/* The manifest table, panelled like the deck's terminal: wide by nature, so
-   it scrolls on a phone rather than squeezing the file names. */
-.manifests {
-  max-width: 60rem;
-  margin: 0 auto;
-  padding: 0.5rem 1.25rem 1rem;
-  border: 1px solid var(--ifm-color-emphasis-200);
-  border-radius: 14px;
-  background: var(--ifm-background-surface-color);
-  overflow-x: auto;
-}
-
-.manifests table {
-  width: 100%;
-  font-size: 0.92rem;
-}
-
-/* Infima left-aligns table headers; centre them with the rest of the page. */
-.manifests th,
-.manifests td,
-.manifests p {
-  text-align: center;
-}
-
-.manifests p {
-  margin: 0.75rem 0 0;
-  font-size: 0.92rem;
-  color: var(--ifm-color-emphasis-800);
-}
-
-.manifests code {
-  font-size: 0.85em;
-}
-
-.reference {
-  max-width: 52rem;
-  margin: 0 auto;
-  font-size: 0.95rem;
-  line-height: 1.9;
-  text-align: center;
-  /* Centred text with markers hanging outside the box reads as misaligned, so
-     the bullets flow with the line instead. */
-  list-style-position: inside;
-  padding-left: 0;
-}
-
-/* The two Unix blocks share the first row and Windows takes the second in
-   full width; everything stacks on a phone. */
-.install {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-@media (max-width: 996px) {
-  .install {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 576px) {
-  .hero { padding-top: 2.6rem; }
-  .lead, .sectionLead { font-size: 1rem; text-align: left; }
-  .sectionTitle { font-size: 1.35rem; }
-  .feature { padding: 1.1rem; }
-  .projects { grid-template-columns: 1fr; }
-  .manifests { padding: 0.25rem 0.75rem 0.75rem; }
-  .reference { text-align: left; list-style-position: outside; padding-left: 1.25rem; }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .feature { transition: none; }
-}
-
-/* A command is one long URL: wrap it inside its block rather than clipping
-   or scrolling it. */
-.install pre,
-.install code {
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-/* A grid track sized in `fr` takes its content's minimum size, and an install
-   command is one unbreakable ~90-character URL, so without this the column
-   refuses to shrink below that URL and takes the whole document with it: on a
-   phone the page ends up twice the viewport wide and every section is
-   clipped. Allowing it to shrink is what lets the code block's own
-   overflow-x do its job and scroll the URL inside the block instead. */
-.install > * {
-  margin-bottom: 0;
-  min-width: 0;
+  .page *, .page *::before, .page *::after { scroll-behavior: auto; }
 }

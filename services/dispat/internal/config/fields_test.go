@@ -19,6 +19,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	public "github.com/yohimik/dispat/pkg/models"
 )
 
 // TestFieldTablesCoverEveryModelField compares each table against the struct
@@ -34,7 +36,7 @@ func TestFieldTablesCoverEveryModelField(t *testing.T) {
 		{"SpaceFile", SpaceFile{}, spaceFileFields(&SpaceFile{})},
 		{"PackageConfig", PackageConfig{}, packageConfigFields(&PackageConfig{})},
 		{"VersionGroupConfig", VersionGroupConfig{}, versionGroupFields(&VersionGroupConfig{})},
-		{"SpaceFlowConfig", SpaceFlowConfig{}, spaceFlowFields(&SpaceFlowConfig{})},
+		{"SpaceFlowConfig", SpaceFlowConfig{}, flowEntryTable()},
 		{"RunConfig", RunConfig{}, runFields(&RunConfig{})},
 		{"PublishConfig", PublishConfig{}, publishFields(&PublishConfig{})},
 		{"AdoptPublishedConfig", AdoptPublishedConfig{}, adoptPublishedFields(&AdoptPublishedConfig{})},
@@ -90,6 +92,17 @@ func TestResolvedFieldsAreOutsideTheLanguage(t *testing.T) {
 		}
 		assert.NotContains(t, table, strings.ToLower(name))
 	}
+}
+
+// flowEntryTable is the `flow` object's typed keys as pkg/models lists them.
+// The object is read by that package's own normaliser rather than by a table
+// here, so the drift check holds its key list to the type's json tags instead.
+func flowEntryTable() fields {
+	table := make(fields)
+	for _, key := range public.FlowEntryKeys() {
+		table[strings.ToLower(key)] = nil
+	}
+	return table
 }
 
 // modelKeys are the keys a struct's json tags say it holds, lowered the way

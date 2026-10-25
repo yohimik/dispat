@@ -1,16 +1,17 @@
 # Publishing to Steam
 
-Upload a build to Steam with `steamcmd`. Put the version in the build description and let the release channel decide
-which Steam branch goes live. Steam has no version field.
+Steam identifies each upload with a build number. Put dispat's semantic version in the build description, then map
+release channels such as `beta` to Steam branches. Players receive whichever build their branch points to.
 
-A build is a numbered upload with a description attached, and players get whichever build a branch points at. This maps
-onto dispat cleanly once you decide what the description says and which branch a given release sets live.
+The example uses Godot for the export and `steamcmd` for the upload. Replace the export command with your engine's
+build command if needed.
 
 ## The layout
 
 ```
 games/adventure/project.godot                  the game itself
 games/adventure/scripts/app_build.template.vdf the SteamPipe build script, with two placeholders
+games/adventure/scripts/depot_windows.vdf      the Windows depot's file mappings
 games/adventure/scripts/steam-publish.sh       fills the template in and runs steamcmd
 dispat.json
 ```
@@ -34,13 +35,11 @@ dispat.json
 }
 ```
 
-dispat reads the `project.godot` manifest. The `autoVersion` field finds the game's version and writes it back with
-nothing else configured. Read [Godot](./godot.md) for the detail.
+`autoVersion` updates the existing version in `project.godot` before export. See [Godot](./godot.md) for the supported
+fields and export settings.
 
-Set `flow.login` to run your authentication script once before the first publish of the space. It runs once per space,
-not once per package. A repository with one game still uses a space to get this behavior.
-
-See [registry login, once per space](./login.md).
+`flow.login` runs once before the space's first publish. Even a repository with one game uses a space here to share
+that login behavior. See [Registry login, once per space](./login.md).
 
 ## The build script
 
@@ -69,20 +68,29 @@ Fill the template in using the environment dispat provides:
 #!/bin/sh
 set -eu
 
-# A prerelease goes to its own Steam branch; a stable release goes to the
-# default branch, which is what an empty SetLive means.
+# A prerelease activates its matching Steam branch. Stable releases are
+# uploaded without activating a branch; promote them in Steamworks afterward.
 branch="$DISPAT_CHANNEL"
 [ "$branch" = "stable" ] && branch=""
 
+build_script="$PWD/scripts/app_build.generated.vdf"
+trap 'rm -f "$build_script"' EXIT
+
 sed -e "s|{{DESC}}|$DISPAT_NEW_VERSION|" \
     -e "s|{{BRANCH}}|$branch|" \
-    scripts/app_build.template.vdf > /tmp/app_build.vdf
+    scripts/app_build.template.vdf > "$build_script"
 
-steamcmd +login "$STEAM_USERNAME" +run_app_build /tmp/app_build.vdf +quit
+steamcmd +login "$STEAM_USERNAME" +run_app_build "$build_script" +quit
 ```
 
 `$DISPAT_CHANNEL` holds the release channel. This is `stable` for an ordinary release, or `beta` or `rc` for a
-prerelease. Name your Steam branches after your channels to make the mapping a single line.
+prerelease. Create matching Steam branches before uploading prereleases. Empty `SetLive` leaves the upload inactive;
+Steam requires you to promote a build to the default branch manually in App Admin. See the
+[SteamPipe build options](https://partner.steamgames.com/doc/sdk/uploading?l=english).
+
+The script runs inside `games/adventure` and writes the generated VDF beside the template. Steam resolves
+`ContentRoot` relative to that file, so `../build/` points to the game's build directory. The trap removes the
+generated file when the script exits.
 
 ## A release
 
@@ -100,27 +108,24 @@ $ dispat
 12:54:14 INF build succeeded package=adventure stage=build version=0.3.0-beta.0
 12:54:14 INF login started space=games stage=login
 12:54:14 INF publish started package=adventure stage=publish version=0.3.0-beta.0
-12:54:16 INF would upload 0.3.0-beta.0 to branch 'beta' package=adventure stage=publish version=0.3.0-beta.0
 12:54:16 INF published package=adventure stage=publish tag=adventure@0.3.0-beta.0 version=0.3.0-beta.0
 12:54:16 INF summary channel=beta package=adventure status=published tag=adventure@0.3.0-beta.0 took=1.4s version="0.2.0 -> 0.3.0-beta.0"
 ```
 
-Watch the login happen once, after the build succeeds and before the first publish. A build that fails never reaches
-Steam.
+The login runs after the build succeeds and before the first publish. If the build fails, the upload does not run.
 
-Testers on the beta branch get the build. Graduate the same work when it is ready for everybody, rather than rebuilding
-a different version of it:
+Once the work is ready for a stable release, graduate it with a release commit:
 
 ```console
 $ git commit -m "release(adventure)%beta>stable: ship it"
 $ dispat
 12:54:16 INF ● changed baselineFromInitials=true bump=minor channel="beta -> stable" dueToProviders=[] ownCommits=1 package=adventure reason=direct space=games version="0.3.0-beta.0 -> 0.3.0"
-12:54:16 INF would upload 0.3.0 to branch 'default' package=adventure stage=publish version=0.3.0
 12:54:16 INF summary channel=stable package=adventure status=published tag=adventure@0.3.0 took=1.0s version="0.3.0-beta.0 -> 0.3.0"
 ```
 
-The `0.3.0-beta.0` release became `0.3.0` and the branch became the default one. Both uploads sit on the same store
-page. You can read their descriptions in the Steamworks build list.
+The `0.3.0-beta.0` release became `0.3.0`. The stable upload is recorded, but players stay on their existing build
+until you promote it to the default branch in Steamworks. Both uploads appear in the Steamworks build list, where
+their descriptions identify the dispat versions.
 
 ## Several platforms in one release
 
@@ -172,13 +177,12 @@ session.
 
 ## Worth knowing
 
-- **Uploading is not releasing.** A build sitting on a branch nobody is on changes nothing for players. This makes
-  automation safe. Set the default branch live to release the game, which happens in the `%beta>stable` graduation
-  above.
+- **Uploading and going live are separate decisions.** Check which branch the script updates and who can access it.
+  Test the branch mapping privately before using the stable release path.
 - **Steam build numbers are Valve's, versions are yours.** The tag `adventure@0.3.0` and the changelog are your record.
   The build description is how you find that release again in the Steamworks list.
-- **A failed upload costs you nothing but time.** No version was consumed. The next run re-does the leg that failed.
-  See [recovering from a failed run](../reference/releasing/recovery.md).
+- **A failed upload does not consume a semantic version.** Check Steam's result if the response was lost before
+  retrying the failed step. See [recovering from a failed run](../reference/releasing/recovery.md).
 - **Keep the export in the build stage.** The run stops before `steamcmd` launches if `godot --headless` fails.
 - **Test the whole thing on a private branch first.** Set `SetLive` to a branch only you are on. Run a release and look
   at what arrives.

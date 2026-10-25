@@ -23,6 +23,7 @@ import (
 	"context"
 
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
+	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
 // Remotex runs a package's stage frames on another execution node.
@@ -36,13 +37,14 @@ import (
 type Remotex interface {
 	// Guard brackets a frame the orchestrator keeps for itself: the sign,
 	// version and syncLock stages, whose whole job is editing the working tree
-	// the dispatched builds are snapshotted from. The returned function gives the
-	// guard back and is called on every path.
+	// the dispatched builds are snapshotted from. It also prepares the named
+	// package's declared output roots before its first preparing frame. The
+	// returned function gives the guard back and is called on every path.
 	//
 	// It takes the stage name rather than the task, because what the guard is
 	// for is the kind of write the frame makes, and a caller naming the stage
 	// cannot pass an implementation something it would have to interpret.
-	Guard(ctx context.Context, stage string) (func(), error)
+	Guard(ctx context.Context, stage, packageName string) (func(), error)
 	// Stage runs one package's frame of a stage the run may place elsewhere,
 	// wherever this run places it, and answers what came of it. The request's
 	// descriptor is the whole of what the implementation needs to know about
@@ -69,6 +71,41 @@ type Remotex interface {
 // indistinguishable from one that ran here before any of this existed, hooks,
 // labels, exports and all.
 type LocalFrame func(ctx context.Context) (string, error)
+
+type localStageRuntimeKey struct{}
+
+// LocalStageRuntime is one local frame's private execution environment.
+type LocalStageRuntime struct {
+	Dir         string
+	Runner      script.Runnerx
+	Env         []string
+	OutputPaths []OutputPathMapping
+}
+
+// OutputPathMapping translates paths beneath declared output roots between
+// the authoritative source checkout and one task's materialized checkout.
+type OutputPathMapping struct {
+	SourceRoot string
+	TaskRoot   string
+	Roots      []string
+}
+
+// WithLocalStageRuntime runs a local producer in a private checkout using
+// the original package's shell and without an inherited workspace context.
+func WithLocalStageRuntime(ctx context.Context, runtime LocalStageRuntime) context.Context {
+	return context.WithValue(ctx, localStageRuntimeKey{}, runtime)
+}
+
+// ResolveLocalStageExecution applies a private checkout's directory, runner,
+// inherited environment, and declared-output path mapping to one local frame.
+func ResolveLocalStageExecution(ctx context.Context, fallbackDir string, fallbackRunner script.Runnerx,
+	fallbackEnv []string) (string, script.Runnerx, []string, []OutputPathMapping) {
+	if runtime, ok := ctx.Value(localStageRuntimeKey{}).(LocalStageRuntime); ok && runtime.Dir != "" {
+		env := RemapOutputEnvironment(fallbackEnv, runtime.OutputPaths)
+		return runtime.Dir, runtime.Runner, append(env, runtime.Env...), runtime.OutputPaths
+	}
+	return fallbackDir, fallbackRunner, fallbackEnv, nil
+}
 
 // StageRequest is one stage frame as another node has to receive it:
 // everything the frame consists of, and everything it runs under.
@@ -186,7 +223,7 @@ func (tc *taskCtx) runStage(ctx context.Context, s stage) (what string, err erro
 // its writes out of a snapshot somebody is taking at the same moment.
 func (tc *taskCtx) guardedStage(ctx context.Context, s stage) (string, error) {
 	stage := tc.stage.Name
-	releaseGuard, err := tc.Remote.Guard(ctx, stage)
+	releaseGuard, err := tc.Remote.Guard(ctx, stage, tc.t.pkg)
 	if err != nil {
 		return stage + " could not be guarded", err
 	}
@@ -235,7 +272,7 @@ func (tc *taskCtx) stageRequest(s stage) StageRequest {
 		Stage:      tc.stage.Name,
 		Descriptor: tc.stage,
 		Frame:      StageFrame{Before: s.before, Commands: s.commands, After: s.after},
-		Env:        computedPackageEnv(tc.plan, tc.t.pkg, tc.wsVars, tc.updates, tc.stage.Name),
+		Env:        computedReleaseEnv(tc.rel, tc.wsVars, tc.updates, tc.stage.Name),
 		StaticEnv:  tc.rel.Pkg.Space.Env,
 		Dir:        tc.rel.Pkg.Dir,
 	}

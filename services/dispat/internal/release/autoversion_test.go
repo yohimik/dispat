@@ -256,8 +256,10 @@ func TestAutoVersionStableOverPrereleaseW203(t *testing.T) {
 }
 
 func TestAutoVersionFailedProviderFallsBackToBaseline(t *testing.T) {
-	// core releases but its build fails; web proceeds on its own bump and its
-	// manifest must point at core's baseline, never the never-released Next.
+	// core released and failed after it built; web proceeds on its own bump,
+	// and its version stage, admitted against that outcome, writes core's
+	// baseline into its manifest, never the never-released Next. The version
+	// stage waits on no provider (§19.2a), so the outcome is staged by hand.
 	root := t.TempDir()
 	space := avSpace(&model.AutoVersion{Kinds: allKinds()})
 	seedFile(t, root, "core/package.json", `{"name": "@acme/core"}`)
@@ -267,12 +269,13 @@ func TestAutoVersionFailedProviderFallsBackToBaseline(t *testing.T) {
 	p.Providers["web"] = []string{"core"}
 	fillUpdates(p)
 	// No DueTo: web is not bumped *because of* core, so a core failure skips
-	// nothing — but ordering still guarantees core's outcome is known first.
+	// nothing.
 
-	r := &fakeRunner{fail: map[string]bool{"build " + filepath.Join(root, "core"): true}}
-	res := newExecutor(execSpec{Runner: r, Build: 1, Publish: 1}).Run(context.Background(), p)
-	require.Equal(t, StatusFailed, res["core"].Status)
-	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
+	r := &fakeRunner{}
+	run := newRunFor(p, map[string]bool{"core": true, "web": true}, r)
+	run.failedAfterBuild("core")
+	run.execute(context.Background(), task{"web", taskVersion, ""})
+	assert.Equal(t, StatusPending, run.results["web"].Status, "%v", run.results["web"].Err)
 	assert.Contains(t, fileText(t, root, "web/package.json"), `"@acme/core": "^1.0.0"`,
 		"failed provider: the baseline, not the planned version")
 }
@@ -386,8 +389,10 @@ func TestSyncLockSkippedWhenNothingChanged(t *testing.T) {
 
 func TestAutoVersionSkipsUserScriptShortCircuitButNotNative(t *testing.T) {
 	// The "no live updates -> skip version scripts" rule: when every DueTo
-	// provider failed, the user version script stays silent but the native
-	// reconciliation still runs (it writes baselines, not dead versions).
+	// provider has failed by the time the version stage is admitted, the user
+	// version script stays silent but the native reconciliation still runs
+	// (it writes baselines, not dead versions). The version stage waits on no
+	// provider (§19.2a), so the outcome is staged by hand.
 	root := t.TempDir()
 	space := avSpace(&model.AutoVersion{Kinds: allKinds()})
 	space.VersionScript = []string{"user-version"}
@@ -399,11 +404,11 @@ func TestAutoVersionSkipsUserScriptShortCircuitButNotNative(t *testing.T) {
 	p.Releases["web"].DueTo = []string{"core"}
 	fillUpdates(p)
 
-	coreDir := filepath.Join(root, "core")
-	r := &fakeRunner{fail: map[string]bool{"build " + coreDir: true}}
-	res := newExecutor(execSpec{Runner: r, Build: 1, Publish: 1}).Run(context.Background(), p)
-	require.Equal(t, StatusFailed, res["core"].Status)
-	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
+	r := &fakeRunner{}
+	run := newRunFor(p, map[string]bool{"core": true, "web": true}, r)
+	run.failedAfterBuild("core")
+	run.execute(context.Background(), task{"web", taskVersion, ""})
+	require.Equal(t, StatusPending, run.results["web"].Status, "%v", run.results["web"].Err)
 
 	webDir := filepath.Join(root, "web")
 	assert.Equal(t, -1, r.indexOf("user-version "+webDir), "user script skipped: nothing live to sync")

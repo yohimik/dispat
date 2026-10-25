@@ -1,11 +1,10 @@
 # An Android app
 
-You can release an Android app from a monorepo using Gradle builds driven by the computed version. This setup requires
-a monotonic `versionCode` and attaches a bundle to the GitHub release.
+Pass dispat's planned version to Gradle, build the app, then run your delivery command. The example below uses Gradle
+tasks; the publish task can upload to Play or an artifact repository. You can also attach the resulting bundle to a
+GitHub release, as shown below.
 
-Gradle projects fit the same build and publish slots as every other ecosystem. Pass the version through environment
-variables into your Gradle properties. The publish step for an app is whatever your delivery requires, like a Play
-upload, an artifact repository, or an APK attached to a GitHub release.
+The version players see and Android's integer `versionCode` have different jobs. Configure both before building.
 
 ```json
 {
@@ -25,7 +24,7 @@ upload, an artifact repository, or an APK attached to a GitHub release.
 }
 ```
 
-Keep two Gradle-specific details in mind:
+Adapt these two details to your project:
 
 - Scripts run inside the package folder, which is `android/<app>` in this example. Call the Gradle wrapper at the
   repository root by going two levels up with `../../gradlew`.
@@ -40,7 +39,7 @@ echo "DISPAT_EXPORT_GITHUB=$PWD/app/build/outputs/bundle/release/app-release.aab
 
 ## Check the published library set
 
-A source-tree Gradle build does not prove that an external Android project can resolve the published AARs. Check exact
+If you also publish Android libraries, test them from a separate consumer project. Check exact
 Maven coordinates and the declared set of publishable modules. Keep a clean consumer check for required ABIs, metadata
 and transitive dependencies inside the release gates, using packed artifacts or a staging repository before publication.
 dispat does not compare AAR bytecode with Maven metadata. Check production coordinates separately after native release
@@ -52,9 +51,9 @@ dependencies can build from the checkout.
 
 ## Inspect every native wrapper for 16 KB alignment
 
-The criterion is independent of the engine that produced the app: inspect every 64-bit `.so` that reaches the SDK or
-final package, including middleware and plugin wrappers. To pass Android's documented ELF check, every `PT_LOAD` segment needs `p_align`
-of at least `0x4000`; a passing core library says nothing about the wrappers beside it.
+Inspect every 64-bit `.so` included in the SDK or final app, including middleware and plugin wrappers. This applies
+regardless of which engine produced the app. Android's documented ELF check requires every `PT_LOAD` segment to have
+`p_align` of at least `0x4000`; checking only the core library misses the wrappers beside it.
 
 Use Android's documented [16 KB page-size guidance](https://developer.android.com/guide/practices/page-sizes) for the
 exact checks. ELF segment alignment and APK ZIP alignment are separate. Run both, then

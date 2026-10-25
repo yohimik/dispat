@@ -4,16 +4,15 @@ description: Read and safely update dependency manifests across the package form
 
 # Manifest tools
 
-Every package in a repository carries a file that declares its name, its version, and its dependencies. npm uses
-`package.json`, Go uses `go.mod`, and Rust uses `Cargo.toml`. Roughly twenty other formats do the same job, and this
-page calls all of them **manifests**.
+Package manifests describe names, versions, or dependencies. Examples include npm's `package.json`, Go's `go.mod`,
+and Rust's `Cargo.toml`. dispat supports these and the other formats [listed below](#supported-formats).
 
 dispat reads and writes manifests in several places already. Run `dispat compute` to read them, build the dependency
 graph, and find the starting version for each package. Auto-versioning writes them so a released package and its
 consumers agree on the new version. Two commands expose this machinery directly:
 
-- **`dispat scanner`** answers what a folder actually declares.
-- **`dispat writer`** changes a declaration without disturbing anything else in the file.
+- **`dispat scanner`** lists manifests and their declarations in a folder.
+- **`dispat writer`** changes declarations while preserving the rest of each file.
 
 Neither command needs a config file, a git repository, or a release plan. They read only the files you point them at.
 You can run them on any checkout, including one that has never used dispat.
@@ -96,9 +95,8 @@ Use this flag in a CI job to catch a malformed manifest before it reaches a rele
 
 ## Changing a manifest
 
-The writer edits a manifest in place and preserves its formatting. Only the version text you ask to change actually
-moves. Indentation, key order, comments, and blank lines survive exactly as they were. The result is a one-line diff
-rather than a reformatted file.
+The writer edits the requested values in place. It preserves indentation, key order, comments, and blank lines, so
+the diff shows the changes you asked for.
 
 ```console
 $ dispat writer packages/web/package.json --set-version 1.3.0 --set @acme/core=^1.3.0
@@ -108,7 +106,7 @@ packages/web/package.json
 1 manifest(s): 1 applied, 0 skipped, 0 missing
 ```
 
-Three flags decide what happens, and you can repeat each one:
+These flags cover version and dependency edits:
 
 | Flag             | What it does                                                                     |
 |------------------|----------------------------------------------------------------------------------|
@@ -233,7 +231,7 @@ touches the file.
 
 ### Applied, skipped and missing
 
-Each edit ends in exactly one of three states. Telling them apart is the whole point of the report.
+The report gives each edit one of three outcomes:
 
 **Applied** means the writer changed the file.
 
@@ -242,8 +240,8 @@ something outside the file. A Maven `${property}`, a Cargo workspace inheritance
 are intentional indirections. Overwriting them with a number breaks their intended behavior. Skipped is the normal,
 healthy state for many manifests, so it never fails the command.
 
-**Missing** means the manifest does not declare that dependency in that field at all. Usually, you and the file
-disagree about its contents. You might have typed the name wrong, or put the right name in the wrong field.
+**Missing** means the manifest does not declare that dependency in the requested field. Check the spelling and whether
+the dependency belongs to a different field, such as `devDependencies`.
 
 The writer reports a missing edit and the command still succeeds by default. A batch aimed at ten manifests is allowed
 to overshoot on some of them. Pass `--strict` to fail the command when overshooting is a bug.
@@ -340,7 +338,8 @@ and which shapes they deliberately ignore.
 
 ## Docker
 
-Docker fits the same two commands as everything else. It spells "version" differently enough to need its own section.
+The scanner and writer also support Docker image references. Their versions are image tags, so a few rules differ
+from package-manager ranges.
 
 A Dockerfile's dependencies are the images it names. Every `FROM`, `COPY --from`, and `RUN --mount=...,from=` counts.
 Each one pulls a real image:
@@ -399,7 +398,7 @@ The writer reports three kinds of reference as skipped and never rewrites them:
 | `FROM redis@sha256:...`        | the digest is what gets pulled, so a new tag beside it would name nothing real  |
 | `FROM ${REGISTRY}/base:${TAG}` | the value comes from a build argument, and a literal would break that link      |
 
-None of these is an error. They represent a carefully written Dockerfile. A run that meets them still succeeds.
+These references are left unchanged, and the command still succeeds.
 
 ### Naming a Docker package
 

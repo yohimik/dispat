@@ -45,22 +45,37 @@ func (w *Worker) installTaskInputs(ctx context.Context, assignment Assignment, c
 		return nil, ReasonBytesMissing, err
 	}
 	installed := make([]ManifestInput, 0, len(assignment.Inputs))
+	type inputGroup struct {
+		name     string
+		requests []InstallRequest
+	}
+	groups := make(map[string]*inputGroup)
+	var ordered []*inputGroup
 	for _, input := range assignment.Inputs {
 		manifest, validated, reason, err := w.readInputManifest(ctx, assignment, input)
 		if err != nil {
 			return nil, reason, err
 		}
-		if err := InstallOutputs(ctx, InstallRequest{
+		key := input.Package + "\x00" + input.Path
+		group := groups[key]
+		if group == nil {
+			group = &inputGroup{name: input.Package}
+			groups[key] = group
+			ordered = append(ordered, group)
+		}
+		group.requests = append(group.requests, InstallRequest{
 			Git: w.Cache, Manifest: manifest, Objects: validated.Objects, Dir: checkout.Dir(input.Path),
 			Staging: filepath.Join(dir, stagingDirName, formatIdentityHash(input.Package)), Log: log,
-		}); err != nil {
-			return nil, OutputFaultReason(err), err
-		}
-		log.Debug().Str("package", input.Package).Str("commit", input.Commit).
-			Int("files", manifest.Files).Int64("bytes", manifest.Bytes).Msg("inputs installed")
+		})
 		installed = append(installed, ManifestInput{
 			Package: input.Package, OutputTree: manifest.OutputTree, Digest: manifest.Digest,
 		})
+	}
+	for _, group := range ordered {
+		if err := InstallOutputSets(ctx, group.requests); err != nil {
+			return nil, OutputFaultReason(err), err
+		}
+		log.Debug().Str("package", group.name).Int("sets", len(group.requests)).Msg("inputs installed")
 	}
 	return installed, "", nil
 }
@@ -152,7 +167,7 @@ func (w *Worker) captureTaskOutputs(ctx context.Context, assignment Assignment, 
 		PackagePath:       packagePath,
 		Roots:             assignment.Outputs,
 		Limits:            assignment.Limits,
-		IsAbsentRootEmpty: assignment.Kind == KindRun,
+		IsAbsentRootEmpty: assignment.Kind == KindRun || assignment.Kind == KindStage,
 		Manifest: OutputManifest{
 			Run: assignment.Run, PlanDigest: assignment.PlanDigest, Task: assignment.Task,
 			Attempt: assignment.Attempt, Generation: assignment.Generation, Node: w.Node,

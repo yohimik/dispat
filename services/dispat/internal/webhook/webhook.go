@@ -350,6 +350,7 @@ func formatFields(ev release.Event) map[string]string {
 		"timestamp":       ev.Time.Format(time.RFC3339Nano),
 		"package":         esc(ev.Package),
 		"stage":           esc(ev.Stage),
+		"label":           esc(ev.Label),
 		"version":         esc(ev.Version),
 		"previousVersion": esc(ev.PreviousVersion),
 		"channel":         esc(ev.Channel),

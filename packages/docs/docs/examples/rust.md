@@ -1,7 +1,8 @@
 # A Cargo workspace
 
-Keep your crates in one workspace. dispat versions them from commits and publishes them to crates.io in dependency
-order. The tool rewrites the `path` dependencies between your crates to real versions before it uploads anything.
+This example versions a Cargo workspace and publishes its crates to crates.io in dependency order. Keep both `path`
+and `version` on local dependencies: Cargo uses the path during development, and dispat updates the version needed
+for publication.
 
 ## The layout
 
@@ -96,8 +97,8 @@ crates/app/Cargo.toml
 1 manifest(s): 1 applied, 1 skipped, 0 missing
 ```
 
-The manifest declares `tokio` as `{ workspace = true }`. Skipped is the correct outcome here. The version lives in the
-root `[workspace.dependencies]`, and writing a literal into the member breaks the inheritance you set up.
+`tokio` is skipped because the member declares it as `{ workspace = true }`. Its version lives in the root
+`[workspace.dependencies]`; replacing the member's declaration with a literal would break that inheritance.
 
 The same applies to `version.workspace = true` on the package itself. Point an
 [`autoVersion.replace`](../configuration/autoversion.md) rule at the root manifest if your workspace inherits its
@@ -109,7 +110,8 @@ current.
 
 ## Building against the crate next door
 
-Run `dispat writer --link` to write a `[patch.crates-io]` entry. The empty form takes it away again.
+Local links use `[patch.crates-io]`. Add them before building, remove them before publishing, then check that none
+remain:
 
 ```sh
 dispat autowriter --since all --link-local     # before the build
@@ -125,21 +127,16 @@ dispat scanner --verify-unlinked               # fails with E215 if one is left 
 - **`0.x` versions are their own compatibility rule.** Cargo treats `0.4` and `0.5` as incompatible. A `feat` on a
   pre-1.0 crate is a breaking change for its consumers even though dispat calls it a minor. Reach the consumers
   deliberately with `^` in the commit when that matters.
-- **Keep `cargo publish` last.** Put anything that can fail in the build stage, where failing costs nothing. This
-  applies to `cargo test` and `cargo package` above all.
-
-## See also
-
-- Read [autoVersion](../configuration/autoversion.md) for the rewriting policy and `syncLock`.
-- Read [Manifest tools](../editing/manifests.md) for the scanner and the writer used on their own.
-- Read [Shared versions](../reference/releasing/versioning.md) if the crates should move as one version.
+- **Keep `cargo publish` last.** Run checks such as `cargo test` and `cargo package` in the build stage so a failure
+  stops the release before crates.io accepts a version.
 
 ## Recover a partial crate release
 
-Keep the provider order, and reconcile exact versions already accepted by the registry before retrying a partially
-published workspace. Do not blindly skip every duplicate-version error. A clean consumer checks the packaged dependency
-graph outside local path overrides. Keep `cargo package` and artifact checks before publication, and perform remote
-reconciliation outside the publish command. See [integration guidance](./release-integration.md).
+Before retrying a partially published workspace, check exactly which versions crates.io accepted and continue in
+dependency order. A duplicate-version error alone is not proof that the expected artifact arrived. Use a clean
+consumer to check the packaged dependency graph without local path overrides. Keep `cargo package` and artifact
+checks before publication, and check previous remote results outside the publish command. See
+[integration guidance](./release-integration.md).
 
 Check each destination separately in a mixed release. A missing native package does not prove that Rust crates are
 absent. dispat can coordinate crate and native-package stages, but it does not build missing native bindings or roll
@@ -152,3 +149,9 @@ publication, then run the relevant target build against those bytes. Add a clean
 platform-specific code can differ. dispat orders and versions the publish step; it does not validate crate contents.
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.
+
+## See also
+
+- Read [autoVersion](../configuration/autoversion.md) for the rewriting policy and `syncLock`.
+- Read [Manifest tools](../editing/manifests.md) for the scanner and the writer used on their own.
+- Read [Shared versions](../reference/releasing/versioning.md) if the crates should move as one version.

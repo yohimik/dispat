@@ -4,9 +4,8 @@ Use `github.com/yohimik/dispat/pkg/writer` to bump versions in `package.json`, `
 format [the scanner](./scanner.md) reads. Most formats use targeted byte edits that preserve indentation, key order
 and comments. Go modules use the Go module formatter.
 
-Every format writer goes through one internal splicer. This means the read cap, the splice, the proof that the result
-still parses, and the atomic write happen in the same place. Writes go through a same-folder temporary file, an fsync,
-and a rename, but dispat skips the write entirely if nothing changed.
+All format writers share the same read limit, validation, and atomic-write path. Changed files are written through a
+temporary file in the same folder, followed by an fsync and rename. If the result is unchanged, no write occurs.
 
 ```sh
 go get github.com/yohimik/dispat/pkg/writer
@@ -21,20 +20,20 @@ res, err := writer.Rewrite("packages/web/package.json", "1.3.0", []writer.Edit{
 // res.Applied, res.Skipped, res.Missing, res.VersionWritten, res.Path
 ```
 
-Read the result to see three distinct outcomes instead of just checking the error. `Applied` holds the edits that
-changed the file. `Skipped` holds edits where the dependency exists but the version cannot be written, which is the
-normal state of a healthy manifest.
+Check the result as well as the error:
 
-`Missing` holds edits the manifest does not declare at all. This usually means your caller and the file disagree about
-what is installed.
+- `Applied`: edits that changed the file.
+- `Skipped`: the dependency exists, but the writer cannot change its version. This is expected for values supplied
+  through a property or another file.
+- `Missing`: the manifest does not declare the dependency. Check the dependency name and the file you passed.
 
 An unsupported path returns `ErrUnsupportedManifest`. Reads are capped at 16 MiB, and a larger file returns
 `ErrManifestTooLarge`.
 
 ## What is never written
 
-A value that defers to something outside the file is left alone rather than replaced with a literal. Overwriting it
-would sever the indirection it exists for. This covers a Maven `${property}`, a Cargo `{ workspace = true }`, an
+Values supplied by a property, workspace, or another file are left unchanged. Replacing one with a literal would
+break that connection. This covers a Maven `${property}`, a Cargo `{ workspace = true }`, an
 MSBuild or Xcode `$(...)` property, a nuspec `$version$` pack-time token, and the `spec.version = Acme::VERSION`
 constant nearly every published gem uses.
 
@@ -42,8 +41,8 @@ A Maven `<parent>` version is never written either. It selects which POM this on
 repoint the build rather than release the module. Nothing is added where a declaration carries no version on purpose,
 such as a gem pinned to a git revision.
 
-Every writer proves its output before a byte lands. It re-parses the result with `json.Valid`, `modfile.Parse`, a
-re-parse for the XML formats, or `toml.Unmarshal`.
+Before writing, the package validates the edited content with `json.Valid`, `modfile.Parse`, an XML parser, or
+`toml.Unmarshal`, as appropriate for the format.
 
 Formats with no cheap grammar to re-parse against are guarded three ways instead. This applies to `project.pbxproj`,
 the Ruby manifests, and the Gradle build scripts. The writer refuses a replacement carrying any byte that could end a
@@ -62,8 +61,8 @@ res, err := writer.Replace("build.gradle", []writer.Replacement{
 // res.Applied, res.Skipped, res.Missing, res.Count, res.Path
 ```
 
-It runs over any file and replaces every occurrence rather than the first. It applies replacements in order, each over
-what the one before it left.
+Each replacement changes every match. Replacements run in order, so a later replacement sees the result of the
+earlier ones.
 
 It refuses a file that looks binary so a replacement never lands inside a PNG that happens to contain the version text.
 This returns `ErrBinaryFile` and is decided by a NUL byte in the first 8 KiB. Call `ReplaceBytes` to do the same work
@@ -127,12 +126,13 @@ This covers the nine places a format keeps a counter. These include `CFBundleVer
 `AndroidBundleVersionCode`, the per-platform counters under `buildNumber`, `version/code` in every Godot export preset,
 a `.uplugin`'s `Version`, and the Android `StoreVersion` in `Config/DefaultEngine.ini`.
 
-A counter the file does not declare is not created. A format with no counter at all gives `ErrNoBuildCounter`.
+An absent counter is left absent, except for a pubspec version's `+` suffix, which can be appended to the existing
+version. A format with no counter at all returns `ErrNoBuildCounter`.
 
 ## The same work from the command line
 
-Use [`dispat writer`](../cli/writer.md) and [`dispat replacer`](../cli/replacer.md) to run this package with a report
-attached. Neither command needs a configuration file or a git repository:
+Use [`dispat writer`](../cli/writer.md) and [`dispat replacer`](../cli/replacer.md) to make these edits from the
+terminal and print a report. Neither command needs a configuration file or a git repository:
 
 ```sh
 dispat writer packages/web/package.json --set-version 1.3.0

@@ -1,8 +1,8 @@
 # The autoversion command
 
-Run `dispat autoversion` to execute the native manifest reconciliation of the version stage. dispat rewrites declared
-workspace ranges to the planned versions and updates the package's own version. It then runs the space's `syncLock`
-scripts for each package whose manifests actually changed. A package whose space enables
+Run `dispat autoversion` to bring manifest versions into line with the release plan. It updates the package's own
+version and its declared workspace dependency ranges, then runs the space's `syncLock` scripts for packages whose
+manifests changed. A package whose space enables
 [`autoSign`](../configuration/autosign.md) leaves its own version to the sign stage, so the command writes its ranges
 alone unless `--write-version` asks for the own version too.
 
@@ -12,33 +12,24 @@ without an `autoVersion` block unless you force one with a policy flag. That fla
 Pass `--only-updated` to narrow rewrites to declarations naming a package this run releases. This leaves a range that
 fell behind an earlier release exactly as it is, instead of catching it up (`W197`).
 
-dispat writes inside each package's own folder. It rides the build concurrency budget.
+Files are written inside each package's folder. The command uses the configured build concurrency limit.
 
 ## The selection it shares
 
-Use `dispat changelog`, `dispat autoversion`, `dispat commit`, and `dispat github` to expose the release pipeline's
-native steps to custom flows. A stage script can run a step exactly when the flow needs it. The release stage later
-finds the work done and skips it.
+`changelog`, `autoversion`, `commit`, and `github` let you run individual release steps from a custom flow or stage
+script. The later release step recognises completed work and skips it.
 
-These four commands share the run command's [selection](./run.md#choosing-the-packages) *and* its window. Run them with
-no terms to cover every releasing package in dependency order. You can narrow this with `--package`, `--space`,
-`--group`, or the invocation folder.
+These commands use the run command's [package selection](./run.md#choosing-the-packages) and release window. By
+default, they process releasing packages in dependency order. Narrow the selection with `--package`, `--space`,
+`--group`, or your current folder. Use `--since` to change the window, `--consumers` to include dependent packages,
+and `--on-error` to choose how failures affect them.
 
-Pass `--since` to replace the window. Pass `--consumers` to expand it downstream. Use `--on-error` to decide what a
-failed package does to its dependents.
+A name that matches no package is an error. A selected package with no release to perform is a logged no-op. After
+`dispat commit --tag`, the tagged package is no longer in the release window; pass `--since all` to include it again.
 
-A selection must follow two rules. First, a term matching no package is an error. Second, a *selected* package that is
-not releasing is a logged no-op.
-
-This means a flow never fails over a converged or held package. That second rule is also why a step run after
-`dispat commit --tag` covers nothing. You must pass `--since all` to put the tagged package back on the table.
-
-The four command words are reserved. Each wins the `dispat <script>` shorthand over a
-[script](../configuration/spaces.md#scripts-and-dispat-run) of the same name, so `dispat commit` is always the command.
-Run `dispat run commit` to reach the script instead.
-
-Every config value the commands consume is also a flag. You can use these flags to override the config for a single
-invocation. See [Flags](#flags) for details.
+Built-in command names take precedence over script names. For example, `dispat commit` runs this built-in step;
+`dispat run commit` runs a [script](../configuration/spaces.md#scripts-and-dispat-run) named `commit`.
+Use the flags below to override configuration for this invocation.
 
 ## Flags
 
@@ -46,38 +37,36 @@ These commands accept the [global flags](./README.md#global-flags) alongside the
 
 ### `--package`, `-p`
 
-Narrow every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`,
-`autowriter`, `autoreplacer`, `commit`, `github`, `compute`) to the named packages. This flag is repeatable,
-comma-separated, and case-insensitive. It supports `*` globs, so `-p '*'` selects every package; see
-[Choosing the packages](./run.md#choosing-the-packages).
+Select named packages. Repeat the flag or separate names with commas. Names are case-insensitive and accept `*`
+globs; quote them so the shell does not expand them first. For example, `-p core,web` selects two packages and `-p '*'`
+selects every package. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--space`, `-s`
 
-Narrow the same eleven commands to every package in the named spaces. This uses the same spelling rules as packages. A
-standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).
+Select every package in the named spaces. This accepts the same lists and globs as `--package`. Standalone packages
+do not belong to a space, so `-s '*'` does not include them. See
+[Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--group`, `-g`
 
-Narrow the same eleven commands to every package in the named
-[versioning groups](../reference/releasing/versioning.md). This uses the same spelling rules. A group is a
-`versionGroups` entry or a space that versions as one, so it can cross spaces; see
-[Choosing the packages](./run.md#choosing-the-packages).
+Select every package in a named [versioning group](../reference/releasing/versioning.md), using the same lists and
+globs as `--package`. A group may be a `versionGroups` entry or a space that versions together, and may span several
+spaces. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--since`
 
-Apply to the same seven commands. Cover the packages addressed by commits since a git revision, instead of the release
-window. Pass `all` to cover every package; see [the run command](./run.md).
+Use commits since a Git revision to choose packages, replacing the default release window. Pass `all` to include
+every package. See [how the run command selects packages](./run.md).
 
 ### `--consumers`
 
-Apply to the same seven commands. Cover every package that transitively depends on a selected one. See
-[the run command](./run.md).
+Also include packages that depend on the selected packages, directly or indirectly. See
+[how the run command expands a selection](./run.md).
 
 ### `--on-error`
 
-The default is `skip`. Decide what a failed package does to its dependents in every sweeping command (`run`,
-`autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Pass `skip` to skip transitively, or
-`continue` to proceed. The command exits `1` on any failure either way.
+Choose what happens to dependent packages when a package fails. The default, `skip`, skips its direct and indirect
+dependents. `continue` lets them run. Either way, any package failure makes the command exit `1`.
 
 ### `--match`, `--write-version`
 

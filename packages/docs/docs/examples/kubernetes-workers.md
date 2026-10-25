@@ -1,17 +1,18 @@
 # Worker nodes on Kubernetes
 
-A cluster suits dispat's worker nodes as **batch capacity that exists for the length of one release**. It does not suit
-them as a deployment that grows and shrinks on CPU load while a release is running. This page gives the reasons, the
-arrangement that works, and the manifest for it. Read [distributed execution](../distributed-execution.md) first for
-what an orchestrator and a worker are.
+Start a fixed worker pool before each release and let it stop when the work is done. An Indexed Job fits that
+lifecycle: every worker has a known name, and pending pods can trigger node autoscaling. CPU-based pod autoscaling
+does not fit because dispat fixes its worker list before dispatching work.
+
+The guide below explains pool sizing, includes a Job manifest and covers credentials. Read
+[distributed execution](../distributed-execution.md) first if orchestrators and workers are new to you.
 
 ## What fits
 
-A worker asks nothing of the network it runs in. It polls the repository being released over Git and pushes its
-answers back, so a worker pod needs no Service, no Ingress and no inbound port. It runs behind NAT and in a private
-cluster.
+A worker polls and writes to the repository over Git, so it needs outbound Git access but no Service, Ingress or
+inbound port. It can run behind NAT or in a private cluster.
 
-A worker is also a well-behaved batch process:
+Its process lifecycle fits a batch job:
 
 - `--idle-timeout` makes it exit with code `0` after that many seconds with nothing claimed and nothing in flight,
   counted from its last activity, so a pod started for one release ends by itself and a long build never ends its own
@@ -20,18 +21,17 @@ A worker is also a well-behaved batch process:
 - Everything under `--state-dir` can be lost. The object cache is rebuilt, and an assignment is bound to the branch it
   arrived on, so an `emptyDir` volume is a correct state folder.
 
-Releases come in bursts: minutes of work, a few times a day or a week. Machines kept warm for them are idle almost all
-of the time. Starting the workers for a release and letting them end afterwards costs nothing between releases, and
-that saving is the reason to run workers on a cluster.
+If releases are occasional, keeping dedicated workers running leaves them idle between jobs. Starting them for each
+release lets the cluster remove their machines afterwards. How much that saves depends on the cluster's other
+workloads and node provisioning policy.
 
-The machines themselves follow from the pods. A worker pod requests the CPU and memory one build needs. When the
-cluster has no room for it the pod stays pending, the cluster autoscaler or Karpenter adds a machine, and it removes
-the machine again once the pod has ended. Horizontal scaling of machines is therefore driven by pending worker pods.
-No metric has to be watched for it.
+Give each worker pod the CPU and memory one build needs. If the cluster has no room, the pod stays pending and the
+cluster autoscaler or Karpenter can add a node. Once the work ends, that node can be removed. This scales machines
+from pending pods without using worker CPU as a demand signal.
 
 ## What does not fit
 
-A HorizontalPodAutoscaler that watches worker CPU during a release adds nothing, for four reasons.
+A HorizontalPodAutoscaler watching worker CPU cannot expand the active release's worker pool:
 
 - **The pool is fixed before any task is placed.** The orchestrator's configuration lists its workers by name. After
   planning it asks every one of them what it is, and a worker that does not answer within
@@ -62,8 +62,8 @@ More workers help only while more builds are ready than there are slots. Three f
 - Publications of one repository run one after another. Workers shorten the build part of a release, and the sum of
   the publish durations stays.
 
-Size the pool for the widest level of a typical release and no further. `dispat status` prints the plan without
-running anything, which is where to read that width from.
+Use `dispat status` to inspect a typical release plan. Size the pool for the builds that can run at the same time;
+workers beyond that point will wait idle.
 
 ## One Indexed Job per release
 
@@ -162,9 +162,9 @@ spec:
           secret: {secretName: worker-git-key, defaultMode: 0400}
 ```
 
-The image carries `dispat`, `git` and whatever the build commands call. The release pipeline applies the Job, then
-starts `dispat release` on the orchestrator. The preflight is what waits for the pool. When every worker has answered,
-the run places its work, and fifteen idle minutes after the last task the pods succeed and the machines go away.
+Include `dispat`, `git` and the required build tools in the image. The release pipeline applies the Job, then starts
+`dispat release` on the orchestrator. Preflight waits for every listed worker to answer before dispatching work.
+After fifteen idle minutes, the pods exit successfully and the node autoscaler can remove unused machines.
 
 The choices in the manifest that matter:
 

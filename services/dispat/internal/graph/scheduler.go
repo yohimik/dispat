@@ -101,6 +101,87 @@ func (s *Scheduler[N]) Len() int { return len(s.nodes) }
 // which is what the graph costs to hold and to drain.
 func (s *Scheduler[N]) EdgeLen() int { return s.edgeCount }
 
+// CycleNodes names exactly the vertices on directed cycles without consuming
+// the scheduler. Pass-through vertices are included because a cycle through
+// a zero-duration relay still prevents its dependent tasks from starting.
+func (s *Scheduler[N]) CycleNodes() []N {
+	all := append(slices.Clone(s.passThroughs), s.nodes...)
+	reverse := make(map[N][]N, len(all))
+	for from, next := range s.dependents {
+		for _, to := range next {
+			reverse[to] = append(reverse[to], from)
+		}
+	}
+	type frame struct {
+		node  N
+		index int
+	}
+	seen := make(map[N]bool, len(all))
+	order := make([]N, 0, len(all))
+	for _, root := range all {
+		if seen[root] {
+			continue
+		}
+		seen[root] = true
+		stack := []frame{{node: root}}
+		for len(stack) > 0 {
+			top := &stack[len(stack)-1]
+			if top.index < len(s.dependents[top.node]) {
+				to := s.dependents[top.node][top.index]
+				top.index++
+				if !seen[to] {
+					seen[to] = true
+					stack = append(stack, frame{node: to})
+				}
+				continue
+			}
+			order = append(order, top.node)
+			stack = stack[:len(stack)-1]
+		}
+	}
+	seen = make(map[N]bool, len(all))
+	onCycle := make(map[N]bool)
+	for i := len(order) - 1; i >= 0; i-- {
+		root := order[i]
+		if seen[root] {
+			continue
+		}
+		seen[root] = true
+		component := []N{root}
+		stack := []N{root}
+		for len(stack) > 0 {
+			n := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			for _, from := range reverse[n] {
+				if !seen[from] {
+					seen[from] = true
+					component = append(component, from)
+					stack = append(stack, from)
+				}
+			}
+		}
+		if len(component) > 1 {
+			for _, n := range component {
+				onCycle[n] = true
+			}
+			continue
+		}
+		for _, to := range s.dependents[root] {
+			if to == root {
+				onCycle[root] = true
+				break
+			}
+		}
+	}
+	var cyclic []N
+	for _, n := range all {
+		if onCycle[n] {
+			cyclic = append(cyclic, n)
+		}
+	}
+	return cyclic
+}
+
 // Ready returns the nodes with no pending dependencies that have not been
 // handed out yet, in insertion order. The initial frontier, on a fresh
 // scheduler. Pass-through nodes with nothing to wait for complete first, so

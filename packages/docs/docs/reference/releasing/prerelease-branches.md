@@ -8,8 +8,7 @@ live in commit messages and tags, making a branch strategy a way of organizing t
 
 Three facts decide everything below.
 
-dispat reads a package's channel from its newest release tag, so `core@1.5.0-beta.2` is on `beta` and `core@1.4.2` is
-on `stable` with no side file. Write a directive in a commit to move a package between channels. Use `%beta` to enter
+A package's baseline tag identifies its channel: `core@1.5.0-beta.2` is on `beta`, and `core@1.4.2` is on `stable`. Write a directive in a commit to move a package between channels. Use `%beta` to enter
 the beta line and a transition such as `%beta>stable` to graduate it.
 
 dispat reads tags from the commits reachable from `HEAD`. A tag on an unmerged branch is invisible to other branches,
@@ -42,8 +41,8 @@ in CI to release because a detached checkout matches no pattern, though patterns
 
 ## The train on the branch
 
-Put a risky rewrite out on a prerelease channel first. Declare the channel in the commit. The publish script sees it as
-`$DISPAT_CHANNEL`, which you can use as the npm dist-tag so beta users opt in and `latest` stays untouched.
+To test a change before its stable release, name a prerelease channel in the commit. The publish script receives it
+as `$DISPAT_CHANNEL`; for npm, use that as the dist-tag to publish to `beta` without moving `latest`.
 
 ```console
 $ git commit -m "feat(core)%beta: risky rewrite, try it on beta first"
@@ -53,7 +52,7 @@ $ dispat
 12:04:05 INF published package=core stage=publish tag=core@0.2.0-beta.0 version=0.2.0-beta.0
 ```
 
-Ordinary commits keep the train rolling when feedback arrives:
+Add ordinary commits as you address feedback. The package stays on its current prerelease channel:
 
 ```console
 $ git commit -m "fix(core): beta feedback"
@@ -76,17 +75,16 @@ $ dispat
 12:04:05 INF ● changed bump=minor channel="beta -> rc" dueToProviders=[] ownCommits=3 package=core reason=direct space=libs version="0.2.0-beta.1 -> 0.2.0-rc.0"
 ```
 
-A transition matches the package's **baseline** channel, which makes it idempotent. Once the baseline says `rc`, a
-`%beta>rc` directive proposes nothing, so re-running converges instead of minting `rc.1`. Use `%*>rc` to match any
-prerelease, but the wildcard is a source only because there is no transition *to* a random prerelease.
+A transition applies only when the baseline matches its source channel. Once the package is on `rc`, rerunning
+`%beta>rc` does nothing. Use `%*>rc` to match any prerelease source; the destination must be a named channel.
 
 You can run the promotion on the beta branch or on a dedicated `rc` branch. The tags travel with the commits. Merge
 `beta` into an `rc` branch and run the transition there to get the exact same behavior as running it in place.
 
 ## Merging to main: the consequences
 
-Merging the branch usually breaks a release tool. Here is exactly what dispat sees after you run `git merge beta` on
-`main`.
+After `git merge beta` on `main`, dispat sees the branch's commits and reachable tags. These rules determine the next
+release:
 
 **Every branch commit enters main's window, with its own message parsed.** The window includes every commit reachable
 from `HEAD` since the last stable tag, instead of doing a first-parent walk. The `feat(core)%beta:` commits written on

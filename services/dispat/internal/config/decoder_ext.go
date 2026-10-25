@@ -183,6 +183,22 @@ func stageRelation(dst **StageRelation) setter {
 	}
 }
 
+// optionalStrs preserves the difference between an omitted selection and an
+// explicit empty selection, including when a model is encoded as JSON.
+func optionalStrs(dst **[]string) setter {
+	return func(val any, at string) error {
+		var selected []string
+		if err := strs(&selected)(val, at); err != nil {
+			return err
+		}
+		if selected == nil {
+			selected = []string{}
+		}
+		*dst = &selected
+		return nil
+	}
+}
+
 // adoptPublished fills `publish.adoptPublished`: the boolean that turns
 // adoption on or off, or the object naming its verify scripts. The scalar takes
 // the weak reading every boolean key of the language gets.

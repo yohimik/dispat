@@ -1,9 +1,7 @@
 # Cross-platform binaries on a GitHub release
 
-Compile one CLI for four platforms and attach the results, with checksums, to the GitHub release the run creates.
-
-You do not need a registry in this setup. The GitHub release *is* the distribution, so the build stage produces files
-and tells dispat which ones to upload.
+This example compiles a Go CLI for four platforms and attaches the binaries and checksums to a GitHub release. The
+build script produces the files and exports their paths for dispat to upload. No separate package registry is needed.
 
 ## The layout
 
@@ -27,8 +25,8 @@ dispat.json
 }
 ```
 
-Leave out the publish script. You are not uploading to a third party, so the package's whole delivery is its tag and
-its GitHub release. dispat writes both of these at the end of the run.
+There is no publish script here. The GitHub recorder handles the upload from the exported asset list when dispat
+writes the release records.
 
 ## The build script
 
@@ -50,11 +48,9 @@ done
 echo "DISPAT_EXPORT_GITHUB=$(ls -d "$PWD"/dist/* | tr '\n' ' ')" >> "$DISPAT_OUTPUT"
 ```
 
-The last line contains the whole integration. Append to the `$DISPAT_OUTPUT` file to set variables. Set
-`DISPAT_EXPORT_GITHUB` to a whitespace-separated list of absolute paths.
-
-This is the output name dispat treats as a directive. It uploads each path as an asset and names it after the file. Use
-`$PWD` to get the package folder inside a stage, which makes `"$PWD"/dist/*` absolute without any bookkeeping.
+The last line appends `DISPAT_EXPORT_GITHUB` to `$DISPAT_OUTPUT`. Its value is a whitespace-separated list of absolute
+file paths. dispat uploads each file using its filename as the asset name. `$PWD` is the package folder during the
+build, so `"$PWD"/dist/*` supplies absolute paths.
 
 The export acts as the opt-in. Do not export this variable if you want to skip creating a GitHub release. In a
 monorepo, only the packages that produce artifacts create a release.
@@ -81,7 +77,7 @@ $ dispat
 The release named `acmectl@1.5.0` carries five assets. These are the four binaries and `SHA256SUMS`. The release body
 contains the changelog sections.
 
-Run without a token and dispat prints a warning, but everything else still happens:
+Without a token, dispat skips the GitHub release and prints this warning. The other release steps still run:
 
 ```console
 12:56:06 WRN github releases disabled error="no token found in $GITHUB_TOKEN" package=acmectl
@@ -95,8 +91,8 @@ pass a personal access token through `github.tokenEnv`.
 Pass `-X main.version=$DISPAT_NEW_VERSION` to put the release version into the binary itself. This ensures
 `acmectl --version` and the tag agree. Every stage receives the same variable.
 
-A Rust build reads it in `build.rs`, and a Node build writes it into a generated file. You do not need a separate step
-to bump anything.
+For other languages, read the variable in a build script or write it into a generated source file. A Rust project can
+use `build.rs`; a Node project can generate a version module.
 
 ## Building on more than one operating system
 
@@ -118,17 +114,18 @@ produce every asset by itself. Use one of these two approaches:
   only adds assets, which helps when the release page is your changelog for everything.
 - **The release body is the changelog entry.** It comes from the same commits. You do not write anything twice.
 
+## Bound producer queues before release
+
+If the binary contains a producer/worker queue, include a backpressure check in its build tests. Block a worker,
+submit more work than the queue should accept, and fail the test unless enqueue waits for capacity. A performance
+change can otherwise make the producer outpace the workers.
+
+Run the small queue probe in `build`, then exercise the produced library or binary in a representative consumer before
+exporting it. A successful GitHub upload proves that the asset exists. It does not prove that a source fix reached the
+asset or that long-running memory remains bounded.
+
 ## See also
 
 - Read [Release records](../configuration/records.md#github) for the GitHub recorder's options.
 - Read [Script environment variables](../reference/environment.md#script-outputs) for outputs and the export directive.
 - Read [dispat in CI](../reference/ci.md) for the job that runs this.
-
-## Bound producer queues before release
-
-Performance changes can make an existing pipeline accept work faster than it completes it. Add a probe that blocks a
-worker, drives the producer beyond the intended capacity, and fails unless enqueue applies backpressure.
-
-Run the small queue probe in `build`, then exercise the produced library or binary in a representative consumer before
-exporting it. A successful GitHub upload proves that the asset exists. It does not prove that a source fix reached the
-asset or that long-running memory remains bounded.

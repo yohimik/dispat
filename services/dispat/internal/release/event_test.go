@@ -114,8 +114,10 @@ func TestObserverBlockedSkip(t *testing.T) {
 	assert.Equal(t, "skipped", ev.Status)
 	assert.Equal(t, plan.CodeBlocked, ev.Code)
 	assert.Equal(t, "a", ev.BlockedBy)
-	// The skip is b's only event: none of its stages ever started.
-	assert.Equal(t, []string{"package.skipped:"}, obs.forPackage("b"))
+	// b's version stage waits on no provider (§19.2a), so it ran; the skip
+	// came at the build, which waits for a's publish, and no stage after it
+	// started.
+	assert.Equal(t, []string{"stage.started:version", "stage.succeeded:version", "package.skipped:"}, obs.forPackage("b"))
 }
 
 func TestObserverGatingHookFailure(t *testing.T) {

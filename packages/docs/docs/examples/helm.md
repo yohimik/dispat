@@ -1,11 +1,8 @@
 # Helm charts that follow the image
 
-You can configure a chart so the same run that pushes the image also writes the `appVersion` and the image tag. The
-chart `version` moves on its own schedule.
-
-A chart carries two version numbers that mean different things. The `version` belongs to the chart, and it changes when
-the templates change. The `appVersion` belongs to the application, and it changes when the image updates. Updating
-these numbers by hand is bookkeeping that goes wrong quietly.
+This example publishes an image and then a Helm chart that points to it. The chart has two separate versions:
+`version` identifies the chart itself, while `appVersion` identifies the application image. The configuration updates
+both and keeps `values.yaml` in sync with the image tag.
 
 ## The layout
 
@@ -50,18 +47,16 @@ dispat.json
 }
 ```
 
-Three ideas drive this configuration.
+The configuration makes three decisions explicit:
 
-**`dependencies` with `keep: true`.** Nothing in the chart files says the chart belongs to the image, so you declare
-the edge by hand. The `keep: true` field tells [`dispat compute`](../cli/compute.md) this dependency is deliberate. The
-command leaves it alone instead of offering to remove it.
+**`dependencies` with `keep: true`.** Declare the chart's dependency on the image by hand. The chart files do not
+give [`dispat compute`](../cli/compute.md) an edge it can infer, so `keep: true` tells it to preserve this declaration.
 
-**`isBuildWaitingPublish` on the image.** You set this on the *provider* package. Consumers of that package wait for
-the image to be published rather than merely built. A chart naming a missing image tag is useless, so the chart waits.
+**`isBuildWaitingPublish` on the image.** The flag belongs to the provider. It makes the chart wait until the image
+has been pushed, so the chart can reference a tag that is available to pull.
 
-**The three `replace` rules.** The `Chart.yaml` file is YAML, but it lacks a standard dependency manifest. Literal
-find-and-write is the right tool here. You use `{version}` for this package and `{providerVersion}` for the package it
-follows.
+**The three `replace` rules.** dispat has no native chart writer, so these rules update the literal text. `{version}`
+is the chart's planned version; `{providerVersion}` is the image version it follows.
 
 ## A release
 

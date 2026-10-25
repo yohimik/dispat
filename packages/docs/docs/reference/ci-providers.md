@@ -1,18 +1,16 @@
 # The release job on other providers
 
-This page shows the same release job written for GitLab CI, CircleCI, Jenkins, Buildkite, and Azure Pipelines. It
-highlights only the parts that differ.
+Use the examples below to adapt a release job to GitLab CI, CircleCI, Jenkins, Buildkite, or Azure Pipelines.
 
-dispat needs four things from a CI provider: `git`, a POSIX shell, the full repository history, and credentials for
-whatever your stages push. Everything else below is one provider's spelling of those requirements. Read
+Each job needs `git`, a POSIX shell, full repository history with tags, and credentials for the release lock and
+anything your stages publish. Read
 [dispat in CI](./ci.md) to get the binary onto the runner, and [Pipeline patterns](./pipelines.md) to see what to run
 once it is there.
 
 ## What every provider has to get right
 
-**The clone must not be shallow.** dispat reads tags and commit ranges. A truncated history makes every version it
-computes wrong, so it refuses to guess and stops with `E196` instead. Most providers clone shallowly by default, so you
-must change this setting.
+**Fetch full history.** dispat needs commit ranges and tags to calculate versions. A shallow clone is rejected with
+`E196`. Check your provider's clone settings before the release step.
 
 **Tags must come with it.** A baseline is a tag. A clone without tags looks like a repository that has never released,
 so a release from one is refused with `E196` before it plans: the remote holds records this checkout cannot see, and
@@ -20,8 +18,8 @@ planning from them would publish a released version a second time. The check run
 remote once per repository. Fetch the tags in the job (`git fetch --tags`, or your provider's own setting below);
 dispat never fetches them for you.
 
-**Something must be able to push.** Tags and the release commit go back to the remote. Change your checkout token if it
-is read-only.
+**Give the release job write access.** The release lock requires a remote tag write even when release commits are
+not pushed. If the job also pushes commits and release tags, its credentials need access to those refs.
 
 **Concurrency is already handled.** A run claims the repository with a [release lock](./releasing/release-lock.md) tag
 on the remote before planning, on every release and whatever flags it was given. The second pipeline stops with a
@@ -38,9 +36,8 @@ git tag | wc -l                         # must not be 0 in a repository that has
 
 ## GitLab CI
 
-Set `GIT_DEPTH: 0` because GitLab clones the last 20 commits by default. Put a project access token with
-`write_repository` in a masked variable. The job token cannot push, so this masked token becomes the remote's
-credentials.
+Set `GIT_DEPTH: 0` to fetch full history. This example uses a project access token with `write_repository`, stored in
+a masked `RELEASE_TOKEN` variable, to authenticate pushes to the remote.
 
 ```yaml title=".gitlab-ci.yml"
 release:
@@ -68,8 +65,8 @@ sets `$DISPAT_TAG` and `$DISPAT_NEW_VERSION` in that environment.
 
 ## CircleCI
 
-You usually have nothing to change because the built-in `checkout` step brings the full history and the tags. Add the
-preflight check above if your configuration uses a custom clone.
+This example uses the built-in `checkout` step. Use the preflight check above to confirm that the job has full history
+and tags, especially if you replace it with a custom clone.
 
 ```yaml title=".circleci/config.yml"
 version: 2.1
@@ -180,8 +177,8 @@ push.
 
 ## What does not change
 
-Everything above stops at the shell prompt. The release is identical on every provider once dispat runs. You get the
-same plan, the same order, the same tags, and the same changelog.
+Once the checkout, tools, and credentials are ready, the same dispat configuration determines planning, execution
+order, tags, and changelog content on every provider.
 
 Two features are the exception, and both are opt-in:
 

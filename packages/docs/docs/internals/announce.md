@@ -1,20 +1,20 @@
 # The release announcement
 
-dispat's own release workflow renders a card and posts it to configured Instagram, LinkedIn, and Discord destinations.
-It uses the [`flow.announce`](../configuration/spaces.md#flowannounce) stage and the
-[updated-provider listing](../reference/environment.md), which other projects can use with their own announcement
-scripts.
+This page documents dispat's own release announcements: the files to edit, how to preview them, and how to recover a
+failed post. The workflow renders a card and posts to configured Instagram, LinkedIn, and Discord destinations.
+
+It uses [`flow.announce`](../configuration/spaces.md#flowannounce) and the
+[updated-provider listing](../reference/environment.md). Other projects can use the same stage and variables with
+their own scripts.
 
 ## Who announces, and when
 
-The announcement belongs to the documentation package, not to the CLI. Every link in a post leads into the site, and the
-docs package's `announce` stage runs after its publish stage deploys the site, so the pages a post points at are live
-before anybody reads the post. A site that failed to deploy leaves nothing announced.
+The documentation package announces after its publish stage deploys the site. That keeps the linked pages available
+before the post goes out. If the site fails to deploy, the announcement does not run.
 
-What is announced is dispat. The stage reads the dispat version this docs release picks up from the updated-provider
-listing, `DISPAT_UPDATED_DISPAT_NEW_VERSION` and `DISPAT_UPDATED_DISPAT_CHANNEL`. The listing names that version whether
-dispat shipped in the same run or in an earlier run whose docs leg failed, so a split release still announces once, when
-the site finally goes live. A docs release that picks up no new dispat announces nothing.
+The announced version comes from `DISPAT_UPDATED_DISPAT_NEW_VERSION` and `DISPAT_UPDATED_DISPAT_CHANNEL`. These name
+the CLI version the docs release picks up, including a version published in an earlier run whose docs deployment
+failed. A docs release with no new dispat version announces nothing.
 
 The files live in [`packages/docs/announce/`](https://github.com/yohimik/dispat/tree/main/packages/docs/announce), and
 the stage is the `announce` script of
@@ -27,10 +27,9 @@ The step outputs the release workflow reads, `cli-released` and `cli-version`, a
 
 ## RC and stable announcements
 
-Both channels post only what a person wrote. Each has a `notes.yaml`, which its `crier.yaml` pulls in as the caption
-with a `$ref`, and a `template.html` carrying the same words on the card. Nothing generated is posted. The only value
-either takes from the release is the version: the stage sets `ANNOUNCE_NEW_VERSION` from the listing, and both
-configurations read their data with `render.data: env:ANNOUNCE_`, which turns it into `{{ .new_version }}`.
+Each channel has a hand-written caption in `notes.yaml` and matching card text in `template.html`. Its `crier.yaml`
+loads the caption through `$ref`. Only the version is filled in at release time: the stage sets `ANNOUNCE_NEW_VERSION`,
+and `render.data: env:ANNOUNCE_` exposes it as `{{ .new_version }}` in both configurations.
 
 | File | Purpose |
 |---|---|
@@ -50,10 +49,9 @@ outside the site, CLI and Go test image build contexts.
 
 ## Writing an announcement
 
-The words are written by hand in two places, and the two must match: the channel's `notes.yaml` and the text of its
-`template.html`. Announcing a new release therefore never edits a configuration. The first line of the notes is the
-cover's lede. The links are printed on the cover above the install commands, where a reader can copy an address a
-picture cannot make clickable. The remaining paragraphs fill the notes page.
+Edit the channel's `notes.yaml` and the text in `template.html` together, keeping their wording in sync. The first line
+is the cover introduction. Put links above the install commands so readers can copy their addresses from the card;
+the remaining paragraphs go on the notes page. The channel configuration does not need to change for each release.
 
 A release candidate's links name that exact candidate: its GitHub release under
 `releases/tag/services/dispat/v<version>` and its documentation under `https://dispat.dev/next/`. A stable release links
@@ -123,9 +121,9 @@ ANNOUNCE_NEW_VERSION=1.11.0-rc.4 ANNOUNCE_NOCOVER= crier render --config announc
 ANNOUNCE_NEW_VERSION=1.11.0 ANNOUNCE_NOCOVER=true crier render --config announce/stable/crier.yaml
 ```
 
-The second command renders the pages the Instagram passes post, without the cover. Nothing checks a card against its
-caption or a caption's length by machine. After a rewrite, read the card against the caption, and print each
-platform's resolved caption with `crier publish --dry-run --json`, which makes no network calls.
+The second command renders the Instagram notes pages without the cover. There is no automated check that the card
+matches its caption or that the caption fits each platform's limit. After editing, compare the two and inspect each
+resolved caption with `crier publish --dry-run --json`. That command makes no network calls.
 
 ## Recover an incomplete announcement
 

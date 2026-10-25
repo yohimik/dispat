@@ -1,11 +1,10 @@
 # The autowriter command
 
-Run `dispat autowriter` to apply `dispat writer` across a selection of packages instead of a list of files. The
-`--set-version`, `--set`, and `--link` flags mean exactly what they mean there. dispat finds the manifests by scanning
-each covered package that the plan and the window pick.
+Use `dispat autowriter` to make the same manifest edit across several packages. It scans the selected packages and
+applies the same `--set-version`, `--set`, and `--link` operations as [`dispat writer`](./writer.md).
 
-You can pass the same selection and window flags as the step commands. The `--package`, `--space`, `--group`,
-`--since`, and `--consumers` flags all read the same.
+Choose packages with `--package`, `--space`, or `--group`. Use `--since` to change which commits count and
+`--consumers` to include dependent packages, as you would with [`dispat run`](./run.md).
 
 Pass `--manifests root` (the default) to edit the manifests sitting in each package folder. Pass `--manifests all` to
 edit every manifest under it. This leaves any manifest belonging to another package to that package.
@@ -14,10 +13,12 @@ You can write a range as `{version}` to resolve to the planned version of the pa
 `--set-version {version}` to write the covered package's own planned version to its root manifests alone.
 
 Pass `--only-updated` to drop every edit naming a package this run does not update. Pass `--strict` to fail on an edit
-that matches no manifest anywhere. This is the cross-package reading of missing, because an edit absent from one
-manifest out of twenty is the ordinary case.
+that matches no manifest anywhere. An edit may be absent from an individual manifest without failing; `--strict` fails only when it matches none
+of the manifests.
 
-Pass `--set-local`, `--link-local`, or `--unlink-local` to derive the edits instead of taking them. dispat finds every
+## Derive edits from workspace dependencies
+
+Use `--set-local`, `--link-local`, or `--unlink-local` to derive edits from the workspace. dispat finds every
 dependency a manifest declares that names another package in the workspace. It reconciles the range to that package's
 version (spelled by `--range`), writes its local folder redirect, or removes that redirect.
 
@@ -42,38 +43,36 @@ You can use the [global flags](./README.md#global-flags) alongside these options
 
 ### `--package`, `-p`
 
-Narrows package-selecting commands (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`, `autowriter`,
-`autoreplacer`, `commit`, `github`, `compute`) to the named packages. You can repeat this comma-separated flag, which
-matches case-insensitively and accepts `*` globs (`-p '*'` selects every package). Read
-[Choosing the packages](./run.md#choosing-the-packages) for more details.
+Select named packages. Repeat the flag or separate names with commas. Names are case-insensitive and accept `*`
+globs; quote them so the shell does not expand them first. For example, `-p core,web` selects two packages and `-p '*'`
+selects every package. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--space`, `-s`
 
-Narrows the same eleven commands to every package in the named spaces. It uses the same spellings, and a standalone
-package belongs to no space. Read [Choosing the packages](./run.md#choosing-the-packages) for more details.
+Select every package in the named spaces. This accepts the same lists and globs as `--package`. Standalone packages
+do not belong to a space, so `-s '*'` does not include them. See
+[Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--group`, `-g`
 
-Narrows the same eleven commands to every package in the named
-[versioning groups](../reference/releasing/versioning.md) using the same spellings. A group is a `versionGroups` entry
-or a space that versions as one, so it can cross spaces. Read [Choosing the packages](./run.md#choosing-the-packages)
-for more details.
+Select every package in a named [versioning group](../reference/releasing/versioning.md), using the same lists and
+globs as `--package`. A group may be a `versionGroups` entry or a space that versions together, and may span several
+spaces. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--since`
 
-Instructs the same seven commands to cover the packages addressed by commits since a git revision, instead of the
-release window. Pass `all` to cover every package. Read [the run command](./run.md) for more details.
+Use commits since a Git revision to choose packages, replacing the default release window. Pass `all` to include
+every package. See [how the run command selects packages](./run.md).
 
 ### `--consumers`
 
-Instructs the same seven commands to additionally cover every package that transitively depends on a selected one. Read
-[the run command](./run.md) for more details.
+Also include packages that depend on the selected packages, directly or indirectly. See
+[how the run command expands a selection](./run.md).
 
 ### `--on-error`
 
-The default is `skip`. Tells every sweeping command (`run`, `autowriter`, `autoreplacer`, `changelog`, `autoversion`,
-`commit`, `github`) what a failed package does to its dependents. Pass `skip` to skip them transitively, or `continue`
-to process them. The command exits `1` on any failure either way.
+Choose what happens to dependent packages when a package fails. The default, `skip`, skips its direct and indirect
+dependents. `continue` lets them run. Either way, any package failure makes the command exit `1`.
 
 ### `--set-version`
 

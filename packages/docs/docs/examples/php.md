@@ -1,7 +1,7 @@
 # Composer packages
 
-You can release PHP packages from one repository to Packagist. Composer takes its versions from git tags. This means
-the tag is the release, and `composer.json` only has to name the right constraints.
+Composer gets package versions from Git tags. This example updates the constraints between packages, runs PHPUnit,
+and notifies Packagist. If your monorepo uses a splitter, keep its publication steps in the release workflow too.
 
 ## The layout
 
@@ -30,9 +30,8 @@ dispat.json
 }
 ```
 
-You have nothing to upload. Packagist reads the repository and its tags, so the publish stage is at most a webhook
-telling it to look now. Drop the `publish` slot entirely if your repository already has the Packagist webhook
-installed. The tag becomes the whole release.
+Packagist reads the repository and its tags instead of receiving a package upload. The `notify` command asks it to
+refresh. You can omit that publish slot if the repository already has a Packagist webhook.
 
 The `{name}/v{version}` format puts the package name in the tag. This makes per-package tags in a monorepo readable. It
 is also what a Composer monorepo split tool expects.
@@ -51,8 +50,8 @@ $ dispat autoversion
 12:44:57 INF auto-versioning finished failed=0 ran=2 skipped=0 stage=autoversion
 ```
 
-Expect to see `versionWritten=false` as the normal and correct outcome here. A `composer.json` usually declares no
-`version` field because Composer derives it from the tag. dispat writes a version field only where one exists.
+`versionWritten=false` is expected here: `composer.json` has no `version` field, so Composer will use the tag. dispat
+updates a version field only when one already exists.
 
 The `core` package produced no line at all because nothing in its manifest needed changing. Check the consumer to see
 the updated constraint:
@@ -82,7 +81,7 @@ packages/web/composer.json  composer  acme/web
 1 manifest(s), 3 dependency declaration(s)
 ```
 
-Look at the identity line. It carries no `@version` because this manifest declares none. dispat writes to both
+The identity line has no `@version` because the manifest declares none. dispat writes to both
 `require` sections, and it updates the `version` field only if the file already has one.
 
 ## Worth knowing
@@ -98,12 +97,6 @@ Look at the identity line. It carries no `@version` because this manifest declar
 - **Branch aliases are unnecessary here.** Every release is a real version on a real tag. This is what `^1.3.0`
   resolves against.
 
-## See also
-
-- [A Go module workspace](./go.md) shows the other ecosystem where the tag is the whole publish.
-- [Release records](../configuration/records.md) explains pushing tags and writing the changelog.
-- [Commit message reference](../reference/commits.md) covers scopes, propagation, and channels.
-
 ## Track generated documentation separately
 
 Component tags, Packagist visibility and API documentation deployment are different outputs. Give a separately
@@ -114,3 +107,9 @@ Also verify every split package that a new component requires. A root tag alone 
 and dependency edge reached its destination. dispat can order component release commands, but the external splitter
 or webhook still owns tag creation and indexing. Complete destination checks before publication; reconcile ambiguous
 remote results outside the publish command before retrying.
+
+## See also
+
+- [A Go module workspace](./go.md) shows the other ecosystem where the tag is the whole publish.
+- [Release records](../configuration/records.md) explains pushing tags and writing the changelog.
+- [Commit message reference](../reference/commits.md) covers scopes, propagation, and channels.

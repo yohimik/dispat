@@ -63,6 +63,12 @@ func (c *Coordinator) publishHere(ctx context.Context, here release.LocalFrame) 
 // producerOf is the node that built this package, and the empty string for a
 // package whose outputs this run has not admitted or built somewhere else.
 func (c *Coordinator) producerOf(request release.StageRequest) string {
+	for i := len(request.Descriptor.OwnOutputStages) - 1; i >= 0; i-- {
+		if admitted := c.outputs.findStage(request.Release.Pkg.Name,
+			request.Descriptor.OwnOutputStages[i]); admitted != nil {
+			return admitted.node
+		}
+	}
 	admitted := c.outputs.find(request.Release.Pkg.Name)
 	if admitted == nil {
 		return ""
@@ -108,21 +114,29 @@ func (c *Coordinator) resolvePublishInputs(ctx context.Context, node string,
 	if err != nil {
 		return nil, err
 	}
-	own := c.outputs.find(packageName)
-	if own == nil {
-		// A package that declares no build outputs publishes from its sources,
-		// which the prepared input state already carries.
-		return inputs, nil
+	stages := request.Descriptor.OwnOutputStages
+	if len(stages) == 0 {
+		stages = []string{"build"} // hand-built descriptors retain the original contract
 	}
-	branch, err := c.reachOutputs(ctx, node, own)
-	if err != nil {
-		return nil, err
+	for _, stage := range stages {
+		own := c.outputs.findStage(packageName, stage)
+		if own == nil && stage == "build" {
+			own = c.outputs.find(packageName)
+		}
+		if own == nil {
+			continue
+		}
+		branch, err := c.reachOutputs(ctx, node, own)
+		if err != nil {
+			return nil, err
+		}
+		inputs = append(inputs, AssignmentInput{
+			Task: own.manifest.task, Package: packageName, Branch: branch,
+			Commit: own.commit, Digest: own.manifest.digest,
+			Path: resolveAnchoredPath(sources, request.Release.Pkg.Repository, dir),
+		})
 	}
-	return append(inputs, AssignmentInput{
-		Task: own.manifest.task, Package: packageName, Branch: branch,
-		Commit: own.commit, Digest: own.manifest.digest,
-		Path: resolveAnchoredPath(sources, request.Release.Pkg.Repository, dir),
-	}), nil
+	return inputs, nil
 }
 
 // resolveAnchoredPath is where one package's folder sits in the checkout a node

@@ -1,11 +1,13 @@
 # The changelog command
 
-Run `dispat changelog` to write the pending changelog entry for each covered package, exactly as the release stage's
-recorder would write it. If an entry already exists, dispat skips it and logs `W226`, and this same check tells the
-release stage to skip entries you already wrote. Run this command early so a changelog written in a `beforePublish`
-script, before `dispat commit`, lands inside the tagged commit.
+Run `dispat changelog` to write pending changelog entries before the normal release step. It uses the same content
+and formatting as the release recorder. Existing entries are skipped with `W226`, so the later release step does not
+write them again.
 
-dispat writes these entries inside each package's own folder. The command rides your build concurrency budget.
+To include the changelog in the tagged commit, run this command before `dispat commit`, for example in a
+`beforePublish` script.
+
+Entries are written inside each package's folder, using the configured build concurrency limit.
 
 An entry that cannot be written does not fail the command. dispat logs it as an error under `E222`, closes with a
 warning that names every package whose entry is missing, and exits `0`, so a flow that writes its changelog inside the
@@ -16,12 +18,15 @@ anything is written, and an interrupted command, still exit non-zero.
 
 ## The shape of what it writes
 
-One entry has one shape, whichever door writes it. Items inside a section are separated by a single blank line, a
-commit body is indented two spaces under the bullet it belongs to so that it stays part of that item, and every section
-ends the same way whether or not its last line carried a body. The dependencies section is the one exception: its
-lines are a table of movements and render as one tight block, with no blank lines between them. In the file, the new entry is separated from the entry
-below it by [`changelog.entrySpacing`](../configuration/records.md#the-seam-between-entries) blank lines, two by
-default.
+Entries use the same layout whether this command or the release recorder writes them:
+
+- Items in a section have one blank line between them.
+- A commit body is indented two spaces beneath its bullet.
+- Dependency updates form one compact block, without blank lines between rows.
+- Entries in the file are separated by [`changelog.entrySpacing`](../configuration/records.md#the-seam-between-entries)
+  blank lines, two by default.
+
+Section endings are consistent whether or not the last item includes a commit body.
 
 This command renders exactly what the release stage's recorder renders, so an entry written from a stage script and one
 written by the release itself are the same bytes. See [Release records](../configuration/records.md) for the entry
@@ -30,26 +35,20 @@ happens to a file that already had content.
 
 ## The selection it shares
 
-`dispat changelog`, `dispat autoversion`, `dispat commit`, and `dispat github` expose the release pipeline's native
-steps to custom flows. You can run a step from a stage script at the exact moment your flow needs it. The release stage
-later finds the work done and skips it.
+`changelog`, `autoversion`, `commit`, and `github` let you run individual release steps from a custom flow or stage
+script. The later release step recognises completed work and skips it.
 
-All four commands share the run command's [selection](./run.md#choosing-the-packages) *and* its window. Run them with
-no terms to cover every releasing package in dependency order. You can narrow this list with `--package`, `--space`,
-`--group`, or your invocation folder, adjust the window with `--since` or `--consumers`, and handle failures with
-`--on-error`.
+These commands use the run command's [package selection](./run.md#choosing-the-packages) and release window. By
+default, they process releasing packages in dependency order. Narrow the selection with `--package`, `--space`,
+`--group`, or your current folder. Use `--since` to change the window, `--consumers` to include dependent packages,
+and `--on-error` to choose how failures affect them.
 
-Two rules govern what a selection may contain. A term matching no package causes an error, but a *selected* package
-that is not releasing becomes a logged no-op. This means your flow never fails over a converged or held package, which
-is why a step run after `dispat commit --tag` covers nothing until `--since all` puts the tagged package back on the
-table.
+A name that matches no package is an error. A selected package with no release to perform is a logged no-op. After
+`dispat commit --tag`, the tagged package is no longer in the release window; pass `--since all` to include it again.
 
-The four command words are reserved. Each command name wins the `dispat <script>` shorthand over a
-[script](../configuration/spaces.md#scripts-and-dispat-run) of the same name, so `dispat commit` always runs the
-command. You can still reach your script by spelling it out as `dispat run commit`.
-
-Every config value these commands consume is also a flag. You can use these flags to override the config for a single
-invocation. See the [flags table](#flags) for details.
+Built-in command names take precedence over script names. For example, `dispat commit` runs this built-in step;
+`dispat run commit` runs a [script](../configuration/spaces.md#scripts-and-dispat-run) named `commit`.
+Use the flags below to override configuration for this invocation.
 
 ## Flags
 
@@ -57,46 +56,43 @@ Beside the [global flags](./README.md#global-flags):
 
 ### `--package`, `-p`
 
-Narrow every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`, `autoversion`,
-`autowriter`, `autoreplacer`, `commit`, `github`, `compute`) to the named packages. This repeatable, comma-separated
-flag matches case-insensitively and accepts `*` globs, so `-p '*'` selects every package. See
-[Choosing the packages](./run.md#choosing-the-packages).
+Select named packages. Repeat the flag or separate names with commas. Names are case-insensitive and accept `*`
+globs; quote them so the shell does not expand them first. For example, `-p core,web` selects two packages and `-p '*'`
+selects every package. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--space`, `-s`
 
-Narrow the same eleven commands to every package of the named spaces. This flag uses the same spellings as the package
-flag, and a standalone package belongs to no space. See [Choosing the packages](./run.md#choosing-the-packages).
+Select every package in the named spaces. This accepts the same lists and globs as `--package`. Standalone packages
+do not belong to a space, so `-s '*'` does not include them. See
+[Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--group`, `-g`
 
-Narrow the same eleven commands to every package of the named
-[versioning groups](../reference/releasing/versioning.md). This flag uses the same spellings, and a group is a
-`versionGroups` entry or a space that versions as one, so it may cross spaces. See
-[Choosing the packages](./run.md#choosing-the-packages).
+Select every package in a named [versioning group](../reference/releasing/versioning.md), using the same lists and
+globs as `--package`. A group may be a `versionGroups` entry or a space that versions together, and may span several
+spaces. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--since`
 
-Cover the packages addressed by commits since a git revision for the same seven commands. This replaces the default
-release window. Pass `all` to cover every package, and see [the run command](./run.md) for details.
+Use commits since a Git revision to choose packages, replacing the default release window. Pass `all` to include
+every package. See [how the run command selects packages](./run.md).
 
 ### `--consumers`
 
-Tell the same seven commands to additionally cover every package that transitively depends on a selected one. See
-[the run command](./run.md).
+Also include packages that depend on the selected packages, directly or indirectly. See
+[how the run command expands a selection](./run.md).
 
 ### `--on-error`
 
-The default is `skip`. Decide what a failed package does to its dependents during every sweeping command (`run`,
-`autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Set this to `skip` for transitive
-skipping or `continue`. This setting decides only what a failure does to the dependents. For `changelog` and
-`github`, `--ignore-errors` below decides whether a failure exits `1`; every other sweeping command exits `1` on any
-failure.
+Choose what happens to dependent packages when a package fails. The default, `skip`, skips its direct and indirect
+dependents. `continue` lets them run. Whether a failed entry makes the command exit `1` is decided by
+`--ignore-errors` below.
 
 ### `--ignore-errors`
 
-The default is `true`. Exit `0` when an entry could not be written, after logging it as an error (`E222`) and naming it
-in the closing summary. `--ignore-errors=false` exits `1` instead. `dispat github` takes the same flag. `dispat commit`
-does not: a tag it could not create or push always fails it.
+The default is `true`: an entry that could not be written is logged as an error (`E222`) and named in the closing
+summary, and the command exits `0`. `--ignore-errors=false` exits `1` instead. `dispat github` takes the same flag;
+`dispat commit` does not, because a tag it could not create or push always fails it.
 
 ### `--file`, `-f`, `--file-title`, `--date-format`
 

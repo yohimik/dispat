@@ -1,11 +1,10 @@
 # A site deployed from the release
 
-You can build and push a documentation or marketing site to a hosting branch as part of a release run. A guard stops a
-developer's working tree from ever reaching the live site.
+Put the site build in `build` and its deployment command in `publish`. This example deploys the generated files to a
+GitHub Pages branch and refuses to deploy unless `CI=true`.
 
-This is how the site you are reading is published. Look at
-[`packages/docs/dispat.yaml`](https://github.com/yohimik/dispat/blob/main/packages/docs/dispat.yaml) to see the
-original configuration.
+For this repository's site configuration, see
+[`packages/docs/dispat.yaml`](https://github.com/yohimik/dispat/blob/main/packages/docs/dispat.yaml).
 
 ## The layout
 
@@ -33,8 +32,9 @@ dispat.json
 }
 ```
 
-The `keep: true` edge on `app` makes the site rebuild after the application it documents. Nothing in the site's files
-declares that relationship. You state it once by hand, and `dispat compute` leaves it alone.
+The dependency on `app` orders the site after the application it documents. `keep: true` preserves that hand-written
+edge when you run `dispat compute`. To release the site when only the app changes, request propagation in the app's
+commit. The edge alone does not request a site release.
 
 ## The deploy script
 
@@ -55,25 +55,21 @@ git commit -qm "docs: deploy ${DISPAT_NEW_VERSION}"
 git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
 ```
 
-A publish stage is an ordinary shell command. Running `dispat run deploy-site` from a laptop force-pushes a
-half-finished working tree over the live site. The first line uses [`dispat if`](../cli/if.md) to prevent this. The
-deploy only runs where `CI` is set.
-
-The second line guards against a missing secret. Failing before the first `git` call is cheaper than failing halfway
-through a force-push.
+You can invoke a publish script directly with `dispat run deploy-site`, so the script needs its own guard. Here,
+[`dispat if`](../cli/if.md) refuses deployment unless `CI` equals `true`. The next line checks `GITHUB_TOKEN` before
+any Git operations begin.
 
 ## Why a publish stage rather than a separate workflow
 
-A deploy triggered by a push to `main` runs on every commit. It triggers even when nothing changes, and it has no idea
-which version it publishes. A publish stage runs only when a release happens. It knows its version. The tag it produces
-is the record that this exact site went out.
+A publish stage runs when the site has a planned release and receives that version as `$DISPAT_NEW_VERSION`. Its tag
+records the deployment alongside the other packages in the run.
 
-This approach also orders the site after what it documents. With the `keep: true` edge above, a release that ships both
-packages builds the site only once the application is published.
+When both packages release, the site's build waits for the app's build and its deployment waits for the app's publish.
+If generating the site needs the app's published artifact, set `isBuildWaitingPublish: true` on `app` as well.
 
 ## Other hosts
 
-Only the last two lines of the script are GitHub-specific.
+Keep the build and release graph, then replace the deployment script for your host:
 
 | Host | The publish stage |
 |------|-------------------|
@@ -83,15 +79,14 @@ Only the last two lines of the script are GitHub-specific.
 | S3 and CloudFront | `aws s3 sync build s3://acme-site --delete` then an invalidation |
 | A plain server | `rsync -a --delete build/ deploy@acme.example:/srv/site/` |
 
-Each of these commands takes a version string. Pass `$DISPAT_NEW_VERSION` to make the deploy history readable next to
-your tags.
+Where the host supports a deployment message, include `$DISPAT_NEW_VERSION` so its history can be matched to your tags.
 
 ## Worth knowing
 
 - **The build is often the link checker.** A static site generator that fails on a broken link turns the build stage
   into a gate. A bad link never reaches the publish stage.
-- **Deploying is not idempotent for a person, but it is for a run.** Re-running a failed release repeats the deploy.
-  This is safe because the same commit produces the same site.
+- **A retry can repeat the deployment.** Keep the same source revision and built files, and make the deployment
+  command safe to repeat. Check the host first if a previous deployment's result is unclear.
 - **Version the site like everything else.** Its tag says when it was published. Its changelog says what changed.
 - **Keep secrets out of the script.** The script reads `GITHUB_TOKEN` from the environment and never echoes it.
 

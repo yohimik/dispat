@@ -1,8 +1,7 @@
 # Splitting the file with `$ref`
 
-One config file describes the whole monorepo, so in a big repository that file gets long. Use `$ref` to move any part
-of it into a separate file. Write an object holding a single `$ref` key anywhere a value belongs, and dispat will use
-that file's content as the value:
+Use `$ref` to split a long configuration into smaller files or share a block between configurations. Put a `$ref`
+object wherever a value belongs. dispat loads the named file and uses its contents there:
 
 ```yaml
 # dispat.yaml
@@ -24,8 +23,7 @@ apps:
     build: [build]
 ```
 
-The two files act exactly like one file with the spaces written inline. Nothing else changes. dispat checks the same
-keys, catches the same typos, and prints the same errors.
+This loads the same configuration as writing both spaces inline, with the same key validation and error checks.
 
 ## Where the path points
 
@@ -94,8 +92,8 @@ not a deep merge. A key an object holds replaces that key whole, exactly as
 
 ## References inside references
 
-A referenced file can hold references of its own. These resolve against its own folder. Nesting is capped at 32
-levels, which no honest configuration reaches, and dispat reads a file twice if you use it in two places.
+A referenced file can contain further references, resolved against its own folder. References can nest up to 32
+levels. If you reference a file in two places, dispat reads it twice.
 
 Do not create a loop. dispat stops and prints the path if a file reads itself, directly or through others:
 
@@ -128,7 +126,7 @@ single value, because there is nothing for the extra keys to override.
 
 ## Where references can go
 
-Put a reference in every property, at every depth. This includes inside `custom`. The document itself can be a
+You can put a reference at any depth, including inside `custom`. The document itself can be a
 reference, which lets a repository keep its real configuration somewhere else:
 
 ```json
@@ -161,8 +159,7 @@ TRC configuration file read file=/repo/cfg/spaces.yaml
 TRC configuration file read file=/repo/cfg/flow.yaml
 ```
 
-Check this first when a split config does not behave. A `$ref` naming the wrong fragment looks exactly like a key
-nobody wrote.
+Use this trace when an expected setting is missing. It shows whether dispat loaded the fragment you intended.
 
 When a value is wrong, the error names the key path (`spaces["libs"]: ...`) rather than the file the text was written
 in. Use the trace above to find that file.

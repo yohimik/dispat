@@ -1,13 +1,12 @@
 # Replacing text across the monorepo
 
-Some versions do not live in a manifest. A Gradle script builds a coordinate by
-hand, a Helm chart names a base image, or a README shows an install line. No
-manifest parser can reach these files, so no manifest writer can update them.
+Use `dispat autoreplacer` to update literal text across selected packages. It
+is useful for versions in README examples, image references, or build scripts
+that the manifest writer cannot update.
 
-[The replacer](./replacer.md) handles this for files you name. Run
-`dispat autoreplacer` to do the same thing across a whole monorepo. It works
-out which packages the run covers, looks in the files you target inside each
-one, and replaces the text you requested.
+The command uses the release plan to select packages, then applies your
+replacement to matching files in each one. For files you want to name
+directly, use [the replacer](./replacer.md).
 
 ```console
 $ dispat autoreplacer --files '*.gradle' --replace 'com.acme:core:1.2.0=>com.acme:core:1.3.0' --since all
@@ -52,10 +51,9 @@ because braces mean something to most shells.
 
 ## Reaching the packages that need it
 
-The package holding a stale coordinate is usually the one where nothing
-changed. Core moved, so web's Gradle file is now out of date. The release
-window only covers what the commits touched, so a plain run never visits web at
-all.
+The package needing an update may be outside the selected release window. For
+example, if core changes but web does not, web's Gradle reference can become
+stale without web being selected.
 
 Pass `--consumers` to reach those dependent packages. This flag adds every
 package that depends on a selected one, all the way down the graph:
@@ -110,12 +108,11 @@ silently do nothing, which is how a typo hides. You must provide the flag.
 
 ## It parses nothing
 
-This is both the point and the risk. The replacer does exactly what it is told.
-It has no idea whether the text it found is the version you meant or a
-coincidence.
+The replacer matches literal text. It cannot tell whether a match is the
+version you intended to change.
 
-Give a replacement enough context to be unambiguous. `com.acme:core:1.2.0` is
-safe. A bare `1.2.0` will find things you did not intend.
+Include enough context to identify the intended value, such as
+`com.acme:core:1.2.0`. A bare `1.2.0` can also match unrelated versions.
 
 ## Catching a pattern that has gone stale
 
@@ -138,10 +135,10 @@ the pattern wanted, and counts that as a match.
 
 ## Failures
 
-There is no rollback for this command, so git is your undo. dispat writes each
-file on its own and only when something in it changed. A failure halfway
-through leaves the files already written in their new state, but a re-run is a
-safe no-op.
+This command has no rollback. Review the diff and use Git to undo changes if
+needed. dispat writes each changed file separately, so a failure can leave
+earlier files updated. On a rerun, files already in the requested state are
+left untouched.
 
 A failed package skips its dependents, exactly as a failed script does in
 `dispat run`. Pass `--on-error continue` to run them anyway. Either way, the

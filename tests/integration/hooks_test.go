@@ -923,6 +923,9 @@ func TestHooksVersionScriptsSkippedWhenEveryProviderDied(t *testing.T) {
 	linked := func(t *testing.T) *harness.Repo {
 		t.Helper()
 		r := harness.New(t)
+		// One slot: the consumer's version task waits for no provider, so it
+		// is only behind the provider's build in the queue, and starts once
+		// that build has failed. That is what makes the skip deterministic.
 		cfg := libsConfig(failIfMarker, 1)
 		cfg.Scripts["stamp"] = models.Script{`echo "$DISPAT_PACKAGE" >> ../../version-ran.log`}
 		cfg.Scripts["before-stamp"] = models.Script{`echo "$DISPAT_PACKAGE before" >> ../../version-ran.log`}
@@ -965,6 +968,7 @@ func TestHooksVersionScriptsSkippedWhenEveryProviderDied(t *testing.T) {
 		assert.False(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
 		assert.True(t, r.IsTagged("web@0.1.0"),
 			"a consumer with changes of its own still releases; tags: %v", r.TagList())
+		assert.False(t, harness.IsCodePresent(res.Events, "W194"), "nothing is blocked: %s", res.Stdout)
 		assert.NoFileExists(t, r.Path("version-ran.log"),
 			"the stage's scripts and their hooks are exactly what the dead provider skips")
 	})

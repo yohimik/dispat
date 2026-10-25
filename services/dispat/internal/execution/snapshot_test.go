@@ -119,6 +119,128 @@ func TestSnapshotCapturesTheWorkingState(t *testing.T) {
 	}
 }
 
+func TestSnapshotKeepsPreExecutionOutputRootsWhileUpdatingOtherInputs(t *testing.T) {
+	fixture := newSnapshotFixture(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(fixture.dir, "dist"), 0o755))
+	fixture.write(t, "dist/seed", "preexisting\n")
+	fixture.run(t, "add", "dist/seed")
+	fixture.run(t, "commit", "-qm", "tracked output root")
+	fixture.head = strings.TrimSpace(fixture.run(t, "rev-parse", "HEAD"))
+	fixture.write(t, "dist/initial", "user input\n")
+	s := newSnapshots()
+	require.NoError(t, s.captureBaselines(t.Context(), baselineCapture{sources: []Source{fixture.source()},
+		roots: map[string][]string{fixture.dir: {"dist"}},
+		open:  func(string) *gitx.LocalGitx { return fixture.git }, log: zerolog.Nop()}))
+	defer s.closeBaselines()
+	fixture.write(t, "dist/seed", "unrelated stage changed this\n")
+	fixture.write(t, "dist/new", "unrelated stage added this\n")
+	fixture.write(t, "tracked.txt", "authorized preparation\n")
+	commit, err := s.capture(t.Context(), fixture.git, fixture.source(), zerolog.Nop())
+	require.NoError(t, err)
+	listing := fixture.listing(t, commit)
+	assert.Equal(t, "preexisting", listing["dist/seed"])
+	assert.Equal(t, "user input", listing["dist/initial"])
+	assert.NotContains(t, listing, "dist/new")
+	assert.Equal(t, "authorized preparation", listing["tracked.txt"])
+}
+
+func TestSnapshotIncludesPreparationInsideTrackedIgnoredRootButNotLaterOutputs(t *testing.T) {
+	fixture := newSnapshotFixture(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(fixture.dir, "dist"), 0o755))
+	fixture.write(t, "dist/seed", "baseline\n")
+	fixture.run(t, "add", "dist/seed")
+	fixture.run(t, "commit", "-qm", "tracked root")
+	fixture.head = strings.TrimSpace(fixture.run(t, "rev-parse", "HEAD"))
+	fixture.write(t, ".gitignore", "ignored.txt\ndist/\n")
+	fixture.write(t, "dist/stale", "old ignored product\n")
+	s := newSnapshots()
+	require.NoError(t, s.captureBaselines(t.Context(), baselineCapture{sources: []Source{fixture.source()},
+		roots: map[string][]string{fixture.dir: {"dist"}},
+		open:  func(string) *gitx.LocalGitx { return fixture.git }, log: zerolog.Nop()}))
+	defer s.closeBaselines()
+	fixture.write(t, "dist/seed", "native preparation\n")
+	fixture.write(t, "dist/prepared", "ignored native output\n")
+	require.NoError(t, s.refreshPackageRoots(t.Context(), packageRootState{name: "core", source: fixture.source(),
+		roots: []string{"dist"}, git: fixture.git, log: zerolog.Nop()}))
+	fixture.write(t, "dist/seed", "unrelated output\n")
+	fixture.write(t, "dist/new", "generated output\n")
+	commit, err := s.capture(t.Context(), fixture.git, fixture.source(), zerolog.Nop())
+	require.NoError(t, err)
+	listing := fixture.listing(t, commit)
+	assert.Equal(t, "native preparation", listing["dist/seed"])
+	assert.Equal(t, "ignored native output", listing["dist/prepared"])
+	assert.NotContains(t, listing, "dist/stale")
+	assert.NotContains(t, listing, "dist/new")
+	assert.Equal(t, "ignored.txt\ndist/", listing[".gitignore"])
+}
+
+// An idempotent version script can write the same bytes an ignored stale
+// product already held. That write is still preparation the build must see.
+func TestSnapshotAdmitsIdempotentPreparationRewriteInsideIgnoredRoot(t *testing.T) {
+	fixture := newSnapshotFixture(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(fixture.dir, "dist"), 0o755))
+	fixture.write(t, ".gitignore", "ignored.txt\ndist/\n")
+	fixture.write(t, "template.txt", "same bytes\n")
+	fixture.run(t, "add", ".gitignore", "template.txt")
+	fixture.run(t, "commit", "-qm", "add preparation template")
+	fixture.head = strings.TrimSpace(fixture.run(t, "rev-parse", "HEAD"))
+	fixture.write(t, "dist/prepared", "same bytes\n")
+	for run := 0; run < 2; run++ {
+		s := newSnapshots()
+		require.NoError(t, s.captureBaselines(t.Context(), baselineCapture{sources: []Source{fixture.source()},
+			roots: map[string][]string{fixture.dir: {"dist"}},
+			open:  func(string) *gitx.LocalGitx { return fixture.git }, log: zerolog.Nop()}))
+		require.NoError(t, s.cleanPackageRoots(t.Context(), packageRootState{name: "core", source: fixture.source(),
+			roots: []string{"dist"}, git: fixture.git, log: zerolog.Nop()}))
+		assert.NoFileExists(t, filepath.Join(fixture.dir, "dist", "prepared"),
+			"the old ignored product is removed before preparation runs")
+		// The version script's copy is deliberately idempotent in bytes and mode.
+		fixture.write(t, "dist/prepared", "same bytes\n")
+		require.NoError(t, s.refreshPackageRoots(t.Context(), packageRootState{name: "core", source: fixture.source(),
+			roots: []string{"dist"}, git: fixture.git, log: zerolog.Nop()}))
+		commit, err := s.capture(t.Context(), fixture.git, fixture.source(), zerolog.Nop())
+		require.NoError(t, err)
+		assert.Equal(t, "same bytes", fixture.listing(t, commit)["dist/prepared"])
+		s.closeBaselines()
+	}
+}
+
+func TestCleanPackageRootsPreservesPinnedInputsAndOtherOwners(t *testing.T) {
+	fixture := newSnapshotFixture(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(fixture.dir, "dist"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(fixture.dir, "other"), 0o755))
+	fixture.write(t, ".gitignore", "ignored.txt\ndist/stale\nother/stale\n")
+	fixture.write(t, "dist/tracked", "tracked input\n")
+	fixture.run(t, "add", ".gitignore", "dist/tracked")
+	fixture.run(t, "commit", "-qm", "track source inside output root")
+	fixture.head = strings.TrimSpace(fixture.run(t, "rev-parse", "HEAD"))
+	fixture.write(t, "dist/input", "untracked input\n")
+	fixture.write(t, "dist/stale", "old output\n")
+	fixture.write(t, "other/stale", "another owner's output\n")
+	s := newSnapshots()
+	require.NoError(t, s.captureBaselines(t.Context(), baselineCapture{sources: []Source{fixture.source()},
+		roots: map[string][]string{fixture.dir: {"dist", "other"}},
+		open:  func(string) *gitx.LocalGitx { return fixture.git }, log: zerolog.Nop()}))
+	defer s.closeBaselines()
+	require.NoError(t, s.cleanPackageRoots(t.Context(), packageRootState{name: "core", source: fixture.source(),
+		roots: []string{"dist"}, git: fixture.git, log: zerolog.Nop()}))
+	assert.Equal(t, "tracked input\n", readSnapshotFixtureFile(t, fixture.dir, "dist/tracked"))
+	assert.Equal(t, "untracked input\n", readSnapshotFixtureFile(t, fixture.dir, "dist/input"))
+	assert.NoFileExists(t, filepath.Join(fixture.dir, "dist", "stale"))
+	assert.Equal(t, "another owner's output\n", readSnapshotFixtureFile(t, fixture.dir, "other/stale"))
+	fixture.write(t, "dist/prepared", "new preparation\n")
+	require.NoError(t, s.cleanPackageRoots(t.Context(), packageRootState{name: "core", source: fixture.source(),
+		roots: []string{"dist"}, git: fixture.git, log: zerolog.Nop()}), "cleaning once does not erase later preparation")
+	assert.Equal(t, "new preparation\n", readSnapshotFixtureFile(t, fixture.dir, "dist/prepared"))
+}
+
+func readSnapshotFixtureFile(t *testing.T, root, path string) string {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+	require.NoError(t, err)
+	return string(contents)
+}
+
 // TestSnapshotLeavesTheRepositoryAlone: the repository a run is releasing is
 // the thing everything else depends on, so preparing an input state may not
 // move its index, its HEAD, its branches or its working tree.
@@ -177,7 +299,7 @@ func TestSnapshotNeverSeesAHalfWrittenFile(t *testing.T) {
 	go func() {
 		defer writing.Done()
 		for range 20 {
-			releaseGuard, err := coordinator.Guard(t.Context(), "version")
+			releaseGuard, err := coordinator.Guard(t.Context(), "version", "")
 			require.NoError(t, err)
 			writeInChunks(t, filepath.Join(fixture.dir, "lockfile.txt"), whole)
 			releaseGuard()
@@ -274,7 +396,7 @@ func TestTheInputStateIsCapturedTwiceBeforeItIsReported(t *testing.T) {
 	source := Source{Name: "root", Dir: fixture.dir, Head: fixture.head}
 	before := gitx.GitInvocations()
 
-	_, err := writeStateTree(t.Context(), fixture.git, index, source, zerolog.Nop())
+	_, err := writeStateTree(t.Context(), stateTreeCapture{git: fixture.git, index: index, source: source, log: zerolog.Nop()})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), fixture.dir, "the failure names the repository it is about")
@@ -291,7 +413,7 @@ func TestACapturedStateSurvivesOneRacingWriter(t *testing.T) {
 	source := Source{Name: "root", Dir: fixture.dir, Head: fixture.head}
 	index := filepath.Join(t.TempDir(), "index")
 
-	tree, err := writeStateTree(t.Context(), fixture.git, index, source, zerolog.Nop())
+	tree, err := writeStateTree(t.Context(), stateTreeCapture{git: fixture.git, index: index, source: source, log: zerolog.Nop()})
 
 	require.NoError(t, err)
 	assert.Len(t, tree, 40)

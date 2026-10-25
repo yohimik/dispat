@@ -1,7 +1,11 @@
 # Script sequences
 
-Define named commands in `scripts`. The top-level `run` object and each space's `flow` object say **what runs when** by
-referencing those names. dispat looks up a `flow` name against the package the stage is running for.
+Define a shell command once in `scripts`, then refer to its name from a `flow` stage or a top-level `run` hook. A name
+can hold one command or several commands to run in order.
+
+## Where script names are resolved
+
+For a `flow` entry, dispat resolves the script name for the package whose stage is running.
 
 It checks the closest level first: the package's `scripts`, then its space's, then the file's. If a `flow` name is
 missing from all three levels, dispat rejects the config with an error naming that package. This catches a script
@@ -9,6 +13,8 @@ defined only in some *other* space or package.
 
 The `run` hooks are different. They execute once at the repository root with no package involved, so they only ever see
 the file's `scripts`.
+
+## Execution order and failures
 
 Every entry in either object accepts a single script name or an array of names. dispat executes them **sequentially, in
 order**. How a failure behaves depends on what the sequence gates:
@@ -42,12 +48,12 @@ scripts:
     - npm run bundle
 ```
 
-Naming the script contributes **all** of its commands to the sequence it was named in. A `flow: {build: release}` entry
-creates a build stage of three commands. A `flow` entry naming two such scripts creates a sequence of everything both
-of them bind.
+Referencing a script runs all of its commands. In this example, `flow: {build: release}` runs the three commands as the
+build stage. If a `flow` entry names two scripts, dispat runs all commands from the first, then all commands from the
+second.
 
-The two levels of ordering flatten into the single order they run in. A failure behaves the way that sequence's
-failures behave. It fails fast under a release-gating stage, and warns and continues under a warn-only hook.
+The stage or hook determines how failures are handled: release-gating sequences stop at the first failure; warn-only
+hooks log the failure and continue.
 
 These commands are separate invocations of the [configured shell](./README.md#top-level-options). dispat does not join
 them into one string. Three things follow from this:

@@ -1,7 +1,8 @@
 # O3DE projects and gems
 
-O3DE’s `project.json` and `gem.json` can supply a project or gem version and explicit gem dependency constraints.
-Keep engine compatibility and the release-train identity separate when they serve different purposes.
+Use `project.json` and `gem.json` to read project or gem versions and explicit gem dependencies. This guide shows
+manifest edits and a two-gem release graph. Keep the release-train version separate from engine compatibility
+constraints when they describe different things.
 
 ## Version and dependency boundaries
 
@@ -35,9 +36,9 @@ For two separately released gems in one repository, keep the graph and native ve
 }
 ```
 
-This is a graph fragment, not a claim about O3DE’s own release configuration. Supply real baselines and the existing
-CMake/build/package commands before releasing. A root `gem.json` is in the default manifest scope. For nested
-manifests, choose the scope deliberately so that unrelated gems and demo projects do not inherit the same version.
+This fragment illustrates the graph. Add your actual starting versions and CMake, build and packaging commands
+before releasing. A `gem.json` directly in the package folder is in the default manifest scope. If you include nested
+manifests, check that unrelated gems and demo projects will not receive the same version.
 
 Use `dispat compute` to inspect native gem dependencies and `dispat status` to inspect the release plan. A dependency
 constraint says which gem version is required; it does not prove the resulting binaries are ABI-compatible or that
@@ -45,9 +46,9 @@ the installer includes the right payload. Test those with the native toolchain a
 
 ## Preserve the right version source
 
-A release-train tag, gem version and engine-compatibility constraint need not be equal. Do not rewrite compatibility
-fields merely to match the train’s semantic version. Choose which artifact gets the release record, and use a
-version script when the published identity lives outside the supported manifest fields.
+A release-train tag, gem version and engine-compatibility constraint can have different values. Decide which artifact
+the release record identifies before choosing a field to update. If that version is outside the supported manifest
+fields, use a version script and leave compatibility constraints under their existing policy.
 
 See [game development](./game.md) for installer identity and recovery findings, and
 [From one package to many](./one-to-many.md) for adding tools, plugins and sites around an existing deliverable.

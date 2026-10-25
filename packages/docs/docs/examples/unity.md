@@ -1,16 +1,16 @@
 # Unity
 
-A Unity project keeps its version in `ProjectSettings/ProjectSettings.asset` and its dependencies in
-`Packages/manifest.json`. dispat reads and writes both. A Unity game releases the same way an npm package does: one
-command, one version, one tag.
+A Unity release uses the project's existing build method and store uploader. dispat updates the version in
+`ProjectSettings/ProjectSettings.asset` and reads dependencies from `Packages/manifest.json`. The example below
+connects a Unity build to an itch.io upload.
 
 ## The short version
 
 ```json title="dispat.json"
 {
   "scripts": {
-    "build": "Unity -quit -batchmode -projectPath game -executeMethod Builder.Build",
-    "publish": "butler push game/Build acme/game:windows --userversion $DISPAT_NEW_VERSION"
+    "build": "Unity -quit -batchmode -projectPath . -executeMethod Builder.Build",
+    "publish": "butler push Build acme/game:windows --userversion $DISPAT_NEW_VERSION"
   },
   "packages": {
     "game": {
@@ -22,6 +22,9 @@ command, one version, one tag.
   "initials": {"game": "0.1.0"}
 }
 ```
+
+The scripts run inside `game`, so `.` is the Unity project and `Build` is its output directory. Configure
+`Builder.Build` to write the upload there.
 
 Use `manifests: all` to reach `ProjectSettings/ProjectSettings.asset`. The file sits one folder down from the package
 rather than directly in it. Commit a feature and run `dispat`. The settings file, the git tag, and the changelog will
@@ -46,8 +49,7 @@ $ dispat
 | `AndroidBundleVersionCode` | the build counter | `--set-build` |
 | `buildNumber` (per platform) | the build counter, when there is no Android one | `--set-build` |
 
-The file is YAML, but standard libraries cannot parse it. Unity writes its own tag directive and tags the document with
-a class id.
+Unity adds a tag directive and class ID to the YAML settings file:
 
 ```yaml
 %YAML 1.1
@@ -62,8 +64,8 @@ PlayerSettings:
   AndroidBundleVersionCode: 7
 ```
 
-A conforming YAML parser refuses `!u!129`. dispat reads the file by line instead, so it can parse any real Unity
-project. It only reads settings one level deep, so nested mappings cannot leak a version into the answer.
+dispat reads this format line by line rather than relying on a generic YAML parser. It reads settings one level deep
+so a nested mapping is not mistaken for the project's version.
 
 ### `Packages/manifest.json`
 
@@ -79,8 +81,9 @@ Every entry is a dependency. dispat accepts all three forms Unity uses:
 }
 ```
 
-dispat keeps all three exactly as written. The `file:` form tells dispat which folder it points at. This makes an
-embedded package part of the workspace graph. Release `com.acme.core`, and the project consuming it releases next.
+The scanner retains all three forms. The `file:` entry identifies the linked folder, which lets dispat connect the
+embedded package to the workspace graph. Use propagation when a release of `com.acme.core` should also release the
+project that consumes it.
 
 The manifest declares no name and no version of its own. It lists what the project consumes.
 
@@ -93,11 +96,10 @@ Google Play and the App Store order uploads by an integer counter. They ignore t
 $ dispat writer --set-build "$GITHUB_RUN_NUMBER" game/ProjectSettings/ProjectSettings.asset
 ```
 
-Every counter in the file moves. A project shipping to Steam, the App Store, and Google Play from one settings file has
-three counters. Stamping only one of them would upload two builds with the wrong store order.
+The command updates every supported counter in the file. If you export several platforms from one settings file,
+check all their counters before uploading.
 
-Pass an integer for the counter. The stores require it, so dispat enforces it. Passing a version string fails before
-the file opens, saving you from an upload error later.
+Pass an integer. A version string is rejected before the file is changed.
 
 A version write never touches a counter. A build write never touches the version. They move for different reasons, so
 you use separate commands for each.
@@ -134,17 +136,10 @@ yours in the `syncLock` hook.
 
 ## The folders dispat stays out of
 
-`Library/` is Unity's `node_modules`. Its `PackageCache` holds a real `package.json` for every resolved package, which
-would flood your workspace with third-party packages if scanned. dispat never descends into `Library/`, `Temp`, `Logs`,
-`UserSettings`, `MemoryCaptures`, or `Builds`.
+`Library/PackageCache` contains manifests for resolved third-party packages. To avoid treating generated or cached
+files as workspace packages, dispat skips `Library/`, `Temp`, `Logs`, `UserSettings`, `MemoryCaptures` and `Builds`.
 
 Rename any source folder called `Library` or `Builds`. dispat will not find manifests inside them.
-
-## Where to go next
-
-- Read [From one package to many](./one-to-many.md) when your repository grows past one project.
-- See [Godot](./godot.md) and [Unreal](./unreal.md) for the other engines.
-- Read [Auto-versioning](../configuration/autoversion.md) to see what `manifests` and `range` do in full.
 
 ## Validate every distribution format
 
@@ -161,3 +156,9 @@ not necessarily publish itself to NuGet; follow the declared distribution policy
 Android exports can include native libraries from packages, plugins and middleware. Apply the engine-independent
 [Android alignment check](./android.md#inspect-every-native-wrapper-for-16-kb-alignment) to every 64-bit `.so` in the
 final artifact, including wrappers. Keep ELF, APK ZIP and device checks separate.
+
+## Where to go next
+
+- Read [From one package to many](./one-to-many.md) when your repository grows past one project.
+- See [Godot](./godot.md) and [Unreal](./unreal.md) for the other engines.
+- Read [Auto-versioning](../configuration/autoversion.md) to see what `manifests` and `range` do in full.

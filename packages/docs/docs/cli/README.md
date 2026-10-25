@@ -1,52 +1,71 @@
 # CLI reference
 
-This page lists every dispat command with its flags and exit codes. Run `dispat` on its own to release. Use the other
-commands to narrow that release or perform a single step.
+Start with `dispat status` to inspect the release plan and `dispat preview` to read the pending notes. When you are
+ready to release, run `dispat` or `dispat release`.
+
+The commands below are grouped by task. Each command's page lists its flags and examples; global flags and exit codes
+are covered on this page.
 
 ```
 dispat [command] [flags]
 ```
 
-From dispat 1.8.2, `dispat --help` links to the AI agent skill (agent work guide), configuration reference, and API
-reference captured by that binary's release tag. Development builds explicitly link to upcoming documentation. Agents
-should check for newer agent skill patches on the installed CLI's major/minor line, while keeping the configuration and
-API references pinned to the installed binary.
-
 ## Commands
 
-| Command                   | Effect                                                                                                            |
-|---------------------------|---------------------------------------------------------------------------------------------------------------------|
-| `release` (default)       | Plan the release, print the graph, and run the version, build, and publish steps for every changed package before recording releases and tagging. dispat takes the [release lock](./release.md#the-release-lock) first to refuse concurrent releases instead of racing them. Pass `--package`, `--space`, or `--group` to release part of the graph; see [The release command](./release.md). |
-| `status`                  | Plan the release, print the graph with computed version bumps, and exit. dispat executes, tags, and writes nothing. This accepts the same selection flags as a release; see [The status command](./status.md).          |
-| `run <script>`            | Run a script in every changed package that declares it. dispat runs these in graph order; see [The run command](./run.md).        |
-| `init`                    | Write a starter config file and exit; see [The init command](./init.md).                                  |
-| `preview`                 | Print pending release notes and exit; see [The preview command](./preview.md).                            |
-| `changelog`               | Write the pending changelog entry immediately; see [The changelog command](./changelog.md).                               |
-| `autoversion`             | Reconcile manifests to the planned versions; see [The autoversion command](./autoversion.md).                         |
-| `autowriter`             | Apply one set of manifest edits to every covered package; see [The autowriter command](./autowriter.md). |
-| `autoreplacer`         | Replace literal text across every covered package; see [The autoreplacer command](./autoreplacer.md). |
-| `commit`                  | Write a validated source commit with `-m`, or create per-package release commits; see [The commit command](./commit.md).                               |
-| `diagnostics <message>` | Check a literal commit message with optional project parser settings; see [The diagnostics command](./diagnostics.md). |
-| `github`                  | Create the per-package GitHub release immediately; see [The github command](./github.md).                           |
-| `trigger <event>`         | Deliver one script-raised `script.<event>` webhook event, from inside a stage script; see [The trigger command](./trigger.md). |
-| `compute`                 | Derive the dependency graph and the starting versions from the packages' manifests; see [The compute command](./compute.md). |
-| `worker`                  | Serve the build and publish tasks another machine's release assigns to this one. It plans nothing, starts no release and writes no release record; see [The worker command](./worker.md) and [Distributed execution](../distributed-execution.md). |
-| `if [cond]`               | Run one of several shell scripts. dispat chooses the script based on a condition matching the environment, the filesystem, or the changed packages; see [The if command](./if.md). |
-| `for [item]...`           | Run one shell command per item of a list: the words you type, the packages, spaces or versioning groups you select, or the changed packages; see [The for command](./for.md). |
-| `exec <script>`           | Run one declared script here exactly once. You can run it for a named subject or the folder you are in; see [The exec command](./exec.md). |
-| `self-update`             | Replace this binary with the latest release; see [The self-update command](./self-update.md).                             |
-| `install <repo>`          | Install a tool from any GitHub repository's releases; see [The install command](./install.md).                            |
-| `scanner [folder]`        | Print what a folder's manifests declare; see [The scanner command](./scanner.md).                     |
-| `writer <manifest>...`    | Edit manifests in place while preserving their format; see [The writer command](./writer.md).                  |
-| `replacer <file>...`      | Replace literal text in any file without parsing it; see [The replacer command](./replacer.md).                             |
+### Inspect and set up
+
+| Command | What it does |
+| --- | --- |
+| `init` | Write a starter config. [Options](./init.md). |
+| `status` | Show the release plan and version bumps without changing files. [Options](./status.md). |
+| `preview` | Read pending release notes. [Options](./preview.md). |
+| `diagnostics <message>` | Check a commit message against parser rules. [Options](./diagnostics.md). |
+| `compute` | Suggest dependencies and starting versions from manifests. [Options](./compute.md). |
+
+### Release and record
+
+| Command | What it does |
+| --- | --- |
+| `release` (default) | Run version, build, and publish steps, then record releases and tags. Takes the [release lock](./release.md#the-release-lock) first. [Options and partial releases](./release.md). |
+| `changelog` | Write pending changelog entries. [Options](./changelog.md). |
+| `autoversion` | Update manifests to the planned versions. [Options](./autoversion.md). |
+| `commit` | Create a checked source commit with `-m`, or per-package release commits. [Options](./commit.md). |
+| `github` | Create GitHub releases for packages that opted in. [Options](./github.md). |
+
+### Run scripts
+
+| Command | What it does |
+| --- | --- |
+| `run <script>` | Run a declared script in changed packages, in dependency order. [Options](./run.md). |
+| `exec <script>` | Run one declared script once. [Options](./exec.md). |
+| `if [cond]` | Choose a shell command based on a variable, file, or changed packages. [Options](./if.md). |
+| `for [item]...` | Run a shell command for each item, package, space, or group. [Options](./for.md). |
+| `trigger <event>` | Send a `script.<event>` webhook event. [Options](./trigger.md). |
+| `worker` | Accept assigned build and publish tasks. [Options](./worker.md) and [distributed execution](../distributed-execution.md). |
+
+### Read and edit files
+
+| Command | What it does |
+| --- | --- |
+| `scanner [folder]` | Read package names, versions, and dependencies from manifests. [Options](./scanner.md). |
+| `writer <manifest>...` | Edit version and dependency fields in named manifests. [Options](./writer.md). |
+| `replacer <file>...` | Replace literal text in named files. [Options](./replacer.md). |
+| `autowriter` | Apply manifest edits across selected packages. [Options](./autowriter.md). |
+| `autoreplacer` | Replace literal text across selected packages. [Options](./autoreplacer.md). |
+
+### Install and update tools
+
+| Command | What it does |
+| --- | --- |
+| `install <repo>` | Install a tool from GitHub release assets. [Options](./install.md). |
+| `self-update` | Update the installed dispat binary. [Options](./self-update.md). |
 
 ## Global flags
 
 ### `--root`
 
-The default is `.`. Set the starting directory for config resolution. This defaults to your current directory. The
-*effective* monorepo root is the directory containing the config file (see `--config`), so the CLI works from inside a
-package folder.
+Start configuration lookup in this directory. The default, `.`, is your current directory. The directory containing
+the resolved config becomes the effective monorepo root (see `--config`), so commands can be run from a package folder.
 
 ### `--config`
 
@@ -136,6 +155,11 @@ dispat github --help       # the github step's, and so on
 Help needs no config file and no git repository. It exits `0` because asking for help is not an error. A word that is
 not a command name acts as the [run shorthand](./run.md), so `dispat lint --help` prints help for the run command.
 
+From dispat 1.8.2, `dispat --help` links to the AI agent skill (agent work guide), configuration reference, and API
+reference captured by that binary's release tag. Development builds explicitly link to upcoming documentation. Agents
+should check for newer agent skill patches on the installed CLI's major/minor line, while keeping the configuration and
+API references pinned to the installed binary.
+
 ## Exit codes
 
 dispat uses four exit codes:
@@ -168,8 +192,8 @@ or a split versioning group produces a warning on both commands and exits `0` wi
 An empty plan is a success on both commands because releasing nothing is correct for a repository with nothing pending.
 Pass `--require-release` to opt out of this behavior on `release` and `status` alike when your CI stage must publish
 something; see [Gating a pipeline on the plan](../reference/ci.md#gating-a-pipeline-on-the-plan). dispat answers this
-flag before taking the [release lock](./release.md#the-release-lock), so an empty run never queues real releases behind
-it.
+flag after taking the [release lock](./release.md#the-release-lock) and planning. Use `dispat status --require-release`
+for a CI check that does not take the lock or contact the remote.
 
 The two [shell helpers](./if.md#exit-codes) are the exception. The `if` and `exec` commands hand back the exit code of
 the script they ran, so `dispat if CI --then 'exit 7'` exits `7`. This ensures a pipeline gating on a specific code

@@ -1,7 +1,8 @@
 # A Flutter app and its packages
 
-Build a Flutter app from Dart packages published to pub.dev. dispat manages the app's build number separately from its
-version.
+This example publishes a Dart package to pub.dev and builds a Flutter app that uses it. The app's release version
+and store build number are updated separately. Add your store upload command if the same run should also publish
+the app bundle.
 
 ## The layout
 
@@ -11,9 +12,8 @@ apps/app/pubspec.yaml         acme_app 0.4.1+41, depends on acme_core
 dispat.json
 ```
 
-`0.4.1+41` is two numbers in one string. The version is `0.4.1`, and `+41` is the build number the stores use to tell
-one upload from another. dispat treats them as what they are. The release moves the version, and a separate write moves
-the counter.
+In `0.4.1+41`, `0.4.1` is the release version and `41` is the store build number. A version write preserves the build
+number; the `set-build` script below updates it separately.
 
 ## The configuration
 
@@ -39,9 +39,8 @@ the counter.
 }
 ```
 
-You define two spaces because the two halves ship differently. You publish a package to pub.dev, and you build an app
-into a bundle for a store. They still sit in one dependency graph, so dispat reconciles the app's `acme_core`
-constraint before it builds.
+The two spaces have different jobs: `packages` publishes to pub.dev, while `apps` builds store bundles. Both belong to
+the same dependency graph, so dispat updates the app's `acme_core` constraint before building it.
 
 The `set-build` script runs in `flow.beforeBuild`, after the version stage writes the new version and before the bundle
 is produced. That order matters. The version write preserves the existing build number, and this script then replaces
@@ -111,8 +110,7 @@ dispat autowriter --since all --unlink-local   # and back out before publishing
 dispat scanner --verify-unlinked               # E215 if one survived
 ```
 
-A `dependency_overrides` block reaching pub.dev is the classic Flutter monorepo accident. The gate above is the cheap
-way never to have that conversation.
+Run the verification command before publication to catch local overrides left in the pubspec.
 
 ## Worth knowing
 
@@ -123,12 +121,6 @@ way never to have that conversation.
 - **`--force` skips the confirmation prompt.** A stage has no terminal, so an interactive publish hangs the run.
 - **`pubspec_overrides.yaml` is not read.** dispat writes overrides into the pubspec itself. This is the file both the
   tooling and the reader agree on.
-
-## See also
-
-- [An Android app](./android.md) for the Gradle side of a mobile release.
-- [An iOS app and a CocoaPods library](./apple.md) for the Apple side.
-- [autoVersion](../configuration/autoversion.md) for what the version stage reconciles.
 
 ## Check compatible published dependencies
 
@@ -141,3 +133,9 @@ is unknown, inspect the registry outside the publish command before changing sou
 [integration guidance](./release-integration.md#test-the-distributed-artifact).
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.
+
+## See also
+
+- [An Android app](./android.md) for the Gradle side of a mobile release.
+- [An iOS app and a CocoaPods library](./apple.md) for the Apple side.
+- [autoVersion](../configuration/autoversion.md) for what the version stage reconciles.

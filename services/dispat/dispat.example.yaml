@@ -44,11 +44,15 @@ runOutputs:
   test: [coverage]
 
 # A space's `flow` object says what runs at which stage, referencing scripts by
-# name. Every entry is optional (a stage without a script still runs, keeping
-# ordering, tags, changelogs and github releases; it just executes no shell
-# command) and accepts one name or an array of names run in order. A name is
-# resolved by the package the stage runs for: its own `scripts`, then its
-# space's, then the ones above.
+# name. Every entry is optional: a package runs the stages its flow gives a
+# script or a hook, and has no task for the others (a package with no publish
+# is recorded after its last stage; one with no stage at all is recorded at
+# once). An entry accepts one name or an array of names run in order, or an
+# object naming them under `script` with a `label` and a place in the order
+# (`before`, `after`, `parallel`, each naming another stage of the package).
+# A key that is no built-in stage or hook defines a stage of that name, with
+# before<Name> and post<Name> hooks. A name is resolved by the package the
+# stage runs for: its own `scripts`, then its space's, then the ones above.
 spaces:
   libs:
     # One folder, or a list of folders whose sub-folders all belong to this
@@ -159,6 +163,19 @@ spaces:
       # its checks is never published. It reads the build's exports and
       # hands its own to the publish.
       tests: smoke-test
+      # The object form of an entry: the same scripts, a label the log, the
+      # events and the summary show, and a place in the package's stage
+      # graph. By default the stages form the chain sign, version, syncLock,
+      # build, tests, publish, the records, announce, with your own stages
+      # beside the tests; a stage stating `before` or `after` places itself,
+      # one stating neither keeps its default place, `parallel` says two
+      # stages are unordered, and a configuration no order realises is
+      # refused (E230-E232) before anything runs.
+      #   announce: { script: announce, after: build }   # before the publication, where it gates
+      #   scan: { script: smoke-test, label: "Security scan", parallel: tests }
+      #   beforeScan: install                            # the stage's own hooks
+      # A stage after the records (the announce by default) only warns and
+      # runs on the orchestrator; everything before them gates the release.
       # Hooks around the package stages (beforeAll, beforeSign, postSign,
       # beforeVersion, postVersion, beforeBuild, postBuild, beforeTests,
       # postTests, beforePublish, postPublish, beforeAnnounce, postAnnounce).

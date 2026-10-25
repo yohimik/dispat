@@ -1,8 +1,8 @@
 # The preview command
 
-Run `dispat preview` to plan and print your pending release notes. dispat shows the breaking changes, features, fixes,
-and provider updates that will go into the next changelog entry and GitHub release body. It covers every package with
-pending changes in publish order.
+Run `dispat preview` to read the release notes before publishing. It shows the breaking changes, features, fixes,
+and dependency updates planned for each package, in publish order. By default, it prints the next changelog entry;
+use `--github` to preview the GitHub release body.
 
 You can narrow this list using
 [`--package`, `--space`, `--group`, or the invocation folder](./run.md#choosing-the-packages). The preview respects
@@ -26,9 +26,8 @@ pending and `--version` previews. The changelog preview remains complete.
 Run a preview to check your [channel filters](../configuration/records.md#choosing-which-releases-a-line-reaches)
 before you release anything. The output renders for the specific channel the pending release is on.
 
-A preview cannot show everything. The `### Release` block for a GitHub body in
-[commit mode](../configuration/records.md#commit) relies on exported publishing data. Nothing has been published yet,
-so this block is absent.
+The GitHub body's `### Release` block in [commit mode](../configuration/records.md#commit) needs data exported by
+publish scripts. That data is not available during preview, so the block is omitted.
 
 When a record is configured to write nothing, the preview tells you in its place:
 
@@ -117,18 +116,18 @@ selected package, its full tag, or `latest`. A bare `--version` means `latest`. 
 
 ### `--package`, `-p`
 
-Narrow to the named packages for every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`,
-`autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`). You can repeat the flag, separate names
-with commas, and use case-insensitive `*` globs (`-p '*'` matches every package). See
-[Choosing the packages](./run.md#choosing-the-packages).
+Select named packages. Repeat the flag or separate names with commas. Names are case-insensitive and accept `*`
+globs; quote them so the shell does not expand them first. For example, `-p core,web` selects two packages and `-p '*'`
+selects every package. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--space`, `-s`
 
-Narrow to every package in the named spaces for the same eleven commands, using the same spelling rules. A standalone
-package belongs to no space. See [Choosing the packages](./run.md#choosing-the-packages).
+Select every package in the named spaces. This accepts the same lists and globs as `--package`. Standalone packages
+do not belong to a space, so `-s '*'` does not include them. See
+[Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--group`, `-g`
 
-Narrow to every package in the named [versioning groups](../reference/releasing/versioning.md) for the same eleven
-commands. A group is a `versionGroups` entry or a space that versions as one, so it can cross spaces. See
-[Choosing the packages](./run.md#choosing-the-packages).
+Select every package in a named [versioning group](../reference/releasing/versioning.md), using the same lists and
+globs as `--package`. A group may be a `versionGroups` entry or a space that versions together, and may span several
+spaces. See [Choosing the packages](./run.md#choosing-the-packages).

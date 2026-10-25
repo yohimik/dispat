@@ -152,7 +152,7 @@ func TestAdmissionRecordsWhatEachStageDid(t *testing.T) {
 	r := &run{plan: p, results: map[string]*Result{"app": {Name: "app"}},
 		reconciledProviders: map[string][]string{}, builtPackages: map[string]bool{}}
 	ctxFor := func(kind taskKind) *taskCtx {
-		return &taskCtx{run: r, t: task{"app", kind}, rel: p.Releases["app"], log: zerolog.Nop(),
+		return &taskCtx{run: r, t: task{"app", kind, ""}, rel: p.Releases["app"], log: zerolog.Nop(),
 			updates: []providerUpdate{{Package: "core"}, {Package: "utils"}}}
 	}
 
@@ -180,7 +180,7 @@ func TestAdmissionReRunsTheVersionScriptsAgainstTheLiveProviders(t *testing.T) {
 	r := &run{Executor: &Executor{Runner: runner, Log: zerolog.Nop()}, plan: p,
 		results:             map[string]*Result{"app": {Name: "app"}, "core": {Status: StatusFailed}},
 		reconciledProviders: map[string][]string{}, builtPackages: map[string]bool{}}
-	tc := &taskCtx{run: r, t: task{"app", taskPublish}, rel: p.Releases["app"], log: zerolog.Nop(),
+	tc := &taskCtx{run: r, t: task{"app", taskPublish, ""}, rel: p.Releases["app"], log: zerolog.Nop(),
 		deadPickups: []string{"core"},
 		updates:     []providerUpdate{{Package: "utils", NewVersion: "1.1.0"}}}
 

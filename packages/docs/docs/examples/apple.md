@@ -1,7 +1,8 @@
 # An iOS app and a CocoaPods library
 
-You will archive an app and upload it to App Store Connect. You will also publish a pod to trunk. Four Apple file
-formats carry a version between them.
+An iOS app and its CocoaPods library use different version fields and publication commands. This example connects
+them in one release graph, updates their manifests, and calls the native archive, export, and upload tools. Supply
+your project's signing settings and export options.
 
 ## The layout
 
@@ -10,6 +11,7 @@ pods/core/AcmeCore.podspec              the library, published to CocoaPods trun
 apps/ios/Podfile                        the app's dependencies, including AcmeCore
 apps/ios/App/Info.plist                 CFBundleShortVersionString and CFBundleVersion
 apps/ios/Acme.xcodeproj/project.pbxproj MARKETING_VERSION and CURRENT_PROJECT_VERSION
+apps/ios/ExportOptions.plist           the project's IPA export and signing options
 dispat.json
 ```
 
@@ -20,6 +22,7 @@ dispat.json
   "scripts": {
     "stamp": "dispat writer App/Info.plist Acme.xcodeproj/project.pbxproj --set-version \"$DISPAT_NEW_VERSION\" --set-build \"$GITHUB_RUN_NUMBER\"",
     "archive": "xcodebuild archive -scheme App -archivePath build/App.xcarchive",
+    "export": "xcodebuild -exportArchive -archivePath build/App.xcarchive -exportPath build -exportOptionsPlist ExportOptions.plist",
     "upload": "xcrun altool --upload-app -f build/App.ipa -u \"$APPLE_ID\" -p \"$APP_PASSWORD\"",
     "lint": "pod lib lint",
     "trunk": "pod trunk push AcmeCore.podspec"
@@ -32,7 +35,7 @@ dispat.json
     },
     "apps": {
       "path": "apps",
-      "flow": {"beforeBuild": "stamp", "build": "archive", "publish": "upload"},
+      "flow": {"beforeBuild": "stamp", "build": ["archive", "export"], "publish": "upload"},
       "autoVersion": {"enabled": true, "manifests": "all", "range": "~> {version}"}
     }
   },
@@ -42,15 +45,19 @@ dispat.json
 }
 ```
 
-Set **`range: "~> {version}"`** because CocoaPods writes optimistic requirements the Ruby way. It does not use the npm
-way.
+Set **`range: "~> {version}"`** to write CocoaPods' pessimistic version constraint, such as `~> 1.3.0`.
 
 Use **`manifestNames`** to connect the pod name `AcmeCore` to the folder called `core`. dispat then recognises a
 `pod 'AcmeCore'` line anywhere as this package.
 
-**The `stamp` script** exists because of where Xcode keeps versions. `autoVersion` writes a package's own version into
-the manifests directly in its folder, but an iOS project keeps `Info.plist` and `project.pbxproj` one level deeper in
-`App/` and `Acme.xcodeproj/`. Call `dispat writer` in `beforeBuild` to write both files along with the build number.
+**The `stamp` script** targets `App/Info.plist` and `Acme.xcodeproj/project.pbxproj` explicitly. It runs in
+`beforeBuild` to write the planned version and CI build number into both files. `manifests: "all"` also includes nested
+manifests in automatic reconciliation; a version write alone does not update their build counters.
+
+**Archive, then export.** The archive command creates `build/App.xcarchive`. The export command turns that archive
+into an IPA using your `ExportOptions.plist`. Create those options for your distribution method and signing setup;
+Apple's [command-line guide](https://developer.apple.com/library/archive/technotes/tn2339/_index.html) describes the
+export command. This example assumes the exported app is named `App.ipa`; update the upload path if yours differs.
 
 ## A release
 
@@ -134,12 +141,6 @@ than a version. dispat never rewrites them.
 - **Swift Package Manager needs no manifest support here.** `Package.swift` resolves versions from git tags. The tag
   dispat writes is the whole story, exactly as with [Go](./go.md).
 
-## See also
-
-- Check [A Flutter app and its packages](./flutter.md) if the app is built from Dart.
-- Read [An Android app](./android.md) for the same shape on the other platform.
-- See [Manifest tools](../editing/manifests.md#writing-the-build-counter) for `--set-build` on its own.
-
 ## Validate fresh packaged frameworks
 
 Create framework outputs in a clean directory and propagate every build and signing failure. Test the resulting
@@ -152,8 +153,7 @@ project still gives the built framework `MARKETING_VERSION = 5.12.0`; an `Info.p
 plist. Keep intentionally separate releases separate too: a ZIP-only packaging correction can use a new GitHub tag
 while leaving the CocoaPods version unchanged.
 
-An integration check must understand the project's release policy before requiring every destination to advance.
-A packaging-only correction may use a new archive tag while leaving the CocoaPods version unchanged.
+Check the project's release policy before requiring every destination's version to advance.
 
 ## Pin the vendored source behind a Swift tag
 
@@ -164,3 +164,9 @@ dispat can create the wrapper tag after the build succeeds; it does not infer wh
 native fix.
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.
+
+## See also
+
+- Check [A Flutter app and its packages](./flutter.md) if the app is built from Dart.
+- Read [An Android app](./android.md) for the same shape on the other platform.
+- See [Manifest tools](../editing/manifests.md#writing-the-build-counter) for `--set-build` on its own.

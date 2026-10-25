@@ -1,11 +1,11 @@
 # Packages
 
-A `packages` map holds per-package configuration. You key these entries by package name. The key keeps the spelling you
-write, and dispat matches it against the package folder case-insensitively, like every config map key. You can write
-this map at the top level of your root file, inside a space for
-[its own packages](./spaces.md#the-spaces-packages-map), or in a
-[space configuration file](./spaces.md#the-space-configuration-file). All three places take the same entry shape, and
-[the override ladder](#the-override-ladder) decides which one wins.
+Use `packages` to configure a package that needs different settings from its space, or to declare a package outside
+every space. Each key is a package name. dispat preserves its spelling and matches folder names without regard to case.
+
+You can put this map in the root configuration, inside a space for [its own packages](./spaces.md#the-spaces-packages-map),
+or in a [space configuration file](./spaces.md#the-space-configuration-file). The entries have the same shape in each
+place. [The override ladder](#the-override-ladder) explains which setting wins.
 
 A top-level entry plays one of two roles:
 
@@ -74,15 +74,20 @@ these package-only keys:
 | `env`          | map name → value | Fixed environment variables for this package's scripts. dispat merges these key by key over the space's map and the top-level one. See [Static env](./env.md).                                                                                                                                      |
 | `custom`       | object          | Free-form data dispat never reads. See [`custom`](./custom.md). Nothing merges this data, so an entry's object and an in-folder file's object are independent.                                                                                                                                           |
 
-For an entry overriding a space package, a field left unset **inherits** from the space. A field you set overrides it.
-The per-field rules follow from what each object means:
+### How package overrides combine
+
+An unset field inherits from the space. How a field you set combines with the inherited value depends on the option:
 
 - The tri-state options (`isBuildWaitingPublish`, `revertOnFail`) inherit when absent. An explicit `false` overrides a
   space's `true`. `isBuildWaitingPublish` may also be written as an object, and a level that states one **replaces the
   whole relation**: its two fields carry meaning against each other, so a half-inherited relation would be one nobody
   wrote. See [The provider relation](./spaces.md#the-provider-relation).
-- `flow` merges **entry by entry**. An overridden stage or hook replaces that entry's list, every other entry inherits,
-  and an explicit empty array (`"build": []`) clears an inherited entry. dispat looks up the names inside against this
+- `flow` merges **entry by entry**. An overridden stage or hook replaces that entry, every other entry inherits, and
+  an explicit empty array (`"build": []`) clears an inherited entry. A stage entry is one value in both its forms, so a
+  list or an [object](./spaces.md#the-order-of-the-stages) written here replaces the whole inherited entry, scripts,
+  `label` and constraints alike: restate the scripts beside a constraint to keep them. A
+  [stage of this package's own](./spaces.md#stages-of-your-own) and its `before<Name>` and `post<Name>` hooks are
+  entries like the others. dispat looks up the names inside against this
   package first, then its space, then the file, so a package can keep its space's `flow.build: build` and still supply
   its own `build` command. A name missing from all three levels is an error naming the package. You cannot set
   `flow.login` per package because login runs [once per space, in the space folder](./spaces.md#flowlogin) and gates
@@ -123,8 +128,8 @@ where it declares a [standalone package](#standalone-packages-path).
 
 ## The override ladder
 
-You can configure one package from six places. They apply in this order, each overlaying the one before it field by
-field. The layer nearest the package wins:
+A package can inherit settings through the layers below. They apply from top to bottom, using the merge rules above.
+The nearest layer that sets a value wins:
 
 | # | Layer                     | Where it lives                                    |
 |---|---------------------------|----------------------------------------------------|
@@ -176,10 +181,9 @@ dispat works out which package a dependency refers to by reading the name each p
 `package.json` says `"name": "@acme/core"`, so a sibling depending on `@acme/core` depends on that folder. This covers
 most repositories without any configuration at all.
 
-Some packages declare no name dispat can read. A Gradle module keeps its coordinate in a build script that is a program
-rather than a manifest, and a folder built by a Makefile declares nothing. A project in an ecosystem dispat lacks a
-parser for is opaque by definition. Nothing points at these packages, so `dispat compute` derives no edges into them
-and auto-versioning never reconciles the declarations that name them.
+Some packages have no readable manifest name. A Gradle module may calculate its coordinate in a build script; a
+Makefile project may declare no name at all. Without a name, `dispat compute` cannot derive dependencies on that
+package by name, and auto-versioning cannot reconcile declarations that use it.
 
 Set `manifestNames` to say what such a package is called:
 
@@ -193,8 +197,7 @@ From then on, a dependency spelled `com.acme:core` anywhere in the workspace res
 for `dispat compute` and for [auto-versioning](./autoversion.md) alike. The two share one index, so they cannot
 disagree about what a name means.
 
-Two rules keep this honest. A stated name **outranks** one a manifest declares, because you are stating a fact rather
-than a file happening to say it.
+A configured name **takes precedence** over a name read from a manifest.
 
 No two packages may state the same name. A manifest name identifies one package. A collision here is a typo in your
 configuration, so dispat fails to load it.
@@ -204,11 +207,8 @@ The key belongs to a package, not to a space. You write it in a `packages` entry
 
 ## `src`
 
-The files a commit touches attribute it when it names no scope. Whichever package owns a changed path is the package
-the commit addresses. Ownership means the package folder, so *everything* in the folder counts.
-
-This is usually right, but occasionally it is not. A package whose folder also holds a docs site, a fixtures tree, or a
-scratch directory releases on a typo fix in prose.
+When a commit has no scope, dispat uses its changed files to find the affected packages. By default, every file in a
+package folder counts, including documentation, fixtures, and scratch files.
 
 Set `src` to narrow that to one sub-folder:
 
@@ -221,7 +221,7 @@ packages:
 A changed file now has to sit under `packages/core/lib` to make a scopeless commit address `core`. Anything else in the
 folder belongs to whichever package encloses it, or to no package at all.
 
-You should know what `src` does *not* change, because it is most of the package:
+`src` only changes that file-based matching:
 
 - **The package folder is still the package.** Scripts run there, the changelog is written there, and the release
   commit stages all of it, `src` or not.
@@ -346,9 +346,8 @@ dependencies next to the rest of its configuration:
 }
 ```
 
-These entries match the ones a consumer lists in the top-level [`dependencies`](./dependencies.md) object. An edge
-reads the same wherever you declare it, and moving one between the two places is a cut and a paste. The consumer is the
-package itself, and one provider needs no array: `"dependencies": "core"`.
+Use the same provider entries as the top-level [`dependencies`](./dependencies.md) object. Here, the consumer is the
+package itself. A single provider needs no array: `"dependencies": "core"`.
 
 All declarations merge **into one list**. This includes the top-level object, every entry's list, and every in-folder
 list. Where you declare an edge changes nothing about how it plans.

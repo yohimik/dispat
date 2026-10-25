@@ -34,6 +34,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -100,6 +102,174 @@ func InstallOutputs(ctx context.Context, request InstallRequest) error {
 		}
 	}()
 	if err := stageOutputs(ctx, request); err != nil {
+		return err
+	}
+	return replaceOutputRoots(request)
+}
+
+type selectedOutputEntry struct {
+	entry ManifestEntry
+	oid   string
+	store *gitx.LocalGitx
+}
+
+// InstallOutputSets merges several admitted sets for one package into one
+// staged replacement. A successor's complete-root snapshot supersedes its
+// ancestor, including paths it deleted. Incomparable producers may share a
+// path only when they produced identical entries.
+func InstallOutputSets(ctx context.Context, requests []InstallRequest) error {
+	if len(requests) == 0 {
+		return nil
+	}
+	if requests[0].Manifest == nil {
+		return fmt.Errorf("execution: missing stage output manifest")
+	}
+	if len(requests) == 1 {
+		return InstallOutputs(ctx, requests[0])
+	}
+	chosen := make(map[string]selectedOutputEntry)
+	first := requests[0]
+	live := make([]bool, len(requests))
+	byDigest := make(map[string]int, len(requests))
+	for i, request := range requests {
+		if request.Manifest == nil || request.Manifest.Package != first.Manifest.Package ||
+			request.Dir != first.Dir || request.Staging != first.Staging ||
+			!slices.Equal(request.Manifest.Roots, first.Manifest.Roots) ||
+			len(request.Objects) != len(request.Manifest.Entries) {
+			return fmt.Errorf("execution: incompatible output sets for one package")
+		}
+		live[i] = true
+		if prior, exists := byDigest[request.Manifest.Digest]; exists && prior != i {
+			return fmt.Errorf("execution: duplicate stage output identity: %w", refuseOutputs(ReasonOutputIdentity))
+		}
+		byDigest[request.Manifest.Digest] = i
+	}
+	for j, request := range requests {
+		for _, input := range request.Manifest.Inputs {
+			if i, exists := byDigest[input.Digest]; exists && i != j {
+				live[i] = false
+			}
+		}
+	}
+	selected := -1
+	for i, request := range requests {
+		if !live[i] {
+			continue
+		}
+		if selected < 0 {
+			selected = i
+		}
+		for j, entry := range request.Manifest.Entries {
+			current, exists := chosen[entry.Path]
+			if !exists {
+				chosen[entry.Path] = selectedOutputEntry{entry, request.Objects[j], request.Git}
+				continue
+			}
+			if current.entry != entry {
+				return fmt.Errorf("execution: incomparable stage output sets conflict at %s: %w",
+					entry.Path, refuseOutputs(ReasonPathConflict))
+			}
+		}
+	}
+	if selected < 0 {
+		return fmt.Errorf("execution: cyclic stage output provenance: %w", refuseOutputs(ReasonOutputIdentity))
+	}
+	retainedByLive := make(map[int]map[string]bool)
+	consumers := make(map[string][]int)
+	for j, request := range requests {
+		if !live[j] {
+			continue
+		}
+		retained := make(map[string]bool, len(request.Manifest.Entries))
+		for _, entry := range request.Manifest.Entries {
+			retained[entry.Path] = true
+		}
+		retainedByLive[j] = retained
+		for _, input := range request.Manifest.Inputs {
+			consumers[input.Digest] = append(consumers[input.Digest], j)
+		}
+	}
+	for i, ancestor := range requests {
+		if live[i] {
+			continue
+		}
+		for _, j := range consumers[ancestor.Manifest.Digest] {
+			retained := retainedByLive[j]
+			for _, entry := range ancestor.Manifest.Entries {
+				if !retained[entry.Path] {
+					if _, exists := chosen[entry.Path]; exists {
+						return fmt.Errorf("execution: a stage deletes an output another branch retains at %s: %w",
+							entry.Path, refuseOutputs(ReasonPathConflict))
+					}
+				}
+			}
+		}
+	}
+	paths := make([]string, 0, len(chosen))
+	for path := range chosen {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	first = requests[selected]
+	merged := *first.Manifest
+	merged.Entries = make([]ManifestEntry, 0, len(paths))
+	orderedEntries := make([]selectedOutputEntry, 0, len(paths))
+	merged.Bytes = 0
+	for _, path := range paths {
+		item := chosen[path]
+		merged.Entries = append(merged.Entries, item.entry)
+		orderedEntries = append(orderedEntries, item)
+		merged.Bytes += item.entry.Size
+	}
+	merged.Files = len(merged.Entries)
+	first.Manifest = &merged
+	return installMergedOutputs(ctx, first, orderedEntries)
+}
+
+// installMergedOutputs stages one root set from objects that may live in
+// different immutable Git stores. It reuses the single-set path checks and
+// root replacement, but selects each blob from its admitted producer's store.
+func installMergedOutputs(ctx context.Context, request InstallRequest, entries []selectedOutputEntry) error {
+	if err := os.RemoveAll(request.Staging); err != nil {
+		return fmt.Errorf("execution: clearing the staging folder %s: %w", request.Staging, err)
+	}
+	defer func() { _ = os.RemoveAll(request.Staging) }()
+	if err := os.MkdirAll(request.Staging, 0o700); err != nil {
+		return err
+	}
+	if err := stageDeclaredRoots(request); err != nil {
+		return err
+	}
+	readers := make(map[*gitx.LocalGitx]*gitx.ObjectReader)
+	defer func() {
+		for _, reader := range readers {
+			_ = reader.Close()
+		}
+	}()
+	for _, item := range entries {
+		if item.entry.Type == EntrySymlink {
+			continue
+		}
+		reader := readers[item.store]
+		if reader == nil {
+			var err error
+			reader, err = gitx.OpenObjectReader(ctx, item.store)
+			if err != nil {
+				return err
+			}
+			readers[item.store] = reader
+		}
+		if err := stageOneFile(request, reader, item.entry, item.oid); err != nil {
+			return err
+		}
+	}
+	for store, reader := range readers {
+		if err := reader.Close(); err != nil {
+			return fmt.Errorf("execution: closing output reader for %s: %w", store.Dir, err)
+		}
+		delete(readers, store)
+	}
+	if err := stageSymlinks(request); err != nil {
 		return err
 	}
 	return replaceOutputRoots(request)

@@ -1,17 +1,16 @@
 # The writer command
 
-Run `dispat writer <manifest>...` to apply `--set-version`, `--set`, and `--link` to each named manifest. An edit ends
-up applied, skipped, or missing. If you provide a path that no writer covers, dispat always exits `1`.
+Run `dispat writer <manifest>...` to edit the files you name. Use `--set-version` for a package's own version,
+`--set` for a dependency range, and `--link` for a local dependency redirect. An unsupported manifest path exits `1`.
+
+The report marks each edit as applied, skipped, or missing.
 
 A skipped edit means the version defers to something outside the file. This is normal and never fails the command. A
 missing edit means the manifest does not declare that dependency, which fails only if you pass `--strict`.
 
-The `dispat scanner`, `dispat writer`, and `dispat replacer` commands expose the manifest libraries directly.
-`dispat scanner` prints what a folder's manifests declare. `dispat writer` edits a declaration in place while
-preserving the file's formatting, and `dispat replacer` replaces literal text in any file at all.
-
-These commands need no config file, no git repository, and no release plan. They work on any checkout. Positional paths
-resolve against `--root`.
+No configuration file, Git repository, or release plan is required. Positional paths resolve against `--root`.
+Use [`dispat scanner`](./scanner.md) to inspect declarations first, or [`dispat replacer`](./replacer.md) for literal
+text outside a manifest field.
 
 Pass `--log-format json` to swap each command's listing for one event per file.
 

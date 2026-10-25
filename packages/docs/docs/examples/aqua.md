@@ -1,12 +1,12 @@
 # Aqua tool pins
 
-An Aqua manifest describes tools a repository consumes. It is not a publication manifest for those tools. dispat can
-scan and rewrite its literal version pins while Aqua continues to select release assets, verify checksums and install
-the tools.
+Use dispat to inspect and update the tool versions pinned in `aqua.yaml` and its imports. Aqua still chooses release
+assets, verifies checksums and installs the tools. These pins describe what the repository consumes; publishing a
+tool itself needs a separate release setup.
 
 ## A manifest split into imports
 
-Large repositories often keep the registry and checksum policy in one file and one pin per imported file:
+You can keep the registry and checksum policy in one file, with each tool pin in an imported file:
 
 ```text
 aqua/aqua.yaml
@@ -85,12 +85,12 @@ packages:
   - name: acme/cli@v1.2.0
 ```
 
-With `packages/cli` and `packages/web` present, this consumer pin lets `dispat compute` propose the `web -> cli`
-dependency edge. Review and save that graph before releasing. The earlier repository-root `aqua/aqua.yaml` example
-is independently scannable and writable, but lies outside these package directories and does not establish a consumer
-edge for this configuration. The provider
-waiting flag is appropriate only when the consumer installs the new tool through a registry after the provider
-publishes. Leave it out when the build uses a local binary or another shared build context.
+With both folders present, `dispat compute` can propose `web -> cli` from the pin. Review and save that edge before
+releasing. The earlier root-level `aqua/aqua.yaml` can be scanned and edited on its own, but it is outside these
+packages and does not establish a consumer edge for this configuration.
+
+Set the provider's waiting flag when the consumer installs the newly published tool from a registry. Leave it out
+when the build uses a local binary or shared build output.
 
 ## Verify the installation boundary
 

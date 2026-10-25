@@ -35,7 +35,7 @@ func BenchmarkTaskGraph(b *testing.B) {
 			e := &Executor{}
 			b.ReportAllocs()
 			for b.Loop() {
-				sched, _ := e.buildTaskGraph(p, changed)
+				sched, _ := e.buildTaskGraph(p, changed, newStagePlans(p, changed))
 				drainInHandOutOrder(sched)
 			}
 		})

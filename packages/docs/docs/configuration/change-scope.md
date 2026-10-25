@@ -1,7 +1,7 @@
 # What counts as a change
 
-A release triggers when a commit modifies a package. dispat must decide which package a commit applies to. You can tell
-it to ignore specific files so they never trigger a release.
+Use `src` and `ignore` to control which changed files make a commit apply to a package. These settings help keep
+documentation, fixtures, or generated files from causing an unwanted release. Explicit commit scopes still apply.
 
 ## Two ways a commit reaches a package
 
@@ -36,8 +36,8 @@ Define `src` to specify the folder holding your actual source files. This path i
 }
 ```
 
-A change to `packages/core/src/parser.ts` now counts as a change to `core`. Modifying `packages/core/docs/guide.md`
-changes nothing.
+A change to `packages/core/src/parser.ts` now counts as a change to `core`. A change to
+`packages/core/docs/guide.md` does not address `core` unless the commit names it explicitly.
 
 Set `src` at the root, on a space, or on a single package. The nearest statement wins. dispat resolves this path
 against each package's own folder, so a space-level `src: "src"` means `<space>/<package>/src` for every package in
@@ -148,10 +148,11 @@ staying silent:
 W131  unit resolved to no package and is inert: fix: rewrite the guide
 ```
 
-The tool releases nothing. Check the warning to see which commit was inert in case you expected a release.
+That commit causes no release. If you expected one, check its changed files against the package's `src` and `ignore`
+settings.
 
 ## Choosing between them
 
-Set `src` when a package has a single folder of actual source code and everything else is incidental. Set `ignore` when
-you mix important files with files that do not matter. The two settings compose: `src` isolates the folder, and
-`ignore` excludes files from what remains, with the patterns still counted from the package folder.
+Use `src` when one folder contains everything that should count toward a release. Use `ignore` when you need to
+exclude particular files throughout the package. You can combine them: `src` selects the folder, then `ignore` excludes
+files within it. Ignore patterns still resolve from the package folder.

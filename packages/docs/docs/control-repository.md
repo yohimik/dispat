@@ -1,20 +1,22 @@
 # A control repository for many repositories
 
-When code lives in several Git repositories, a small control repository can link them as submodules and give dispat one
-dependency graph. There are two useful modes:
+Use a control repository when one team coordinates releases across several Git repositories. It links the source
+repositories as submodules and gives dispat one dependency graph. Each source keeps its own remote, ownership and
+review process.
 
-- **Source-history mode** reads conventional commits and release tags from each linked repository. Use it when those
-  histories already carry the release intent you need.
-- **Pointer-history mode** reads only control-repository commits that move submodule pointers. It is the established
-  wrapper pattern for source repositories that do not use conventional commits.
+Choose where release decisions come from before writing the configuration:
 
-Both modes preserve each source repository's ownership, review rules, and remote. Source-history mode adds real
-cross-repository pending windows and source-owned tags. Pointer-history mode keeps one simpler release history in the
-control repository.
+| Mode | Release input | Where tags live | Use it when |
+|---|---|---|---|
+| [Source history](#source-history-mode) | Commits and tags in each source repository | In the source that owns the package | Source commits already describe what should release. |
+| [Pointer history](#pointer-history-mode) | Control-repository commits that move submodule pointers | In the control repository | Sources do not use conventional commits, or the control team writes release decisions. |
 
-**Or without a control repository.** A non-empty repository identity activates a linked peer fleet automatically:
-every repository keeps its own configuration and records, two-sided submodule links join the peers, and a release can
-start in any of them. See [A choreographed fleet](./choreographed-repositories.md).
+For source history, start with [one control file](#one-control-file), then add
+[imported configuration](#importing-source-configuration) if teams keep settings beside their code. For pointer
+history, start with the [wrapper layout](#a-wrapper-folder) and its [configuration](#the-configuration).
+
+If each repository should own its release policy and be able to start a combined release, use
+[linked repositories](./choreographed-repositories.md) instead. That setup needs no control repository.
 
 ## Source-history mode
 
@@ -22,10 +24,9 @@ Set `polyrepo: true` or pass `--polyrepo` to read each linked source repository'
 `configs` list or any `--configs` flag also enables the mode. dispat requires initialized submodules at the commits
 pinned by the current control checkout and complete history in every repository.
 
-The control repository is still the one place that starts the run. It supplies the combined dependency graph, shared
-release policy, fleet lock, and explicit directives that need to reach several repositories. The source repositories
-supply package commits, tags, files, and optionally small imported config fragments. A source needs no `dispat.yaml` at
-all when the control file declares its packages.
+Start the run from the control repository. It supplies the combined graph, shared release policy, locking and
+directives that need to reach several repositories. Sources supply their package commits, tags and files. A source
+needs a `dispat.yaml` only if you choose to import its configuration; the control file can declare its packages itself.
 
 ### One control file
 
@@ -68,12 +69,13 @@ repositoryOverrides:
       branch: main
 ```
 
-The package and space paths keep their usual control-relative spelling. dispat assigns each resulting package to the
-Git repository that contains it. A package must stay wholly within that repository. A control-owned wrapper whose
-`src` or manifest path crosses into a source submodule is rejected in this mode, because its history and the files it
-would commit have different owners. The closest Git worktree containing the package path and `src` must be that
-assigned repository. A package inside an unlisted nested Git repository is rejected with `E331`; add it to the control
-repository as a participating source before it can own packages.
+Package and space paths are relative to the control repository. dispat assigns each package to the Git repository
+containing it, and all of the package must stay inside that repository.
+
+This mode rejects a control-owned wrapper whose `src` or manifest path crosses into a source submodule: the history
+and files would have different owners. The closest Git worktree containing both the package path and `src` must be
+the assigned repository. A package inside an unlisted nested Git repository fails with `E331`; declare that
+repository as a participating source first.
 
 `.gitmodules` names are repository identities. In the example they are `sdk-source`, `api-source`, and `web-source`;
 the reserved identity `control` refers to the control repository. URLs and mount paths can change without changing
@@ -82,7 +84,7 @@ rejected with `E330` before the workspace is constructed.
 
 ### Importing source configuration
 
-Large fleets can keep declarations beside their source without making discovery implicit:
+To keep package declarations in their source repositories, list the files to import explicitly:
 
 ```yaml title="dispat.yaml"
 configs:
@@ -112,10 +114,9 @@ spaces:
     path: packages
 ```
 
-The explicitly imported file establishes that source's normal configuration root. Its ordinary space and in-folder
-package layers apply inside that repository, along with references it explicitly contains. A centrally declared path
-that merely enters a source does not start this discovery. This keeps a coincidental filename from changing fleet
-policy while preserving normal local layering for a source you deliberately import.
+An imported file becomes that source's configuration root. Its space files, in-folder package files and explicit
+references then apply as they would in a local setup. Merely pointing a central declaration at a source folder does
+not load those files. Import the source configuration when you want its local settings to apply.
 
 Each imported source uses its own parser settings. Its `parser.quiet` controls whether that source's parser findings
 are printed; `--quiet-parser` and `--quiet-parser=false` override every repository for the invocation. Diagnostics
@@ -142,16 +143,16 @@ a configuration conflict. Central participation still applies to an imported sou
 
 ### How commits reach packages
 
-A commit in a source repository directly addresses packages owned by that source. This is true for an explicit package
-name or glob, `*`, `.`, and the changed-file fallback. It cannot directly claim a package in another source. Once dispat has
-the direct set, `^`, `^^`, channel propagation, and configured dependency propagation traverse the combined graph and
-can reach consumers anywhere.
+A source commit directly addresses only packages in that source. This applies to explicit names, globs, `*`, `.` and
+changed-file attribution. From that initial set, `^`, `^^`, channel propagation and configured dependency propagation
+can reach consumers anywhere in the combined graph.
 
-A control commit works at fleet scope when its scope-set names packages across sources or uses `*`. Use one for an
-intentional fleet-wide hold, cancellation, channel transition, or release directive. dispat evaluates it against the
-exact source commits pinned by that control revision. Source commits from separate repositories have no reliable
-newest order; if two incomparable directives need one winner, dispat fails rather than sorting by date. A later control
-directive can settle the choice from a known source snapshot.
+A control commit can name packages across sources or use `*` for a fleet-wide hold, cancellation, channel transition
+or release directive. dispat evaluates it against the source revisions pinned by that control commit.
+
+Separate source histories have no reliable “newest” order. If two incomparable directives require one winner,
+dispat fails instead of choosing by date. A later control directive can settle the choice against a known source
+snapshot.
 
 An applicable direct channel directive still takes precedence over propagated channels, even when the propagated
 proposals come from incomparable source revisions. A directive that proposes no change, including an unmatched
@@ -178,16 +179,18 @@ Only the provider-presence check is skipped: an invalid consumer, edge kind, or 
 
 ### When a boundary needs help
 
-Within one source repository, the package's normal tags establish its stable and fresh pending windows. Across source
-repositories, dispat also needs to know which provider revision a consumer release incorporated.
+Within one source, a package's tags establish its stable and fresh pending windows. Across sources, dispat also
+needs to know which provider revision a consumer release included.
 
-It can infer that only from a normal control release checkpoint that proves the association. The checkpoint's ordinary
-release-commit message must identify the exact consumer source tag, that same commit must move the consumer gitlink to
-the commit behind the tag, and its other gitlinks must pin the provider revisions incorporated by that release.
+A control release checkpoint proves that association only when all three conditions hold:
 
-A matching pointer is insufficient by itself. A tag can be added later to a commit already pinned for months, and the
-same consumer pointer can appear in several control commits while providers advance. dispat never guesses by commit or
-tag date. When the checkpoint is missing, customized beyond unambiguous parsing, or ambiguous, provide the association:
+1. Its ordinary release-commit message names the exact consumer source tag.
+2. That same commit moves the consumer gitlink to the commit behind the tag.
+3. Its other gitlinks pin the provider revisions included in the release.
+
+A matching pointer alone is not enough. Someone might add a tag to a commit that was pinned months ago, or leave the
+consumer pointer unchanged while providers advance. dispat does not infer the association from dates. If the
+checkpoint is missing, ambiguous or customized beyond what dispat can parse, state it explicitly:
 
 ```yaml
 repositoryBaselines:
@@ -234,9 +237,9 @@ repositoryOverrides:
       branch: main
 ```
 
-If `repositoryOverrides.sdk-source.commit` is absent, the centrally configured source inherits the whole control commit policy. If it is
-present, it replaces the whole object and omitted fields use their normal defaults. It is not a field-by-field overlay;
-for example, omitting `push` in the replacement means `false`.
+Without `repositoryOverrides.sdk-source.commit`, the source inherits the entire control commit policy. With it, the
+override replaces the whole object. Omitted fields use their normal defaults; for example, omitting `push` makes it
+`false`. The two objects are not merged field by field.
 
 Overrides apply to centrally configured sources. An imported source owns its commit policy in its imported root, so a
 `commit` entry in `repositoryOverrides` for that same source is a configuration conflict rather than another override
@@ -260,11 +263,16 @@ After interruption, dispat still records successful publications within its reco
 commit/push hooks respect the interruption: running hooks are cancelled and later hooks are skipped while native
 commits, tags, pushes, and required checkpoints finish.
 
-If a source tag and revision are durable but the control checkpoint fails, the error names the source repository, full
-revision, and tag. The next run refuses the unpinned checkout. Inspect the source remote, then explicitly commit or
-reconcile the control gitlink to that durable revision, or restore the source checkout to the intended committed pin.
-Do not republish, force a checkpoint, or expect dispat to commit this repair automatically. Consumers stay gated until
-the control checkout and source pin agree again.
+If the source tag and revision were recorded but the control checkpoint failed, the error names the source, full
+revision and tag. The next run refuses the unpinned checkout. To repair it:
+
+1. Inspect the source remote and confirm the recorded revision.
+2. Commit or reconcile the control gitlink to that revision, or restore the source checkout to the intended committed
+   pin.
+3. Confirm that the control checkout and source pin agree before retrying.
+
+Do not republish or force a checkpoint. dispat does not commit this repair for you, and consumers remain gated until
+the pin agrees.
 
 The release lock covers the whole combined workspace, including active sources and standalone packages. Independent
 per-repository locks do not make two fleet runs safe.
@@ -283,15 +291,14 @@ repositoryOverrides:
     enabled: false
 ```
 
-A space path that lies inside a disabled repository stops contributing. The folders it names hold that repository's
-packages, so excluding the repository excludes the declaration with it, and a space whose every path is excluded is
-dropped together with its own `packages` entries. This is what lets a disabled source stay uninitialized while the rest
-of the fleet releases.
+A space path inside a disabled source is excluded too. If all of a space's paths are excluded, the space and its
+`packages` entries are dropped. The disabled source can therefore stay uninitialized while the rest of the fleet
+releases.
 
-A disabled repository keeps its filesystem boundary. Its path still belongs to that repository, so a control package
-declared inside it is refused as belonging to a nested repository rather than quietly becoming control-owned. The
-difference is what each declaration claims: a space path only hosts the packages of whoever owns the folders, while a
-package declared with a path claims those files for the control repository.
+Disabling a source does not transfer its files to the control repository. An explicit control package inside its path
+is still refused as belonging to a nested repository. A space path discovers packages belonging to the folders'
+owner; an explicit package path claims those files for the control repository. That is why the two declarations are
+handled differently.
 
 A required dependency on a package of a disabled repository is an error that names the excluded repository, because
 that provider is no longer part of the composed workspace. A dependency declared `external: true` keeps the existing
@@ -307,19 +314,22 @@ for each exclusion.
 
 ### Keeping the plan fixed during release
 
-Source-history mode captures each source head while composition verifies it against the control gitlink, then retains
-that exact revision as planning's initial pin boundary. It also records the participating heads and relevant release
-tags before parsing history. After all imported and control `beforeAll` hooks finish, dispat checks the whole fleet
-again before it starts package work. A changed head, relevant tag, or source pin fails with `E330` so the run does not
-combine two fleet states.
+Before parsing history, dispat captures each participating head and relevant release tag. It checks every source head
+against its control gitlink and keeps that exact revision as the initial planning boundary.
 
-State can also change while packages build. After a package's `beforePublish` hook and immediately before its publish
-command, dispat checks the repository of that package and every package in its transitive provider and shared version
-group closure. This includes a fixed-group member in another source even when the two packages have no dependency edge.
-It also checks the control repository when an applicable explicit control directive was consulted, including a hold or
-cancellation, or when an enabled control checkpoint will record the package. A change in an unrelated source does not
-stop that package. A relevant change fails the package before its publish command, and the normal dependency rules keep
-its consumers from publishing from the stale plan.
+After all imported and control `beforeAll` hooks finish, dispat checks the whole fleet again. A changed head, relevant
+tag or source pin fails with `E330` before package work starts. The plan cannot combine the earlier and later states.
+
+dispat checks again after each package's `beforePublish` hook, immediately before its publish command. That check
+covers:
+
+- The package's repository and every repository reached through its transitive providers and shared version groups.
+  This includes a fixed-group member in another source even without a dependency edge.
+- The control repository, if the plan used an applicable explicit control directive, including a hold or cancellation,
+  or if an enabled control checkpoint will record the package.
+
+A change in an unrelated source does not stop this package. A relevant change fails it before publication, and normal
+dependency rules stop its consumers from publishing from the stale plan.
 
 A native dispat record step may intentionally advance the owning source during the same run. It must export the exact
 full lowercase 40- or 64-hex source commit as
@@ -328,11 +338,13 @@ or alias tags. Direct `git commit` or `git tag` calls in build and hook scripts 
 cause `E330`. Use the native record and publish steps to produce the commit and export when a nested command must
 advance release state.
 
-The outer release shares each admitted source pin with its nested commands through private, transient coordination for
-that run. A command that was already running can therefore validate a source revision recorded concurrently elsewhere
-in the same release. The coordinator accepts exact source identities and full exported commits, is bound to the same
-control root and configuration, and is deleted when the run ends. It is not a baseline, release record, tag payload, or
-recovery ledger; a later run reconstructs its state from durable source tags and control checkpoints.
+The outer release shares accepted source pins with nested commands through private coordination data for that run.
+This lets an already-running command validate a source revision recorded elsewhere in the same release. The
+coordinator accepts exact source identities and full exported commits, is bound to the same control root and
+configuration, and is deleted when the run ends.
+
+This temporary data is not a baseline, release record, tag payload or recovery ledger. Later runs reconstruct state
+from durable source tags and control checkpoints.
 
 Packages in one source publish and record in a deterministic repository order. That ordering does not create
 dependency failure edges; it only prevents two packages from observing a half-recorded source transition. Packages in
@@ -344,12 +356,10 @@ name; it is not forced to the front. Within one dispat process, native Git trans
 a transaction that touches several worktrees takes them in canonical Git common-directory order, takes linked worktrees
 of one repository once, and gives them back in reverse. Hooks and scripts run outside those transactions.
 
-The lock policy is the control configuration's. Its `unsafeDisableLock`, or `DISPAT_UNSAFE_DISABLE_LOCK` in the
-environment, is the only way to release a source without its lock. A source whose imported configuration sets
-`unsafeDisableLock` is still locked, and the run says so in one warning line naming the ignored setting and the
-repositories, because a source that could switch its own lock off would take the fleet's exclusion apart one
-repository at a time. A [choreographed fleet](./choreographed-repositories.md) is the other way round: each peer owns
-its own setting.
+The control configuration owns the lock policy. Only its `unsafeDisableLock`, or the environment variable
+`DISPAT_UNSAFE_DISABLE_LOCK`, can allow a source release without its lock. An imported source's `unsafeDisableLock`
+is ignored; one warning names the setting and affected repositories. This keeps one source from weakening the fleet's
+locking policy. In a [linked peer fleet](./choreographed-repositories.md), each peer instead owns its own lock setting.
 
 The fleet lock coordinates dispat runs, and the per-repository serialization covers one process only. Neither can
 exclude every process that can write the Git worktrees. Git's own lock files refuse a conflicting writer of the index
@@ -418,16 +428,16 @@ platform/                       the control repository
       src/                      submodule -> github.com/acme/web
 ```
 
-Set up three parts, and only three:
+The layout has three parts:
 
 - **The control repository** is a normal dispat monorepo. `libs` and `services` are spaces, `sdk`, `api` and `web` are
   packages, and each package is a folder like any other.
-- **The linked repositories** are untouched. They hold source code and nothing else. They need no `dispat.yaml`, no
-  commit convention, and no release job.
+- **The linked repositories** keep their existing source and workflow. They need no `dispat.yaml`, commit convention
+  or dispat release job.
 - **The pointer** is what a git submodule actually is: a single entry in the control repository recording which commit
   of the linked repository this checkout uses.
 
-## Why it works
+### Why it works
 
 Git does not store a submodule's files in the parent repository. It stores one entry, at the submodule's path, holding
 a commit hash. Move a linked repository forward by making an ordinary commit in the control repository that changes
@@ -443,16 +453,15 @@ feat(api): a health endpoint
 services/api/src
 ```
 
-That last line is the whole trick. dispat decides which package a commit touched by looking at the paths it changed.
-`services/api/src` sits inside the `api` package folder, so a pointer bump is a change to `api`. It works exactly as if
-someone had edited a file there. Everything dispat does with an ordinary change now applies: the version, the
-changelog, the tag, the propagation to consumers, and the ordering of the build.
+The changed path, `services/api/src`, is inside the `api` package. dispat therefore treats this pointer move as a
+change to `api`, just as it would a file edit. The commit supplies the version bump and changelog text, and normal
+propagation and build ordering apply.
 
 Scopes work the way they do everywhere else. The commit above did not need its `(api)` scope at all. A commit with no
 scope is attributed to the packages whose folders it touched, so a bare `fix: pick up the latest api` reaches the same
 package. Writing the scope is still worth it because it makes the log readable.
 
-## What you get back
+### What you get back
 
 - **One dependency graph across repositories.** Declare an edge from `api` to `sdk` once in the control repository,
   whatever repositories the two live in.
@@ -464,9 +473,8 @@ package. Writing the scope is still worth it because it makes the log readable.
 - **Selective work.** Run [`dispat run --since`](./cli/run.md) and [`dispat if --changed`](./cli/if.md) to narrow a job
   to the packages a pointer bump reached. The pipeline cost follows the change and not the size of the fleet.
 
-Here is the payoff. `api` depends on `sdk`, they live in different repositories, and one commit moved the `sdk`
-pointer. The `^` on the type is the [reach directive](./reference/commits.md). It says "and the packages that depend on
-this one":
+Here, `api` depends on `sdk`, and a commit moves the `sdk` pointer. The `^`
+[reach directive](./reference/commits.md) also requests releases for its direct consumers:
 
 ```console
 $ git commit -m "feat(sdk)^: a retry policy for every client call"
@@ -477,28 +485,26 @@ $ dispat status
 09:31:07 INF release plan ready held=0 packages=3 releasing=2
 ```
 
-Two different repositories are releasing in order from one commit. A third correctly stayed out of it.
+The plan releases `sdk` and `api`; `web` is unchanged.
 
-## What stays separate, and why that is the point
+### What stays separate, and why that is the point
 
 The versions live in the control repository. The tags are its tags, the changelog files are its files, and its history
 is the release history. The linked repositories keep their own history and their own tags untouched.
 
-That separation is the reason to do this rather than a drawback of it. The people working in the linked repositories
-open pull requests, review them, and merge them exactly as they do today. They never write a conventional commit, never
-edit a `dispat.yaml`, and never wonder why a release did not fire. All of that lives in one repository, usually owned
-by one team.
+Source teams can keep their current pull-request and review process. They do not need to adopt dispat's commit
+convention or configuration; the control team owns those decisions.
 
-It has a real cost, and you should be clear about it. **The control repository sees one commit per bump, not the
-history behind it.** A pointer moving from one commit to another is a single event. The release notes are only as good
-as the message on that one commit. [Where the version comes from](#where-the-version-comes-from) is entirely about
-writing that message well. This includes a script that generates it from the linked repository's own log.
+The tradeoff is in the release notes: **dispat sees the pointer-bump commit, not the source history behind it.** Its
+message must describe the changes you want recorded. [Where the version comes from](#where-the-version-comes-from)
+shows how to write that message by hand or generate it from the source log.
 
-## Two layouts
+### Two layouts
 
-There are two places the submodule can sit. The difference matters more than it looks.
+Choose a wrapper if the control repository should commit changelogs and package configuration. Mounting the submodule
+directly as a package is flatter, but generated files then belong to the source repository.
 
-### A wrapper folder
+#### A wrapper folder
 
 Make the package a folder the control repository owns, and place the submodule inside it, conventionally at `src`:
 
@@ -508,11 +514,11 @@ services/api/            the package
   src/                   submodule -> github.com/acme/api
 ```
 
-This is the layout to prefer. The reason is one git rule: **a parent repository cannot commit files that live inside a
-submodule.** Run `git add services/api/src` to stage the pointer and nothing else. Anything dispat writes inside the
-submodule is left behind as a modification in the linked repository's working copy. Use a wrapper folder so the
-changelog, any per-package config file, and anything else generated during a release land in the wrapper. The release
-commit stages them normally:
+The wrapper matters because **a parent repository cannot commit files inside a submodule**. `git add services/api/src`
+stages only the pointer. Edits inside the submodule stay in that source's working copy.
+
+Put changelogs, package configuration and other release-generated files in the wrapper so the control release commit
+can stage them:
 
 ```console
 $ git show --stat HEAD
@@ -538,7 +544,7 @@ Optionally add `src: src` to the package. That narrows what counts as a change t
 the wrapper's own files does not trigger a release. The pointer still counts because its path is exactly the folder
 `src` names.
 
-### The submodule as the package
+#### The submodule as the package
 
 Mount the submodule directly as the package folder:
 
@@ -546,7 +552,7 @@ Mount the submodule directly as the package folder:
 services/api/            submodule -> github.com/acme/api
 ```
 
-This layout is flatter and easier to explain to someone reading the repository for the first time. It costs two things.
+This removes one folder level, with two consequences:
 
 **The changelog would be written inside the linked repository.** dispat writes a package's changelog in the package
 folder, which is now the submodule. The file is created in the linked repository's working copy, and no commit in the
@@ -569,7 +575,7 @@ folder as a configuration layer. Under this layout that folder belongs to anothe
 dispat config file. dispat reads a file that happens to be named that way, and refuses outright one declaring `spaces`
 or `packages`.
 
-### Choosing
+#### Choosing
 
 |                                            | A wrapper folder                     | The submodule as the package        |
 |--------------------------------------------|--------------------------------------|-------------------------------------|
@@ -582,7 +588,7 @@ or `packages`.
 Take the wrapper unless you have decided you do not want changelog files at all. The rest of this page uses it and
 notes where the flat layout differs.
 
-## The configuration
+### The configuration
 
 Write one file for the tree at the top of this page:
 
@@ -614,19 +620,18 @@ commit:
   push: true
 ```
 
-Nothing here is special to the pattern. It is an ordinary dispat configuration. The only sign that these packages live
-in other repositories is `--prefix src`, which points npm at the submodule inside each package folder. Under the flat
-layout the commands would be plain `npm ci` and `npm publish` because the package folder is the submodule.
+`--prefix src` points npm at the submodule inside each wrapper. With the flat layout, use plain `npm ci` and
+`npm publish` because commands already run in the submodule. The rest is an ordinary dispat configuration.
 
 Set `commit.enabled` to write the release commit that carries the changelog entries. Set `commit.push` to send it and
 the tags to the control repository's remote. The pointers themselves were committed earlier by whoever moved them.
 
-## Where the version comes from
+### Where the version comes from
 
-The pointer bump commit is the only input dispat has. How that commit gets written decides how good this pattern feels.
-Choose from three ways, from simplest to most automated. They combine freely.
+The pointer-bump commit supplies release intent. You can write it during review, have source CI request it, or generate
+it from the source log. These approaches can be used together.
 
-### Someone moves the pointer
+#### Someone moves the pointer
 
 A person, or a bot such as Renovate, opens a pull request in the control repository. This pull request moves one
 submodule forward and describes it:
@@ -638,10 +643,10 @@ git add services/api/src
 git commit -m "feat(api): a health endpoint"
 ```
 
-This is worth starting with. It reads well, puts the release decision in front of a reviewer, and needs no tooling at
-all. It stops scaling when the fleet is large enough that nobody wants to write those messages.
+Start here if pointer updates are infrequent. A reviewer can check both the selected revision and the release message
+without any additional tooling.
 
-### The linked repository asks for a release
+#### The linked repository asks for a release
 
 The linked repository's own CI tells the control repository what happened on merge to its main branch. It sends a
 `repository_dispatch` event carrying the package name and the bump it wants:
@@ -661,10 +666,10 @@ The linked repository's own CI tells the control repository what happened on mer
 A workflow in the control repository receives it, moves the pointer, and commits `feat(api): a health endpoint`. This
 is the only option that puts anything in the linked repository. It is a few lines that never mention dispat.
 
-### A sync job writes the commit
+#### A sync job writes the commit
 
-Fetch every linked repository on a schedule. The control repository writes the commits itself, deriving each one from
-the linked repository's own log. This scales best, and it is the version most fleets end up on.
+For frequent updates, a scheduled sync job can fetch each source and generate the pointer-bump message from its log.
+The script below preserves conventional commit types and treats other subjects as fixes.
 
 ```sh title="tools/sync.sh"
 #!/bin/sh
@@ -734,8 +739,8 @@ fix(web): fix broken links in the footer
 perf(web): preload the hero image
 ```
 
-The middle commit was not written to any convention. It became a fix, which is the safe reading, and it still reaches
-the changelog:
+The middle subject has no conventional type, so the script labels it as a fix. Review that fallback against your
+release policy. It produces this plan and changelog:
 
 ```console
 $ dispat status
@@ -758,13 +763,12 @@ $ dispat preview --changelog
 - preload the hero image
 ```
 
-Three commits were written by people who have never heard of dispat, in a repository dispat has never been installed
-in, and the changelog reads properly.
+The generated control commit now carries all three upstream subjects into release planning and notes.
 
 Run one job per package, or loop over them and let a single commit cover several packages. The units in one commit may
 carry different scopes, so one sync commit can release the whole fleet.
 
-### Settings this implies
+#### Settings this implies
 
 Configure three settings for a control repository that copies text from elsewhere, whichever way the message gets
 written:
@@ -780,23 +784,19 @@ nonPackageScopes: [release, sync]
 
 - `parser.maxDescriptionLength: -1` turns off the long-description warning. Upstream subject lines were not written to
   dispat's 100 character limit, and there is no point being told so on every release.
-- `parser.propagation.depth: 1` makes a bump reach the packages that depend on it without anyone writing the `^`
-  directive. This matters more here than in an ordinary monorepo. A generated commit message cannot know how far a
-  change should reach, and the person who wrote the upstream commit was never asked. Setting the default in the
-  configuration is the honest place for that decision. Use `all` for the whole transitive closure. Leave it at the
-  default `0` if you would rather each bump stay put until someone asks for more.
+- `parser.propagation.depth: 1` makes a bump reach direct consumers without a `^` directive. Generated messages cannot
+  decide the intended reach, so choose the default here. Use `all` for every transitive consumer, or keep the default
+  `0` to require an explicit propagation request.
 - `nonPackageScopes` should name whatever scope your own bookkeeping commits use. This ensures a `chore(sync):` commit
   is not reported as naming a package that does not exist. `release` is in the default list and must stay.
-- Leave `commitErrors` at its default, `warn`. A message assembled from someone else's subject lines will occasionally
-  produce something dispat cannot parse. That unit dropping out is a far better outcome than the whole release refusing
-  to run.
+- The default `commitErrors: warn` lets the release continue if a generated unit cannot be parsed; that unit is
+  excluded. Use a stricter policy only if you want such a message to block the release.
 
-## Building and publishing
+### Building and publishing
 
-Choose between two models. The first is why most people adopt the pattern, and the second is for fleets with pipelines
-they cannot retire.
+Run the build and publish commands centrally, or have the control repository wait for each source's existing pipeline.
 
-### The control repository builds
+#### The control repository builds
 
 The `flow` in the control repository holds the build and publish commands. They run against the checked-out submodule.
 This is the configuration shown above: `npm --prefix src ci`, `npm --prefix src publish`.
@@ -805,10 +805,10 @@ Everything in [Examples](./examples/README.md) applies unchanged because from di
 packages in ordinary folders. `flow.login` runs once per space, so one registry login covers every package in it.
 `DISPAT_NEW_VERSION` and the rest of the [script environment](./reference/environment.md) are there as usual.
 
-Choose this model when the repositories build in similar enough ways that a handful of shared scripts covers them. It
-gets the linked repositories down to source code and nothing else.
+Use this model when a few shared scripts can build and publish the repositories. Source repositories then need no
+separate dispat release workflow.
 
-### The control repository triggers each pipeline
+#### The control repository triggers each pipeline
 
 Compute the version and ordering in the control repository and then hand off if a linked repository has a build that
 only it knows how to run:
@@ -823,14 +823,13 @@ scripts:
       --repo acme/$DISPAT_PACKAGE --exit-status
 ```
 
-The `publish` script must not return until the publish has actually happened. Everything downstream of it treats a
-successful publish as the point of no return. This includes the tag, the changelog, and any consumer waiting on this
-package.
+The script must wait for the actual publication and return its result. Tags, changelogs and waiting consumers all
+depend on that exit status; successfully dispatching a workflow is not enough.
 
-You keep the ordering, the versions, and the records. You give up two things. Each linked repository still has a
-pipeline to maintain, and something has to sit and poll for the result.
+The control repository still owns ordering, versions and records. Each source keeps its own pipeline, and the control
+job waits for it to finish.
 
-### Making the release visible in the linked repository
+#### Making the release visible in the linked repository
 
 The tag and the changelog live in the control repository, which is not where a user of the linked repository looks. Add
 three optional settings, each independent of the others:
@@ -860,10 +859,9 @@ three optional settings, each independent of the others:
   name uppercased) if a release script creates a commit somewhere. This moves the tag and the GitHub release onto that
   commit instead of the release commit. See [script outputs](./reference/environment.md#script-outputs).
 
-## Dependencies across repositories
+### Dependencies across repositories
 
-This is the part that no arrangement of separate repositories can give you. Declare edges in the control repository. A
-dependency that crosses a repository boundary is written exactly like one that does not:
+Declare cross-repository dependencies in the control file using ordinary package names:
 
 ```yaml
 dependencies:
@@ -881,19 +879,16 @@ $ dispat compute
 1 suggestion(s); apply all with --write, choose with --interactive
 ```
 
-It found a `package.json` two levels inside a wrapper, in a different repository. It derived an edge that dispat now
-orders releases by.
+The scanner found the dependency in the submodule's `package.json` and proposed the corresponding release edge.
 
-### One caveat: writes inside a submodule
+#### One caveat: writes inside a submodule
 
 [Automatic version reconciliation](./configuration/autoversion.md) updates a consumer's manifest so its range points at
 the provider's new version. Under a wrapper layout it needs `manifests: "all"` to see manifests inside the submodule at
 all.
 
-Once it does, there is a wrinkle. That manifest lives in a linked repository, and the control repository cannot commit
-it. The write still happens in the working tree, so the build uses the right version, but it is not recorded anywhere.
-
-Handle that in two reasonable ways. They are genuinely both fine:
+The updated manifest belongs to the source repository, so the control repository cannot commit it. The build sees the
+edit, but you must decide whether to keep it only for that build or record it in the source:
 
 - **Let it be a build-time edit.** Keep `autoVersion` on so the build resolves against the version being released. Let
   each linked repository update its own ranges the way it already does, usually with Renovate or Dependabot. This keeps
@@ -906,10 +901,10 @@ Handle that in two reasonable ways. They are genuinely both fine:
 
   Choose this when the manifests should be the source of truth and the linked repository has no bot of its own.
 
-## Starting from versions already published
+### Starting from versions already published
 
-The linked repositories have probably shipped versions already. The control repository has no tags, so its first run
-would start everything from scratch. State the baselines instead:
+If the sources have already shipped, copy their current release versions into `initials`. The new control repository
+has no release tags of its own from which to infer those baselines:
 
 ```yaml
 initials:
@@ -921,7 +916,7 @@ initials:
 The next release of `sdk` then continues from `2.3.1`. Run `dispat compute --write` to fill this block in from the
 manifests it finds. [Adopting dispat](./examples/adopting.md) walks the whole procedure with transcripts.
 
-## The release job
+### The release job
 
 Configure the one pipeline the whole fleet needs. Check out the submodules, and fetch the complete history, because
 dispat reads tags and commits:
@@ -988,10 +983,10 @@ jobs:
 The identity lines are not optional. A runner has no git user configured, and the script commits. The push lands on
 `main`, which starts the release job above.
 
-## What to watch for
+### What to watch for
 
-- **The control repository sees the pointer, not the history.** Everything a release knows comes from the bump commit
-  message. Get that message right and the rest follows.
+- **The pointer-bump message is the release input.** Review its type, scope and notes; source history is not read
+  automatically in this mode.
 - **A checkout without submodules produces empty folders.** The pointers are in the history either way, so the plan
   comes out identical and nothing warns. The failure arrives later when a build finds nothing to build. Use
   `submodules: recursive` in every job, including the ones that only run `dispat run` or `dispat if`.
@@ -1005,9 +1000,8 @@ The identity lines are not optional. A runner has no git user configured, and th
 - **A linked repository that is itself a dispat monorepo does not merge.** Put it in a wrapper where its config file is
   never read. Alternatively, exclude the folder with [`.dispatexclude`](./examples/layout.md). Do not mount it as a
   package and hope the two configurations agree.
-- **Relative submodule URLs resolve against the control repository's own remote.** `git submodule add ../api.git` is
-  convenient on GitHub, where every repository sits under the same owner. It is confusing anywhere else. Absolute URLs
-  are never wrong.
+- **Relative submodule URLs resolve against the control repository's remote.** `git submodule add ../api.git` can be
+  useful when repositories share an owner. Use absolute URLs when that relationship would be unclear.
 
 ## See also
 

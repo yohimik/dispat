@@ -1,13 +1,14 @@
 # Adopting dispat
 
-Introduce dispat into a new repository or one that has shipped versions for years. Run
-[`dispat compute`](../cli/compute.md) to read what your manifests already declare, which saves you from transcribing
-everything by hand.
+Start by asking [`dispat compute`](../cli/compute.md) to read your manifests. It proposes dependency edges and starting
+versions for you to review before the first release.
+
+For a new project, follow the first section. If your project already ships, also check its starting versions, tag
+format and changelog handling below. You can keep the release history you already have.
 
 ## Let the manifests declare the graph
 
-Let dispat read your `dependencies` from the manifests instead of maintaining them by hand. Define a space, turn on
-`autoVersion`, and leave `dependencies` empty for now:
+Define a space, turn on `autoVersion`, and leave `dependencies` empty for now. The manifests will supply the edges:
 
 ```json
 {
@@ -72,9 +73,9 @@ $ cat packages/web/package.json
 }
 ```
 
-Check the manifest to see that the `workspace:*` range became `^0.1.0` and the `version` field advanced. The
-hand-pinned `left-pad` survived because dispat only touches ranges matching the `match` globs, leaving every other byte
-of the file exactly as it was. Name a `syncLock` script to regenerate a lock file after the rewrite, and list it under
+The `workspace:*` range became `^0.1.0` and the `version` field advanced. `left-pad` is unchanged because its range
+does not match the `match` globs. Other file content stays as it was. Name a `syncLock` script to regenerate a lock file
+after the rewrite, and list the lock file under
 `commit.include` if it lives at the repo root (details in [`autoVersion`](../configuration/autoversion.md) and
 [the compute command](../cli/compute.md)).
 
@@ -96,9 +97,8 @@ $ dispat compute
 3 suggestion(s); apply all with --write, choose with --interactive
 ```
 
-dispat prints two kinds of line from reading the same files. The `add` line defines the dependency graph, while each
-`initial` line defines a starting version that dispat needs written down because no release tag carries it yet. The
-evidence after each line shows the source file, so you can run `cat` to explain any wrong number.
+Each `add` line proposes a dependency edge. Each `initial` line proposes a starting version for a package with no
+matching release tag. The source file appears beside the suggestion so you can check where a value came from.
 
 dispat writes nothing to disk until you pass a flag. Run `dispat compute --write` to apply everything at once, or pass
 `--interactive` to walk through the changes one at a time. This lets you accept the graph now and think about the
@@ -155,21 +155,19 @@ Read the full rules in [the compute command](../cli/compute.md) and
 
 ## Existing changelogs and history
 
-A repository that has shipped for years arrives with a `CHANGELOG.md` somebody wrote by hand and a history written
-before the commit convention existed. dispat never rewrites what it did not write, and never moves it. What follows is
-what that means in each of the places it is easy to worry about.
+You may already have a hand-written `CHANGELOG.md` and years of commits that do not follow the current convention.
+Check these four details before your first release: where a new entry will go, how much history it will cover, how
+old commit messages are handled, and whether an existing heading matches the planned tag.
 
 ### The file keeps everything above its first entry
 
-dispat recognises a changelog by the title it renders itself. A file that opens with that title is the shape dispat has
-been writing: the title is rendered again and the new entry goes one blank line under it, with everything below
-untouched.
+If a changelog opens with dispat's configured title, dispat keeps that title and inserts the new entry one blank line
+below it. Existing content follows unchanged.
 
-A file that opens with anything else keeps that opening exactly as it is. Front matter, a title in your own words, a
-badge row, a paragraph of introduction: everything above the first line beginning `## ` is the file's preamble, it
-stays at the head of the file, and the new entry is inserted below it across the
-[entry seam](../configuration/records.md#the-seam-between-entries). dispat's own `# Changelog` is never written into
-such a file, because the file already has a title and adding one would say it twice.
+If the file opens differently, everything before the first line beginning `## ` is treated as its preamble. This
+can include front matter, a title, badges and introductory text. The preamble stays at the top; the new entry goes
+below it, using the configured [entry seam](../configuration/records.md#the-seam-between-entries). dispat does not
+add its own `# Changelog` title to that file.
 
 ```markdown
 ---
@@ -194,20 +192,18 @@ file and ends up below the newest entry. And a hand-maintained `## Unreleased` h
 other, so new entries are written above it rather than into it.
 
 A byte-order mark stays at the very top, ahead of everything, and a title terminated with CRLF is still recognised as
-the title. Old content keeps the line endings it was checked out with; only the seam dispat writes is `\n`. Run the
-release twice and the second run finds its entry and skips it, so adoption converges instead of layering.
+the title. Old content keeps its existing line endings; only the seam dispat writes uses `\n`. A second run finds
+the existing entry and skips it rather than adding a duplicate.
 
 The same writer serves [`dispat changelog`](../cli/changelog.md), so a flow that writes its entries from a stage script
 adopts a file in exactly this way.
 
 ### The first release documents the whole history
 
-A package with no release tag has no baseline, so its first window is its entire history. Every conventional commit in
-it is rendered into that one entry. This is worth knowing before the first run rather than after it, because a
-long-lived repository gets one very large first entry.
+A package with no matching release tag includes every conventional commit in its first changelog entry. For a
+long-lived project, that can be a large entry.
 
-The way to a smaller one is a baseline the first run can start from. A `tagFormat` matching the tags you already have
-adopts them:
+To start from an existing release, set `tagFormat` to match its tags:
 
 ```yaml
 tagFormat: "v{version}"
@@ -219,14 +215,13 @@ the history behind it.
 
 ### A history that predates the convention
 
-Old commits are not conventional commits, and dispat says so once per offending message. The default
-[`commitErrors: "warn"`](../configuration/parser.md#commiterrors) is what makes this survivable: each unrecognised unit
-contributes nothing and the run proceeds. Setting `commitErrors: "error"` over a pre-convention history refuses every
-release until the history itself is rewritten, which is not a trade a repository adopting dispat should take.
+Old commits may not follow the convention. With the default
+[`commitErrors: "warn"`](../configuration/parser.md#commiterrors), dispat reports each unrecognised message, excludes
+it from release input and continues. Setting `commitErrors: "error"` makes those messages block the release. Keep
+the warning policy when adopting a history that you do not intend to rewrite.
 
 Set [`parser.quiet: true`](../configuration/parser.md#quiet) to keep the findings out of the log. The diagnostics are
-still raised and counted, and the summary line reports how many went unprinted, so "nothing is wrong" and "you asked
-not to see it" never look the same.
+still counted, and the summary reports how many were hidden.
 
 ### When a hand-written heading matches the tag
 
@@ -235,8 +230,7 @@ produces can therefore already carry the heading for the version this release is
 entry that exists, leaves the file alone, and reports the skip as `W226`. The release itself goes through: only the
 record is held.
 
-That is a skip rather than an overwrite because the alternative is rewriting a line a person wrote, and from inside the
-file the two cases look the same. Only the colliding version is ever ambiguous, so the next release writes its entry
-normally.
+dispat cannot tell whether the matching heading was written by a person or an earlier run, so it preserves the entry.
+Only that version is affected; the next release writes its entry normally.
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.

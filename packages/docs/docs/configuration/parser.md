@@ -1,7 +1,7 @@
 # Commit parsing options
 
-Read how dispat parses commit messages and handles errors. You can find the message format in the
-[commit message reference](../reference/commits.md).
+Use these settings to choose how dispat handles malformed commit messages, custom commit types, and propagation
+defaults. For the syntax to write in a commit, see the [commit message reference](../reference/commits.md).
 
 ## `commitErrors`
 
@@ -12,10 +12,9 @@ This setting controls how dispat handles a commit message error.
 | `warn` *(default)* | The offending unit contributes nothing, but the run continues. Other units in the same commit still apply. |
 | `error`            | Any commit error stops the run before dispat builds, publishes, or tags anything.                             |
 
-The spec assigns `warn` as the blast radius for unit-scoped and message-scoped errors. A malformed header or a scope
-naming an unknown package is an authoring mistake in *one unit*, so the rest of the history remains unaffected. Choose
-the stricter `error` reading when a mistyped scope silently dropping a package from a release is the worse failure of
-the two.
+With the default `warn` policy, an invalid unit is ignored while other valid units can still contribute to the plan.
+Examples include a malformed header or a scope naming an unknown package. Choose `error` if you want to fix every
+commit error before releasing, rather than risk leaving an intended package out of the release.
 
 Neither value affects **repository-scoped** failures like a dependency cycle or a prerelease tag with no numeric
 counter. A computed version that fails to exceed the baseline or a graduation that goes backwards also means no correct
@@ -31,9 +30,9 @@ run does.
 List scope names that are deliberately not packages. This tells dispat not to flag them as typos with the
 unknown-package error. A unit scoping only these resolves to nothing, silently, and with no diagnostic.
 
-The default `["release"]` is load-bearing rather than cosmetic. The tool's own release commit is
-`chore(release): {tags}`. Without the exemption, every run in [`commit`](./records.md#commit) mode leaves an error
-behind for the next run to trip over. Under `commitErrors: "error"`, that breaks the repository on the second release.
+Keep `release` in the list if you use the default release-commit message, `chore(release): {tags}`. Without that
+exemption, the next run treats the release commit as an unknown-package error. Under `commitErrors: "error"`, this
+stops the next release.
 Add your own conventions (`deps`, `ci`, ...) as needed, or set it to `[]` to disable the exemption entirely.
 
 ## `parser`
@@ -42,7 +41,7 @@ Configure the commit-message parser options here. Everything is optional. An abs
 keeps the default, so existing configurations parse exactly as before. An invalid value fails the config load before
 dispat does any planning.
 
-Read about one setting before the table. **`propagation.depth` changes propagation from opt-in to on-by-default.** The
+Pay particular attention to **`propagation.depth`**, which can make propagation automatic. The
 default `0` means a plain `feat(core):` releases `core` alone, and you must write reach per commit (`^`, `^^`, `+N`).
 Set it to `1` so every bump reaches its direct consumers with no caret written, or use `all` to reach every transitive
 consumer. A directive on the unit always wins over the default. Use `1` if you want automatic propagation, or keep `0`
@@ -78,8 +77,8 @@ parser:
 
 ### Quiet
 
-A repository whose history predates the convention earns a diagnostic on nearly every old commit. This noise buries the
-findings that matter. Set `parser.quiet: true` to hide the parser's own findings about the text of a commit message,
+Older history may contain many commits that do not follow the message convention. Set `parser.quiet: true` to hide
+the parser's findings about commit-message text,
 specifically codes `E0xx`/`E1xx` and `W0xx`/`W1xx`.
 
 ```yaml
@@ -87,10 +86,9 @@ parser:
   quiet: true
 ```
 
-This is a display decision and only that. Every diagnostic is still raised, counted, and does whatever it did before.
+This only changes the log output. Every diagnostic is still raised, counted, and handled by the same policy.
 Under `commitErrors: "error"`, a hidden error still refuses the release, and a [repository-scoped](#commiterrors)
-failure still aborts the run. Read the plan-diagnostics summary line to see how many lines went unprinted. This ensures
-"nothing is wrong" and "you asked not to see it" never look the same:
+failure still aborts the run. The plan-diagnostics summary reports how many messages were hidden:
 
 ```console
 INF plan diagnostics warnings=12 errors=1 hidden=13

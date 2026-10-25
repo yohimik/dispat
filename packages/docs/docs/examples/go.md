@@ -1,21 +1,27 @@
 # A Go module workspace
 
-Keep several Go modules in one repository, and release them in dependency order. Go has no registry to publish to, so
-the tag *is* the release. This makes a Go workspace the shortest setup on the site.
+For Go modules, publishing means pushing the right Git tags. This example tests modules in dependency order and
+updates their `require` versions before recording the release. Pay particular attention to the tag format: Go uses
+it to find modules in subdirectories.
 
 ## The layout
 
 ```
-packages/core/go.mod      module github.com/acme/core
-services/api/go.mod       module github.com/acme/api, requires core
+packages/core/go.mod      module github.com/acme/monorepo/packages/core
+services/api/go.mod       module github.com/acme/monorepo/services/api, requires core
 dispat.json
 ```
 
 ## The configuration
 
+This configuration shows the per-module tests and version updates. A complete release job also needs a way to resolve
+new provider versions before their tags reach the remote. `go mod tidy` cannot fetch a tag that has not been pushed.
+Choose that ordering for your project before using this configuration in CI. The
+[local-link pattern below](#building-against-the-working-tree) covers tests against the checkout; it does not publish
+the new tags.
+
 ```json title="dispat.json"
 {
-  "tagFormat": "{name}/v{version}",
   "scripts": {
     "test": "go test ./...",
     "tidy": "go mod tidy"
@@ -23,11 +29,13 @@ dispat.json
   "spaces": {
     "libs": {
       "path": "packages",
+      "tagFormat": "packages/{name}/v{version}",
       "flow": {"build": "test"},
       "autoVersion": {"enabled": true, "syncLock": ["tidy"]}
     },
     "services": {
       "path": "services",
+      "tagFormat": "services/{name}/v{version}",
       "flow": {"build": "test"},
       "autoVersion": {"enabled": true, "syncLock": ["tidy"]}
     }
@@ -42,10 +50,9 @@ you. The `autoVersion` field keeps the `require` lines pointing at the versions 
 
 ## The tag format matters here
 
-The `{name}/v{version}` format is not decoration. The go tool finds a module in a subdirectory only under a tag
-prefixed with that subdirectory, so a module at `packages/core` must be tagged `packages/core/v0.1.0`. Name your
-packages after their folders to produce exactly that format, just as dispat uses `"tagFormat": "pkg/{name}/v{version}"`
-for its own modules.
+The tag prefix must match the module's directory. In the `github.com/acme/monorepo` repository above, a module at
+`packages/core` needs a tag such as `packages/core/v0.1.0`. The two spaces set different prefixes so both module
+directories produce the right tags. See Go's [guide to module source layouts](https://go.dev/doc/modules/managing-source).
 
 ## Letting dispat read the graph
 
@@ -54,7 +61,7 @@ configuration instead of writing it out yourself:
 
 ```console
 $ dispat compute --write
-+ add     api -> core (dependencies)  services/api/go.mod dependencies "github.com/acme/core": "v1.2.0"
++ add     api -> core (dependencies)  services/api/go.mod dependencies "github.com/acme/monorepo/packages/core": "v1.2.0"
 
 applied 1 change(s) to dispat.json (previous copies carry the .backup suffix)
 ```
@@ -77,31 +84,29 @@ folder. A `go.mod` file declares no version of its own. This is why the identity
 
 ```console
 $ dispat scanner
-packages/core/go.mod  gomod  github.com/acme/core
-services/api/go.mod  gomod  github.com/acme/api
-  dependencies  github.com/acme/core      v1.2.0
-  dependencies  github.com/go-chi/chi/v5  v5.1.0
+packages/core/go.mod  gomod  github.com/acme/monorepo/packages/core
+services/api/go.mod  gomod  github.com/acme/monorepo/services/api
+  dependencies  github.com/acme/monorepo/packages/core  v1.2.0
+  dependencies  github.com/go-chi/chi/v5                 v5.1.0
 2 manifest(s), 2 dependency declaration(s)
 ```
 
 dispat writes through the same module parser the go tool uses. A `require` block keeps its grouping and its comments:
 
 ```console
-$ dispat writer services/api/go.mod --set github.com/acme/core=v1.3.0
+$ dispat writer services/api/go.mod --set github.com/acme/monorepo/packages/core=v1.3.0
 services/api/go.mod
-  applied  dependencies  github.com/acme/core  v1.3.0
+  applied  dependencies  github.com/acme/monorepo/packages/core  v1.3.0
 1 manifest(s): 1 applied, 0 skipped, 0 missing
 ```
 
-Two rules belong to Go rather than dispat. Ranges do not exist in `go.mod`, so a `caret` or `tilde` policy still writes
-the exact canonical `vX.Y.Z`. dispat never adds a requirement that is not already there, because adding one is
-`go get`'s job and it has a `go.sum` to update.
+`go.mod` uses exact versions, so even a `caret` or `tilde` policy writes `vX.Y.Z`. dispat updates existing requirements;
+use `go get` to add a new one and update `go.sum`.
 
 ## Building against the working tree
 
-Write a `replace` directive to compile a service against the copy of the library next door rather than a published
-version, and take it away again afterwards. Run [`dispat autowriter`](../editing/autowriter.md) to do both across every
-package the plan covers:
+For a local build, a `replace` directive can point the service at the library beside it. Remove that directive before
+release. [`dispat autowriter`](../editing/autowriter.md) can add and remove the links across the packages in the plan:
 
 ```json title="dispat.json (the link bracket)"
 {
@@ -113,27 +118,20 @@ package the plan covers:
 }
 ```
 
-A `replace` directive must never reach a tag, because a consumer fetching the module would get a path that does not
-exist on their machine. Run `verify` before the release. A leftover link fails the run with code `E215` instead of
-shipping.
+A local `replace` directive points to a path that will not exist on a consumer's machine. Run `verify` before release
+to catch leftover links; a detected link fails with `E215`.
 
 ## Worth knowing
 
-- **Major versions past v1 change the module path.** A `v2` release means the path becomes `github.com/acme/core/v2` in
-  the module line and in every consumer's `require`. dispat writes the versions, but moving the path is a source change
-  you make in the commit that breaks the API.
+- **Major versions past v1 change the module path.** A `v2` release means the path becomes
+  `github.com/acme/monorepo/packages/core/v2` in the module line and in every consumer's `require`. dispat writes the
+  versions, but moving the path is a source change you make in the commit that breaks the API.
 - **`go mod tidy` runs after the version stage, not before.** This is what `syncLock` is for. The manifest is already
   reconciled when the command runs, so it only refreshes `go.sum`.
 - **Indirect requirements are left alone.** The scanner keeps them apart from the module's own declarations because the
   toolchain owns them.
 - **Nothing publishes if the tag is not pushed.** Set `commit.push` in your
   [release records](../configuration/records.md), or push the tags in the job that runs dispat.
-
-## See also
-
-- Read [Manifest tools](../editing/manifests.md) to use the scanner and writer on their own.
-- Run [`dispat compute`](../cli/compute.md) to derive the graph and the starting versions.
-- Check [Pipeline patterns](../reference/pipelines.md) for the working-tree link bracket in a CI job.
 
 ## Verify the published module
 
@@ -153,3 +151,9 @@ drafts, assets and already-published module releases by exact tag OID. dispat ca
 cannot infer release intent from the directory tree.
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.
+
+## See also
+
+- Read [Manifest tools](../editing/manifests.md) to use the scanner and writer on their own.
+- Run [`dispat compute`](../cli/compute.md) to derive the graph and the starting versions.
+- Check [Pipeline patterns](../reference/pipelines.md) for the working-tree link bracket in a CI job.

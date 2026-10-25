@@ -1,8 +1,8 @@
 # Keeping configuration beside the code
 
-You have three ways to keep a folder's release configuration in the folder itself. You can write a space configuration
-file for a space's own exceptions, or a package configuration file for one package. Use a `.dispatexclude` file when a
-migration leaves two config files in one place.
+Keep shared defaults in the root configuration and put exceptions beside the code they affect. A space can have its
+own configuration file, and so can an individual package. If a migration leaves two configuration files in one
+folder, `.dispatexclude` lets you choose which one dispat loads.
 
 ## Keeping a space's exceptions inside its folder
 
@@ -28,9 +28,10 @@ the space, and it overrides the root file field by field.
 }
 ```
 
-Every package of `libs` now tags as `libs/<name>@<version>`, and `reports` rolls its folder back when it fails. The
-root config never learns either fact, but you still must define the space at the root because that is where its `path`
-and name live. Commands run from inside the space keep resolving to the monorepo root, so
+Every package in `libs` now tags as `libs/<name>@<version>`, and `reports` restores its folder when it fails. These
+settings stay in the space file. The root configuration still declares the space's name and `path`.
+
+Commands run inside the space still resolve to the monorepo root, so
 `cd packages/reports && dispat status` works as before.
 
 You can put these same entries in the root file instead. Place them under the space rather than at the top level:
@@ -73,9 +74,8 @@ first listed folder is the primary one for the space, meaning the login script r
 
 ## Keeping a package's exceptions inside its folder
 
-Create a config file inside a package folder to configure that specific package. The top-level object is exactly a
-package entry, making it the most local layer of the ladder. It beats every entry above it that names the same package,
-and the file travels with the package so a moved package keeps its exceptions.
+Create a configuration file inside a package folder for settings specific to that package. Its top-level object is a
+package entry. These values override the root and space settings, and the file stays with the package if you move it.
 
 Move the `reports` exception from the space file into the package itself:
 
@@ -86,10 +86,9 @@ Move the `reports` exception from the space file into the package itself:
 }
 ```
 
-The folder now declares everything unusual about itself, rolling back on failure and versioning with the `platform`
-group. A package file cannot carry a `path` key because a file cannot move its own folder. dispat refuses a package
-file that declares `spaces` or `packages`, since a folder holding its own monorepo root belongs behind a
-`.dispatexclude`.
+The package now restores its folder on failure and versions with the `platform` group. A package file cannot declare
+`path`; its location already determines the folder. It also cannot declare `spaces` or `packages`. Use
+`.dispatexclude` to exclude a nested monorepo root instead.
 
 Resolution stays root-first here too. Run the CLI from inside the package and dispat ascends past the package's own
 file, and past its space's, to the monorepo root. This means `cd packages/reports && dispat lint` works no matter what

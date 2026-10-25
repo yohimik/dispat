@@ -1,8 +1,7 @@
 # Publishing to itch.io
 
-Push a build to itch.io with `butler`. You target one channel per platform and attach the release version so the itch
-page shows what players download. itch.io is the least ceremonial store to automate. One command takes a folder and
-uploads only the parts that changed.
+This example exports a game for Windows, Linux and macOS, then uploads each build with `butler`. Each platform gets
+an itch.io channel, and `--userversion` supplies the version shown to players. Prereleases use separate channels.
 
 ## The layout
 
@@ -30,9 +29,8 @@ dispat.json
 }
 ```
 
-dispat reads `project.godot` as a manifest. The `autoVersion` field finds the game's version and writes it back with
-nothing else configured. [Godot](./godot.md) covers the rest of what dispat reads there, including `plugin.cfg` and
-`export_presets.cfg`.
+`autoVersion` updates the existing version in `project.godot` before export. The [Godot guide](./godot.md) also covers
+addon versions in `plugin.cfg` and store settings in `export_presets.cfg`.
 
 Provide `BUTLER_API_KEY` in the job's environment to authenticate the publish stage. `butler` reads this directly, so
 you skip the login step.
@@ -79,12 +77,11 @@ $ dispat
 12:55:08 INF done cancelled=0 failed=0 held=0 published=1 skipped=0 took=1.3s unchanged=0
 ```
 
-Everything a player sees now agrees. The download is `0.2.1`, the tag says `adventure@0.2.1`, and the changelog entry
-under that heading says the save file no longer corrupts on quit.
+The upload uses version `0.2.1`, the release tag is `adventure@0.2.1`, and the changelog records the save-file fix.
 
 ## Two things called a channel
 
-These concepts are unrelated. They meet in the script above.
+The script combines two different meanings of “channel”:
 
 An **itch channel** is a download slot on your game's page. It names a platform (`windows`, `linux-demo`, `html5`) and
 each one holds one current build.
@@ -100,14 +97,14 @@ must not land on a channel they are subscribed to.
 
 ## Worth knowing
 
-- **butler uploads differences, not files.** The second push of a 4 GB game usually transfers a few megabytes. This
-  makes publishing every release affordable.
+- **butler uploads changed data.** The amount transferred depends on how much the build changed, rather than only
+  on the total size of the game.
 - **`butler status acme/adventure` tells you what is live**. Run this in a
   [`postPublish` hook](../configuration/spaces.md) to make the log state what players now see.
 - **The version is metadata, not identity.** itch keeps its own build numbers per channel. The `--userversion` flag
   makes those numbers mean something to you afterwards.
-- **A failed push costs nothing.** Nothing gets tagged as published for that platform. The next run repeats the leg,
-  and `--if-changed` skips whatever already arrived.
+- **The package is recorded after every push succeeds.** A failed platform push stops the script. On retry,
+  `--if-changed` skips unchanged uploads; check the remote result first if an earlier push may have succeeded.
 
 ## See also
 

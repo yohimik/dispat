@@ -1,16 +1,16 @@
 # config: the configuration loader
 
-The `github.com/yohimik/dispat/pkg/config` package is the loader dispat reads its own configuration with, published
-on its own. It parses JSON, YAML and TOML into one tree, composes that tree from several files through a `$ref` key,
-finds the file a command was run beneath by walking up the directory tree, and turns the result into your structs
-through a table of setters rather than through reflection.
+Use `github.com/yohimik/dispat/pkg/config` to load JSON, YAML, and TOML into your own Go structs. It is the same
+loader dispat uses, but it works independently of dispat's configuration model.
+
+The loader can find a configuration by walking up from the current directory, combine files with `$ref`, and apply
+overrides. You declare the accepted fields in a table of setters.
 
 ```sh
 go get github.com/yohimik/dispat/pkg/config
 ```
 
-There is no reflection in the source at all. That is what makes the config surface of a struct something you read
-rather than infer, and it is what lets the package link under TinyGo.
+The package uses no reflection. The field table makes accepted keys explicit and lets the package link under TinyGo.
 
 ## Loading a file
 
@@ -26,14 +26,20 @@ var cfg Config
 err = config.DecodeObject(tree.Settings(l, nil), "", configFields(&cfg))
 ```
 
-`Options{}` is the whole default configuration: every field has a valid zero value, so changing one thing is one
-field. `RefKey` names the key that makes an object a reference, `MaxRefDepth` caps how far references nest,
-`KeyDelim` is the separator a nested key path is spelled with, `ReadFile` is the one door every path this package
-opens goes through, `Formats` maps a file extension to its parser, and `Logger` receives the package's events.
+Start with `Options{}` for the defaults; every option has a valid zero value. Set only what you need:
+
+| Option | Controls |
+| --- | --- |
+| `RefKey` | The key used for file references. |
+| `MaxRefDepth` | How deeply references may nest. |
+| `KeyDelim` | The separator in nested key paths. |
+| `ReadFile` | The function used for every file read. Useful for tests or a custom filesystem. |
+| `Formats` | The parser associated with each file extension. |
+| `Logger` | Where loader events are sent. |
 
 ## The fields table
 
-A struct's whole config surface is one table, written once:
+List the accepted keys and their setters in a `config.Fields` table:
 
 ```go
 func configFields(dst *Config) config.Fields {
@@ -46,15 +52,12 @@ func configFields(dst *Config) config.Fields {
 }
 ```
 
-The table is keyed by each name's `Fold`, which is its ordinary lower case (ς keys as σ). A file spells a key however
-it likes and the decode folds it to find the setter, so `logLevel` and `loglevel` both load, and the key itself is
-never renamed. A key with no entry in the table is a key your model has no field for, and that is the unknown-key
-refusal: **structural rather than a check somebody has to remember to switch on**. The error names the key by its full
-path from the root, because a typo the loader accepts is configuration that silently never applies.
+Table keys use `Fold`: ordinary lowercase, with ς folded to σ. Input keys are folded for lookup without being
+renamed, so `logLevel` and `loglevel` both match `loglevel` in the table. An unknown key is rejected with its full path
+from the root. There is no separate option to enable unknown-key checking.
 
-The object rules live in `DecodeObject` and nowhere else. The value has to be an object; no two of its keys may fold
-together; its keys are visited in sorted order, so a file with several mistakes always reports the same one first; and
-a key holding nothing is a key that said nothing rather than a typo.
+`DecodeObject` checks that the value is an object and that no two keys fold to the same name. It visits keys in
+sorted order, making the first reported error consistent across runs. Empty values are treated as absent.
 
 | Setter | Fills | Shorthands it takes |
 |--------|-------|---------------------|
@@ -65,8 +68,8 @@ a key holding nothing is a key that said nothing rather than a typo.
 | `Object` | an optional sub-object | allocated only when the file wrote one |
 | `ObjectMap`, `ObjectList` | named entries, a list of objects | a lone object is the one-element list |
 
-A setter is a `func(val any, at string) error`, so a key whose shape is your own is a closure you write. `MapOf` is
-the setter to write a setter with: it carries the object rules and takes your reader for each value.
+For a custom value shape, write a setter with the signature `func(val any, at string) error`. Use `MapOf` for a map
+with custom values: it applies the object rules and calls your reader for each value.
 
 ## Resolving the file
 
@@ -81,11 +84,12 @@ path, root, err := l.Resolve(ctx, cwd, config.Resolver{
 })
 ```
 
-What a found file means is yours to decide, because a sub-folder may carry a configuration file of its own. `Classify`
-places each file as a root, a candidate or a fallback. The ascent stops at the first root, remembers the first of each
-of the others, and lets a root displace a remembered candidate only when `Owns` says the root claims the folder the
-candidate was found in. A file that cannot be read stops the ascent as well, because a broken root configuration must
-fail where configuration is loaded rather than be silently stepped over.
+`Classify` labels each file as a root, candidate, or fallback. The search remembers the first candidate and fallback,
+then stops at the first root. That root replaces a remembered candidate only if `Owns` confirms that it owns the
+candidate's folder. This lets a subfolder keep a configuration of its own.
+
+An unreadable file stops the search with an error. The loader does not skip a broken configuration and continue to a
+parent.
 
 ## Composing with `$ref`
 
@@ -98,16 +102,17 @@ areas:
   both: {$ref: [./base.json, ./overlay.json]}
 ```
 
-A referenced document becomes the value whole, whether it is an object, a list or a single value. Keys written beside
-the reference override what it brought in, in their own spelling. A reference naming several files reads them in order
-and merges: objects key by key with the later file winning, lists end to end, with files that disagree about what they
-hold refused rather than guessed at.
+A reference replaces the entire value with the referenced document, which may be an object, list, or scalar. Keys
+beside `$ref` override imported keys and keep their own spelling.
 
-A file is never cached between positions, which is what makes a file appearing twice in one chain, and only that, a
-cycle; the error names every hop that closed it. Nesting is capped as well, which catches the loops the chain check
-cannot see, such as two names for one file through a symlink.
+When `$ref` names several files, they are read in order. Objects merge by key, with later values winning; lists are
+concatenated. Incompatible value shapes produce an error.
 
-`Tree.Files` is every file the tree was read from, in the order it was read.
+The same file may be used in separate branches. A file repeated within one reference chain is a cycle, and the error
+lists the chain. Files are not cached between positions. A nesting limit also catches cases the chain check cannot
+identify, such as different symlink paths to the same file.
+
+`Tree.Files` lists the files read, in read order.
 
 ## Overrides
 
@@ -120,13 +125,12 @@ settings := tree.Settings(l, config.Overrides{
 })
 ```
 
-The value replaces whatever spelling the file used rather than sitting beside it. A file writing `logLevel` and an
-override writing `loglevel` would otherwise be two keys the decode refuses as a collision, over a value the operator
-passed correctly. This is the generic form of a command-line flag overlay, and it reaches nested paths.
+Overrides match keys regardless of case and replace the existing value. For example, a `loglevel` override replaces
+`logLevel`; it does not create a second key. This is useful for applying command-line flags, including flags that
+set nested values.
 
-Rendering the settings is also where two of the config language's quieter rules live: an object with no keys is not a
-key at all, so an opt-in block written as a bare `{}` says nothing rather than enabling itself at its defaults; and a
-key spelled with the delimiter is the levels it names.
+Rendering also removes empty objects and expands delimited key paths. A bare `{}` therefore does not enable an
+optional block with its defaults, and a key containing the delimiter is treated as a nested path.
 
 ## Environment binding
 
@@ -142,16 +146,17 @@ ov, err := config.EnvBinding{
 settings := tree.Settings(l, config.MergeOverrides(ov, flagOverrides))
 ```
 
-The derivation runs one way, from a declared key to a variable name, and never the other. Splitting a variable name
-back into key levels is where an automatic binding has to guess whether `LOG_LEVEL` is `log.level` or `logLevel`, and
-the guess is wrong for somebody. `Strict` makes a prefixed variable that no declared key answers to an error, which
-turns a typo in a deployment manifest into a failure at startup rather than a setting that silently never applied.
+Each declared key determines its environment variable name. The loader does not infer keys from variable names,
+where `LOG_LEVEL` could mean either `log.level` or `logLevel`.
+
+Set `Strict` to reject prefixed variables that do not match a declared key. This catches misspelled deployment
+settings when the application starts.
 
 ## Editing a file back
 
-The writers put one key back without disturbing the rest of the file. JSON is spliced, so every byte outside the
-replaced span survives. YAML goes through a node tree that carries its comments, so it keeps them but may reflow. TOML
-returns `ErrTOMLEdit`, for you to render a paste-ready snippet with `RenderKeyTOML` instead.
+The edit API updates a key in its source file. JSON edits preserve every byte outside the replaced span. YAML edits
+preserve comments but may change layout. TOML editing returns `ErrTOMLEdit`; use `RenderKeyTOML` to produce a snippet
+the caller can paste instead.
 
 ```go
 file, keyPath, err := l.ResolveEdit(ctx, path, []string{"areas", "libs", "path"})
@@ -165,14 +170,12 @@ the backup, rather than replacing the link with a regular file; pass the path of
 
 ## Logging
 
-The events are what someone reads when a loader has gone quiet and then, one day, loaded the wrong file: which
-directories the ascent tried and what it made of each, which files a `$ref` pulled in, how many overrides landed,
-which key an edit was written to.
+Logs show where configuration came from: directories searched, files loaded through `$ref`, overrides applied, and
+the source key changed by an edit. Use them when a setting comes from an unexpected file.
 
-The `Logger` interface is two methods and no dependency, because a library that picks a logging package picks it for
-every program that imports it. Set `Options.Logger` for a program with one logger, or put one on the context with
-`config.WithLogger` for a program with several. Every emit is guarded by `Enabled`, and the `Field` constructors keep
-scalars in typed slots, so an event nobody asked for costs an interface call and a comparison.
+The two-method `Logger` interface does not require a particular logging library. Set `Options.Logger` for a shared
+logger, or use `config.WithLogger` to attach one to a context. Events check `Enabled` before being emitted, and `Field`
+constructors keep scalar values typed.
 
 ## Watching for changes
 
@@ -186,25 +189,18 @@ w, err := watch.Start(ctx, watch.Options[Config]{
 defer w.Close()
 ```
 
-It watches directories rather than files, because a config file is usually replaced rather than written in place and a
-watch on the file itself follows the old inode into the void. The watch set is derived from the files each load
-reports, so a configuration composed through `$ref` watches every fragment. A reload that fails keeps the last good
-value.
+The watcher monitors directories so it can detect files replaced by an atomic save. It updates its watch list from
+the files reported by each load, including `$ref` fragments. A failed reload keeps the last good configuration.
 
-`watch` is a subpackage on purpose: it is the only part of this module that needs fsnotify, so a program that reads
-its configuration once at startup never links it. dispat is one of those programs, which is what keeps its TinyGo
-build clear of it.
+Only `config/watch` depends on fsnotify. Programs that load configuration once at startup, including dispat, do not
+need it. This also keeps the dependency out of dispat's TinyGo build.
 
 ## Performance
 
-The package is alloc-budgeted rather than merely fast. `bench_test.go` measures every stage against fixtures built in
-code and served through `Options.ReadFile`, so a run measures the loader and not the filesystem underneath it, and
-`alloc_test.go` pins the allocation counts as a regression gate: a change that reintroduces a second deep copy of the
-tree, or a flat intermediate map in the settings rendering, fails the build rather than being noticed later.
+`bench_test.go` measures each loading stage with in-memory fixtures supplied through `Options.ReadFile`, excluding
+filesystem time. `alloc_test.go` checks allocation counts to catch regressions such as an extra deep copy of the tree.
 
-The numbers each release measured are on the [benchmarks](../internals/benchmarks.mdx) page, alongside the fuzz
-targets. They are injected from the run that produced them rather than written by hand, so a number on that page is a
-number that was measured.
+See [benchmarks](../internals/benchmarks.mdx) for results generated by the benchmark runs and the available fuzz targets.
 
 ## Requirements
 

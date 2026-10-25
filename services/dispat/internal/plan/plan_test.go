@@ -1720,7 +1720,53 @@ func TestCycleIsRejected(t *testing.T) {
 	assert.Contains(t, p.Diagnostics[0].Message, "cycle")
 	assert.Contains(t, p.Diagnostics[0].Message, "app -> core (dependencies)",
 		"the diagnostic names the edges and the manifest field carrying each one")
+	assert.NotContains(t, p.Diagnostics[0].Message, "utils",
+		"a package outside the cycle is not reported as a cycle member")
 	assert.Empty(t, p.Order, "no publish order exists")
+}
+
+func TestDevOnlyCycleOutsideSelectedKindsIsAccepted(t *testing.T) {
+	pkgs, _ := testPackages()
+	for _, pkg := range pkgs {
+		pkg.Space.ProviderRelation.Build = models.StageWaitNone
+	}
+	deps := []model.Dependency{
+		{Consumer: "app", Provider: "core", Kind: model.KindDevDependencies},
+		{Consumer: "core", Provider: "app", Kind: model.KindDevDependencies},
+	}
+	p, err := Compute(context.Background(), newFakeGit(), Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.NoError(t, err)
+	assert.False(t, p.IsFatal())
+	assert.Empty(t, p.PublishProviders["app"])
+}
+
+func TestBuildOnlyEdgeCycleIsExecutionConfigurationNotE200(t *testing.T) {
+	pkgs, _ := testPackages()
+	deps := []model.Dependency{
+		{Consumer: "app", Provider: "core"},
+		{Consumer: "core", Provider: "app", Kind: model.KindDevDependencies},
+	}
+	p, err := Compute(context.Background(), newFakeGit(), Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.NoError(t, err)
+	require.True(t, p.IsFatal())
+	require.Len(t, p.Diagnostics, 1)
+	assert.Equal(t, CodeStageWorkspaceCycle, p.Diagnostics[0].Code)
+	assert.Contains(t, p.Diagnostics[0].Message, "app, core")
+}
+
+func TestSelectedDevPublicationCycleIsE200BeforeExecutionConfiguration(t *testing.T) {
+	pkgs, _ := testPackages()
+	pkgs[0].Space.PublishOrderKindsSet = true
+	pkgs[0].Space.PublishOrderKinds = []model.DepKind{model.KindDevDependencies}
+	deps := []model.Dependency{
+		{Consumer: "app", Provider: "core"},
+		{Consumer: "core", Provider: "app", Kind: model.KindDevDependencies},
+	}
+	p, err := Compute(context.Background(), newFakeGit(), Options{Packages: pkgs, Dependencies: deps, Root: "/r"})
+	require.NoError(t, err)
+	require.True(t, p.IsFatal())
+	require.Len(t, p.Diagnostics, 1)
+	assert.Equal(t, CodeDependencyCycle, p.Diagnostics[0].Code)
 }
 
 func TestDuplicateVersionTagsAreRejected(t *testing.T) {

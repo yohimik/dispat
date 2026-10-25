@@ -37,25 +37,29 @@ import (
 func buildLiteralTaskGraph(p *plan.Plan, changed map[string]bool,
 	publishGroup func(*plan.Release) string) *graph.Scheduler[task] {
 	sched := graph.NewScheduler[task]()
-	buildOrder := newStageReach(newStageEdges(p, changed), model.StageRelation.IsBuildWaitingBuild)
-	publishOrder := newPublishReach(newStageEdges(p, changed))
+	plans := newStagePlans(p, changed)
+	buildOrder := newStageReach(newStageEdges(p, changed, plans), model.StageRelation.IsBuildWaitingBuild)
+	publishOrder := newPublishReach(newStageEdges(p, changed, plans))
 	for _, name := range slices.Sorted(maps.Keys(changed)) {
-		pub := task{name, taskPublish}
-		first := addStageChain(sched, p.Releases[name])
+		sp := plans[name]
+		sp.addEdges(sched)
+		first := sp.readinessTargets()
 		for _, prov := range p.Providers[name] {
 			if !changed[prov] {
 				continue
 			}
-			for _, waited := range resolveFirstTaskWaits(p.Releases[prov].Pkg.Space.ProviderRelation, prov) {
-				sched.AddEdge(waited, first)
+			for _, waited := range resolveFirstTaskWaits(p.Releases[prov].Pkg.Space.ProviderRelation, plans[prov]) {
+				addEdges(sched, waited, first)
 			}
-			sched.AddEdge(task{prov, taskPublish}, pub)
+			sched.AddEdge(plans[prov].recording, sp.recording)
 		}
 		for _, behind := range buildOrder.Indirect(name) {
-			sched.AddEdge(task{behind, taskBuild}, first)
+			for _, built := range plans[behind].built() {
+				addEdges(sched, built, first)
+			}
 		}
 		for _, behind := range publishOrder.Indirect(name) {
-			sched.AddEdge(task{behind, taskPublish}, pub)
+			sched.AddEdge(plans[behind].recording, sp.recording)
 		}
 	}
 	if publishGroup != nil {
@@ -69,7 +73,7 @@ func buildLiteralTaskGraph(p *plan.Plan, changed map[string]bool,
 				continue
 			}
 			if previous := last[group]; previous != "" {
-				sched.AddEdge(task{previous, taskPublish}, task{name, taskPublish})
+				sched.AddEdge(plans[previous].recording, plans[name].recording)
 			}
 			last[group] = name
 		}
@@ -123,7 +127,7 @@ func assertSameHandOuts(t *testing.T, p *plan.Plan, changed map[string]bool, pub
 	for name, policy := range completionPolicies() {
 		literal := buildLiteralTaskGraph(p, changed, publishGroup)
 		want := drainRecordingHandOuts(literal, policy())
-		sched, _ := (&Executor{PublishGroup: publishGroup}).buildTaskGraph(p, changed)
+		sched, _ := (&Executor{PublishGroup: publishGroup}).buildTaskGraph(p, changed, newStagePlans(p, changed))
 		got := drainRecordingHandOuts(sched, policy())
 		require.Equal(t, want, got, "completion %s", name)
 		handed := 0
@@ -257,16 +261,16 @@ func releasingNames(p *plan.Plan) map[string]bool {
 // first and the literal graph states their edges first.
 func TestTaskGraphHandOutsAreNotVacuous(t *testing.T) {
 	p, changed := mkHubPlan(2)
-	sched, _ := (&Executor{}).buildTaskGraph(p, changed)
+	sched, _ := (&Executor{}).buildTaskGraph(p, changed, newStagePlans(p, changed))
 	got := drainRecordingHandOuts(sched, func(int) int { return 0 })
 	assert.Equal(t, [][]task{
-		{{"p0000", taskBuild}, {"p0001", taskBuild}},
-		{{"p0000", taskPublish}},
-		{{"c0000", taskBuild}, {"c0001", taskBuild}, {"p0001", taskPublish}},
+		{{"p0000", taskBuild, ""}, {"p0001", taskBuild, ""}},
+		{{"p0000", taskPublish, ""}},
+		{{"c0000", taskBuild, ""}, {"c0001", taskBuild, ""}, {"p0001", taskPublish, ""}},
 		nil,
 		nil,
 		nil,
-		{{"c0000", taskPublish}, {"c0001", taskPublish}},
+		{{"c0000", taskPublish, ""}, {"c0001", taskPublish, ""}},
 		nil,
 		nil,
 	}, got)
@@ -281,7 +285,7 @@ func TestTaskGraphHandOutsAreNotVacuous(t *testing.T) {
 func TestTaskGraphStatesOneEdgePerDependencyEdge(t *testing.T) {
 	for _, n := range []int{1, 50, 200} {
 		p, changed := mkHubPlan(n)
-		sched, _ := (&Executor{}).buildTaskGraph(p, changed)
+		sched, _ := (&Executor{}).buildTaskGraph(p, changed, newStagePlans(p, changed))
 		assert.Equal(t, 6*n, sched.EdgeLen(), "hub over %d", n)
 		assert.Equal(t, 2*n*n+2*n, buildLiteralTaskGraph(p, changed, nil).EdgeLen(), "literal hub over %d", n)
 	}

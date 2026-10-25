@@ -8,14 +8,13 @@ example.
 The command exits `1` if a file cannot be read or looks binary. If a pattern matches nothing, the command succeeds
 unless you pass `--strict`.
 
-The `dispat scanner`, `dispat writer`, and `dispat replacer` commands expose the manifest libraries directly.
-`dispat scanner` prints what a folder's manifests declare, `dispat writer` edits a declaration in place while
-preserving formatting, and `dispat replacer` changes literal text anywhere. You do not need a config file, a git
-repository, or a release plan to run them on any checkout.
+No configuration file, Git repository, or release plan is required. For a dependency declared in a supported
+manifest, [`dispat writer`](./writer.md) can target the field directly. Use [`dispat scanner`](./scanner.md) to inspect
+those declarations.
 
 Positional paths resolve against `--root`. Pass `--log-format json` to swap the default listing for one event per file.
 
-The replacer has [a page of its own](../editing/replacer.md).
+See [Replacing literal text](../editing/replacer.md) for examples and matching rules.
 
 ## Flags
 

@@ -1,8 +1,8 @@
 # Webhooks
 
-The top-level `webhooks` list declares HTTP endpoints dispat notifies of release progress as it happens: the run
-starting and finishing, each package's stages, and each package's outcome. Use it to feed a CI dashboard, a chat bot,
-or a deploy tracker without scraping the [JSON log stream](./README.md#log-levels).
+Use `webhooks` to send release events to a dashboard, chat bot, or deployment tracker. Events cover the start and end
+of the run, package stages, and package outcomes. They save you from having to parse the
+[JSON log stream](./README.md#log-levels).
 
 ```yaml
 webhooks:
@@ -21,10 +21,9 @@ webhooks:
 Declare as many webhooks as you need. Each one subscribes independently, and several may subscribe to the same event;
 each receives its own delivery.
 
-**Webhooks observe and never gate.** Deliveries run asynchronously on their own goroutines: dispat never waits for an
-answer, and nothing an endpoint does (refuse, hang, or not exist at all) changes what the release does or what the
-command exits with. A delivery that does not get through is a `W239` warning in the log, nothing more. Anything that
-must be able to stop a release belongs in the [script hooks](./spaces.md#stages-and-hooks) instead.
+**Webhook failures do not stop a release or change its exit code.** Deliveries run asynchronously. An unavailable,
+slow, or rejecting endpoint produces a `W239` warning if delivery fails. Use
+[script hooks](./spaces.md#stages-and-hooks) for checks that must be able to stop a release.
 
 ## Webhook options
 
@@ -52,8 +51,8 @@ run refused before that (a blocked plan, failed verification, a failed `run.befo
 |---------------------|----------------------------------------------------------------------------------------------------|
 | `release.started`   | Once, when the task graph is about to start, carrying the whole plan.                             |
 | `release.finished`  | Once, when the run has settled, carrying the outcome counts and every package's status.           |
-| `stage.started`     | When one package's `sign`, `version` or `propagate`, `syncLock`, `build`, `tests`, `publish`, or `announce` stage starts. |
-| `stage.succeeded`   | When that stage completes. A stage with no configured script still fires both.                    |
+| `stage.started`     | When one package's `sign`, `version` or `propagate`, `syncLock`, `build`, `tests`, `publish` or `announce` stage, or a [stage the flow defines](./spaces.md#stages-of-your-own), starts. |
+| `stage.succeeded`   | When that stage completes. A stage with nothing to run, such as a build with no `build` entry, still fires both; a stage after the records that failed fires `stage.started` alone and only warns. |
 | `package.published` | When one package's publish frame completes, carrying the release tag.                             |
 | `package.failed`    | When one package fails, naming the failed stage and the error.                                    |
 | `package.skipped`   | When one package is skipped because a dependency failed, with `code: "W194"` and `blockedBy`.     |
@@ -61,10 +60,14 @@ run refused before that (a blocked plan, failed verification, a failed `run.befo
 | `script.progress`   | When a stage script raises it through [`dispat trigger progress`](../cli/trigger.md), with a 0 to 100 value and an optional message. |
 | `script.<word>`     | When a stage script raises its own event through [`dispat trigger <word>`](../cli/trigger.md): the family is open-ended, and a subscription may name any word a trigger can say. |
 
-The `announce` stage is observed only when an [announce script](./spaces.md#stages-and-hooks) is configured: it is a
-tail of the publish rather than a task of its own. The `sign` stage is observed only for a package that has one, which
-is a package whose space configures [`autoSign`](./autosign.md) or a sign flow entry, and the `tests` stage only for a
-package whose space configures `flow.tests` or one of its hooks. The version stage is named after the key that
+A stage is observed only for a package that has one: the `build` stage for every package, the `tests`, `publish` and
+`announce` stages for a package whose flow configures the stage or one of its hooks, the `sign` stage for one whose space configures
+[`autoSign`](./autosign.md) or a sign flow entry, and a stage the flow defines under its own name. A package with no
+publish stage reports `package.published` once the stages before its record completed. A stage
+[after the records](./spaces.md#the-order-of-the-stages) reports its events after `package.published`, as the
+announce does, and a stage that failed without failing the package reports no `stage.succeeded`. The `stage.*` events
+and a `package.failed` event carry a `label` field when the flow gave the stage one. The version stage is named after
+the key that
 configured it: `propagate` under `flow.propagate` or `autoPropagate`, `version` under the version keys, and a
 `failedStage` carries the same name (see [Two names for one block](./autoversion.md#two-names-for-one-block)). The
 `release.` / `stage.` / `package.` prefixes carry dispat's own events and only those; the `script.` prefix carries what
@@ -86,11 +89,9 @@ and version of the script that raised it.
 
 ## Levels and overrides
 
-`webhooks` is a space-shaped key: you can also write it on a space, on a package entry, and in the in-folder
-configuration files, and it folds through the [same ladder](./packages.md#the-override-ladder) every space-shaped
-setting does. A stated list **replaces the inherited one whole**, like `aliasTags`: a package that declares its own
-webhooks routes its events there and nowhere else, and an explicit empty list (`webhooks: []`) opts a level out
-entirely.
+You can set `webhooks` at the root, on a space, on a package, or in an in-folder configuration file. The
+[nearest list wins](./packages.md#the-override-ladder), replacing the inherited list completely. A package with its
+own list sends package events only to that list. Set `webhooks: []` to disable them for a level.
 
 ```yaml
 webhooks:
@@ -105,9 +106,8 @@ spaces:
         webhooks: []                              # ...and this one, which reports nowhere
 ```
 
-Two rules keep the routing predictable. The run-bracket events (`release.started`, `release.finished`) always deliver
-to the top-level list alone: they describe the run, which no one package speaks for. And a webhook inherited by
-several packages is one endpoint with one delivery order, not one endpoint per package.
+The run events (`release.started`, `release.finished`) always go to the top-level list alone. A webhook inherited by
+several packages keeps one shared delivery queue and order.
 
 ## A custom payload format
 
@@ -122,9 +122,9 @@ webhooks:
 
 A `{field}` token (letters only) is replaced by that field of the event, and every other byte is literal, so a
 template may itself be JSON. The fields are the payload's own scalar names: `event`, `timestamp`, `package`, `stage`,
-`version`, `previousVersion`, `channel`, `tag`, `status`, `failedStage`, `error`, `code`, `blockedBy`, `progress`,
-`message`, `root`, `published`, `failed`, `skipped`, `cancelled`, `role`, `node`, and `worker`. A token naming anything
-else is refused at load.
+`label`, `version`, `previousVersion`, `channel`, `tag`, `status`, `failedStage`, `error`, `code`, `blockedBy`,
+`progress`, `message`, `root`, `published`, `failed`, `skipped`, `cancelled`, `role`, `node`, and `worker`. A token
+naming anything else is refused at load.
 
 Substituted values are escaped for a JSON string position, so a template embedding `{error}` inside its quotes stays
 valid JSON whatever the error text carries. The delivery still carries the `X-Dispat-Event` and `X-Dispat-Delivery`

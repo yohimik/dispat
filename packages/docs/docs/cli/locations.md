@@ -1,7 +1,8 @@
 # Naming a place in your monorepo
 
-Three flags on the two shell helpers ask where you mean in the monorepo. They
-take the same answers except for one. Learn one flag and you know all three.
+Use `--for` to choose whose script and environment to use, `--script-from` to
+choose only the script source, and `--in` to choose the working directory.
+The flags share the location names below; only `--in` also accepts a folder path.
 
 ```console
 $ dispat exec build --for pkg:core          # whose script, and whose environment
@@ -19,8 +20,7 @@ $ dispat exec build --in pkg:core            # which folder to run in
 | `cwd`            | the folder you are standing in right now              |
 | `packages/core`  | that specific folder, accepted only by `--in`         |
 
-Names are exact. You cannot use globs here. Each flag needs exactly one answer,
-and a pattern matching two packages cannot provide that.
+Use an exact name. Each flag selects one location, so globs are not accepted.
 
 ## cwd, and what "standing" means
 
@@ -83,9 +83,10 @@ execution directory. Neither flag implies the other.
 $ dispat exec release --for pkg:core --in root
 ```
 
-That command runs the `release` script belonging to core from the repository
-root. It uses core's environment and core's `DISPAT_*` variables. Say so twice
-if you want both to be core, or stand in core's folder and pass `--for cwd`.
+That command runs core's `release` script from the repository root, with core's
+environment. Release variables are included when requested through `--env`, or
+inherited when this command runs inside a stage. To use core's folder as well,
+pass `--for pkg:core --in pkg:core`, or run from that folder with `--for cwd`.
 
 ## A note on symlinks
 

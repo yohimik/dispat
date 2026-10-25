@@ -4,9 +4,9 @@ description: Recover a stopped release safely by using recorded tags and checkin
 
 # Recovering from a failed run
 
-A repeat `dispat` run plans from durable tags: it skips recorded packages and continues with their pending
-consumers. Check which record failed before retrying, because a package can have its native tag while its separate
-GitHub release record is still missing.
+Before retrying, check which part of the release failed. A new `dispat` run reads the durable tags, skips recorded
+packages, and plans the remaining work. A package may already have a tag while its GitHub release is still missing,
+so those two failures need different repairs.
 
 With `commit.push` on, dispat attempts the remote tag or receipt before it runs optional recorders or lets a dependent
 publish. A stopped CI job can still leave a publication without a record if it stops during the publish command or
@@ -87,7 +87,17 @@ Removing a release page or Git tag does not recall artifacts already downloaded 
 After an authorized withdrawal, verify each publication destination separately and account for consumers that may
 still have the withdrawn bytes. A removed remote reference alone is not evidence that a publication was undone.
 
-## Recover an npm publication without a release tag
+Choose the section that matches the last completed operation:
+
+| What happened | Start here |
+| --- | --- |
+| A package failed while its provider published | [Dependent build failure](#continue-after-a-dependent-build-fails) |
+| A provider failed | [Provider failure](#continue-after-a-provider-fails) |
+| The run was interrupted | [Interruption and recording](#recover-an-interrupted-run) |
+| The retry finds changed files | [Working-tree cleanup](#what-a-failed-run-leaves-in-the-working-tree) |
+| The package and tag exist, but the GitHub release does not | [Repair GitHub metadata](#repair-github-metadata-after-the-package-was-recorded) |
+| npm accepted the package, but there is no release tag | [npm publication recovery](#recover-an-npm-publication-without-a-release-tag) |
+| A push was rejected after publication | [Concurrent pushes](#when-somebody-pushes-while-the-release-runs) |
 
 Treat npm's version and dispat's release tag as separate records. If npm accepts a tarball and the run stops before
 the Git tag reaches the remote, do not create the missing Git tag or npm dist-tag by hand. First inspect the exact npm
@@ -158,8 +168,7 @@ $ git tag
 core@0.1.0
 ```
 
-The run exits with a non-zero status, leaving `core@0.1.0` tagged while `app` is not. You do not need to repair a state
-file or reconcile versions by hand. Fix the tests and run the command again:
+The run exits nonzero. `core@0.1.0` is tagged, while `app` still has work to release. Fix the tests and rerun dispat:
 
 ```console
 $ dispat
@@ -182,13 +191,12 @@ run, while `core` is never re-released.
 If the *provider* fails instead, a consumer whose only reason to release was that provider is skipped and reported with
 `W194`, so you can catch it up with a re-run once you fix the provider.
 
-A consumer that has changes of its own is a different case, and by default it releases anyway: its own work is not
-invalidated by somebody else's failure. What it publishes names the provider's *previous* version, because that is the
-version the provider actually has. dispat reconciles its manifests back to that version before it publishes, whatever
-the version stage wrote earlier while the provider's publish was still pending.
+By default, a consumer with changes of its own can still release. Its manifests must refer to the provider's previous,
+published version. Before publication, dispat restores those dependency ranges if the version stage had already
+written the provider's planned version.
 
-That consumer is not finished with the provider, though. The provider still owes it the release its caret asked for, so
-the run that finally publishes the provider releases the consumer a second time to pick it up:
+The provider's propagated change is still pending for that consumer. When the provider finally publishes, the consumer
+releases again to include it:
 
 ```console
 $ dispat
@@ -217,10 +225,11 @@ and `app` fails after `core` published. dispat reports that as `E201` as well, b
 debt, and names the remedy: an empty commit `release(app)` with the footer `Release-As: <version>`, the version the
 failed run planned for `app`. The next release ships `app` at that version and picks `core` up.
 
-One shape cannot be repaired in place. If the consumer's build had already run over the manifests naming the provider's
-planned version, whatever it produced may carry that version inside it, and rewriting a manifest does not reach a built
-artefact. dispat blocks that consumer with `W194` naming the provider rather than rebuilding it silently, and the next
-run builds it against what the provider published.
+If the consumer already built against the provider's planned version, changing its manifest is not enough: the built
+artifact may contain that version too. dispat blocks the consumer with `W194`. The next run rebuilds it against the
+provider's published version.
+
+## Recover an interrupted run
 
 An interrupted run follows the same rule. If you press Ctrl-C or a CI job dies, packages with a completed publish keep
 their record. dispat reports everything else as `cancelled`, and your next run recomputes the remaining plan.
@@ -245,9 +254,8 @@ paths before retrying; dispat refuses them so its automatic commit cannot captur
 pre-existing changes only in selected package folders where `revertOnFail` could reset them. With both features off,
 writer output left by the earlier run remains valid input to the retry.
 
-Catch-up has a manifest half as well as a release half. A consumer that failed to release beside its provider keeps its
-old range until its own next release, when the version stage reconciles the range to the provider's published version
-(`W197`). This pickup is
+A consumer that failed while its provider released keeps its old dependency range. On the consumer's next release,
+the version stage updates that range to the published provider version (`W197`). This is
 [the auto-version reconciliation](../../configuration/autoversion.md#picking-up-providers-released-without-you), not a
 release triggered by the provider.
 
@@ -347,6 +355,47 @@ dispat preview --package core --version 0.1.0 --github
 
 The output is the body the release would have sent. The preview reads the current configuration, so check that the
 `github` entry format has not changed since the release.
+## Recover an npm publication without a release tag
+
+Treat npm's version and dispat's release tag as separate records. If npm accepts a tarball and the run stops before
+the Git tag reaches the remote, do not create the missing Git tag or npm dist-tag by hand. First inspect the exact npm
+version, the workflow revision, and the tarball integrity outside the publish script.
+
+If a workflow is interrupted after npm reports success and before Git records are written, inspect npm separately.
+A project whose publisher intentionally runs only `npm publish` leaves that decision to the workflow operator;
+rerunning the same publish command is unsafe. npm does not permit a name and version combination to be reused after
+publication, including after an unpublish. Recover forward with a new patch version through the reviewed workflow, while keeping any independent
+binary or provider pin unchanged when its bytes did not change. For example, reserve `1.10.0` and release `1.10.1`
+rather than trying to recreate `1.10.0`.
+
+Keep artifact validation before publication: build and inspect one tarball, verify its package name, version, and digest,
+exercise that exact file, then give the same path to npm. The publish stage can then remain one upload operation. If the
+entire package and all its versions are unpublished, npm also requires waiting 24 hours before publishing another
+version of that package. Use npm's authenticated procedure and follow its
+[unpublish policy](https://docs.npmjs.com/policies/unpublish/) as a separate administrative action; removal does not
+make its version reusable.
+
+The 24-hour restriction applies to every new version under the removed package name. Advancing the patch version
+does not bypass it. A registry E409 indicating that the package is still being processed can occur during this
+interval; inspect the package's `time.unpublished.time` and wait until the restriction has expired before retrying CI.
+
+After a successful publication, independent installation checks may need to wait for registry metadata to become
+available. Poll for the exact version with a bounded deadline before installing it. Keep that readiness check in a
+post-release job, after release records, so a delayed registry response cannot turn an accepted upload into a failed
+publish stage. This short readiness wait does not replace the 24-hour restriction after complete removal.
+
+### Publish the next patch before removing the previous version
+
+If the package is still published, an alternative is to keep its name and publish the next patch through the reviewed
+workflow first. For example, publish `1.10.1`, verify its release records and installation, then unpublish only
+`1.10.0` using `npm unpublish <package-name>@1.10.0`, if npm's
+[unpublish policy](https://docs.npmjs.com/policies/unpublish/) permits it. Keep `1.10.1` published: removing only the
+previous version avoids complete package removal and its 24-hour restriction, without renaming the package.
+
+Exact dependency pins and lockfiles that still require `1.10.0` may fail to install after removal; update those
+consumers to the replacement patch. If removal is not permitted or would disrupt consumers, deprecate only the old
+version with a message directing users to the patch. The removed version remains unusable for future publications.
+If all versions were already unpublished, wait out the restriction described above before publishing the patch.
 
 ## When somebody pushes while the release runs
 
@@ -355,9 +404,8 @@ after the run has started. Such a commit reaches the release at the very end, as
 packages have already published: refusing there would leave a released package with no commit, no tag and nothing on
 the remote.
 
-dispat therefore recovers rather than refuses, and it does so by joining the two rather than choosing between them. It
-pulls the branch and merges what landed with its release commit, leaving that commit exactly as it was, and pushes the
-merge. The run exits `0` and says what it did:
+dispat pulls the branch, merges the new commits with its release commit, and pushes the merge. The original release
+commit and its tags are preserved. A successful recovery exits `0` and reports the merge:
 
 ```console
 12:04:05 WRN pulled the branch during the release to sync changes that landed while it ran; the release tags point at the tree that was planned and the release commit was merged on top branch=main code=W242 remote=origin
@@ -372,9 +420,8 @@ the release commit and whose second is what arrived. The merge itself is a `chor
 The commit that arrived is outside the tag's ancestry, which is where it belongs. It was not in this run's plan, it is
 not in this run's records, and the next run plans it and releases it on its own terms, with an entry of its own.
 
-The window this recovers from is still open while it recovers, so another clone can land a commit between the pull and
-the push that follows it. dispat answers that the same way, up to three rounds in all; the warning is reported once per
-round. What never moves across the rounds is the tag: it names the commit the run planned, not the merge above it.
+Another commit can arrive between the pull and the retrying push. dispat retries this recovery up to three times and
+warns on each attempt. The release tag continues to point to the original release commit, never to a recovery merge.
 
 The warning is there because the branch the release went out on is not the branch the run was planned against. Read it
 as a prompt to check that the merge is the history you wanted.
@@ -397,9 +444,8 @@ replaced on the remote: the push creates the name or leaves what is there alone.
 
 ### When what landed conflicts
 
-Sometimes the commits that arrived changed the same content the release did. The release has already published by
-then, so stopping would still leave it nowhere but the local clone. dispat completes it and hands you the conflict
-instead:
+If an arriving commit conflicts with the release changes, dispat still records the published release and preserves
+the conflicting work for you to resolve:
 
 ```console
 12:04:05 WRN commits landed on the branch during the release and changed the same content; this release's side was kept and theirs was pushed to a branch of its own to be reconciled branch=main code=W243 keptAt=release-conflicts/core-0.1.0-20260902-053012 paths=["packages/core/CHANGELOG.md"] remote=origin

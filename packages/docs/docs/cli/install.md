@@ -1,21 +1,10 @@
 # The install command
 
-Run `dispat install https://github.com/owner/repo` to install a tool published as a GitHub release asset. You do not
-need a config file or a git repository. This command installs somebody else's binary the way
-[`self-update`](./self-update.md) installs dispat's own, so a CI job that already has dispat has a release downloader
-as well.
+Run `dispat install https://github.com/owner/repo` to download and install a tool from a GitHub release. No
+configuration file or Git repository is required. Use [`self-update`](./self-update.md) to update dispat itself.
 
-dispat reads the repository's releases, picks the highest stable version, downloads the file you named, verifies the
-published size and checksum, and only then moves it into place. Anything already at the destination is kept beside it
-as `<name>.backup` and removed during a later run a week afterwards. Because nothing moves until every check passes, a
-failed download leaves the folder exactly as it found it.
-With no destination binary and no earlier backup, installation prints no rollback instructions. If a regular
-`<name>.backup` remains from an earlier install, dispat preserves and reports it and starts its one-week retention
-period again.
-On a later replacement, dispat holds the existing backup until the new file is installed. If the final swap fails, it
-restores the previous tool and backup, or reports their remaining paths if restoration also fails. A cleanup warning
-after installation means the new tool and its immediate backup are ready, but an older copy needs manual cleanup.
-If a failed download cannot be removed, the warning names the staged file left for manual cleanup.
+By default, dispat chooses the highest stable version. It verifies the asset's published size and checksum before
+installing it and keeps the previous binary as a backup.
 
 ```console
 $ dispat install https://github.com/acme/tool --asset 'tool-{os}-{arch}'
@@ -71,16 +60,15 @@ DISPAT_TOKEN=... dispat install https://ghe.example.com/acme/tool --token-env DI
 
 ## Choosing the file
 
-Most releases attach more than one file, and installing the wrong one globally is worse than typing its name. Use
-`--asset` to say which one you want. dispat expands `{os}`, `{arch}`, `{version}`, `{tag}` and `{name}` in the value,
-so one invocation keeps working as releases come and go:
+Use `--asset` to choose the release file for your platform. The value can include `{os}`, `{arch}`, `{version}`,
+`{tag}`, and `{name}`, so you do not need to update the command for each release:
 
 ```sh
 dispat install acme/tool --asset 'tool-{os}-{arch}'
 dispat install cli/cli   --asset 'gh_{version}_{os}_{arch}.tar.gz'
 ```
 
-The value also matches as a glob, which reaches an asset whose exact spelling nobody wants to write out:
+You can also use a glob when only part of the filename is fixed:
 
 ```sh
 dispat install acme/tool --asset '*linux-amd64'
@@ -110,8 +98,8 @@ installs into `$DISPAT_BIN_DIR`, then `/usr/local/bin` when that folder accepts 
 the same ladder [the install script](../reference/ci.md#the-install-script) climbs. The name defaults to the
 repository's own, and on Windows a name with no extension gains `.exe`.
 
-dispat creates the folder if it does not exist, and tells you when it is not on your `PATH`, because a tool your shell
-cannot find is a successful install that looks like a failed one.
+dispat creates the destination folder if needed and tells you if it is missing from `PATH`. Add it to `PATH` so your
+shell can find the installed command.
 
 ## Assets that are not binaries
 
@@ -126,16 +114,16 @@ dispat install cli/cli --asset 'gh_{version}_{os}_{arch}.tar.gz' \
 dispat install acme/tool --asset install.sh --pipe sh
 ```
 
-The verification is the same either way, so what reaches your command has already been checked against the size and
-the checksum the release published. dispat stages the file in a folder of its own and removes it afterwards, so a
-command that fails leaves nothing behind on your `PATH`. `$DISPAT_ASSET` names the same file by path, under the name
-the release published, for a command that has to seek rather than read a stream; `$DISPAT_ASSET_NAME` is that name on
-its own.
+The file is checked against the published size and checksum before the command starts. dispat removes its staged
+download afterwards. Files created by your command belong to that command; a failure does not roll them back.
+
+Use `$DISPAT_ASSET` for the staged file's path when a tool needs to seek instead of reading a stream. The file keeps
+the release asset's name, also available as `$DISPAT_ASSET_NAME`.
 
 ## Running it more than once
 
-`dispat install` is idempotent. It hashes the file already at the destination against the checksum the release
-published, so running the same line again costs no transfer and says so:
+Running the same install command again checks the destination file against the published checksum. If it already
+matches, dispat skips the download:
 
 ```console
 $ dispat install acme/tool --asset 'tool-{os}-{arch}'
@@ -163,13 +151,13 @@ dispat install jqlang/jq --release 1.7.1 --asset 'jq-{os}-{arch}'
 dispat install cli/cli --release 2.62.0 --asset 'gh_{version}_{os}_{arch}.tar.gz' --pipe 'tar -xz'
 ```
 
-Pin every line with `--release`. A manifest whose versions float installs something different on each machine it runs
-on, which is the outcome a manifest exists to prevent.
+Pin each tool with `--release` when every machine should receive the same version. Without a pin, a later run may
+install a newer release.
 
-`set -e` belongs at the top, because every line either does its work or stops the file. Running the manifest again
-costs no transfer, since each line compares what is already installed against the checksum the release published, so a
-provisioning script may run on every boot. A mistake in the command line exits `2` before any request is made, and a
-flag belonging to another dispat command is one of those mistakes:
+Use `set -e` to stop the script if an install fails. When a published checksum matches the installed file, rerunning
+that line needs no download. Releases without checksums cannot use this check.
+
+Invalid arguments exit `2` before any network request, including flags that belong to another dispat command:
 
 ```console
 $ dispat install acme/tool --tag 1.4.0
@@ -208,6 +196,19 @@ $ dispat install acme/tool --rollback
 rolled back tool at /usr/local/bin/tool
 the binary it replaced is now the backup, so another --rollback returns to it
 ```
+
+## Backups and interrupted installs
+
+When replacing a tool, dispat keeps the previous binary as `<name>.backup`. A later run removes that backup after
+one week. If there is no installed binary but an earlier regular backup remains, dispat preserves it, reports it,
+and restarts its one-week retention period. A first install with neither file needs no rollback instructions.
+
+The current binary and backup stay in place until the download has passed its checks. On a later replacement, the
+existing backup is kept until the new file is installed. If the final swap fails, dispat restores both previous files.
+If restoration also fails, the error names their remaining paths.
+
+A cleanup warning after a successful install means the new tool and its immediate backup are ready, but an older
+copy needs manual removal. A failed download that cannot be removed is also reported with its staged path.
 
 ## Flags
 

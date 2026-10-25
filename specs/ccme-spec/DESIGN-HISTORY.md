@@ -342,12 +342,12 @@ composed-history paths, and falls back when a prerelease baseline cannot be loca
 counterexample above remains evidence about the earlier engine; the later improvement addresses its window and
 author subphases, without establishing an optimal bound for all of `plan.Compute`.
 
-The current fixed-stage task compiler reads `Plan.Providers` and returns an explicit task scheduler graph.
+At `0e495797`, the fixed-stage task compiler read `Plan.Providers` and returned an explicit task scheduler graph.
 Those retained input and output representations occupy `Theta(P + E + Tk + Dk)` words when both coexist;
 their sizes do not give an auxiliary bookkeeping lower bound. Under indexed relations, constant-time map
 access and policy calls, graph construction has an upper account
 `O(P + E + Tk + Dk + Pr log(Pr + 1))` for `Pr` releasing packages, including changed-name and relay-list sorts.
-The scheduler can sort newly ready batches when relay nodes exist, so its current readiness path is not
+That scheduler can sort newly ready batches when relay nodes exist, so its readiness path is not
 the table's achievable linear path. A restricted streaming readiness problem does have an exact `n`-bit
 lower bound: after a gate completes, each of `n` targets is ready according to whether its independent
 source finished earlier. The same read-only graph admits all subsets through durations learned only from
@@ -455,7 +455,7 @@ other than the stage that carries them, an acyclic stage graph and no `parallel`
 workspace meets a fourth: the graph of packages over the edge kinds of section 13.1, `propagation.kinds` and
 `publish.orderKinds`, and the build dependencies that are not `none` is acyclic. The second and third are necessary,
 given the first, for an order that realises the configuration, the first and fourth are premises, and with all four the
-closure of each package graph realises its configuration and the compiled plan is acyclic. The fourth refuses a cycle
+closure of each package graph realises its configuration and the base task graph is acyclic. The fourth refuses a cycle
 through a build dependency whose kind is outside the edge kinds of section 13.1, which a task graph can survive; section
 19.2a's bullet on cycles now says so. A cycle over the edge kinds of section 13.1 alone is already `E200`, so that is
 the only cycle the fourth condition meets. Its known cost is the test fixture of section 13.1: a fixture that depends at
@@ -512,7 +512,33 @@ release plan or diagnostic number changes, and outside the section 19.1 bullet n
 that does not offer configured stages. For an implementation that runs neither builds nor tests, those are stages of
 duration zero, so its tag still follows the manifest write.
 
-The section states the model the dispat engine is to implement; nothing of it is released. What runs today is this. A
+The subsequent configured-stage implementation indexes stage and task adjacency, but a chain of `k`
+output-producing stages can place `Theta(k²)` ancestor identities in task descriptors. This is auxiliary
+bookkeeping beyond the explicit graph. Admitted output bytes, manifest entries and relays are charged to
+their actual sizes. Weighted stage budgets retain their documented heavy-head queue rule, which may leave
+slots idle and does not meet the one-pool work-conserving premise.
+The implementation uses `E233` for a mixed build-order cycle after the `E200` publication and
+propagation check. The publication and blocking edge selections are resolved per consumer package;
+their omission uses the section 14 defaults, while an explicit empty list selects no edges.
+
+The implemented base graph proof does not cover plan-specific provider outcome waits. The executor now adds those
+waits only where the selected release needs them: blocking providers before the record, pending causes for a
+consumer without an independent cause, and changed update providers before a version frame that reads selected
+provider versions. It checks the full task graph for `E233` before dispatch. Pass-through nodes retain waits across
+unreleasing providers without materialising every provider-consumer pair. Cyclic unreleasing components with no
+changed provider do not create a task cycle. A placed `flow.publish` object also keeps a commandless publication
+boundary and its constraints; this implements script-configured flow placement, not the full target selection model
+of section 13.10a.
+
+The distributed stage implementation captures a source baseline before the first task. Before preparing a package,
+it replaces that package's declared output roots with their pinned source contents, then freezes those roots after
+native preparation. This gives an idempotent preparation write the same provenance as a new write, while stale ignored
+files do not become graph inputs. Each placed producer task starts from that baseline plus only its admitted
+predecessor output sets. Local producers use private materialisations, and worker stages remap paths
+between the task checkout and the canonical package root. Input snapshot scans, output manifests and transfers are
+charged by their actual entries and bytes; this engine does not inherit a graph-only linear runtime bound.
+
+At the time of that design, before the configured-stage implementation, the engine ran a fixed stage chain. A
 `flow` entry is a list of script names, and an unknown `flow` key is refused. A package's stages run in the fixed chain
 `sign`, `version`, `syncLock`, `build`, `tests` and `publish`, each where present, and `build` and `publish` run for
 every releasing package. Provider waits attach to a package's first task, so a consumer whose first task is `sign` or

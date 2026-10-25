@@ -119,7 +119,7 @@ func (tc *taskCtx) verifyPublished(ctx context.Context) (adoptionVerdict, string
 // runVerifyScripts runs the space's verify scripts with the environment the
 // publish had, and reads their exit status.
 func (tc *taskCtx) runVerifyScripts(ctx context.Context, scripts []string) (adoptionVerdict, string) {
-	err := tc.sequence(adoptStage, scripts, true).Run(ctx)
+	err := tc.sequence(ctx, adoptStage, scripts, true).Run(ctx)
 	if err == nil {
 		return verdictMatch, "the verify script matched it"
 	}

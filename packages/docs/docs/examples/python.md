@@ -1,7 +1,7 @@
 # A Python monorepo
 
-Keep your distributions in one repository and retain the Python tools that build and publish them. dispat can keep
-`pyproject.toml` and `requirements.txt` current; the first walkthrough below uses uv.
+This example uses uv to build and publish two Python distributions. dispat updates their `pyproject.toml` files and
+the app's `requirements.txt` pins before building.
 
 For pip, PyPA build/Twine or a Pants monorepo, start with
 [Python without uv, including Pants](./python-pants.md). It covers build metadata, shared version sources and the
@@ -35,10 +35,10 @@ dispat.json
 }
 ```
 
-You can use Poetry, PDM, Hatch, or plain `build` plus `twine`. They all drop into the same two scripts. Nothing in the
-configuration is uv-specific except the commands themselves.
+If you use Poetry, PDM, Hatch, or `build` and `twine`, put their commands in the same build and publish slots. Use the
+lock command appropriate to your project in `syncLock`.
 
-Check `autoVersion.manifests` before you need it. It defaults to `root` to reconcile the manifests directly in the
+`autoVersion.manifests` defaults to `root`, which updates manifests directly in the
 package folder. Set it to `all` when a package keeps a second manifest deeper down, such as a `deploy/requirements.txt`
 next to a Dockerfile.
 
@@ -55,8 +55,8 @@ $ dispat status
 12:39:15 INF release plan ready held=0 packages=2 releasing=2
 ```
 
-Leave out the `^` to release `core` alone. The `app` package stays where it is until it next has a reason of its own.
-[Propagation is opt-in](../concepts.md#propagation-is-opt-in) so that one library fix does not rebuild the world.
+Leave out the `^` to release `core` alone. `app` then keeps its current version until another change requests its
+release. See [opt-in propagation](../concepts.md#propagation-is-opt-in).
 
 ## What the version stage does
 
@@ -68,8 +68,8 @@ $ dispat autoversion
 12:39:15 INF auto-versioning finished failed=0 ran=2 skipped=0 stage=autoversion
 ```
 
-dispat updates three files across two packages in one pass. A status of `versionWritten=false` on the requirements file
-is not a failure because that format has no version of its own to write, only pins to reconcile. The result:
+dispat updates three files across two packages. `versionWritten=false` is expected for a requirements file: it has
+dependency pins, but no package version of its own. The result is:
 
 ```toml
 [project]
@@ -87,8 +87,7 @@ acme-core==1.3.0
 httpx==0.27.2
 ```
 
-Only the version text moved. The comment, the ordering and `httpx` are exactly as they were. This makes the release
-commit reviewable.
+Only the version text changed. The comment, ordering and `httpx` entries are preserved.
 
 ## What dispat reads and writes
 
@@ -113,8 +112,8 @@ packages/core/pyproject.toml  python  acme-core@1.2.0
   reports an editable local install, `-e ./core`, as a link to that folder.
 - **Names are normalised** the way PyPI normalises them (PEP 503). This means `Acme_Core` and `acme-core` are one
   package.
-- **Python ranges are written as `==X.Y.Z`.** A `caret` or `tilde` policy is an npm idea. The Python writers use the
-  spelling the ecosystem actually resolves.
+- **Python ranges are written as `==X.Y.Z`.** The Python writers use this syntax even when the configured range
+  policy is `caret` or `tilde`.
 
 ## Building against the package next door
 
@@ -137,12 +136,6 @@ dispat scanner --verify-unlinked               # E215 if one survived
 - **Publishing needs credentials, once per space.** A token in the environment is enough for `uv publish`. If your
   registry needs a login command, the [`flow.login` slot](./login.md) runs it once per space per run.
 
-## See also
-
-- Read [autoVersion](../configuration/autoversion.md) for `manifests`, `match` and `syncLock` in full.
-- Read [An npm monorepo](./npm.md) for the same shape in a different ecosystem.
-- Read [A Docker image chain](./docker.md) if the requirements file exists to feed an image.
-
 ## Check the release file set
 
 Define completion as the expected set of files, not as one successful upload command. Record the filename and digest of
@@ -156,3 +149,9 @@ reconciliation outside the publish command, then let a successful upload return 
 release records. See [release recovery](../reference/releasing/recovery.md).
 
 See [From one package to many](./one-to-many.md) to add deliverables while preserving existing package identities and release history.
+
+## See also
+
+- Read [autoVersion](../configuration/autoversion.md) for `manifests`, `match` and `syncLock` in full.
+- Read [An npm monorepo](./npm.md) for the same shape in a different ecosystem.
+- Read [A Docker image chain](./docker.md) if the requirements file exists to feed an image.

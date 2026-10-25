@@ -1,6 +1,6 @@
 # The diagnostics command
 
-Check a commit-message string without creating a commit:
+Use `dispat diagnostics` to check a commit message before committing it:
 
 ```sh
 dispat diagnostics 'feat(core): add streaming'
@@ -17,7 +17,7 @@ dispat diagnostics --config dispat.yaml 'feat(core): add streaming'
 dispat diagnostics --root ../project --config settings/dispat.yaml 'fix(api): close the stream'
 ```
 
-Pass a complete dispat configuration, including its package or space declarations. A parser fragment can be included through `$ref`, but is not a standalone dispat configuration.
+Use a complete dispat configuration with package or space declarations. If your parser settings live in a separate fragment, include it with `$ref`; the fragment cannot be passed as the configuration on its own.
 
 A relative configuration path starts at `--root`, which defaults to the current directory. Configuration references resolve as usual. A missing or invalid explicit file is an error; dispat does not fall back to defaults.
 
@@ -25,7 +25,7 @@ This command checks message syntax. It does not check whether a scope names an e
 
 ## Read diagnostics
 
-Each warning or error includes its code, line, column, and unit number where applicable. Warnings do not fail the command unless a parser setting promotes them to errors. An error in any unit rejects the entire message.
+Each finding gives you a diagnostic code and a location: line, column, and unit number where applicable. Warnings leave the command successful unless your parser settings make them errors. One error in any unit rejects the whole message.
 
 ```sh
 dispat diagnostics --log-format json 'unlisted(core): check this type'

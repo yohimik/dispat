@@ -1,16 +1,18 @@
 # The github command
 
-Run `dispat github` to create a GitHub release for each covered package. It creates exactly what the release pipeline's
-recorder would create: a release named after the package tag, or after
-[`releaseName`](../configuration/records.md#your-own-words-around-an-entry), with the rendered changelog sections as
-its body. If the repository already has the release, dispat skips it and logs `W224`. This means a repeated run, and
-the release that follows it, converge instead of failing when the API rejects a duplicate tag.
+Run `dispat github` to create GitHub releases for the selected packages that have opted in. Each release uses the
+package tag or configured [`releaseName`](../configuration/records.md#your-own-words-around-an-entry) as its name,
+and the rendered changelog sections as its body. This is the same output as the release recorder.
+
+An existing release is skipped with `W224`, so rerunning the command does not create a duplicate.
 
 With [`github.draft`](../configuration/records.md#github), or with `--draft` on this command, the release is created
 for a person to publish after reading it. It carries no tag ref until they do, so nothing that resolves a release by
 its tag sees it meanwhile.
 
-You opt in exactly as you do for the recorder. dispat releases a package when its scripts export
+## Choose which packages get a GitHub release
+
+The command uses the same opt-in rules as the release recorder. dispat releases a package when its scripts export
 [`DISPAT_EXPORT_GITHUB`](../reference/environment.md#script-outputs) or when
 [`github.allPackages`](../configuration/records.md#github) covers it.
 
@@ -19,8 +21,7 @@ The stage provides this environment along with `DISPAT_PACKAGE` to identify the 
 with the variable exported, it covers every package your invocation selects. Without either opt-in, the command
 publishes nothing and exits with `0`.
 
-The command covers packages one at a time. A repository has one index and one HEAD, and a clear release order is worth
-reading.
+Packages are processed one at a time, in release order.
 
 ## When a release cannot be created
 
@@ -39,13 +40,12 @@ is written, and an interrupted command, still exit non-zero.
 
 ## The shape of the body
 
-The body is rendered exactly as the release stage's recorder renders it, so a release created from a stage script and
-one created by the release itself carry the same text. Items inside a section are separated by a single blank line, a
-commit body is indented two spaces under the bullet it belongs to so that it stays part of that item, and every section
-ends the same way whether or not its last line carried a body. The dependencies section is the one exception: its
-lines are a table of movements and render as one tight block, with no blank lines between them. A release body is one
-document with no entry beneath it, so the changelog file's
-[entry seam](../configuration/records.md#the-seam-between-entries) does not apply here.
+The command and the release recorder produce the same body. Items have one blank line between them, with commit
+bodies indented two spaces beneath their bullets. Dependency updates form a compact block without blank lines between
+rows. Section endings are consistent whether or not the last item has a body.
+
+The changelog file's [entry spacing](../configuration/records.md#the-seam-between-entries) does not apply to GitHub:
+a release body contains a single entry.
 
 GitHub refuses a body over 125,000 characters. dispat cuts a longer one to 120,000 characters at the last whole entry
 that fits, and ends the sections with a line linking the package's changelog file at the release tag. The cut is
@@ -56,27 +56,20 @@ See [Release records](../configuration/records.md) for the entry format options 
 
 ## The selection it shares
 
-`dispat changelog`, `dispat autoversion`, `dispat commit` and `dispat github` expose the release pipeline's native
-steps to custom flows. You can run a step from a stage script exactly when your flow needs it. The release stage later
-sees the work is done and skips it.
+`changelog`, `autoversion`, `commit`, and `github` let you run individual release steps from a custom flow or stage
+script. The later release step recognises completed work and skips it.
 
-All four commands share the run command's [selection](./run.md#choosing-the-packages) *and* its window. Run them with
-no terms to cover every releasing package in dependency order. You can narrow this with `--package`, `--space`,
-`--group`, or the invocation folder. You can also replace the window with `--since`, expand it downstream with
-`--consumers`, and handle failures with `--on-error`.
+These commands use the run command's [package selection](./run.md#choosing-the-packages) and release window. By
+default, they process releasing packages in dependency order. Narrow the selection with `--package`, `--space`,
+`--group`, or your current folder. Use `--since` to change the window, `--consumers` to include dependent packages,
+and `--on-error` to choose how failures affect them.
 
-A selection follows two rules. First, a term matching no package is an error. Second, a *selected* package that is not
-releasing becomes a logged no-op, so your flow never fails over a converged or held package.
+A name that matches no package is an error. A selected package with no release to perform is a logged no-op. After
+`dispat commit --tag`, the tagged package is no longer in the release window; pass `--since all` to include it again.
 
-This second rule explains why a step run after `dispat commit --tag` covers nothing. You must use `--since all` to put
-the tagged package back on the table.
-
-These four command words are reserved. Like every command name, they win the `dispat <script>` shorthand over a
-[script](../configuration/spaces.md#scripts-and-dispat-run) of the same name. This means `dispat commit` always runs
-the command, but you can reach a script named commit by spelling it out as `dispat run commit`.
-
-Every config value these commands consume is also a flag. You can override the config for a single run using the
-options in the [flags table](#flags).
+Built-in command names take precedence over script names. For example, `dispat commit` runs this built-in step;
+`dispat run commit` runs a [script](../configuration/spaces.md#scripts-and-dispat-run) named `commit`.
+Use the flags below to override configuration for this invocation.
 
 ## Flags
 
@@ -84,46 +77,44 @@ Beside the [global flags](./README.md#global-flags):
 
 ### `--package`, `-p`
 
-Narrow to the named packages for every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`,
-`autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`). This flag is repeatable and
-comma-separated. It matches case-insensitively and accepts `*` globs (`-p '*'` covers every package); see
-[Choosing the packages](./run.md#choosing-the-packages).
+Select named packages. Repeat the flag or separate names with commas. Names are case-insensitive and accept `*`
+globs; quote them so the shell does not expand them first. For example, `-p core,web` selects two packages and `-p '*'`
+selects every package. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--space`, `-s`
 
-Narrow the same eleven commands to every package in the named spaces. This accepts the same spellings and globs as the
-package flag. A standalone package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).
+Select every package in the named spaces. This accepts the same lists and globs as `--package`. Standalone packages
+do not belong to a space, so `-s '*'` does not include them. See
+[Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--group`, `-g`
 
-Narrow the same eleven commands to every package in the named
-[versioning groups](../reference/releasing/versioning.md). This accepts the same spellings and globs. A group is a
-`versionGroups` entry or a space that versions as one, so it can cross spaces; see
-[Choosing the packages](./run.md#choosing-the-packages).
+Select every package in a named [versioning group](../reference/releasing/versioning.md), using the same lists and
+globs as `--package`. A group may be a `versionGroups` entry or a space that versions together, and may span several
+spaces. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--since`
 
-Cover the packages modified by commits since a specific git revision. This applies to the same seven commands and
-replaces the release window. Pass `all` to cover every package; see [the run command](./run.md).
+Use commits since a Git revision to choose packages, replacing the default release window. Pass `all` to include
+every package. See [how the run command selects packages](./run.md).
 
 ### `--consumers`
 
-Expand the selection downstream for the same seven commands. This covers every package that transitively depends on a
-selected one; see [the run command](./run.md).
+Also include packages that depend on the selected packages, directly or indirectly. See
+[how the run command expands a selection](./run.md).
 
 ### `--on-error`
 
-The default is `skip`. Decide what a failed package does to its dependents for every sweeping command (`run`,
-`autowriter`, `autoreplacer`, `changelog`, `autoversion`, `commit`, `github`). Set this to `skip` (transitive) or
-`continue`. This setting decides only what a failure does to the dependents. For `github` and `changelog`,
-`--ignore-errors` below decides whether a failure exits `1`; every other sweeping command exits `1` on any failure.
+Choose what happens to dependent packages when a package fails. The default, `skip`, skips its direct and indirect
+dependents. `continue` lets them run. Whether a failed release makes the command exit `1` is decided by
+`--ignore-errors` below.
 
 ### `--ignore-errors`
 
-The default is `true`. Exit `0` when a GitHub release could not be created, after logging it as an error (`E222`) and
-naming it in the closing summary; see [When a release cannot be created](#when-a-release-cannot-be-created).
-`--ignore-errors=false` exits `1` instead. `dispat changelog` takes the same flag. `dispat commit` does not: a tag it
-could not create or push always fails it.
+The default is `true`: a release that could not be created is logged as an error (`E222`) and named in the closing
+summary, and the command exits `0`; see [When a release cannot be created](#when-a-release-cannot-be-created).
+`--ignore-errors=false` exits `1` instead. `dispat changelog` takes the same flag; `dispat commit` does not, because a
+tag it could not create or push always fails it.
 
 ### `--owner`, `--repo`, `--api-url`, `--token-env`
 

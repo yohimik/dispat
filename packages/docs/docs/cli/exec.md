@@ -1,14 +1,12 @@
 # The exec command
 
-Run `dispat exec <script>` to execute one declared script once. It runs in the
-environment of a package, a space, or your current folder. It plans no release
-and sweeps no packages.
+Run `dispat exec <script>` to execute one declared script once. Choose a
+package, space, or the top level for its script and environment. The working
+directory is a separate choice and defaults to your current folder.
 
-Everything dispat runs is a shell command. Stages, hooks, and `run` scripts are
-strings handed to `/bin/sh -c`. That works well until a script needs to branch
-on a variable, call another script you already wrote, or loop over a list.
-
-Three small commands cover those needs.
+Use `exec` to call a shared script from another script, or to run a package's
+command without starting a release. The related `if` and `for` helpers handle
+conditions and loops:
 
 ```console
 $ dispat if CI --then 'make ci' --else 'make dev'
@@ -16,8 +14,8 @@ $ dispat exec build --for pkg:core
 $ dispat for core web --do 'make "$DISPAT_ITEM"'
 ```
 
-None of the three plans a release. They ignore your packages and the dependency
-graph. They run your script and get out of the way.
+These helpers do not start a release. They read package or release information
+only when an option requests it, such as `exec --env both` or `for --changed`.
 
 ## Which command do I want
 
@@ -43,8 +41,8 @@ dispat exec <script> [--for pkg:<name> | space:<name> | root | cwd] [--fallback]
                      [--in <folder> | pkg:<name> | space:<name> | root | cwd]
 ```
 
-Run `dispat exec` to execute one script your config declares. It runs once in
-the current folder.
+The command needs a configuration file to find the script. It runs once in
+the current folder unless you pass `--in`.
 
 ### One subject decides everything
 
@@ -60,16 +58,13 @@ script runs with.
 | `--for root`      | the top level, said out loud      |
 | `--for cwd`       | whatever you are standing in      |
 
-These values are the same everywhere dispat asks for a location. Read
-[a page of their own](./locations.md) for details.
+See [Naming a place](./locations.md) for the location values shared by these flags.
 
-Workspace tools generally behave this way. `npm -w core run build` runs core's
-script with core's environment as a single decision. `dispat exec` shares the
-same idea.
+For example, `--for pkg:core` selects core's script and environment together.
+It does not change the working directory; use `--in pkg:core` for that.
 
-Pass `cwd` to consult the folder you are standing in. Every other invocation
-means the same thing from any directory. A command behaves identically from the
-repository root, inside a package, or a random CI folder.
+Use `cwd` when the subject should come from your current folder. Named
+subjects select the same package or space wherever you run the command.
 
 ### Using the folder you are in
 
@@ -83,8 +78,8 @@ $ dispat exec build --for cwd
 core-build
 ```
 
-This is the short way to build the thing you are looking at. It costs a scan of
-your workspace and nothing more. It still reads no git history.
+This selects the package you are working in. It scans the workspace to find
+the package but does not read Git history.
 
 Stand outside any package or space and you get the top level. dispat logs a
 line saying so rather than leaving you guessing.
@@ -100,8 +95,8 @@ $ dispat exec deploy --for pkg:core
 error: no script "deploy" in package "core"
 ```
 
-That second failure is on purpose. If `deploy` is declared at the top level and
-you asked for core's script, running the top-level one quietly hides a mistake.
+The second command fails even if `deploy` exists at the top level. Without
+`--fallback`, only the named level is checked.
 
 Pass `--fallback` to find a name further up. It resolves the script the way
 `dispat run` does. It walks from the package to its space to the top level:
@@ -131,9 +126,8 @@ because the environment always stays with the subject.
 
 ### What the script gets
 
-Your config's `env` block belongs to the script. dispat always applies it,
-layered from the file up through the space to the package. You have nothing to
-switch on.
+The subject's configured `env` values are applied automatically, from the
+top level through the space to the package.
 
 The `DISPAT_*` release variables are different. They describe one package's
 release, so working them out means computing a plan. That plan reads git tags
@@ -150,8 +144,8 @@ $ dispat exec announce --for pkg:core --fallback --env both
 announcing core at 1.4.0
 ```
 
-A script written against `$DISPAT_VERSION` can now run on its own. You do not
-need to run a release to get at it.
+Use this when a standalone script needs values such as `$DISPAT_VERSION`
+without running a release.
 
 The release variables need a package, because a space has no version of its
 own. dispat refuses `--env dispat` without a package subject, rather than
@@ -176,9 +170,8 @@ no flag at all:
 }
 ```
 
-Run `dispat run ci`, and the inner `announce` sees the whole release
-environment. This is the exact case `dispat exec` was written for. It costs
-nothing.
+Run `dispat run ci`, and the inner `announce` inherits the release environment.
+It does not need another plan to calculate those values.
 
 ### Passing arguments to the script
 
@@ -224,9 +217,9 @@ This is a separate question from `--for`. The two are free to disagree:
 $ dispat exec release --for pkg:core --in root
 ```
 
-That runs core's script from your repository root. It keeps core's environment
-and core's `DISPAT_*` variables. Pass `--in pkg:core` alongside it if you want
-a package's folder as well as its environment.
+That runs core's script from the repository root and keeps core as the
+environment subject. Release variables still depend on `--env` or the inherited
+stage environment. Use `--in pkg:core` to run in the package folder too.
 
 A missing folder stops the command with a message naming it. This prevents a
 typo from turning into a confusing shell error. `--on-failure` runs in the same
@@ -234,9 +227,9 @@ folder as the script it follows.
 
 ## Exit codes
 
-Both commands hand back the exit code of the script they ran. Run
-`dispat if CI --then 'exit 7'` and it exits `7`. That keeps them transparent in
-a pipeline, so whatever you were gating on still works.
+`exec` and `if` return the script's exit code. For example,
+`dispat if CI --then 'exit 7'` exits `7` when the condition is true, so a
+pipeline can check the script's original result.
 
 A script bound to
 [several commands](../configuration/scripts.md#one-name-several-commands) stops

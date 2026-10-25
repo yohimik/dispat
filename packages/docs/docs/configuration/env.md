@@ -1,7 +1,6 @@
 # Static env
 
-Define fixed environment variables for your scripts using `env` objects. Put a single map at the top of your
-configuration file to reach every script:
+Use `env` for environment variables your scripts should always receive. A top-level map applies to every script:
 
 ```yaml
 env:
@@ -58,13 +57,11 @@ Write `$$` to escape a literal dollar sign. An unknown name expands to nothing, 
 
 ## Two things you cannot do
 
-Keys keep the exact case you write them in, like every config map key, and here that is not a nicety: `PATH` and
-`Path` are two variables. Elsewhere the spelling is preserved and the matching folds, so a script, space or package
-name is reached however it is written; an environment variable is only ever the key itself.
+Environment keys keep their exact spelling. `PATH` and `Path` are different variable names, unlike script, space, and
+package names, which dispat matches without regard to case.
 
-dispat rejects two keys that differ only in case because it cannot tell which one you meant. It asks this of every
-object it reads, and of an `env` object once more, because the layers merge key by key.
+You still cannot declare two keys that differ only by case. dispat rejects that ambiguity both when reading the
+configuration and when merging the `env` layers.
 
-You cannot override a computed variable with a static one. The `DISPAT_` prefix is reserved, so setting a key that
-starts with it throws a configuration error instead of failing quietly. This strictness means your scripts can read
-`DISPAT_VERSION` and trust it.
+The `DISPAT_` prefix is reserved for computed variables. Declaring one in `env` causes a configuration error, so a static
+setting cannot replace the version or stage data your scripts receive.

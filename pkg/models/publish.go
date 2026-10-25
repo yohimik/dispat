@@ -14,6 +14,11 @@ import (
 // space, in a space folder's file or on a package, and a level overlays the
 // one below it field by field.
 type PublishConfig struct {
+	// OrderKinds selects dependency fields that constrain publication. Nil
+	// inherits; a pointer to an empty list disables every publication edge.
+	OrderKinds *[]string `json:"orderKinds,omitempty"`
+	// BlockingKinds selects dependency fields that propagate publish failures.
+	BlockingKinds *[]string `json:"blockingKinds,omitempty"`
 	// AdoptPublished is what a release does when its publish command fails
 	// and the destination already holds the planned version (CCME §19.4).
 	// A level that states it replaces the inherited value whole.

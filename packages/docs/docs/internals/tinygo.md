@@ -1,12 +1,10 @@
 # The TinyGo spike
 
-Read this page to understand why dispat's six standard release binaries are built with the Go compiler, and why a
-release also carries two Linux binaries built by a TinyGo fork. It describes a spike: an experiment kept
-in the repository because its answer is a version number away from changing, not a gate any job runs.
+dispat publishes six standard binaries built with Go and two Linux binaries built with a TinyGo fork. This page
+explains the experiments behind that choice, including upstream limitations, fork fixes, and remaining caveats.
 
-The historical measurements below found smaller TinyGo binaries than gc for the same source. A CLI distributed as
-six standard platform binaries has an obvious interest in that, so the question was asked properly, with the whole
-answer written down. Current Linux release sizes come from the generated table in [Sizes](#sizes).
+The spike is a manual investigation, separate from the release gates. Its historical measurements found smaller
+TinyGo binaries from the same source. For current release sizes, use the generated table in [Sizes](#sizes).
 
 ## What the spike is
 
@@ -17,9 +15,8 @@ answer written down. Current Linux release sizes come from the generated table i
 dispat exec tinygo-spike
 ```
 
-It is a chain of build targets, one question each, and no target aborts. A spike exists for its log, and a build that
-dies on its first failure reports one fact where the matrix needs all of them, so every step records its own exit
-status and the export stage collects the logs whatever they say. They land in `coverage/tinygo-spike/`.
+Each build target tests one question. The spike continues after failures so it can collect a complete result matrix.
+Every step records its exit status, and the export stage writes all logs to `coverage/tinygo-spike/`.
 
 | Stage | Asks |
 |-------|------|
@@ -43,7 +40,8 @@ than carrying copies, so the two halves cannot drift apart.
 
 ## The verdict, as of TinyGo 0.42.0
 
-**No, and the reason is the TLS.** TinyGo does not use the host's `net`. It ships a port of the package over netdev,
+**Upstream TinyGo 0.42.0 cannot support dispat's HTTPS paths.** It does not use the host's `net`. It ships a port of the
+package over netdev,
 its network *device driver* interface. Up to 0.41.1 no driver existed for a host operating system, so DNS resolution
 and TLS both returned `Netdev not set` and `net/http` dereferenced nil and aborted. 0.42.0 carries a host netdev on
 linux, and the `tcp` row of `net.log`, which resolves `api.github.com` first, and the `http` row pass where they
@@ -55,10 +53,9 @@ of the wire, records `first-bytes=504c41 clienthello=false`: the probe's own pay
 `run.log` says the same of the CLI: `self-update --check` fails with `listing releases: unexpected EOF` where the gc
 twin lists the releases.
 
-That is every release path dispat has: the GitHub API, webhooks, self-update's download, the update check, all of
-them https. So nothing is built with it. A silent stub is a worse failure than 0.41.1's crash, since a program asking
-itself whether the request went well is satisfied all the way to a plaintext socket, which is why the spike holds the
-socket itself (below). The other answers were good, which is why the file is kept rather than deleted.
+The GitHub API, HTTPS webhooks, self-update downloads, and update checks depend on working TLS. dispat therefore does
+not use upstream 0.42.0 for release binaries. The test inspects the receiving socket as well as the client's return
+value, because a successful return from the stub does not prove that encryption occurred.
 
 The unit-test stage runs with the upstream toolchain, one package at a time, under three bounds that each answer a way
 the row used to report one fact instead of a matrix. `-p 2`, because `tinygo test ./...` compiles one test binary per
@@ -226,9 +223,8 @@ old one, and C2 puts the old one back with nothing listening. It passes on `linu
 `darwin/arm64` and `darwin/amd64` on a Mac. Rows D and E hold, and F walks the network layers again with a real
 handshake read from the far end of the wire.
 
-The matrix is not the whole product, and the question a release turns on is the wider one: the black-box integration
-suite run against a fork-built binary rather than a gc one. That suite found four faults at 0.42.0-net.2, and all four
-are closed by net.4.
+The self-update matrix covers only part of the CLI. The black-box integration suite tests the fork-built binary more
+broadly. It found four faults at 0.42.0-net.2, all fixed by net.4:
 
 **Process groups are honoured.** `os.StartProcess` accepts `SysProcAttr.Setpgid` through `POSIX_SPAWN_SETPGROUP`, so
 dispat puts every script it runs into its own process group as it always has. Any other `Sys` field still fails, but it
@@ -257,15 +253,13 @@ rather than the toolchain. That includes the four tests an interrupt has to sati
 script, cancel the packages behind it, report the outcome to a webhook listener and give the release lock back. A
 graceful shutdown under the fork binary completes in 3.2 seconds.
 
-So the fork gives all of it: real sockets, real TLS, real certificate verification, real process spawning, real signal
-delivery, and a suite of 694 black-box assertions that pass against it, in a binary around 60% of gc's size. That is
-what puts `dispat-tiny-linux-amd64` and `dispat-tiny-linux-arm64` on a release beside the six the self-update contract
-names.
+That historical run verified sockets, TLS, certificate checks, process spawning, and signal delivery, with 694
+assertions when subtests are included. Its binary was around 60% of the gc build's size. These results supported adding
+`dispat-tiny-linux-amd64` and `dispat-tiny-linux-arm64` alongside the six standard release binaries.
 
 ### Caveats a fork-built release carries
 
-Carried rather than fixed, because none of them blocks the matrix or the suite, and all of them change what a reader
-should expect:
+The following limitations remain even when the matrix and integration suite pass:
 
 - **`http.Client.Timeout` alone arms nothing.** The fork's `net/http` keeps the field without enforcing it. Current
   dispat wraps its GitHub, webhook and self-update calls with a deadline that covers response-body reads and `Close`,
@@ -295,10 +289,9 @@ should expect:
 
 ## Reading the logs
 
-The logs are the artefact. Each is a sequence of `=== what ===` headers followed by the step's output and its
-`exit=` status, so a step that failed says so where it happened rather than stopping the run. `fork.log` carries the
-toolchain version that was installed; `selfupdate.log` carries the matrix above, with `sufake:` lines interleaved from
-the far end of the wire.
+Each log contains `=== what ===` headers, step output, and an `exit=` status. Check `fork.log` for the installed
+toolchain version and `selfupdate.log` for the matrix results. The interleaved `sufake:` lines come from the server and
+show what it received.
 
 Nothing here gates a release, and nothing in CI runs it. Re-asking the question is running one command: the spike
 installs the fork's newest release, as the release's own toolchain stage does, so a new fork release is asked about the

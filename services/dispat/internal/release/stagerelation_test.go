@@ -140,6 +140,7 @@ func mkReachPlan(relations map[string]models.StageWait, providers map[string][]s
 	for name, wait := range relations {
 		p.Releases[name] = &plan.Release{Pkg: &model.Package{Name: name, Dir: name,
 			Space: &model.Space{Name: name,
+				BuildScript: []string{"build"}, PublishScript: []string{"publish"},
 				ProviderRelation: model.NewStageRelation(&models.StageRelation{Build: wait})}}}
 		p.Order = append(p.Order, name)
 	}
@@ -175,7 +176,7 @@ func TestStageRelationOrdersBuildsThroughAPackageThatDoesNotBuild(t *testing.T) 
 				map[string]models.StageWait{"app": models.StageWaitBuild, "ui": c.toUI, "core": c.toCore},
 				map[string][]string{"app": {"ui"}, "ui": {"core"}},
 				"app", "core")
-			assert.Equal(t, c.isOrdered, isHeldBehind(p, changed, task{"core", taskBuild}, task{"app", taskBuild}))
+			assert.Equal(t, c.isOrdered, isHeldBehind(p, changed, task{"core", taskBuild, ""}, task{"app", taskBuild, ""}))
 		})
 	}
 }
@@ -197,9 +198,9 @@ func TestStageRelationBuildReachConvergesThroughTwoGaps(t *testing.T) {
 		"app", "core", "util", "direct")
 
 	for _, provider := range []string{"core", "util", "direct"} {
-		assert.True(t, isHeldBehind(p, changed, task{provider, taskBuild}, task{"app", taskBuild}), provider)
+		assert.True(t, isHeldBehind(p, changed, task{provider, taskBuild, ""}, task{"app", taskBuild, ""}), provider)
 	}
-	assert.False(t, isHeldBehind(p, changed, task{"util", taskBuild}, task{"core", taskBuild}),
+	assert.False(t, isHeldBehind(p, changed, task{"util", taskBuild, ""}, task{"core", taskBuild, ""}),
 		"a package with no providers waits for nothing")
 }
 
@@ -207,7 +208,7 @@ func TestStageRelationBuildReachConvergesThroughTwoGaps(t *testing.T) {
 // has not completed: it completes every task it can except held, and answers
 // whether waiting was never handed out.
 func isHeldBehind(p *plan.Plan, changed map[string]bool, held, waiting task) bool {
-	sched, _ := (&Executor{}).buildTaskGraph(p, changed)
+	sched, _ := (&Executor{}).buildTaskGraph(p, changed, newStagePlans(p, changed))
 	inFlight := sched.Ready()
 	for next := 0; next < len(inFlight); next++ {
 		if inFlight[next] == waiting {
@@ -254,10 +255,10 @@ func TestStageRelationBlockingOutranksOwnWork(t *testing.T) {
 				Releases:  map[string]*plan.Release{"app": consumer, "core": provider},
 				Providers: map[string][]string{"app": {"core"}},
 			}
-			results := map[string]*Result{"core": {Status: StatusFailed}}
+			results := map[string]*Result{"core": {Status: StatusFailed, FailedStage: "publish"}}
 
 			skip, blocker := shouldSkip("app", p, results, nil)
-			assert.Equal(t, c.isSkipped, skip, "a fresh own bump beside a failed provider")
+			assert.Equal(t, c.isSkipped, skip, "a fresh own bump beside a provider that failed after it built")
 			if c.isSkipped {
 				assert.Equal(t, "core", blocker)
 			}

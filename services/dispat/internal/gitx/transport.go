@@ -941,6 +941,33 @@ func (p *Plumbing) WriteTreeFromPaths(ctx context.Context, dir, indexFile string
 	return strings.TrimSpace(out)
 }
 
+// WriteTreeExceptPaths stages the current source state except declared output
+// roots. Entries under those roots stay as they were in indexFile, which is a
+// copy of the run's immutable pre-output baseline index.
+func (p *Plumbing) WriteTreeExceptPaths(ctx context.Context, dir, indexFile, baselineTree string,
+	excluded []string) string {
+	if p.err != nil {
+		return ""
+	}
+	env := []string{"GIT_INDEX_FILE=" + indexFile}
+	if _, err := p.git.runStream(ctx, gitStream{env: env},
+		"-C", dir, "--literal-pathspecs", "add", "--all", "--", "."); err != nil {
+		p.fail(fmt.Errorf("gitx: staging source paths outside declared outputs: %w", err))
+		return ""
+	}
+	reset := append([]string{"--literal-pathspecs", "reset", baselineTree, "--"}, excluded...)
+	if _, err := p.git.runStream(ctx, gitStream{env: env}, reset...); err != nil {
+		p.fail(fmt.Errorf("gitx: restoring original entries beneath declared outputs: %w", err))
+		return ""
+	}
+	out, err := p.git.runStream(ctx, gitStream{env: env}, "write-tree")
+	if err != nil {
+		p.fail(fmt.Errorf("gitx: writing the staged source tree: %w", err))
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // stagedPath is one entry of a forced capture: the mode git records for it,
 // its path from the repository root, and where its bytes are.
 type stagedPath struct {

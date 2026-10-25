@@ -14,6 +14,7 @@ package release
 // relation answers from its own branch.
 
 import (
+	"maps"
 	"slices"
 	"sort"
 
@@ -23,23 +24,23 @@ import (
 )
 
 // resolveFirstTaskWaits answers which of a changed provider's tasks a
-// consumer's first task (its version task when it has one, its build
-// otherwise) has to wait for.
+// consumer's first tasks (its beforeAll task when it has one, its first
+// stages otherwise) have to wait for.
 //
 // The three relations are a chain rather than three unrelated rules: nothing,
-// the provider's build, the provider's build and its publish. The publish case
+// what the provider built, what it built and its records. The publish case
 // names both edges rather than relying on the provider's own build-before-
 // publish edge to imply the first, because the graph is read by people as well
 // as by the scheduler and an edge nobody can see is an ordering nobody can
 // check.
-func resolveFirstTaskWaits(relation model.StageRelation, provider string) []task {
+func resolveFirstTaskWaits(relation model.StageRelation, provider *stagePlan) []task {
 	if !relation.IsBuildWaitingBuild() {
 		return nil
 	}
 	if relation.IsBuildWaitingPublish() {
-		return []task{{provider, taskBuild}, {provider, taskPublish}}
+		return append(provider.built(), provider.recording)
 	}
-	return []task{{provider, taskBuild}}
+	return provider.built()
 }
 
 // stageGaps is one ordering's pass-through nodes in the task graph: one per
@@ -99,20 +100,31 @@ func newPublishGaps(edges stageEdges, consumers []string) *stageGaps {
 	return newStageGaps(edges, consumers, publishGapKinds)
 }
 
+// newBlockingGaps carries a failed provider's outcome through unreleasing
+// packages without adding one edge per reachable provider and consumer pair.
+func newBlockingGaps(edges stageEdges, consumers []string) *stageGaps {
+	return newStageGaps(edges, consumers, blockingGapKinds)
+}
+
 // gapKinds is what one ordering asks of a hop and which tasks it orders.
 type gapKinds struct {
 	// isCarriedThrough is the question the ordering asks of every hop: does
 	// it travel through a provider under this relation.
 	isCarriedThrough func(model.StageRelation) bool
-	// stage is the task of a changed provider the ordering waits for, and
-	// passThrough the kind of the gaps' nodes.
-	stage, passThrough taskKind
+	// providerTasks are the tasks of a changed provider the ordering waits
+	// for, and passThrough the kind of the gaps' nodes.
+	providerTasks func(*stagePlan) []task
+	passThrough   taskKind
 }
 
 var (
-	buildGapKinds   = gapKinds{model.StageRelation.IsBuildWaitingBuild, taskBuild, taskPassBuild}
-	publishGapKinds = gapKinds{isPublicationCarried, taskPublish, taskPassPublish}
+	buildGapKinds    = gapKinds{model.StageRelation.IsBuildWaitingBuild, (*stagePlan).built, taskPassBuild}
+	publishGapKinds  = gapKinds{isPublicationCarried, recordingTask, taskPassPublish}
+	blockingGapKinds = gapKinds{isPublicationCarried, recordingTask, taskPassBlock}
 )
+
+// recordingTask is the task of a provider the publication order waits for.
+func recordingTask(sp *stagePlan) []task { return []task{sp.recording} }
 
 // newStageGaps walks the graph from each consumer in name order, visiting
 // every gap once.
@@ -177,7 +189,7 @@ func (g *stageGaps) carryingGaps(name string) []string {
 }
 
 // passThroughOf is the gap's node in the task graph.
-func (g *stageGaps) passThroughOf(gap string) task { return task{gap, g.passThrough} }
+func (g *stageGaps) passThroughOf(gap string) task { return task{gap, g.passThrough, ""} }
 
 // addPassThroughs registers the gaps' nodes, which the scheduler needs before
 // any edge.
@@ -189,13 +201,15 @@ func (g *stageGaps) addPassThroughs(sched *graph.Scheduler[task]) {
 
 // addConsumerEdges states, in the consumer's turn, what the literal graph
 // states there: the providers' tasks it registers first, and the waits of the
-// consumer's task, here on the gaps it reads through.
-func (g *stageGaps) addConsumerEdges(sched *graph.Scheduler[task], consumer string, waiting task) {
+// consumer's tasks, here on the gaps it reads through.
+func (g *stageGaps) addConsumerEdges(sched *graph.Scheduler[task], consumer string, waiting []task) {
 	for _, provider := range g.firstReached[consumer] {
-		sched.Add(task{provider, g.stage})
+		for _, t := range g.providerTasks(g.plans[provider]) {
+			sched.Add(t)
+		}
 	}
 	for _, gap := range g.carryingGaps(consumer) {
-		sched.AddEdge(g.passThroughOf(gap), waiting)
+		addEdges(sched, g.passThroughOf(gap), waiting)
 	}
 }
 
@@ -209,7 +223,9 @@ func (g *stageGaps) addGapEdges(sched *graph.Scheduler[task]) {
 				continue
 			}
 			if g.changed[provider] {
-				sched.AddEdge(task{provider, g.stage}, g.passThroughOf(gap))
+				for _, t := range g.providerTasks(g.plans[provider]) {
+					sched.AddEdge(t, g.passThroughOf(gap))
+				}
 				continue
 			}
 			sched.AddEdge(g.passThroughOf(provider), g.passThroughOf(gap))
@@ -225,23 +241,256 @@ func (g *stageGaps) addGapEdges(sched *graph.Scheduler[task]) {
 func isPublicationCarried(model.StageRelation) bool { return true }
 
 // stageEdges is the dependency graph the orderings walk: every package's
-// providers, which of them release, and each provider's relation.
+// providers, which of them release, each provider's relation and each
+// releasing package's stage plan.
 type stageEdges struct {
 	providers map[string][]string
 	changed   map[string]bool
 	relations map[string]model.StageRelation
+	plans     map[string]*stagePlan
 }
 
 // newStageEdges indexes the plan's relations once, so a walk asks a map rather
 // than following a pointer chain per edge. A name the plan carries no release
 // for reads as the zero relation, which is the default one, and the walk goes
 // on through it.
-func newStageEdges(p *plan.Plan, changed map[string]bool) stageEdges {
+func newStageEdges(p *plan.Plan, changed map[string]bool, plans map[string]*stagePlan) stageEdges {
 	relations := make(map[string]model.StageRelation, len(p.Releases))
 	for name, rel := range p.Releases {
 		relations[name] = rel.Pkg.Space.ProviderRelation
 	}
-	return stageEdges{providers: p.Providers, changed: changed, relations: relations}
+	return stageEdges{providers: p.Providers, changed: changed, relations: relations, plans: plans}
+}
+
+// publicationStageEdges follows only the manifest kinds selected for
+// publication. Hand-constructed plans without this index keep their legacy
+// provider graph, which is the default relation in their tests and callers.
+func publicationStageEdges(p *plan.Plan, changed map[string]bool, plans map[string]*stagePlan) stageEdges {
+	edges := newStageEdges(p, changed, plans)
+	if p.PublishProviders != nil {
+		edges.providers = p.PublishProviders
+	}
+	return edges
+}
+
+func blockingStageEdges(p *plan.Plan, changed map[string]bool, plans map[string]*stagePlan) stageEdges {
+	edges := newStageEdges(p, changed, plans)
+	if p.BlockingProviders != nil {
+		edges.providers = p.BlockingProviders
+	}
+	edges.providers = condenseBlockingGaps(edges.providers, changed)
+	return edges
+}
+
+// condenseBlockingGaps keeps only paths that can carry a releasing provider's
+// outcome, and collapses cycles made solely of unreleasing packages. Such a
+// cycle is not itself an execution cycle: the packages perform no task, and
+// every consumer of the component needs the same changed providers behind it.
+// Cycles among releasing packages stay as task edges for E233 to diagnose.
+func condenseBlockingGaps(providers map[string][]string, changed map[string]bool) map[string][]string {
+	nodes := make(map[string]bool)
+	for consumer, direct := range providers {
+		if !changed[consumer] {
+			nodes[consumer] = true
+		}
+		for _, provider := range direct {
+			if !changed[provider] {
+				nodes[provider] = true
+			}
+		}
+	}
+	index := 0
+	indices := make(map[string]int, len(nodes))
+	low := make(map[string]int, len(nodes))
+	onStack := make(map[string]bool, len(nodes))
+	representative := make(map[string]string, len(nodes))
+	var stack []string
+	var visit func(string)
+	visit = func(name string) {
+		index++
+		indices[name], low[name] = index, index
+		stack = append(stack, name)
+		onStack[name] = true
+		for _, provider := range providers[name] {
+			if changed[provider] {
+				continue
+			}
+			if indices[provider] == 0 {
+				visit(provider)
+				low[name] = min(low[name], low[provider])
+			} else if onStack[provider] {
+				low[name] = min(low[name], indices[provider])
+			}
+		}
+		if low[name] != indices[name] {
+			return
+		}
+		var component []string
+		for {
+			last := len(stack) - 1
+			member := stack[last]
+			stack = stack[:last]
+			onStack[member] = false
+			component = append(component, member)
+			if member == name {
+				break
+			}
+		}
+		sort.Strings(component)
+		for _, member := range component {
+			representative[member] = component[0]
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(nodes)) {
+		if indices[name] == 0 {
+			visit(name)
+		}
+	}
+	canonical := func(name string) string {
+		if rep := representative[name]; rep != "" {
+			return rep
+		}
+		return name
+	}
+	condensed := make(map[string][]string, len(providers))
+	seen := make(map[string]map[string]bool)
+	for consumer, direct := range providers {
+		from := canonical(consumer)
+		if seen[from] == nil {
+			seen[from] = make(map[string]bool)
+		}
+		for _, provider := range direct {
+			to := canonical(provider)
+			if from == to || seen[from][to] {
+				continue
+			}
+			seen[from][to] = true
+			condensed[from] = append(condensed[from], to)
+		}
+	}
+	relevant := make(map[string]bool)
+	known := make(map[string]bool)
+	var carriesChanged func(string) bool
+	carriesChanged = func(name string) bool {
+		if changed[name] {
+			return true
+		}
+		if known[name] {
+			return relevant[name]
+		}
+		known[name] = true
+		for _, provider := range condensed[name] {
+			if carriesChanged(provider) {
+				relevant[name] = true
+			}
+		}
+		return relevant[name]
+	}
+	for consumer, direct := range condensed {
+		kept := direct[:0]
+		for _, provider := range direct {
+			if carriesChanged(provider) {
+				kept = append(kept, provider)
+			}
+		}
+		sort.Strings(kept)
+		condensed[consumer] = kept
+	}
+	return condensed
+}
+
+// blockingNeedsOutcomeEdges answers whether the publication graph already
+// orders every blocking edge. When it does, its pass-throughs carry the whole
+// blocking closure and a second set of nodes and edges would say nothing new.
+func blockingNeedsOutcomeEdges(blocking, publication stageEdges) bool {
+	for consumer, blocked := range blocking.providers {
+		ordered := make(map[string]bool, len(publication.providers[consumer]))
+		for _, provider := range publication.providers[consumer] {
+			ordered[provider] = true
+		}
+		for _, provider := range blocked {
+			if !ordered[provider] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// releaseOutcomeProviders lists the changed providers whose outcomes a
+// consumer's record must know even when publish.orderKinds omits their edges.
+// The blocking closure can withhold a record despite independent work. Other
+// causes need an outcome wait only when the release has no cause that already
+// survives every provider failure. A provider already ordered by publication
+// needs no second task edge.
+func releaseOutcomeProviders(name string, p *plan.Plan, changed map[string]bool) []string {
+	rel := p.Releases[name]
+	publish := p.PublishProviders
+	if publish == nil {
+		publish = p.Providers
+	}
+	seen := make(map[string]bool)
+	for _, provider := range publish[name] {
+		seen[provider] = true
+	}
+	var providers []string
+	add := func(provider string) {
+		if provider == name || !changed[provider] || seen[provider] {
+			return
+		}
+		seen[provider] = true
+		providers = append(providers, provider)
+	}
+	if !hasIndependentOutcomeCause(rel, changed) {
+		for _, provider := range rel.DueTo {
+			add(provider)
+		}
+		for _, update := range rel.Updates {
+			add(update.Name)
+		}
+		add(rel.ChannelFrom)
+	}
+	sort.Strings(providers)
+	return providers
+}
+
+// hasIndependentOutcomeCause is §19.3's own-cause test with every releasing
+// provider provisionally failed. A prior publication is already settled;
+// fresh work, an exact pin and a direct channel directive need no provider.
+func hasIndependentOutcomeCause(rel *plan.Release, changed map[string]bool) bool {
+	if rel.IsFreshOwnBump() || rel.Pinned ||
+		(rel.IsChannelChanged() && !changed[rel.ChannelFrom]) {
+		return true
+	}
+	for _, update := range rel.Updates {
+		if !changed[update.Name] {
+			return true
+		}
+	}
+	return false
+}
+
+// versionPickupProviders is the changed portion of a release's declared
+// version pickups. These providers must settle before a version frame that
+// consumes pickups starts, so the frame writes their actual published state
+// once rather than a speculative planned state it may have to undo later.
+func versionPickupProviders(rel *plan.Release, changed map[string]bool) []string {
+	space := rel.Pkg.Space
+	if len(rel.Updates) == 0 || (space.AutoVersion == nil && len(space.BeforeVersionScript) == 0 &&
+		len(space.VersionScript) == 0 && len(space.PostVersionScript) == 0) {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var providers []string
+	for _, update := range rel.Updates {
+		if !changed[update.Name] || update.Name == rel.Pkg.Name || seen[update.Name] {
+			continue
+		}
+		seen[update.Name] = true
+		providers = append(providers, update.Name)
+	}
+	sort.Strings(providers)
+	return providers
 }
 
 // stageReach lists the changed providers a consumer reaches over the

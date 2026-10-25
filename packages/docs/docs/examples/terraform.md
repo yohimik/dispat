@@ -1,6 +1,10 @@
 # Terraform before application deployment
 
-This repository releases its Google Cloud footprint as the `infra` package. Its build stage reconstructs Terraform's working state by importing a fixed set of known cloud resources, then saves an exact plan:
+This repository treats its Google Cloud infrastructure as the `infra` package. The build stage imports a known set of
+resources into temporary Terraform state and saves a plan. The publish stage applies that same plan, after which
+dependent applications can deploy.
+
+The build commands are:
 
 ```sh
 sh rebuild.sh
@@ -13,9 +17,14 @@ Its publish stage applies that saved plan in CI:
 terraform apply -input=false tfplan
 ```
 
-The commands are defined in [`infra/dispat.yaml`](https://github.com/yohimik/dispat/blob/main/infra/dispat.yaml); the address-to-resource import mapping is explicit in [`rebuild.sh`](https://github.com/yohimik/dispat/blob/main/infra/rebuild.sh). The temporary `terraform.tfstate` and `tfplan` are Terraform files, not dispat release state, and disappear with the runner. dispat creates no separate progress database, cache, or state bucket. After a successful apply, the package's `infra/v*` Git tag is its durable release record.
+The commands live in [`infra/dispat.yaml`](https://github.com/yohimik/dispat/blob/main/infra/dispat.yaml), and
+[`rebuild.sh`](https://github.com/yohimik/dispat/blob/main/infra/rebuild.sh) maps each Terraform address to its cloud
+resource. The temporary `terraform.tfstate` and `tfplan` disappear with the runner. dispat adds no progress database,
+cache or state bucket; after a successful apply, the package's `infra/v*` Git tag records the release.
 
-This bounded approach fits an existing, known footprint whose resources can all be imported deterministically. It does not make Terraform stateless. A team using a persistent remote backend should keep doing so; if that backend needs a bucket or table, bootstrap it before the stack that consumes it.
+Use this approach only when the resources are known and can all be imported reliably. Terraform still needs state
+during the run. If your team uses a persistent remote backend, keep it; create any bucket or table it needs before
+running the stack that consumes it.
 
 ## How the site follows the infrastructure
 
@@ -30,7 +39,8 @@ That is the scheduler rule to choose deliberately:
 
 ## An adapted infrastructure, backend, and frontend release
 
-The live demo turns the same pattern into three standalone packages. It is an illustrative configuration: supply the referenced scripts for your infrastructure and applications.
+The demo expands this pattern to infrastructure, a backend and a frontend. The configuration below shows their
+ordering; supply the referenced scripts for your own infrastructure and applications.
 
 ```yaml
 initials: {infra: 1.2.0, backend: 0.8.2, frontend: 2.1.0}
@@ -68,7 +78,8 @@ The verified fixture plans `infra` from `1.2.0` to `1.3.0`, applies its saved pl
 
 ### Building the applications beside the infrastructure
 
-Neither application's build reads anything `tf-plan` writes. They read the repository, and what they need from the infrastructure is that it is *applied* before they deploy onto it. That is the `none` relation, declared on the provider:
+If neither application build reads the Terraform plan, the builds do not need to wait for it. They only need the
+infrastructure applied before deployment. Set the provider's build relation to `none` to express that:
 
 ```yaml
 packages:
@@ -80,9 +91,16 @@ packages:
     flow: {build: tf-plan, publish: tf-apply}
 ```
 
-The three builds may now run at once, and both deploys still wait for the apply. Nothing else about the run changes: the plan, the versions and the publication order are the same, and a failed apply still stops a deployment that
-has nothing of its own to release. An application with a change of its own still deploys after a failed apply, as
-it does under the default; write `isBlocking: true` on `infra` to stop every deployment behind a failed apply. Use `none` only for a relation that is genuinely a deploy order. A consumer whose lock file or build resolves the provider from a registry needs `publish`; one that reads the provider's local build output needs `build`. dispat cannot check the claim, so it never infers `none` and never makes it a default.
+The three builds can now run at once. Both deployments still wait for the apply; their versions and publication order
+are unchanged.
+
+There is a failure-policy distinction to check: a failed apply stops a consumer releasing only through propagation,
+but a consumer with its own change can still deploy. Set `isBlocking: true` on `infra` if every dependent deployment
+must stop after a failed apply.
+
+Use `none` only when the dependency affects deployment order alone. A consumer that resolves its provider from a
+registry needs `publish`; one that reads local build output needs `build`. dispat cannot inspect what a build reads,
+so it never infers `none` or uses it as the default.
 
 The relation fixes what happens before what, not how long a run takes. Take the three packages with build and publish stages of 4 and 6 minutes for the infrastructure, 9 and 3 for the backend, and 12 and 2 for the frontend, with the frontend consuming both:
 

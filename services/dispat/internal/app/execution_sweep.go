@@ -99,7 +99,9 @@ func (a *App) openSweepDispatch(ctx context.Context, work *scriptWork, covered [
 	if err := coordinator.Preflight(ctx, work.resolvePlatforms(covered)); err != nil {
 		return coordinator, a.reportSweepRefusal(err)
 	}
-	a.openDispatch(ctx, coordinator, work.pl, work.runner)
+	if err := a.openDispatch(ctx, coordinator, work.pl, work.runner); err != nil {
+		return coordinator, a.reportSweepRefusal(err)
+	}
 	work.coordinator = coordinator
 	// Read from the entry configuration alone, as §28.10 requires: an imported
 	// or linked repository's own declaration is validated where its file is

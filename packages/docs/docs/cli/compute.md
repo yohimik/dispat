@@ -1,13 +1,13 @@
 # The compute command
 
-Run `dispat compute` to read what every package declares about itself and turn it into configuration. You do not have
-to transcribe the dependency graph or the starting versions by hand. The command derives two things:
+Run `dispat compute` when you are setting up dispat or checking whether the configuration still matches your files.
+It reads package manifests and suggests two kinds of configuration:
 
-- the **declared edges**, diffed against the **merged** declaration list. This list includes the top-level
-  `dependencies` key and every [package-declared list](../configuration/packages.md#package-dependencies) from a
-  `packages` entry or an in-folder config file.
-- the **baselines** a first release starts from. These become [`initials`](../configuration/versions.md#initials)
-  entries taken from the version the manifests declare.
+- **Dependencies:** compare the manifests with the combined dependency declarations, including the top-level
+  `dependencies` key and [package-owned lists](../configuration/packages.md#package-dependencies) in `packages`
+  entries or package config files.
+- **Starting versions:** suggest [`initials`](../configuration/versions.md#initials) entries for packages that already
+  have a version in their manifests but no usable release tag.
 
 By default, dispat only prints the suggestions. Pass `--write` to apply them, `--interactive` to confirm each one, or
 `--check` to gate CI. The edges need no git history, but the baselines read each package's release tags and only those
@@ -18,7 +18,9 @@ packages' own declarations. Detection still reads every package's manifests whic
 name index resolves a declared dependency onto a provider, so an edge onto a package outside the selection stays
 recognised rather than being proposed for removal.
 
-**What it reads.** The command scans every package folder for manifests. It reads the same twenty-one ecosystems
+## Manifests and dependency matching
+
+The command scans every package folder for manifests. It reads the same twenty-one ecosystems
 `dispat scanner` reads: npm (`package.json`), Go (`go.mod`), Cargo (`Cargo.toml`), Python (`pyproject.toml`,
 requirements files), Composer (`composer.json`), Maven (`pom.xml`), NuGet (`*.csproj` and the flat lists), pub
 (`pubspec.yaml`), Ruby (`Gemfile`, `*.gemspec`), CocoaPods (`Podfile`, `*.podspec`), Xcode (`project.pbxproj`), Apple
@@ -27,13 +29,15 @@ bundles (`Info.plist`), Android (`AndroidManifest.xml`), Gradle (`libs.versions.
 (`project.godot`, `plugin.cfg`, `export_presets.cfg`), Unreal (`*.uproject`, `*.uplugin`, `Config/Default*.ini`),
 Defold (`game.project`) and O3DE (`project.json`, `gem.json`).
 
-**How a dependency becomes an edge.** A declaration matches a workspace package by manifest name first, then by a
+A declared dependency matches a workspace package by manifest name first, then by a
 declared local path (`file:`, a relative `replace`, `path =`, a `ProjectReference`). Python names are PEP
 503-normalised, Maven names are `groupId:artifactId`, and Docker names are image repositories such as
 `ghcr.io/acme/api`. Two packages declaring the same manifest name is ambiguous, so dispat reports `W220` and derives no
 edges from that name.
 
-**What it suggests.** You will see four kinds of change. Each prints with the manifest line that motivates it:
+## Read the suggestions
+
+Each suggestion includes the manifest line that explains it:
 
 - `+ add` for a detected pair no source declares.
 - `~ kind` for a declared pair whose `kind` disagrees with the manifests.
@@ -48,16 +52,16 @@ A suggestion against a package-declared edge names its source (`[packages/core/d
 listing tells you exactly which file an applied change would touch. A
 [choreographed fleet](../choreographed-repositories.md) adds three more kinds, described below.
 
-**Baselines from manifest versions.** A repository adopting dispat already carries its versions in the manifests.
-Without an entry for them, dispat would start every package at `0.0.0` and release `0.0.1`, throwing away the history
-the files know about. The compute command offers the missing entries instead:
+## Keep existing versions when adopting dispat
+
+Without a release tag or an `initials` entry, a package starts at `0.0.0`. If your manifests already declare a released
+version, `compute` can suggest that version as the starting point:
 
 ```console
 + initial core 1.4.2  packages/core/package.json declares 1.4.2; no release tag yet
 ```
 
-dispat proposes an entry for a package only when all of the following conditions hold. The last point keeps an
-established repository quiet:
+A starting version is suggested only when all of these conditions hold:
 
 - Its manifests declare a version. Root manifests are asked first, and nested ones are asked only when no root manifest
   has an answer, matching the rank that decides manifest names.
@@ -76,18 +80,19 @@ included. To silence a suggestion for good, write the entry yourself, because `"
 other and compute will leave it alone. Without a git repository, dispat skips the baselines altogether with one warning
 and computes the edges as usual.
 
-**How changes are applied.** Nothing is written by default. The listing puts the edges first and the baselines after
-them, sorted by package name. Pass `--write` to apply every suggestion, or `--interactive` to answer `y`/`N` per
-suggestion on stdin.
+## Apply the suggestions
+
+The default command writes nothing. It lists dependency changes first, then starting versions, sorted by package
+name. Pass `--write` to apply all suggestions or `--interactive` to answer `y`/`N` for each one.
 
 dispat applies each change to the file that holds the declaration. An addition goes into the root config's top-level
 `dependencies` object under its consumer. If that consumer already declares its providers in a
 `packages.<name>.dependencies` entry or in its own in-folder file, the addition joins them there. A removal and a kind
 correction edit the declaring source in place, and a baseline goes into the root config's `initials` map.
 
-Every write is guarded. dispat writes everything one file receives in a single pass, so a run that changes two keys
-still leaves one backup. Every edited file is first copied to `<name>.backup`, and each write is atomic. The backup
-file is untracked, worth a `.gitignore` entry, and overwritten on every applying run.
+Changes to each file are combined into one atomic write. Before editing, dispat saves the original as
+`<name>.backup`. That backup is overwritten the next time the file is edited, so review it before another run. Add
+these backup files to `.gitignore` if you do not want them listed as untracked files.
 
 dispat refuses cases it cannot write safely. A TOML file is not rewritten in place, so `--write` prints a
 paste-ready block for it and fails. A key composed from both a [referenced file](../configuration/refs.md) *and* the
@@ -98,9 +103,10 @@ backup sits beside the file that changed. Reading through a filesystem symlink w
 alike, before writing a backup: replacing the link atomically would turn it into a regular file and leave its target
 stale. To apply the suggestions, replace the link with the file it points to, or edit that file by hand.
 
-**Fleet links.** In an [identity-linked fleet](../choreographed-repositories.md), the command also reads the fleet and
-proposes what joins it. The suggestions are independent of the package selection, because a fleet is either linked or
-it is not:
+## Connect repositories in a fleet
+
+In an [identity-linked fleet](../choreographed-repositories.md), `compute` also suggests missing links and roster
+entries. These suggestions concern the whole fleet and are not narrowed by package selection:
 
 ```console
 $ dispat compute
@@ -152,21 +158,21 @@ Beside the [global flags](./README.md#global-flags):
 
 ### `--package`, `-p`
 
-Narrow to the named packages for every package-selecting command (`release`, `status`, `run`, `preview`, `changelog`,
-`autoversion`, `autowriter`, `autoreplacer`, `commit`, `github`, `compute`). This flag is repeatable and
-comma-separated, matched case-insensitively, and accepts `*` globs (`-p '*'` is every package); see
-[Choosing the packages](./run.md#choosing-the-packages).
+Select named packages. Repeat the flag or separate names with commas. Names are case-insensitive and accept `*`
+globs; quote them so the shell does not expand them first. For example, `-p core,web` selects two packages and `-p '*'`
+selects every package. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--space`, `-s`
 
-Narrow to every package of the named spaces for the same eleven commands, using the same spellings. A standalone
-package belongs to no space; see [Choosing the packages](./run.md#choosing-the-packages).
+Select every package in the named spaces. This accepts the same lists and globs as `--package`. Standalone packages
+do not belong to a space, so `-s '*'` does not include them. See
+[Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--group`, `-g`
 
-Narrow to every package of the named [versioning groups](../reference/releasing/versioning.md) for the same eleven
-commands, using the same spellings. A group is a `versionGroups` entry or a space that versions as one, so it may cross
-spaces; see [Choosing the packages](./run.md#choosing-the-packages).
+Select every package in a named [versioning group](../reference/releasing/versioning.md), using the same lists and
+globs as `--package`. A group may be a `versionGroups` entry or a space that versions together, and may span several
+spaces. See [Choosing the packages](./run.md#choosing-the-packages).
 
 ### `--write`
 

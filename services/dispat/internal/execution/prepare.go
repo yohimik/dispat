@@ -241,6 +241,15 @@ func (c *Coordinator) prepareProvider(ctx context.Context, packageName string) (
 				Msg("building a provider this run does not release")
 			if lease.IsLocal {
 				node = c.Local.Name
+				if len(space.BuildOutputs) > 0 {
+					outcome, err := c.runIsolatedHere(ctx, localIsolatedFrame{
+						lease: lease, task: task, attempt: attempt, request: prepared.Request, here: prepared.Here})
+					if err == nil {
+						c.Log.Info().Str("run", c.Run).Str("task", task).Str("status", StatusSucceeded).
+							Msg("task finished")
+					}
+					return outcome, err
+				}
 				return c.runHere(ctx, lease, task, prepared.Request, prepared.Here)
 			}
 			node = lease.Node

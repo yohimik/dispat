@@ -122,9 +122,11 @@ func TestReplaceRuleOnlyFilterNarrowsProviders(t *testing.T) {
 }
 
 func TestReplaceRuleFailedProviderFallsBackToBaseline(t *testing.T) {
-	// The same rule the parsing strategy follows: a provider whose build
-	// failed never shipped its planned version, so the file must name the
-	// baseline. The find text is the baseline too, so nothing changes at all.
+	// The same rule the parsing strategy follows: a provider that failed
+	// never shipped its planned version, so the file must name the baseline.
+	// The find text is the baseline too, so nothing changes at all. The
+	// version stage waits on no provider (§19.2a), so the provider's outcome
+	// is staged by hand.
 	root := t.TempDir()
 	space := avReplaceSpace(model.ReplaceRule{
 		Files: []string{"deps.txt"},
@@ -135,11 +137,13 @@ func TestReplaceRuleFailedProviderFallsBackToBaseline(t *testing.T) {
 	seedFile(t, root, "web/deps.txt", "core@1.0.0\n")
 	p := avPlan(root, space, "core", "web")
 	p.Providers["web"] = []string{"core"}
+	fillUpdates(p)
 
-	r := &fakeRunner{fail: map[string]bool{"build " + filepath.Join(root, "core"): true}}
-	res := newExecutor(execSpec{Runner: r, Build: 1, Publish: 1}).Run(context.Background(), p)
-	require.Equal(t, StatusFailed, res["core"].Status)
-	require.Equal(t, StatusPublished, res["web"].Status, "%v", res["web"].Err)
+	r := &fakeRunner{}
+	run := newRunFor(p, map[string]bool{"core": true, "web": true}, r)
+	run.failedAfterBuild("core")
+	run.execute(context.Background(), task{"web", taskVersion, ""})
+	require.Equal(t, StatusPending, run.results["web"].Status, "%v", run.results["web"].Err)
 	assert.Equal(t, "core@1.0.0\n", fileText(t, root, "web/deps.txt"),
 		"failed provider: the baseline, not the planned version")
 }

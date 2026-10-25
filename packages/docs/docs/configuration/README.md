@@ -1,14 +1,15 @@
 # Configuration file reference
 
-One file at the monorepo root describes everything dispat does. Run `dispat init` to write a starter one, or follow
-[Getting started](../getting-started.md) to walk through a first configuration. This page documents the top level and
-is the one home of the resolution rules below. The CLI and packages pages link back here.
+Start with `dispat init` to create a configuration file, or follow [Getting started](../getting-started.md) for a
+working example. This page explains how dispat finds that file, which settings it accepts, and how overrides work.
 
-**The format** is inferred from the file extension. JSON, YAML, and TOML are the three formats dispat reads.
+## Finding and loading the file
 
-**Finding the file.** dispat uses the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, or `dispat.toml` that exists
-in the root when you omit the `--config` flag. These are the names [`dispat init`](../cli/init.md) writes under its
-formats. dispat ascends the parent directories when the root has none.
+dispat reads JSON, YAML, and TOML. The file extension determines the format.
+
+Without `--config`, dispat uses the first of `dispat.json`, `dispat.yaml`, `dispat.yml`, or `dispat.toml` that exists
+in the root. [`dispat init`](../cli/init.md) uses these names for its supported formats. If none exists there, dispat
+searches the parent directories.
 
 A file it finds higher up only ends the ascent when it declares `spaces` or `packages`. This happens because a package
 folder's own [in-folder config file](./packages.md#in-folder-configuration-files) is an override rather than a root.
@@ -28,21 +29,23 @@ Git worktree; an unlisted nested repository is an `E331` ownership error rather 
 key that looks like a real setting can also mean the file was written for a newer dispat than the one reading it, and
 `dispat self-update --check` reports whether a newer one exists.
 
-**Case.** Every key keeps the spelling you write. dispat matches ordinary configuration names case-insensitively. A
-script, space, package or versioning group is therefore named once, in the case you chose, and reached from anywhere by any spelling: a
-`--package` flag, a commit scope, a flow entry and a dependency edge all match without being asked to agree with the
-map. The name itself travels as written, so it is what a tag, an event and the `DISPAT_*` variables report.
+## Names and spelling
+
+dispat preserves the spelling of configuration keys but matches ordinary names without regard to case. For example,
+`--package core` can select a package named `Core`. Commit scopes, flow entries, dependencies, and versioning groups
+follow the same rule. Tags, events, and `DISPAT_*` variables use the original spelling.
 
 Repository identities are the exception. A `repositoryOverrides` key must exactly match its `.gitmodules` name,
 including case, because that external name identifies the owning Git history. A key matching no linked repository is
 refused whether it enables or disables one, so a misspelled exclusion cannot release the repository it was written to
 hold back.
 
-Two keys of one object that differ only by case are refused when the file loads, and the error names both. There is no
-lookup anywhere in dispat that could choose between them. The one exception is [`custom`](./custom.md), whose contents
-dispat never reads.
+Two keys in the same object cannot differ only by case. dispat rejects the file and names both keys. The exception is
+[`custom`](./custom.md), whose contents dispat does not interpret.
 
-**Splitting the file.** Any value may be a [`$ref`](./refs.md) naming another file. You can use this to spread a long
+## Finding the setting you need
+
+Any value may be a [`$ref`](./refs.md) naming another file. You can use this to spread a long
 configuration across several files. The referenced file's content becomes the value, and everything on this page holds
 for the result.
 
@@ -116,6 +119,7 @@ and
 | `autoSign`         | object                                     | no       | Default own-version policy of the sign stage, which writes each package's own version before the version stage and the build. A level that states one replaces it whole. See [`autoSign`](./autosign.md). |
 | `autoPropagate`    | object                                     | no       | `autoVersion` under the propagate stage's name, with the same options. One object may state only one of the two, and a level stating either replaces both. See [Two names for one block](./autoversion.md#two-names-for-one-block). |
 | `isBuildWaitingPublish` | bool or object                        | no       | Default for every space: what the consumers of a package wait for, and what a failed provider does to them. See [The provider relation](./spaces.md#the-provider-relation). The default is `false`.                                                                              |
+| `publish`          | object                                     | no       | Publication edge kinds, failure blocking kinds, and already-published adoption. See [Publication edge kinds](./spaces.md#publication-edge-kinds). The object overlays field by field through spaces and packages. |
 | `revertOnFail`     | bool                                       | no       | Default for every space. See [Space options](./spaces.md#space-options). The default is `false`.                                                                              |
 | `publish`          | object                                     | no       | Default publish policy for every space: what a release does when the destination already holds the version it is publishing. See [`publish`](./spaces.md#publish). |
 | `versioning`       | string                                     | no       | Default versioning mode, applied under each space's **own** group. Writing `fixed` here means every space versions its packages as one, not that all spaces share a version. Joining spaces into one group is what `versionGroups` is for. The default is `independent`.  |
@@ -130,8 +134,7 @@ and
 
 ### Log levels
 
-The levels are not just volume knobs. Each one answers a different question. The right level to reach for depends on
-what you want to find out:
+Use `info` to follow a release, `debug` to understand a planning decision, or `trace` to investigate a problem in detail:
 
 | Level | What it carries |
 |-------|-----------------|
@@ -151,11 +154,10 @@ You can write most of what configures a package at more than one level. The near
 
 **package → space → root**
 
-The root file says what everything does by default. A space narrows this for its packages. A package entry or a
-package's own config file settles it for one package.
+The root file supplies defaults. A space overrides them for its packages. A package entry or its own config file can
+override them again for that package.
 
-A level that says nothing inherits from above. This makes the boolean options three-state. Writing `false` in a space
-is not the same as leaving it out, and only writing `false` overrides a `true` above it.
+Omitting a setting inherits it. For a boolean, write `false` explicitly to turn off an inherited `true`.
 
 | Setting | root | space | package |
 |---------|------|-------|---------|
@@ -169,6 +171,7 @@ is not the same as leaving it out, and only writing `false` overrides a `true` a
 | `autoVersion`, `autoPropagate` | yes | yes | yes |
 | `autoSign` | yes | yes | yes |
 | `isBuildWaitingPublish` | yes | yes | yes |
+| `publish` | yes | yes | yes |
 | `revertOnFail` | yes | yes | yes |
 | `publish` | yes | yes | yes |
 | `versioning` | yes | yes | yes |
@@ -208,8 +211,8 @@ How a level combines with the one below it depends on the setting:
 Watch out for `concurrency`. At the root it is the **budget**, which is the number of slots a stage may use at once.
 The value `0` means the number of CPUs.
 
-On a space or a package it is a **weight**, which is the number of slots that package's task occupies. The value `0` or
-an absent key means 1. They are the two sides of the same number and they are not interchangeable.
+On a space or a package it is a **weight**: the number of slots that package's task occupies. The value `0` or an
+absent key means 1. Set the root budget for available resources and package weights for how much each task needs.
 
 There is a third number with a similar name and a different job. [`execution.concurrency`](./execution.md#concurrency)
 is one node's **capacity**: how many assigned tasks that machine runs at once, across runs. The root budget still

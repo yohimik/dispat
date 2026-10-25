@@ -33,6 +33,83 @@ func (f *outputFixture) install(t *testing.T, manifest *OutputManifest, into str
 	})
 }
 
+// TestInstallStageSetsMergesOnlyOrderedUpdates: a remote generate stage and
+// its successor may both export one root; the successor may replace a file it
+// consumed, while independent producers may only contribute nonconflicting
+// paths. The install replaces the root once after combining the sets.
+func TestInstallStageSetsMergesOnlyOrderedUpdates(t *testing.T) {
+	fixture := newOutputFixture(t, "packages/core")
+	capture := func(task string, inputs []ManifestInput) (*OutputManifest, []string) {
+		t.Helper()
+		manifest, err := CaptureOutputs(t.Context(), CaptureRequest{
+			Git: fixture.git, Dir: fixture.pkgDir, PackagePath: fixture.pkgPath,
+			Roots: []string{"dist"}, Limits: testLimits, IsAbsentRootEmpty: true,
+			Manifest: OutputManifest{Run: "run-1", PlanDigest: "digest", Task: task,
+				Attempt: 1, Generation: "generation", Node: "worker-a", Package: "core",
+				Version: "1.0.0", Inputs: inputs},
+		})
+		require.NoError(t, err)
+		objects, err := readOutputObjects(t.Context(), InstallRequest{Git: fixture.git, Manifest: manifest})
+		require.NoError(t, err)
+		return manifest, objects
+	}
+	fixture.write(t, "dist/generated.txt", "before", 0o644)
+	first, firstObjects := capture("core:generate", nil)
+	fixture.write(t, "dist/generated.txt", "after", 0o644)
+	fixture.write(t, "dist/extra.txt", "extra", 0o644)
+	second, secondObjects := capture("core:transform", []ManifestInput{{
+		Package: "core", OutputTree: first.OutputTree, Digest: first.Digest,
+	}})
+	into := t.TempDir()
+	staging := filepath.Join(t.TempDir(), "stage-sets")
+	requests := []InstallRequest{
+		{Git: fixture.git, Manifest: first, Objects: firstObjects, Dir: into, Staging: staging, Log: zerolog.Nop()},
+		{Git: fixture.git, Manifest: second, Objects: secondObjects, Dir: into, Staging: staging, Log: zerolog.Nop()},
+	}
+	require.NoError(t, InstallOutputSets(t.Context(), requests))
+	assert.Equal(t, "after", readInstalled(t, into, "dist/generated.txt"))
+	assert.Equal(t, "extra", readInstalled(t, into, "dist/extra.txt"))
+
+	second.Inputs = nil
+	require.ErrorContains(t, InstallOutputSets(t.Context(), requests), "incomparable")
+	assert.Equal(t, "after", readInstalled(t, into, "dist/generated.txt"),
+		"a refused combination leaves the earlier admitted installation intact")
+
+	require.NoError(t, os.Remove(filepath.Join(fixture.pkgDir, "dist", "generated.txt")))
+	deleted, deletedObjects := capture("core:transform-delete", []ManifestInput{{
+		Package: "core", OutputTree: first.OutputTree, Digest: first.Digest,
+	}})
+	deletedInto := t.TempDir()
+	requests[0].Dir, requests[1].Dir = deletedInto, deletedInto
+	requests[1].Manifest, requests[1].Objects = deleted, deletedObjects
+	require.NoError(t, InstallOutputSets(t.Context(), requests))
+	assert.NoFileExists(t, filepath.Join(deletedInto, "dist", "generated.txt"),
+		"the descendant's absent path deletes the ancestor's file")
+	assert.Equal(t, "extra", readInstalled(t, deletedInto, "dist/extra.txt"))
+}
+
+func TestInstallStageSetsReadsIndependentGitStores(t *testing.T) {
+	first := newOutputFixture(t, "packages/core")
+	second := newOutputFixture(t, "packages/core")
+	first.write(t, "dist/left.txt", "left", 0o644)
+	second.write(t, "dist/right.txt", "right", 0o644)
+	a, err := first.capture(t, []string{"dist"}, testLimits)
+	require.NoError(t, err)
+	b, err := second.capture(t, []string{"dist"}, testLimits)
+	require.NoError(t, err)
+	aObjects, err := readOutputObjects(t.Context(), InstallRequest{Git: first.git, Manifest: a})
+	require.NoError(t, err)
+	bObjects, err := readOutputObjects(t.Context(), InstallRequest{Git: second.git, Manifest: b})
+	require.NoError(t, err)
+	into, staging := t.TempDir(), filepath.Join(t.TempDir(), "mixed-stores")
+	require.NoError(t, InstallOutputSets(t.Context(), []InstallRequest{
+		{Git: first.git, Manifest: a, Objects: aObjects, Dir: into, Staging: staging, Log: zerolog.Nop()},
+		{Git: second.git, Manifest: b, Objects: bObjects, Dir: into, Staging: staging, Log: zerolog.Nop()},
+	}))
+	assert.Equal(t, "left", readInstalled(t, into, "dist/left.txt"))
+	assert.Equal(t, "right", readInstalled(t, into, "dist/right.txt"))
+}
+
 // Two package names that collapse to the same path word must never share a
 // staging directory. The files are installed simultaneously to exercise the
 // cleanup of one install while the other is still reading its bytes.

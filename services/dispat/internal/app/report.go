@@ -59,6 +59,9 @@ func (a *App) printDiagnostics(pl *plan.Plan) {
 			level = zerolog.ErrorLevel
 		}
 		ev := a.log.WithLevel(level).Str("code", d.Code)
+		if d.Code == plan.CodeStageWorkspaceCycle {
+			ev = ev.Str("category", "execution-configuration")
+		}
 		if d.Repository != "" {
 			ev = ev.Str("repository", d.Repository)
 		}
@@ -215,6 +218,9 @@ func (a *App) summarize(pl *plan.Plan, results map[string]*release.Result, took 
 		case release.StatusFailed:
 			failed++
 			ev = a.log.Error().Err(res.Err).Str("failedStage", res.FailedStage)
+			if res.FailedStageLabel != "" {
+				ev = ev.Str("failedStageLabel", res.FailedStageLabel)
+			}
 		case release.StatusCancelled:
 			// Interrupted, not failed: the next run owes it the same release.
 			cancelled++

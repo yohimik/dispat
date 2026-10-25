@@ -68,13 +68,13 @@ func fileFields(dst *File) fields {
 		"buildoutputs":          strs(&dst.BuildOutputs),
 		"buildplatforms":        strs(&dst.BuildPlatforms),
 		"runonly":               runOnly(&dst.RunOnly),
-		"flow":                  obj(&dst.Flow, spaceFlowFields),
+		"flow":                  flowObject(&dst.Flow),
 		"autoversion":           obj(&dst.AutoVersion, autoVersionFields),
 		"autopropagate":         obj(&dst.AutoPropagate, autoVersionFields),
 		"autosign":              obj(&dst.AutoSign, autoSignFields),
 		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
-		"revertonfail":          flagPtr(&dst.RevertOnFail),
 		"publish":               obj(&dst.Publish, publishFields),
+		"revertonfail":          flagPtr(&dst.RevertOnFail),
 		"versioning":            versioningMode(&dst.Versioning),
 		"src":                   str(&dst.Src),
 		"ignore":                strs(&dst.Ignore),
@@ -94,9 +94,9 @@ func spaceConfigFields(dst *SpaceConfig) fields {
 	return fields{
 		"path":                  pathList(&dst.Path),
 		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
-		"revertonfail":          flagPtr(&dst.RevertOnFail),
 		"publish":               obj(&dst.Publish, publishFields),
-		"flow":                  obj(&dst.Flow, spaceFlowFields),
+		"revertonfail":          flagPtr(&dst.RevertOnFail),
+		"flow":                  flowObject(&dst.Flow),
 		"tagformat":             str(&dst.TagFormat),
 		"aliastags":             objList(&dst.AliasTags, aliasTagFields),
 		"webhooks":              objList(&dst.Webhooks, webhookFields),
@@ -126,9 +126,9 @@ func spaceConfigFields(dst *SpaceConfig) fields {
 func spaceFileFields(dst *SpaceFile) fields {
 	return fields{
 		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
-		"revertonfail":          flagPtr(&dst.RevertOnFail),
 		"publish":               obj(&dst.Publish, publishFields),
-		"flow":                  obj(&dst.Flow, spaceFlowFields),
+		"revertonfail":          flagPtr(&dst.RevertOnFail),
+		"flow":                  flowObject(&dst.Flow),
 		"tagformat":             str(&dst.TagFormat),
 		"aliastags":             objList(&dst.AliasTags, aliasTagFields),
 		"webhooks":              objList(&dst.Webhooks, webhookFields),
@@ -168,9 +168,9 @@ func packageConfigFields(dst *PackageConfig) fields {
 		"src":                   str(&dst.Src),
 		"ignore":                strs(&dst.Ignore),
 		"isbuildwaitingpublish": stageRelation(&dst.IsBuildWaitingPublish),
-		"revertonfail":          flagPtr(&dst.RevertOnFail),
 		"publish":               obj(&dst.Publish, publishFields),
-		"flow":                  obj(&dst.Flow, spaceFlowFields),
+		"revertonfail":          flagPtr(&dst.RevertOnFail),
+		"flow":                  flowObject(&dst.Flow),
 		"tagformat":             str(&dst.TagFormat),
 		"aliastags":             objList(&dst.AliasTags, aliasTagFields),
 		"webhooks":              objList(&dst.Webhooks, webhookFields),
@@ -193,6 +193,21 @@ func packageConfigFields(dst *PackageConfig) fields {
 	}
 }
 
+func publishFields(dst *PublishConfig) fields {
+	return fields{
+		"orderkinds":     optionalStrs(&dst.OrderKinds),
+		"blockingkinds":  optionalStrs(&dst.BlockingKinds),
+		"adoptpublished": adoptPublished(&dst.AdoptPublished),
+	}
+}
+
+func adoptPublishedFields(dst *AdoptPublishedConfig) fields {
+	return fields{
+		"enabled": flagPtr(&dst.Enabled),
+		"verify":  strs(&dst.Verify),
+	}
+}
+
 // versionGroupFields is one entry of `versionGroups`: a declared group owns
 // its versioning rule and nothing else. The rule has three axes and one key,
 // because two of them are the default for almost every group; the setter is
@@ -200,54 +215,6 @@ func packageConfigFields(dst *PackageConfig) fields {
 func versionGroupFields(dst *VersionGroupConfig) fields {
 	return fields{
 		"versioning": versionGroupVersioning(dst),
-	}
-}
-
-// spaceFlowFields is a `flow` object: what runs at which stage, keyed by stage
-// or hook name with no decoration.
-func spaceFlowFields(dst *SpaceFlowConfig) fields {
-	return fields{
-		"build":           strs(&dst.Build),
-		"tests":           strs(&dst.Tests),
-		"publish":         strs(&dst.Publish),
-		"version":         strs(&dst.Version),
-		"propagate":       strs(&dst.Propagate),
-		"sign":            strs(&dst.Sign),
-		"login":           strs(&dst.Login),
-		"announce":        strs(&dst.Announce),
-		"beforeall":       strs(&dst.BeforeAll),
-		"beforesign":      strs(&dst.BeforeSign),
-		"postsign":        strs(&dst.PostSign),
-		"beforeversion":   strs(&dst.BeforeVersion),
-		"postversion":     strs(&dst.PostVersion),
-		"beforepropagate": strs(&dst.BeforePropagate),
-		"postpropagate":   strs(&dst.PostPropagate),
-		"beforebuild":     strs(&dst.BeforeBuild),
-		"postbuild":       strs(&dst.PostBuild),
-		"beforetests":     strs(&dst.BeforeTests),
-		"posttests":       strs(&dst.PostTests),
-		"beforepublish":   strs(&dst.BeforePublish),
-		"postpublish":     strs(&dst.PostPublish),
-		"beforeannounce":  strs(&dst.BeforeAnnounce),
-		"postannounce":    strs(&dst.PostAnnounce),
-		"onfail":          strs(&dst.OnFail),
-		"onskip":          strs(&dst.OnSkip),
-	}
-}
-
-// publishFields is a `publish` object: the publish stage's policy beyond its
-// commands.
-func publishFields(dst *PublishConfig) fields {
-	return fields{
-		"adoptpublished": adoptPublished(&dst.AdoptPublished),
-	}
-}
-
-// adoptPublishedFields is the object form of `publish.adoptPublished`.
-func adoptPublishedFields(dst *AdoptPublishedConfig) fields {
-	return fields{
-		"enabled": flagPtr(&dst.Enabled),
-		"verify":  strs(&dst.Verify),
 	}
 }
 

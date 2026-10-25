@@ -1,7 +1,7 @@
 # dependencies
 
-`dependencies` declares the consumer to provider relations the graph uses to order releases. Write it as an object
-keyed by the consumer. List what each consumer depends on:
+Use `dependencies` to tell dispat which packages depend on each other. These relationships determine release order
+and propagation. Each key names a consumer; its value lists the providers it uses:
 
 ```yaml
 dependencies:
@@ -9,8 +9,7 @@ dependencies:
   web: core            # one provider needs no array
 ```
 
-Name the provider as a bare string when you only need to declare the edge. Write it as an object when you need to
-configure more details:
+For a simple dependency, write the provider's name. Use an object when you need additional options:
 
 ```yaml
 dependencies:
@@ -23,6 +22,8 @@ dependencies:
     - provider: optional-runtime
       external: true
 ```
+
+## Dependency options
 
 Set `kind` to name the manifest field the edge stands for. This can be `dependencies` (the default), `devDependencies`,
 `peerDependencies` or `optionalDependencies`. Propagation follows or ignores the edge based on
@@ -40,6 +41,8 @@ reconciliation, `--consumers`, and script ordering all apply. `dispat compute` p
 states. The option skips only the missing-provider error; an invalid consumer, `kind`, or other field still fails while
 the provider is absent. A missing provider without `external: true` remains an error.
 
+## Validation
+
 The consumer must exist, and a provider must exist unless its object sets `external: true`. dispat matches names
 without regard to case, just like every other name-keyed part of the config. It rejects self-dependencies and cycles,
 and ignores duplicates.
@@ -52,8 +55,8 @@ runs.
 
 ## Where an edge can be written
 
-You can write the same object at three levels. dispat merges every declaration into one graph. Nothing overrides
-anything, so you declare an edge once wherever it reads best.
+You can declare dependencies at three levels. dispat combines all declarations into one graph; a more local declaration
+does not remove an inherited edge. Declare each relationship once, wherever it is easiest to maintain.
 
 Write it at the **root** for any edge at all. Write it on a **space** for the edges that belong next to it. Write it on
 a **package** in its [`packages` entry or in-folder file](./packages.md#package-dependencies) to list its own

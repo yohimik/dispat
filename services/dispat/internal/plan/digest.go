@@ -50,7 +50,7 @@ import (
 // has to notice. The tag makes that visible instead of silent: bump it in the
 // same commit as any change to the document, and a node running the older
 // code disagrees loudly rather than agreeing by accident.
-const DigestSchema = "dispat-plan-digest/3"
+const DigestSchema = "dispat-plan-digest/5"
 
 // DigestInput is what the digest needs and the plan does not carry: the head
 // snapshot for a single history, the planner inputs the plan was computed
@@ -119,12 +119,14 @@ func (p *Plan) CalculateDigest(input DigestInput) (string, error) {
 // serialization is an implementation detail of the digest and nothing outside
 // this file may come to depend on its shape.
 type digestDocument struct {
-	Schema    string                `json:"schema"`
-	Heads     []digestHead          `json:"heads"`
-	Packages  []digestPackage       `json:"packages"`
-	Edges     []digestEdge          `json:"edges"`
-	Providers []digestProviderEdges `json:"providers"`
-	Parsers   []digestParser        `json:"parsers"`
+	Schema            string                `json:"schema"`
+	Heads             []digestHead          `json:"heads"`
+	Packages          []digestPackage       `json:"packages"`
+	Edges             []digestEdge          `json:"edges"`
+	Providers         []digestProviderEdges `json:"providers"`
+	PublishProviders  []digestProviderEdges `json:"publishProviders"`
+	BlockingProviders []digestProviderEdges `json:"blockingProviders"`
+	Parsers           []digestParser        `json:"parsers"`
 
 	Diagnostics []digestDiagnostic `json:"diagnostics"`
 	Selection   digestSelection    `json:"selection"`
@@ -166,13 +168,15 @@ type digestSelection struct {
 // digest covers should be able to read it in one place.
 func (p *Plan) canonicalDigest(input DigestInput) digestDocument {
 	document := digestDocument{
-		Schema:      DigestSchema,
-		Heads:       canonicalHeads(p.RepositoryHeads, input.Heads),
-		Packages:    make([]digestPackage, 0, len(p.Order)),
-		Edges:       canonicalEdges(input.Options.Dependencies),
-		Providers:   canonicalProviders(p.Providers),
-		Parsers:     canonicalParsers(input.Options),
-		Diagnostics: canonicalDiagnostics(p.Diagnostics),
+		Schema:            DigestSchema,
+		Heads:             canonicalHeads(p.RepositoryHeads, input.Heads),
+		Packages:          make([]digestPackage, 0, len(p.Order)),
+		Edges:             canonicalEdges(input.Options.Dependencies),
+		Providers:         canonicalProviders(p.Providers),
+		PublishProviders:  canonicalProviders(p.PublishProviders),
+		BlockingProviders: canonicalProviders(p.BlockingProviders),
+		Parsers:           canonicalParsers(input.Options),
+		Diagnostics:       canonicalDiagnostics(p.Diagnostics),
 		Selection: digestSelection{
 			Packages:          sortedCopy(input.Selection.Packages),
 			Spaces:            sortedCopy(input.Selection.Spaces),

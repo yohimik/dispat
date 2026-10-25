@@ -107,11 +107,11 @@ func (a *App) runPreparedFrame(ctx context.Context, runner script.Runnerx,
 		log := a.log.With().Str("package", rel.Pkg.Name).Str("stage", part.stage).Logger()
 		log.Debug().Int("commands", len(part.commands)).
 			Msg("preparing the build outputs of a package this run does not release")
+		dir, activeRunner, env, outputPaths := release.ResolveLocalStageExecution(
+			ctx, request.Dir, runner, formatPreparedEnv(request, part.stage, carried))
 		exported, err := release.Sequence{
-			Runner: runner, Dir: request.Dir, Stage: part.stage, Commands: part.commands,
-			Env:      formatPreparedEnv(request, part.stage, carried),
-			Log:      log,
-			FailFast: true,
+			Runner: activeRunner, Dir: dir, Stage: part.stage, Commands: part.commands,
+			Env: env, OutputPaths: outputPaths, Log: log, FailFast: true,
 		}.RunCollectingOutputs(ctx, rel.Pkg.Name+":"+part.stage)
 		release.MergeOutputs(carried, exported)
 		if err != nil {

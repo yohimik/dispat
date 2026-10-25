@@ -12,11 +12,11 @@ when checking its syntax. A `rollback(scope)` message is not a rollback command 
 :::
 
 
-Write your commit messages in a strict superset of Conventional Commits that adds the monorepo dimension. This format
-tells dispat which packages a change releases, how far it reaches, and which channel it lands on.
+Use commit messages to tell dispat what changed, which packages should release, and whether their dependents should
+release too. The format extends Conventional Commits with package scopes, propagation, and prerelease channels.
 
-The [`pkg/ccme`](../go/ccme.md) package parses your messages. A message holds one or more **units** separated by a line
-of `---`. Each unit has its own header, body, and footers.
+The [`pkg/ccme`](../go/ccme.md) parser reads one or more **units** per message. A unit is a header with its own optional
+body and footers. Separate units with a line containing `---` when one commit needs to describe several changes.
 
 ```
 <type>[(<scope-set>)][<directives>][!]: <description>
@@ -68,7 +68,8 @@ redundant, and contradicting them causes an error.
 | `%%beta` | `Propagate-Channel: beta`    | The channel handed to the consumers reached below.          |
 | `++N`    | `Propagate-Channel-Depth: N` | How far the channel travels. Default `0`.                   |
 
-Both depths default to `0`, and neither bounds the other. A unit reaches nobody on either axis until you say so.
+Version-bump propagation and channel propagation have separate depths. Both default to `0`, so neither reaches
+dependent packages unless requested.
 
 ![The same commit planned twice: as feat(core) only core releases, and amended to feat(core)^^ the whole consumer closure joins the plan while utils, a provider, stays unchanged.](/demo-blast.gif)
 
@@ -108,10 +109,9 @@ release(core)%beta>stable%%beta>stable++*:
                             graduate core and everything still on beta behind it
 ```
 
-A `<from>><to>` transition matches against the *baseline* channel, making the directive idempotent. Packages that
-already graduated do not match, so the same directive works perfectly on the first run and the fifth. A bare `stable`
-arriving by propagation never graduates a dependant, because only a direct directive or a transition naming the train
-can do that.
+A `<from>><to>` transition applies only when the package's baseline channel matches `<from>`. Once the package has
+moved, rerunning the same directive does nothing. A propagated bare `stable` does not graduate a dependent package;
+use a direct directive or a transition that names its prerelease channel.
 
 A train converges exactly like stable releases do, meaning work a prerelease has already published cannot release
 again, and a re-run with no new commits finds nothing to do. dispat computes the version of the *next* prerelease and
@@ -133,9 +133,9 @@ already is, and a spent cancel is not re-reported either.
 | `cancel(<pkg>)`                            | Discard the package's unreleased metadata. Irreversible; never reaches a published tag.  |
 
 dispat rejects a pin if it fails to move the package forward, falls below what pending commits require, or raises the
-major version more than one above the computed version. A rejected pin has a unit-scoped blast radius: dispat reports
-the error (stopping the run under `commitErrors: "error"`), ignores the bad directive, and falls back to the computed
-version while leaving other valid units unaffected. A pin sets the exact version and channel, so
+major version more than one above the computed version. A rejected pin affects only its unit: dispat reports
+the error, ignores the directive, and uses the computed version. Other valid units are unaffected. With
+`commitErrors: "error"`, the error stops the release. A pin sets the exact version and channel, so
 `Release-As: 2.0.0-rc.0` enters the rc line and `Release-As: 2.0.0` graduates, but the commit type still declares the
 bump size.
 
@@ -143,6 +143,6 @@ A `cancel` is irreversible and only reaches backwards. It discards contributions
 landing afterwards accumulates normally. A `cancel` on a provider that has already published is a no-op and says so,
 because the version is public and the right target for stopping a pending catch-up is the **consumer**.
 
-A `cancel` names nothing and discards everything behind it. To act on one record rather than the whole ledger, `Edits`
-restates a named commit's record and `Deletes` discards it. Both directives reach only unreleased work and can be
+A `cancel` discards all earlier unreleased records for its scoped packages. To change a specific record, use `Edits`
+to replace it or `Deletes` to remove it. Both directives reach only unreleased work and can be
 undone by a later correction, as explained in [Correcting a release record](./corrections.md).

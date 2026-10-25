@@ -1,7 +1,7 @@
 # A Docker image chain
 
-You can version a Docker monorepo with dispat. Images that depend on images are released in order. A consumer's build
-waits for its base image to be published, and `FROM` lines follow the released versions.
+This example builds a base image, pushes it, then builds the app image that uses it. The second half of the guide
+shows two ways to pass the base image's new version to the app's Dockerfile.
 
 For a registry-backed chain, a consumer that pulls your base image needs it *pushed* before it can build. Set
 `isBuildWaitingPublish` on the provider space to express that boundary. Local BuildKit contexts can instead share
@@ -55,13 +55,11 @@ $ dispat
 12:04:05 INF done cancelled=0 failed=0 held=0 published=2 skipped=0 took=1.2s unchanged=0
 ```
 
-Look at the printed order. The `app` build starts only after the `docker push` of `base` finishes, because the flag
-tells the scheduler that consumers of providers in this space need them *published*, not merely built. Without the flag,
-the `app` build runs in parallel with the `base` push (the right setting for npm, where a consumer builds against the
-local workspace).
+The `app` build starts after `docker push` finishes for `base`. Without `isBuildWaitingPublish`, the app could build
+while the base is still being pushed. That earlier start is useful for consumers that use local workspace output,
+but this Docker build needs the image in the registry first.
 
-You still need to update the base image's version in the `app` Dockerfile. There are two ways to keep it current, and
-the first is usually the one you want.
+The ordering flag does not update the Dockerfile. Choose one of these ways to supply the base version:
 
 **Let dispat write the tag.** dispat reads Dockerfiles. The `FROM` line is a declared dependency like any other, and an
 `autoVersion` block reconciles it at the version stage:
@@ -102,11 +100,9 @@ dispat never rewrites an interpolated reference, so this one is left alone by de
 `$DISPAT_WORKSPACE_BASE_VERSION` when you want the version base carries whether or not it is releasing (see
 [the script environment](../reference/environment.md)).
 
-**A worked example, in this repository.** The [container images](https://github.com/yohimik/dispat/tree/main/docker)
-for dispat are four packages set up this way, and they go one step further. Each one's `docker-compose.yml` *is* its
-manifest, so the version lives there and the build and publish stages are `docker compose build` and
-`docker compose push`. The same file shows both halves of this section: a rewritten literal (`image:`) beside an
-interpolated reference dispat leaves alone (the channel tag).
+**Example from this repository.** dispat's four [container images](https://github.com/yohimik/dispat/tree/main/docker)
+use `docker-compose.yml` as their manifests, with `docker compose build` and `docker compose push` as their stages.
+Each file includes a literal `image:` value that dispat updates and an interpolated channel tag that it leaves alone.
 
 A deployment Compose file can identify a third-party image as its own version source. Inspect the scanner's detected
 identity before enabling automatic own-version rewriting; use explicit dependency edits or a dedicated manifest for

@@ -435,6 +435,11 @@ func TestAdoptionThroughTheNpmRegistryIntegrity(t *testing.T) {
 			bin := t.TempDir()
 			npm := "#!/bin/sh\n[ \"$1\" = view ] || exit 2\n[ \"$2\" = '@acme/core@0.1.0' ] || exit 2\nprintf '%s\\n' " +
 				harness.ShQuote(c.held) + "\n"
+			if c.held == "" {
+				npm = "#!/bin/sh\n[ \"$1\" = view ] || exit 2\n" +
+					"[ \"$2\" = '@acme/core@0.1.0' ] || exit 2\n" +
+					"echo 'npm ERR! code E404' >&2\nexit 1\n"
+			}
 			require.NoError(t, os.WriteFile(filepath.Join(bin, "npm"), []byte(npm), 0o755))
 
 			r := harness.New(t)

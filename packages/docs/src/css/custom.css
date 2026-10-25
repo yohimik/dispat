@@ -1,17 +1,13 @@
-/**
- * The global stylesheet. Infima, the framework the classic theme bundles, reads
- * one primary colour and six shades around it, so the palette below is the
- * whole of the site's colouring.
- *
- * Dark pine: a deep forest green at hue 147, anchored on #102c1b, which is the
- * light ramp's darkest shade. The light shades carry text on white, where the
- * base holds 10.8:1 and the weakest shade 7.5:1. Dark mode keeps a sage accent
- * (an accent as dark as the anchor would vanish there) and instead carries the
- * pine in its background: near-black tinted toward the anchor's hue. On it the
- * base holds 7.0:1, and the weakest of the fourteen shades, dark mode's
- * darkest on its surface colour, still holds 4.6:1.
- */
+/* Shared field-manual palette. Infima and page-level styles use the same
+   paper, ink and rules; typography comes from fonts already on the device. */
 :root {
+  --site-paper: #f6f4ed;
+  --site-ink: #282b25;
+  --site-muted: #62675c;
+  --site-rule: #d3d4c9;
+  --site-wash: #eeede5;
+  --site-serif: Georgia, "Times New Roman", serif;
+  --site-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
   --ifm-color-primary: #17462c;
   --ifm-color-primary-dark: #154028;
   --ifm-color-primary-darker: #143d26;
@@ -20,19 +16,54 @@
   --ifm-color-primary-lighter: #1b5334;
   --ifm-color-primary-lightest: #206040;
   --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(23, 70, 44, 0.1);
-  --ifm-font-family-base: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --ifm-heading-font-family: var(--ifm-font-family-base);
-  --ifm-font-family-monospace: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --ifm-background-color: var(--site-paper);
+  --ifm-background-surface-color: var(--site-paper);
+  --ifm-font-color-base: var(--site-ink);
+  --ifm-font-color-secondary: var(--site-muted);
+  --ifm-color-content: var(--site-ink);
+  --ifm-color-content-secondary: var(--site-muted);
+  --ifm-color-emphasis-100: var(--site-wash);
+  --ifm-color-emphasis-200: #e3e2d8;
+  --ifm-color-emphasis-300: var(--site-rule);
+  --ifm-color-emphasis-400: #b0b3a6;
+  --ifm-color-emphasis-500: #8b9082;
+  --ifm-color-emphasis-600: var(--site-muted);
+  --ifm-color-emphasis-700: #50564b;
+  --ifm-color-emphasis-800: #3d4338;
+  --ifm-color-emphasis-900: var(--site-ink);
+  --ifm-font-family-base: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ifm-heading-font-family: var(--site-serif);
+  --ifm-heading-font-weight: 400;
+  --ifm-font-family-monospace: var(--site-mono);
+  --ifm-navbar-background-color: var(--site-paper);
+  --ifm-navbar-link-color: var(--site-ink);
   --ifm-navbar-height: 4rem;
-  --ifm-global-radius: 0.65rem;
-  --ifm-container-width-xl: 1440px;
-  --ifm-toc-border-color: rgba(23, 70, 44, 0.15);
-  --doc-panel-border: rgba(23, 70, 44, 0.14);
-  --doc-panel-shadow: 0 16px 42px rgba(16, 44, 27, 0.07);
+  --ifm-global-radius: 2px;
+  --ifm-button-border-radius: 2px;
+  --ifm-code-border-radius: 2px;
+  --ifm-card-border-radius: 2px;
+  --ifm-container-width-xl: 1160px;
+  --ifm-toc-border-color: var(--site-rule);
+  --ifm-menu-color: var(--site-muted);
+  --ifm-menu-color-background-active: var(--site-wash);
+  --ifm-menu-color-background-hover: var(--site-wash);
+  --ifm-code-background: var(--site-wash);
+  --ifm-table-border-color: var(--site-rule);
+  --ifm-table-stripe-background: transparent;
+  --ifm-global-shadow-lw: none;
+  --ifm-global-shadow-md: none;
+  --ifm-global-shadow-tl: none;
+  --docusaurus-highlighted-code-line-bg: rgba(23, 70, 44, 0.1);
+  --doc-panel-border: var(--site-rule);
+  --doc-panel-shadow: none;
 }
 
-[data-theme='dark'] {
+:root[data-theme='dark'] {
+  --site-paper: #191b18;
+  --site-ink: #e8e7de;
+  --site-muted: #acae9f;
+  --site-rule: #3c4036;
+  --site-wash: #22251f;
   --ifm-color-primary: #6fae8a;
   --ifm-color-primary-dark: #5ea27a;
   --ifm-color-primary-darker: #55996f;
@@ -40,12 +71,24 @@
   --ifm-color-primary-light: #79b592;
   --ifm-color-primary-lighter: #84bc9b;
   --ifm-color-primary-lightest: #8fc3a5;
-  --ifm-background-color: #101713;
-  --ifm-background-surface-color: #151d18;
+  --ifm-background-color: var(--site-paper);
+  --ifm-background-surface-color: var(--site-paper);
+  --ifm-font-color-base: var(--site-ink);
+  --ifm-font-color-secondary: var(--site-muted);
+  --ifm-color-content: var(--site-ink);
+  --ifm-color-content-secondary: var(--site-muted);
+  --ifm-color-emphasis-100: var(--site-wash);
+  --ifm-color-emphasis-200: #30342c;
+  --ifm-color-emphasis-300: var(--site-rule);
+  --ifm-color-emphasis-400: #606657;
+  --ifm-color-emphasis-500: #8c9282;
+  --ifm-color-emphasis-600: var(--site-muted);
+  --ifm-color-emphasis-700: #c1c3b6;
+  --ifm-color-emphasis-800: #d5d6cb;
+  --ifm-color-emphasis-900: var(--site-ink);
   --docusaurus-highlighted-code-line-bg: rgba(111, 174, 138, 0.12);
-  --ifm-toc-border-color: rgba(143, 195, 165, 0.2);
-  --doc-panel-border: rgba(143, 195, 165, 0.15);
-  --doc-panel-shadow: 0 18px 48px rgba(0, 0, 0, 0.24);
+  --ifm-toc-border-color: var(--site-rule);
+  --doc-panel-border: var(--site-rule);
 }
 
 html {
@@ -71,12 +114,11 @@ body {
 
 .navbar {
   border-bottom: 1px solid var(--doc-panel-border);
-  box-shadow: 0 1px 12px rgba(16, 44, 27, 0.04);
-  backdrop-filter: blur(16px);
+  box-shadow: none;
 }
 
 .navbar__inner {
-  max-width: 1440px;
+  max-width: 1160px;
   margin: 0 auto;
 }
 
@@ -112,8 +154,9 @@ body {
   -webkit-user-select: none;
   user-select: none;
   gap: 0.35rem;
-  font-weight: 760;
-  letter-spacing: -0.02em;
+  font-family: var(--site-mono);
+  font-weight: 600;
+  letter-spacing: -0.045em;
 }
 
 /* The mark is square, and its box is sized before the image arrives: Infima
@@ -135,7 +178,7 @@ body {
 .navbar__link,
 .menu__link,
 .table-of-contents__link {
-  border-radius: 0.45rem;
+  border-radius: 2px;
 }
 
 .navbar__link:hover,
@@ -155,6 +198,7 @@ body {
 .menu__link {
   margin: 0.08rem 0;
   padding: 0.48rem 0.65rem;
+  border-left: 2px solid transparent;
   line-height: 1.35;
 }
 
@@ -166,7 +210,7 @@ body {
 }
 
 .theme-doc-sidebar-menu .menu__list-item-collapsible {
-  border-radius: 0.35rem;
+  border-radius: 2px;
 }
 
 .theme-doc-sidebar-menu .menu__list-item-collapsible:hover > .menu__link,
@@ -178,7 +222,7 @@ body {
   flex: 0 0 2.75rem;
   width: 2.75rem;
   min-height: 2.75rem;
-  border-radius: 0.35rem;
+  border-radius: 2px;
 }
 
 .theme-doc-sidebar-menu .menu__caret:hover,
@@ -192,19 +236,19 @@ body {
 }
 
 .menu__link--active:not(.menu__link--sublist) {
-  box-shadow: inset 3px 0 var(--ifm-color-primary);
+  border-left-color: var(--ifm-color-primary);
   font-weight: 650;
 }
 
 .theme-doc-markdown {
-  font-size: 1.02rem;
+  font-size: 1rem;
 }
 
-.theme-doc-markdown > h1:first-child {
+.theme-doc-markdown h1 {
   margin-bottom: 1.4rem;
   font-size: clamp(2.2rem, 4vw, 3.15rem);
   line-height: 1.08;
-  letter-spacing: -0.045em;
+  letter-spacing: -0.035em;
 }
 
 .theme-doc-markdown h2 {
@@ -232,7 +276,7 @@ body {
 .theme-doc-markdown blockquote {
   padding: 1rem 1.2rem;
   border: 1px solid var(--doc-panel-border);
-  border-left: 4px solid var(--ifm-color-primary);
+  border-left: 2px solid var(--ifm-color-primary);
   border-radius: 0 var(--ifm-global-radius) var(--ifm-global-radius) 0;
   background: var(--ifm-color-emphasis-100);
 }
@@ -240,8 +284,8 @@ body {
 .theme-code-block,
 .theme-doc-markdown pre {
   border: 1px solid var(--doc-panel-border);
-  border-radius: 0.8rem;
-  box-shadow: var(--doc-panel-shadow);
+  border-radius: 2px;
+  box-shadow: none;
 }
 
 /* Flex and grid items otherwise inherit the intrinsic width of a fenced
@@ -266,7 +310,7 @@ body {
   margin: 1.5rem 0 2rem;
   border-collapse: separate;
   border: 1px solid var(--doc-panel-border);
-  border-radius: 0.75rem;
+  border-radius: 2px;
   border-spacing: 0;
   overflow: hidden;
   font-size: 0.92rem;
@@ -274,9 +318,9 @@ body {
 
 .theme-doc-markdown th {
   background: var(--ifm-color-emphasis-100);
-  font-size: 0.78rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-family: var(--site-mono);
+  font-size: 0.8rem;
+  font-weight: 500;
 }
 
 .theme-doc-markdown tr:nth-child(even) td {
@@ -296,20 +340,18 @@ body {
 
 .pagination-nav__link {
   border-color: var(--doc-panel-border);
-  border-radius: 0.8rem;
-  transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+  border-radius: 2px;
+  transition: border-color 150ms ease;
 }
 
 .pagination-nav__link:hover {
-  transform: translateY(-2px);
   border-color: var(--ifm-color-primary);
-  box-shadow: var(--doc-panel-shadow);
 }
 
 .dropdown__menu {
   border: 1px solid var(--doc-panel-border);
-  border-radius: 0.75rem;
-  box-shadow: var(--doc-panel-shadow);
+  border-radius: 2px;
+  box-shadow: none;
 }
 
 @media (max-width: 996px) {
@@ -320,7 +362,7 @@ body {
 }
 
 @media (max-width: 576px) {
-  .theme-doc-markdown > h1:first-child { font-size: 2.15rem; }
+  .theme-doc-markdown h1 { font-size: 2.15rem; }
   .theme-doc-markdown h2 { font-size: 1.52rem; }
   .theme-doc-markdown pre { margin-left: -0.5rem; margin-right: -0.5rem; }
   .pagination-nav { grid-template-columns: 1fr; }
@@ -339,6 +381,31 @@ body {
  */
 :not(pre) > code {
   overflow-wrap: anywhere;
+}
+
+/* Project links finish the page on the same paper as the text. */
+.footer,
+.footer--dark {
+  --ifm-footer-background-color: var(--site-paper);
+  --ifm-footer-color: var(--site-muted);
+  --ifm-footer-title-color: var(--site-ink);
+  --ifm-footer-link-color: var(--site-muted);
+  --ifm-footer-link-hover-color: var(--ifm-color-primary);
+  border-top: 1px solid var(--site-rule);
+  padding: 2.5rem var(--ifm-spacing-horizontal) 1.75rem;
+  font-size: 0.86rem;
+}
+
+.footer__title {
+  font-family: var(--site-mono);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.footer__copyright {
+  margin-top: 2rem;
+  text-align: left;
+  font-size: 0.72rem;
 }
 
 /*

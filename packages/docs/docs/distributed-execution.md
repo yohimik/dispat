@@ -1,24 +1,25 @@
 # Distributed execution
 
-A release can run its build and publish commands on other machines while one machine keeps the release locks, the
-plan and the records. The machine a release is started on is the orchestrator. The machines that execute the work it
-assigns are worker nodes. Everything travels over Git, through the repository being released: an orchestrator pushes
-an assignment to a coordination branch on the remote it releases to, the worker answers on the same branch, and
-verified build outputs move between dependent tasks the same way.
+Use workers to run parts of a release on other machines. The machine where you start the release is the
+**orchestrator**: it keeps the locks, computes the plan and writes the release records. **Workers** run assigned
+commands and return their results. Assignments, responses and build outputs travel over temporary Git branches,
+usually in the repository being released.
 
-With no `execution` object, or with an empty `workers` list, a release plans and executes exactly as it does on one
-machine. Distributed execution is an addition to a configuration rather than a different release engine. The same
-pool also runs [`dispat run` sweeps](#running-scripts-on-workers), which release nothing.
+To try it, [configure the nodes](#configuring-the-nodes), [start a worker](#starting-a-worker), then choose
+[where stages run](#where-a-stage-runs) and [which build outputs travel](#build-outputs-as-inputs). Read the
+[security section](#security-what-distributed-execution-exposes-and-how-to-contain-it) before sharing a pool or using
+a public repository as its mailbox. For a stalled or uncertain run, go to [recovery](#locks-failure-and-recovery).
+
+With no `execution` object or an empty `workers` list, releases still run on one machine. The same worker pool can
+also run [`dispat run` scripts](#running-scripts-on-workers) without releasing anything.
 
 ## When to choose it
 
-Choose it when the work of a release is larger than one machine is comfortable with and the packages can be built
-independently: a workspace whose builds take tens of minutes, a graph wide enough that several packages are ready at
-the same moment, or a release that needs artefacts for platforms this machine cannot build.
+Workers are useful when several long builds can run independently, or when a release needs platforms the current
+machine cannot build for. Look at the dependency graph: more workers help only while several tasks are ready at once.
 
-Leave it out when the work is small. Every delegated task pushes a prepared source state to a mailbox, materializes a
-checkout on the node, and pushes its outputs back. For a build that takes seconds, that transfer and setup is the
-larger half of the job.
+For short builds, start with one machine. Each delegated task transfers a source snapshot, prepares a checkout and
+sends outputs back. That setup can take longer than the build itself.
 
 |                                          | One machine                                     | Orchestrator and workers                                  |
 |------------------------------------------|-------------------------------------------------|-----------------------------------------------------------|
@@ -30,32 +31,32 @@ larger half of the job.
 | What a lost machine costs                | the run                                         | the packages that node was working on                     |
 | Extra failure to read                    | none                                            | a publication whose outcome the run cannot establish      |
 
-dispat makes no performance claim for distributed execution. What it distributes is stated below; how much faster a
-particular release becomes depends on the graph, the machines and the transfer, and no measured comparison is
-published yet.
+There is no published performance comparison yet. Measure your own graph, machines and transfer time before assuming
+that a larger pool will shorten the release.
 
 ## Orchestrator and worker roles
 
-The two roles are the same binary in different postures, and the difference is what each is allowed to decide.
+Both roles use the same binary, with different authority:
 
-**The orchestrator owns the release.** It acquires the release locks, fixes the planning input and computes the plan
-once, names that plan with a digest, probes every configured worker, assigns tasks, admits or refuses the outputs
-that come back, authorizes every publication, writes the tags, records and release commits, and runs the run-level
-hooks. It is also a node of its own pool: a frame it cannot or should not delegate runs here, under the same rules.
+**The orchestrator owns the release.** It locks the repositories, captures the planning input and computes one plan
+with a digest. It probes workers, assigns tasks, verifies returned outputs, authorizes publication, writes release
+records and runs the run-level hooks. It can also execute tasks locally when they are not delegated.
 
-**A worker executes what it was assigned and initiates nothing.** It polls the mailbox named in its own
-configuration, claims work addressed to it when it has a free slot, materializes the exact source state the
-assignment names, runs the frame, and reports the result. A node with `execution.role: worker` refuses to start a
-release with `E226`. So does any process running under a task's authority, whatever its own role says, which is what
-stops a build script from starting a second release of the repository it is building.
+**A worker executes assignments.** It polls its mailbox, claims work when a slot is free, checks out the exact assigned
+source state, runs the commands and reports the result. A stage and its surrounding hooks form a **frame**, which
+always runs together on one node.
+
+A worker cannot start a release: `execution.role: worker` refuses it with `E226`. Processes running under a task's
+authority are also refused, regardless of their configured role. A build script therefore cannot start a second
+release of the repository it is building.
 
 A node whose configuration says `role: orchestrator` may also run `dispat worker`. While it serves a task it has that
 task's authority and never consults its own worker list.
 
 ## Configuring the nodes
 
-Two objects configure a distributed release: the orchestrator's `execution` object and each worker's own. The
-repository being released is the mailbox both reach, so a link needs no more than the node's name.
+Configure `execution` on the orchestrator and on each worker. By default, they exchange messages through the release
+repository, so the orchestrator's worker list needs only the node names:
 
 ```yaml title="dispat.yaml on the orchestrator"
 execution:
@@ -80,31 +81,28 @@ execution:
   concurrency: 2
 ```
 
-[`execution`](./configuration/execution.md) documents every key, its default and its validation. Three properties of
-the object are worth knowing before the keys:
+The [`execution` reference](./configuration/execution.md) lists every key and default. For this setup, check three
+details:
 
-- **It is a node-startup setting.** The key exists in the root file only, and it is read from the configuration a run
-  is started with. A space, a package, a package folder's file, an imported configuration and a linked peer never
-  state it, and a peer that carries one of its own is legal and ignored, with one debug line saying so. A checkout
-  that travels to another machine must not be able to tell that machine what role it plays.
+- **Only the startup root selects execution policy.** Space, package, package-folder and imported settings do not
+  supply it. A linked peer may have its own `execution`, but the combined run ignores it and logs that at debug level.
+  A transferred checkout cannot choose the receiving machine's role.
 - **A node's name is its identity in the transport.** The name is written into the branches addressed to it, and the
   worker's `execution.name` has to be the `name` of the orchestrator's link to it.
-- **An endpoint is credential free.** An `https`, `ssh` or `file` URL, an absolute path, or the scp-like `host:path`
-  form. `http` and `git` are refused because they authenticate nobody, and user information is refused because the
-  configuration file is committed. Git's own credentials on each machine are what reach the mailbox. A link that
-  states no endpoint reaches the push URL of the remote the release takes its lock on, which is held to the same
-  rules, because an endpoint never carries a secret (CCME §28.2): a push URL carrying a token is refused with `E225`
-  before any lock, so keep that credential in a credential helper or in `http.extraheader`.
+- **Endpoints contain no credentials.** Supported forms are `https`, `ssh` and `file` URLs, absolute paths and
+  scp-like `host:path`. Unauthenticated `http` and `git`, and URLs carrying user information, are refused. Use Git's
+  credential helper or `http.extraheader` on each machine instead. The same rule applies when an omitted endpoint
+  resolves to the release remote's push URL: a token in that URL fails with `E225` before locking (CCME §28.2).
 
 ### The mailbox repository
 
-The mailbox is the repository being released. A worker link with no `endpoint` reaches the remote the release takes
-its lock on, at the push URL Git resolves for it: `commit.remote`, or `origin` when that names none, and in a composed
-workspace the entry repository's. Every worker names that same repository as its own `endpoint`, or, started in a
-checkout of the repository, states none and reads the same remote of that checkout. The
-coordination branches live on it beside the release branches, under `refs/heads/dispat-worker-*`, and a run deletes
-the ones it created when it ends. A remote that already holds the repository's objects receives only what a task
-changed.
+The mailbox is a Git repository used to exchange task messages. Without an explicit `endpoint`, dispat uses the push
+URL of `commit.remote`, falling back to `origin`. In a composed workspace, this is the entry repository's remote.
+Workers either name that repository as their endpoint or start in its checkout and use the same remote.
+
+Coordination branches live under `refs/heads/dispat-worker-*`, beside the release branches. A run deletes its own
+branches when it ends. Using the source repository avoids retransferring objects the remote already has; it receives
+only the task's changes.
 
 Using the repository itself has consequences worth knowing before the first run:
 
@@ -123,17 +121,16 @@ Using the repository itself has consequences worth knowing before the first run:
 - **A composed workspace uses the entry repository.** The histories of the peers a task reads are pushed to the entry
   repository's remote, because that is where the node reads them from.
 
-A link that states an `endpoint` reaches that repository instead, for coordination that has to live somewhere else
-than the repository being released. Several links may share one endpoint, and a worker names the same one as its own.
-When two nodes read different mailboxes, the orchestrator relays a result from one to the other, so a node is never
-told about a machine it cannot reach, and an endpoint that holds none of the repository's objects receives the source's
-reachable history on its first task ([what to watch for](#what-to-watch-for) has the cost).
+Set `endpoint` to use a different mailbox. Several workers can share it, but each must name the same mailbox as its
+orchestrator link. If workers use different mailboxes, the orchestrator relays results between them.
+
+A separate mailbox initially has none of the source objects, so its first task transfers the source's reachable
+history. See [transfer costs](#what-to-watch-for) before choosing that layout for a large repository.
 
 ### The signing secret
 
-Every message a mailbox carries is signed with one shared secret, named by `execution.secretEnv` and read from the
-environment of each node. The name goes in the configuration file and the secret never does, exactly as a webhook's
-signing secret is named rather than written.
+Every message is signed with a shared secret. `execution.secretEnv` names the environment variable each node reads.
+Put only that variable name in the configuration; supply the secret through the node's environment.
 
 The secret is symmetric. Every node holding it can sign any message, so it is the trust boundary of the whole pool:
 see [the security section](#security-what-distributed-execution-exposes-and-how-to-contain-it) before sharing one
@@ -149,22 +146,107 @@ export DISPAT_EXECUTION_SECRET="$(cat /run/secrets/dispat-execution)"
 dispat worker --config dispat.worker.yaml --state-dir /var/lib/dispat/worker --idle-timeout 900
 ```
 
-Nothing connects to a worker. It polls its mailbox over Git, every five seconds when it is idle and almost at once
-after it has answered something, so it runs behind NAT and on hosted CI runners with no inbound network of any kind.
-With its `endpoint` stated it needs no checkout of the repository beforehand, and the folder it starts in does not have
-to be a Git repository: the assignment carries the commands, the environment names and the exact source state, and the
-node materializes a checkout of its own. Started in a checkout of the repository being released, it needs no
-`endpoint` at all: it reads its work from that checkout's release remote, as a link with no endpoint reaches it, and
-is refused with `E225` when the folder is not a repository or that remote's push URL cannot be a mailbox.
+Workers need outbound Git access, with no inbound connection. They poll every five seconds while idle and almost
+immediately after answering work, so they can run behind NAT or on hosted CI runners.
 
-`--idle-timeout` ends the process with exit code `0` after that many seconds with nothing claimed and nothing in
-flight, counted from its last activity, which is how a node started for one release ends by itself. `SIGINT` and
-`SIGTERM` stop it as soon as the work it has claimed is finished, also with exit code `0`.
+With an explicit `endpoint`, a worker needs no existing source checkout or Git repository in its startup folder. The
+assignment supplies commands, environment names and exact source states, and the worker creates its own checkout.
+Without an endpoint, start it in the release repository's checkout. Otherwise, or if that checkout's push URL cannot
+serve as a mailbox, startup fails with `E225`.
+
+`--idle-timeout` exits with code `0` after the configured seconds with no claimed or in-flight work, measured from
+the last activity. Use it for workers started for one release. `SIGINT` and `SIGTERM` wait for claimed work to finish,
+then also exit with code `0`.
+
+## Where a stage runs
+
+Use `runOnly` to choose where a package's build and publish stages can run. Supply one value for both or a
+`[build, publish]` pair:
+
+```yaml
+runOnly: orchestrator             # build and publish stay on the orchestrator
+
+packages:
+  ui:
+    runOnly: [both, orchestrator] # build anywhere there is room, publish here
+  signer:
+    runOnly: orchestrator         # this build signs its artefact
+  linux-image:
+    runOnly: [worker, both]       # this build must not run on the orchestrator
+```
+
+| Value          | What it means                                                                                     |
+|----------------|---------------------------------------------------------------------------------------------------|
+| `both`         | the default: a build goes to a worker when one has room and to the orchestrator when none has; a publish stays on the orchestrator |
+| `worker`       | the stage may only be delegated; a run with no worker links is refused with `E225` before any stage runs |
+| `orchestrator` | the stage may only run on the machine the release was started on                                   |
+
+The setting follows the same override order as `buildOutputs` and `buildPlatforms`: root, space, space-folder file,
+package, then package-folder file. An override replaces the whole pair; a single value sets both stages.
+
+Placement follows these rules:
+
+- **A frame runs as one unit on one node.** There is one placement question per frame, not one per command.
+- **The orchestrator is a node of last resort under `both`.** It joins its own pool with capacity
+  `execution.concurrency` and is chosen only when no worker has room. A build it keeps still captures and admits its
+  declared outputs through the same path a worker's result takes.
+- **A publish is delegated only by an explicit `worker`.** `both` keeps publication here.
+- **A login pins publication here.** A space with `flow.login` publishes on the orchestrator whatever the key says,
+  and `publish: worker` beside a login is refused when the configuration loads.
+- **Pinning costs parallelism.** A frame pinned to the orchestrator waits for one of this machine's own slots, and a
+  frame pinned to a worker waits for a worker even when this machine is free. A package pinned to the orchestrator is
+  not held to the workers' platforms at preflight, which is what lets one machine sign what a pool of other
+  architectures builds.
+
+`buildPlatforms` is the other placement filter: the `os/arch` values in Go's spelling that a package's build may run
+on, empty meaning any node. A preparation obeys the provider's own `runOnly` and `buildPlatforms`, not its
+consumer's.
+
+### The tests stage
+
+Configure [`flow.tests`](./configuration/spaces.md#stages-and-hooks) or one of its hooks to run a tests frame after
+build and before publish. Tests check the build's output and use build placement rules:
+
+- **It reads the build's `runOnly` value** with the build's meaning, and the same `buildPlatforms`. A space's login
+  does not pin it, because a login is the publication's affair.
+- **The node that built the package is asked for first.** Its cache already holds the objects the frame reads, and a
+  busy one is passed over rather than waited for.
+- **The package's own admitted outputs are installed first** on a node that did not build them, together with the
+  provider outputs its build was given, exactly as for a delegated publication. A frame placed on the orchestrator
+  installs nothing: the outputs are already in its checkout. A package that declares no `buildOutputs` hands a node
+  its sources alone, so declare what the tests read.
+- **It produces no output set.** The admitted set stays the one the build reported. What its scripts export travels
+  back in the signed result and reaches the publish, as a build's exports do.
+
+Tests run as a separate `<package>:tests` task and share the build budget. The assignment kind is `stage`; its `stage`
+field supplies `DISPAT_STAGE` and the hook names. Build and publish assignments keep their existing `build` and
+`publish` kinds.
+
+Run the same dispat version on all nodes. An older worker that does not understand the generic `stage` kind leaves the
+task unclaimed; it is placed again and eventually fails the package if no node claims it.
+
+### Stages of your own
+
+A [stage the flow defines](./configuration/spaces.md#stages-of-your-own) travels like the tests stage, under the
+generic `stage` kind naming it, and follows the build's placement rules:
+
+- **Before the release records** it reads the build's `runOnly` value with the build's meaning and the same
+  `buildPlatforms`, holds a slot of the build budget, and runs as a `<package>:<stage>` task of its own. Where the
+  build reaches it in the [package graph](./configuration/spaces.md#the-order-of-the-stages), it is given the package's
+  own admitted outputs, like the tests stage; where it does not, it is given the providers' outputs, like the build.
+  Output sets travel along the graph's edges only, so a stage never reads what a stage beside it produced. It
+  produces no output set of its own: the admitted set stays the build's, and what its scripts export travels back and
+  reaches the stages after it.
+- **After the release records** it never withholds the record: it runs on the orchestrator and only warns, as the
+  announce stage does.
+
+Two stages the flow leaves unordered are two tasks: they take two slots and may land on two nodes, which is how a
+fleet runs every independent stage of a package at once. A stage you define sits beside the tests by default, so a
+package with tests and two stages of its own fans out to three nodes once its build is admitted.
 
 ## How a run distributes tasks
 
-A distributed release performs the same steps in the same order as a local one. What changes is where each frame
-runs.
+A distributed release follows the local release stages, with these additional coordination steps:
 
 1. **The locks come first.** Every participating repository's release lock is acquired in name order, before
    anything is planned. A run that would release without the lock is refused: see
@@ -192,23 +274,25 @@ What stays on the orchestrator:
 | the sign and version stages and the manifest and lock-file preparation | they write the state every build of the run then consumes |
 | the space login                                                | authentication must not travel                              |
 | release commits, tags, changelogs, GitHub releases, records     | a worker is never granted the right to write a release ref  |
-| `postPublish`, `announce`, `onFail`, `onSkip` and every run-level hook | they observe the run, which exists here          |
+| `postPublish`, every stage after the records (`announce` by default), `onFail`, `onSkip` and every run-level hook | they observe the run, which exists here          |
 
 What a worker runs: the build frame (`beforeBuild`, the build commands, `postBuild`), the tests frame (`beforeTests`,
-the tests commands, `postTests`) where the package has one, and, where `runOnly` delegates it, the publish frame
+the tests commands, `postTests`) where the package has one, the frame of every [stage of your
+own](#stages-of-your-own) before the records, and, where `runOnly` delegates it, the publish frame
 (`beforePublish`, the publish commands and the stage's after hook). A frame always runs as one unit on one node,
 because a hook that observed a folder another machine wrote would be observing nothing.
 
-**Budgets are the run's and capacity is the node's.** The root `concurrency` budget bounds how many builds and
-publishes are in flight across the whole run and is never multiplied by the number of workers: a task holds its stage
-slot while it waits for a node. `execution.concurrency` is how many assigned tasks one node accepts at once, counted
-across every run that reaches it. Work a node has no slot for waits in its mailbox; an assignment nobody claims
-within the task deadline is withdrawn and placed again, up to three times, and then fails its package.
+**Run budgets and node capacity are separate.** Root `concurrency` limits builds and publishes across the whole run;
+adding workers does not multiply it. A task holds its stage slot while waiting for a node. `execution.concurrency`
+limits the assigned tasks one node accepts across all runs using it.
+
+Work waits in the mailbox when the node has no slot. An assignment unclaimed by its deadline is withdrawn and placed
+again, up to three times, then fails its package.
 
 ## Build outputs as inputs
 
-A build product is normally ignored by Git, so a checkout says nothing about it and a machine that did not run the
-build cannot learn what to ask for. `buildOutputs` is how a package says what its build leaves behind:
+Build products are usually ignored by Git, so another machine cannot get them from a source checkout. Declare the
+folders a build produces with `buildOutputs`:
 
 ```yaml
 buildOutputs: [dist]
@@ -218,129 +302,141 @@ packages:
     buildOutputs: [dist, generated/types]
 ```
 
-The key rides the ordinary ladder (root, space, space folder file, package, package folder file) and replaces whole.
-Entries are literal paths relative to the package folder, slash-separated on every platform, and ignored files travel
-on purpose: a `dist` folder that no commit holds is exactly what a consumer's build needs.
+The setting follows the normal override order: root, space, space-folder file, package, then package-folder file.
+Each override replaces the whole list. Paths are literal, relative to the package folder, and use `/` on every
+platform. Ignored files are included; transferring an untracked `dist` is the purpose of this setting.
+Before a package's preparation commands run, dispat resets its declared roots to the pinned source snapshot.
+Tracked and other admitted source files remain; stale ignored files under those roots are removed. Preparation and
+build commands can then produce ignored files for later stages. Keep source inputs that preparation does not create
+outside ignored output roots, or track them in Git.
 
-**What travels, and how it is checked.** A successful build captures its declared roots into a Git tree, and the
-manifest that describes them travels inside the signed result: every entry with its type, mode, size and SHA-256, and
-a header binding the set to the run, the plan, the task attempt, the ownership, the source states the build consumed,
-the package and version, the platform it ran on and the output sets that went into it. The orchestrator verifies the
-manifest against the tree before it admits the set, and the consuming node verifies it again against the digest its
-assignment names before it installs a single file.
+### What travels and how it is checked
 
-**Installation is atomic at the task-input boundary.** Files are written into a staging folder and verified as they
-are written, then each declared root replaces its destination by a rename. No command of a task starts before every
-one of its inputs is installed.
+A successful build captures its declared roots in a Git tree. Its signed result includes a manifest with each entry's
+type, mode, size and SHA-256. The header binds the set to the run, plan, task attempt, ownership, source states,
+package, version, platform and output sets used as inputs.
 
-The set is staged in the checkout's private Git storage. When the final rename from there into the checkout fails, as
-it does for a linked worktree whose private Git storage is on another filesystem, the set is staged again in a private
-(`0700`) folder beside the outermost checkout and renamed from there, so the install stays a rename and temporary files
-stay outside Git status and release records. When that rename fails too, the install fails with its error. Normal
-completion removes the folder. If a process is killed during installation, a `dispat-outputs-` folder can remain in Git
-storage or as a hidden sibling of the checkout. After confirming that no release using that checkout is active, an
-operator may remove that run's leftover folder; dispat does not guess that another run's staging is abandoned.
+The orchestrator checks the manifest against the tree before accepting the outputs. The consumer node checks them
+again against its assignment's digest before installing any file.
 
-**What is refused.** The prerequisite fails with `E227`, and the consumers of that prerequisite are blocked, when a
-declared root is absent, when the manifest and the tree disagree, when the totals do not match the entries, when an
-entry is not a file or a symlink, when a path is absolute or holds `..`, a `.git` component, a backslash, a colon or
-a NUL, when a path lies outside the declared roots, when a symlink target is absolute or leaves its root, when a mode
-is neither `0644` nor `0755`, when two paths differ only by case, when the platform does not match, or when the set
-is over `transfer.maxFiles`, `transfer.maxBytes` or `transfer.maxManifestBytes`. The reason is a stable word in the
-log rather than an echo of anything the task produced.
+### Installing the outputs
 
-**Only declared paths travel.** A build that changes tracked files outside its declared roots has those changes
-counted and reported as `W244` stray writes, and they are not admitted anywhere. A build whose output a consumer
-needs therefore declares it.
+Files are staged and verified, then each declared root replaces its destination by a rename. No task command starts
+until all inputs are installed; installation is atomic at that task-input boundary.
 
-**A provider this run does not release is still built.** When a consumer's build needs the outputs of a provider that
-is not in the plan, that provider's build frame runs once per run as a `prepare` task, told exactly what
-`dispat run` tells it: the version it already carries, a bump of `none`, no tag, no changelog, no record, no plan
-entry and no event. The run summary reports it with its computation completed, its outputs admitted and its
-publication `none`. One consequence is worth expecting: a run can leave a non-releasing package's `dist` rebuilt in
-the orchestrator's checkout.
+Staging normally uses the checkout's private Git storage. If the rename into the checkout fails, as it can when a
+linked worktree's Git storage is on another filesystem, dispat stages again in a private `0700` folder beside the
+outermost checkout. This keeps the final operation a rename and keeps temporary files out of Git status and release
+records. If the second rename fails, installation fails with that error.
 
-**What a provider relation says about transport.** `isBuildWaitingPublish` decides what a consumer's build waits for,
-and under `{build: none}` the consumer's build does not read the provider's output at all: no outputs travel across
-that hop, and a provider reachable only across `none` hops is not prepared. See
+Normal completion removes the staging folder. A killed process may leave a `dispat-outputs-` folder in Git storage or
+as a hidden sibling of the checkout. Remove that run's folder only after confirming that no release using the
+checkout is active. dispat does not assume another run's staging folder is abandoned.
+
+### Rejected outputs
+
+An invalid output set fails its prerequisite with `E227` and blocks that prerequisite's consumers. The following are
+rejected:
+
+- A missing declared root, a manifest/tree mismatch, or totals that do not match the entries.
+- An entry other than a file or symlink, a mode other than `0644` or `0755`, or two paths differing only by case.
+- An absolute path, a path outside the declared roots, or one containing `..`, a `.git` component, a backslash, colon
+  or NUL.
+- A symlink target that is absolute or leaves its root.
+- A platform mismatch, or a set exceeding `transfer.maxFiles`, `transfer.maxBytes` or `transfer.maxManifestBytes`.
+
+The log uses a stable reason word instead of echoing task-produced text.
+
+Tracked changes outside declared roots are counted and reported as `W244` stray writes. They are not accepted as
+outputs. Declare every path a consumer needs.
+
+### Providers that are not releasing
+
+If a consumer needs outputs from a provider outside the release plan, the provider builds once as a `prepare` task.
+It receives its current version and a bump of `none`, just as with `dispat run`. It gets no tag, changelog, record,
+plan entry or event. The summary shows completed computation, accepted outputs and publication `none`.
+
+This can rebuild a non-releasing package's `dist` in the orchestrator's checkout.
+
+`isBuildWaitingPublish` also controls output transfer. With `{build: none}`, the consumer reads no provider outputs,
+so none travel across that edge. A provider reached only through `none` edges is not prepared. See
 [the provider relation](./configuration/spaces.md#the-provider-relation) and the worked numbers in
 [the terraform example](./examples/terraform.md). An edge that waits for publication still waits: a consumer that
 installs its provider from a registry is ordered after the provider's publication exactly as it is on one machine.
 
 ## Publishing from workers
 
-Publication stays on the orchestrator unless a package's `runOnly` names `worker` for the publish stage, and a space
-with a `flow.login` publishes here whatever the key says. Publication is serialized per repository anyway, so
-delegating one buys a run nothing and spreads registry credentials over one more machine.
+Publishing stays on the orchestrator unless `runOnly` explicitly assigns the publish stage to `worker`. A space with
+`flow.login` always publishes on the orchestrator. Since publications are serialized per repository, delegation does
+not add parallel publication within that repository, and the worker would need registry credentials.
 
 Where a publication is delegated, four things hold:
 
 - **Credentials live in the worker's environment.** The `env` pairs of the configuration travel unresolved: a value
   written as `$NPM_TOKEN` travels as that reference and is expanded on the node that runs the command, from that
   node's own environment. The token a delegated publish needs must therefore exist on that worker.
-- **The authorization is a separate step.** The node installs the package's own verified build outputs, runs
-  `beforePublish`, reports itself ready and stops. The orchestrator then re-verifies that it still holds the release
-  lock, that a composed workspace's snapshot is unchanged, and that nothing relevant to the package changed in the
-  meantime, and writes one single-use authorization naming the exact state of the branch it authorizes. The
-  authorization carries the instant it stops meaning anything, and the node re-reads the branch one last time
-  immediately before the command, so a withdrawal written after the authorization still stops the publish.
+- **Publication needs separate authorization.** The worker installs verified build outputs, runs `beforePublish`,
+  reports ready and waits. The orchestrator checks the release lock, composed-workspace snapshot and other state
+  relevant to the package, then writes a single-use authorization for that exact branch state with an expiry time.
+  The worker reads the branch again immediately before the command, so a later withdrawal still stops publication.
 - **Publication and recording are serialized per repository.** With workers configured, one repository's packages
   publish one after another and are recorded in the same order.
-- **The hook's exports come home.** What `beforePublish` exported travels with the ready message and is merged onto
-  the release at the point the local path would have merged it, so the values a hook exported are on the release
-  whether or not the publication that follows succeeds.
+- **Hook exports return with the ready message.** `beforePublish` values merge into the release at the same point as
+  in a local run, whether or not the subsequent publish succeeds.
 
-One limit is worth stating. A delegated publication's `DISPAT_EXPORT_GITHUB` cannot carry file attachments: the paths
-it exports name a checkout on the worker that is deleted when the task ends. Export attachments from a stage that
-runs on the orchestrator. A publish script that writes tracked files on the node is a stray write, reported as
-`W244` and carried nowhere.
+A delegated publish cannot attach files through `DISPAT_EXPORT_GITHUB`: its paths refer to the worker checkout, which
+is deleted when the task ends. Export attachments from an orchestrator stage. Tracked files changed by a worker's
+publish script are reported as `W244` stray writes and are not transferred.
 
 ## Running scripts on workers
 
-`dispat run` sweeps a script across the pool the way a release executes its builds. With worker links, from
-`execution.workers` or from [`--worker`](#naming-a-worker-on-the-command-line), each package's task of the sweep is
-placed on a node: the commands the swept script binds for that package, run in the package folder with
-`DISPAT_STAGE=run:<script>`, the computed `DISPAT_*` pairs, the configuration's own `env` pairs unresolved, and the
-values the package's providers exported earlier in the same sweep. The node materializes the package's input closure
-as it does for a build and returns what the commands exported, which reaches the package's consumers wherever they
-run. No hook brackets a sweep task, and nothing another task produced is installed before it: a script that needs a
-provider's `dist` is a build rather than a sweep.
+`dispat run` can run a script across the worker pool without releasing packages. Configure workers in
+`execution.workers` or pass [`--worker`](#naming-a-worker-on-the-command-line). Each selected package becomes one task,
+running its script commands in the package folder.
+
+The task receives `DISPAT_STAGE=run:<script>`, computed `DISPAT_*` values, unresolved configuration `env` pairs and
+values exported by providers earlier in the same sweep. The worker prepares the package's source input closure and
+returns exported values to its consumers, wherever they run.
+
+Sweep tasks have no surrounding hooks and install no output files from other tasks. If a script needs a provider's
+`dist`, configure it as a build instead.
 
 ```sh
 dispat run tests --since all
 ```
 
-**Placement follows `runOnly`.** A sweep task is placed where the package's build would be: under `both` on the least
-loaded worker with room, and on this machine only when no worker has any; under `orchestrator` here; and under
-`worker` on a worker only, so a sweep with no worker link refuses such a package with `E225` before any script runs.
-A sweep with no worker link at all runs every task here, as it always did: it fixes no plan, takes no lock, prints no
-summary and reaches no mailbox.
+### Placement and release locks
 
-**A sweep takes no release lock.** It records nothing and authorizes no effect a lock would have to fence, so its
-messages are bound to a generation drawn from its own run identity instead of from lock objects, and a release of the
-same repositories may run beside it: a sweep neither waits for a release nor excludes one. The refusals a release is
-held to still come first. A worker, or a process running under a task's authority, may not start a distributed sweep
-(`E226`), and a lock bypass beside worker links is refused with `E225`, because the bypass states that the repository
-has no remote to coordinate through. The plan is fixed and logged as `plan fixed`, every link is probed, and the sweep
-ends with the summary a distributed release prints: one `task outcome` line per task naming its node, its
-computation, its outputs and how many values it exported, then the run's `run finished` line.
+Placement uses the package's build `runOnly` setting. `both` prefers the least-loaded available worker and uses the
+orchestrator only when no worker has room. `orchestrator` stays local. `worker` requires a worker link; otherwise the
+sweep fails with `E225` before running scripts.
 
-**What a script writes can come back.** A delegated task's files stay on the node that ran it unless the script
-declares where it writes. `runOutputs` in the root file names, per script, folders relative to the root of each
-package's repository:
+Without worker links, the sweep runs locally as usual: no fixed plan, release lock, distributed summary or mailbox.
+
+A distributed sweep also takes no release lock. It records no releases and authorizes no locked publication.
+Messages use a generation derived from the sweep's run identity rather than lock objects. A release of the same
+repositories may run alongside it; neither waits for nor excludes the other.
+
+A worker or a process under task authority still cannot start a distributed sweep (`E226`). A lock bypass with worker
+links is refused (`E225`) because it declares that no coordination remote is available. Before work starts, the sweep
+fixes and logs its plan as `plan fixed` and probes every link. At the end, each `task outcome` line reports node,
+computation, outputs and exported-value count, followed by `run finished`.
+
+### Returning files from a script
+
+Files written by a delegated task stay on its worker unless `runOutputs` declares them. In the startup root
+configuration, name output folders per script, relative to each package's repository root:
 
 ```yaml
 runOutputs:
   tests: [coverage]
 ```
 
-After a delegated task succeeds, its node captures those folders under the manifest, the validation and the transfer
-ceilings every build output is held to, and the orchestrator verifies each set and merges it into its own checkout once
-every task of the sweep has answered:
+After a task succeeds, the worker captures those folders using the same manifest, validation and transfer limits as
+build outputs. The orchestrator verifies the sets and merges them into its checkout after every task has answered:
 
-- **The merge keeps what it does not replace.** A file replaces the file of its own path and every other file of the
-  folder stays, because every task of the sweep writes into the same folder: ten packages' `tests` tasks write ten
-  profiles into one `coverage/`.
+- **The merge preserves other files.** Each file replaces only its own path. For example, ten package tasks can
+  contribute ten profiles to one `coverage/` folder.
 - **A set is merged whole or not at all.** Every file of one task's set is staged and verified before the first one is
   moved, and a move that fails puts back the files already moved.
 - **Two tasks may not disagree about a path.** Two tasks writing one path with different bytes fail the sweep with
@@ -351,25 +447,25 @@ every task of the sweep has answered:
 - **A task this machine ran itself captures nothing.** Under `both` the orchestrator takes a task when no worker has
   room, and that task writes into this checkout directly, as every task of a sweep without workers does. The rule
   about disagreeing paths is checked between the sets that travelled.
-- **An interrupted sweep merges nothing.** A folder assembled from whichever tasks answered before the interrupt is a
-  folder nobody asked for, so the sets already admitted are left where they are and the run says so.
+- **An interrupted sweep merges nothing.** Already accepted sets stay where they are, and the run reports that no
+  merge occurred. It does not assemble a partial folder from only the tasks that answered.
 
 If the merge fails, for example because the checkout cannot accept a file, `dispat run` fails and logs
 `run outputs could not be merged` at error level with the underlying cause. The task summary still follows, so the
 failed merge is visible alongside the tasks that produced those outputs.
 
-A root may be neither a package folder nor a folder holding one, and may not overlap any package's `buildOutputs`
-root, because the two keys install differently: a build output root is replaced whole and a sweep's root is merged
-file by file. `dispat status` reports each of these with `E225`. The key is read from the configuration the sweep is
-started with alone, as `execution` is. Declare folders Git ignores: a folder Git tracks, or does not ignore, also
-travels to every task inside the prepared input state.
+A `runOutputs` root cannot be a package folder, contain a package folder or overlap any package's `buildOutputs`.
+`dispat status` reports these conflicts with `E225`. The distinction matters because build output roots are replaced
+whole, while sweep outputs are merged file by file.
+
+Like `execution`, `runOutputs` is read only from the startup configuration. Use Git-ignored folders; tracked or
+non-ignored files also travel to every task as part of its prepared source state.
 
 ### Naming a worker on the command line
 
-A pipeline that creates a worker machine a minute before the run cannot write it into the committed file.
-`--worker name`, repeatable on `release`, `run` and `status`, adds a link beside the ones `execution.workers` lists,
-and like a configured link with no endpoint it reaches the repository being released. `--worker name=endpoint` names
-another mailbox instead:
+For workers created by CI, use repeatable `--worker name` flags on `release`, `run` or `status`. They add links beside
+`execution.workers` and use the release repository as their mailbox. Use `--worker name=endpoint` for a different
+mailbox:
 
 ```sh
 dispat run tests --since all --worker ci-worker-1
@@ -383,54 +479,68 @@ whose file says `role: worker`, because a worker dispatches nothing. It is no pa
 
 ## Locks, failure and recovery
 
-**The lock is not optional here.** `unsafeDisableLock`, a per-repository bypass and `DISPAT_UNSAFE_DISABLE_LOCK` are
-all refused with `E225` when workers are configured. Every node writes through a remote, and the lock is the only
-thing that stops a second run authorizing the same publication from somewhere else.
+With workers configured, `unsafeDisableLock`, per-repository bypasses and `DISPAT_UNSAFE_DISABLE_LOCK` are all refused
+with `E225`. The remote lock prevents two orchestrators from authorizing the same release.
 
-**Ownership is re-verified before every new effect.** The orchestrator reads every release lock back from its remote
-before the first worker probe, before every assignment and before every publication, whether that publication is
-delegated or kept here, and a successful answer is never reused for the next effect. A lock that is no longer on the
-remote ends the run with `E336`: no new assignment is written, every attempt in flight is withdrawn, and a publication
-that was authorized before the loss is still recorded, because a create-only record of an effect that already happened
-is not a new effect. A read that fails is not a loss: each read is bounded at fifteen seconds, and a failed one is
-read again, one and then two seconds later, with a warning each time. Only when three reads have failed does the run
-stop as it stops for a loss, with the lost line naming the reason `unverified` instead of `lost`; the lock is still
-this run's, so it is given back. A run that was interrupted during a read has lost nothing.
+For a failed build, the next run can build again. For a publish with an unknown result (`E228`), first establish what
+the worker and registry did, then follow the cleanup order below. Do not remove a retained lock to start a retry.
 
-**A node that stops answering blocks its dependents.** A compute task that was never claimed is withdrawn by
-revoking its branch and placed again. A claimed attempt that passes its deadline takes its node out of the pool, its
-slot is not reused, and the packages downstream of it are not attempted. A task is never retried on another node
-inside the same run: the next run builds it again.
+### Lock checks during the run
 
-**Capacity returns only on evidence.** A slot goes back when a result arrives, when a withdrawal is acknowledged, or
-when an unclaimed assignment is fenced before any worker can claim it. Deleting the branch or writing cancellation
-under an exact lease on that assignment provides this proof without a worker acknowledgement. An attempt that
-simply stopped answering leaves its slot where it is, because the work may still be running on that machine.
+The orchestrator reads every release lock from its remote before the first worker probe, every assignment and every
+publication, including local publishes. It never reuses a previous successful check.
 
-**A publication whose outcome cannot be established is reported as such.** When a publication was authorized and no
-result came back, the run withdraws it and waits `timeouts.cancel` for an acknowledgement. A result the node had
-already written where the withdrawal was to go is the answer: its success is a publication, recorded as usual, which
-is also how a publication authorized before a lost lock is still recorded, and its failure is an ordinary publish
-failure. An acknowledgement saying the publish command had not started is an ordinary publish failure. An
-acknowledgement from after the command started, or no acknowledgement at all, is `E228`: the package failed at its
-publish stage, no second attempt is made in this run, its dependents are blocked, and the run exits non-zero. The same
-holds for a publisher withdrawn because its authorization was refused: an acknowledgement saying its command had
-started, with no result, is `E228` rather than a publication withheld.
+If the lock is gone, the run stops with `E336`, writes no new assignments and withdraws attempts in flight. A publish
+authorized before the loss is still recorded: a create-only record of an existing effect is not a new publication.
 
-An authorization push that did not report success is settled by reading the branch, never by pushing it again.
-Found on the branch, or under the result the node wrote on top of it, the authorization landed, and the run reads the
-node's result as usual. Two failures prove that no node read it: a failure preparing it locally, which happens before
-any push, and a push the remote refused, a rejected lease or a server rule, whose branch does not carry it. For either
-one dispat withdraws the waiting attempt, waits for its acknowledgement, fails the package at the authorization and
-gives the lock back. Any other outcome is unknown: the worker may already have received permission and started
-publishing, and a missing branch, or one reset to its earlier state, cannot prove otherwise. The run withdraws the
-attempt as it withdraws a publisher that never answered, and unless the node says its command never started it
-reports `E228` and retains the repository's release lock and any coordination evidence still present.
+A failed read does not prove the lock was lost. Each read is limited to fifteen seconds. Failures are retried after
+one second and then two seconds, with a warning each time. After three failed reads, the run stops as it would for a
+lost lock, but reports `unverified` instead of `lost` and returns the lock it still owns. An interruption during a
+read is not treated as lock loss.
 
-If the publisher never acknowledged, the release lock of the repository it was publishing into is **retained**. The
-uncertain publication's authorization ref is also retained, whether the node acknowledged after starting publish or
-never answered. Other owned coordination refs are cleaned up when their current tips still belong to this run. The
-error names the order of recovery, and it is the order to follow:
+### A worker stops answering
+
+An unclaimed compute task can be withdrawn by revoking its branch and placed again. Once an attempt is claimed,
+passing its deadline removes that node from the pool. Its slot is not reused and downstream packages are not
+attempted. A claimed task is never retried on another node within the same run; the next run builds it again.
+
+A slot becomes available again only after a result, an acknowledged withdrawal, or proof that an unclaimed
+assignment can no longer be claimed. Deleting its branch or writing cancellation under an exact lease supplies that
+proof without a worker acknowledgement. Silence alone does not: the task may still be running.
+
+### A publication has no known result
+
+If an authorized publish returns no result, the run withdraws it and waits `timeouts.cancel` for acknowledgement.
+What happens next depends on the evidence:
+
+| Evidence | Outcome |
+|---|---|
+| A result was already written where the withdrawal would go | Use that result: record success, or report an ordinary publish failure. This also applies to publication authorized before a lost lock. |
+| The worker acknowledges that the command never started | Ordinary publish failure. |
+| The command started but has no result, or the worker never acknowledges | `E228`: fail the publish stage, block dependents, make no second attempt and exit non-zero. |
+
+The same rule applies when authorization was refused. If the worker says the command nevertheless started and supplies
+no result, report `E228`, not a withheld publication.
+
+If an authorization push returns no success receipt, dispat reads the branch; it never repeats the push to find out.
+Finding the authorization at the tip or below the worker's result proves it arrived, and the result is handled
+normally.
+
+Only two failures prove that no worker received the authorization: local preparation failed before any push, or the
+remote rejected the push through a lease or server rule and the branch does not contain it. In either case, dispat
+withdraws the attempt, waits for acknowledgement, fails authorization and returns the lock.
+
+Every other result is uncertain. A missing or reset branch does not prove the worker never received permission. The
+run withdraws the attempt, and unless the worker confirms that its command never started, reports `E228` and retains
+the repository's lock and remaining coordination evidence.
+
+### Recovering an uncertain publication
+
+If the publisher never acknowledges, its repository's release lock is **retained**. The authorization ref is also
+retained when the worker acknowledges after starting publication or never answers. Other owned coordination refs
+are cleaned up only when their current tips still belong to the run.
+
+Follow the recovery order printed in the error:
 
 1. read the run id from the `run` line of the retained lock tag, and list the coordination refs of the repository
    (`git ls-remote --heads origin 'dispat-worker-*'`); the run's own carry that id in the `run` field of their
@@ -447,34 +557,32 @@ unauthenticated tip needs investigation, not deletion under this run's cleanup p
 [The release lock](./reference/releasing/release-lock.md#a-lock-a-distributed-run-retained) has the commands. A run
 may end with a lock retained and no release record at all, so the registry is the evidence, not the tags.
 
-**Retry is the supported recovery.** dispat has no registry reconciliation step. Once the outcome is known, the next
-ordinary run plans what is still owed and publishes it, exactly as it does after an interrupted local publish. Read
-[recovering from a failed run](./reference/releasing/recovery.md) for the general shape of that.
+dispat does not reconcile the registry for you. Once the outcome is known and cleanup is complete, use an ordinary
+run to plan the remaining work. See [Recovering from a failed run](./reference/releasing/recovery.md) for the same
+process after a local publish interruption.
 
-**Cleanup is bounded.** Revoking an attempt that passed its deadline, and withdrawing one when the run ends, each wait
-at most `timeouts.cancel`. Closing the run's coordination branches waits at most `timeouts.cancel`, never less than 30
-seconds and never more than two minutes, and happens before the run gives its release locks back. A mailbox that stops
-answering therefore costs the run its branches, reported with `W244`, and never its locks: the release still ends and
-gives back every lock it would have given back. The refs the run fetched into its own repository are removed however
-the close went. A failure inside dispat's own handling of a coordination branch is contained to that branch, to that
-node's preflight or to that task, and a publication the run had already authorized is then settled as one that never
-answered, never as a failure.
+### Cleanup and leftover branches
 
-**Leftover coordination branches need classification before deletion.** A completed run deletes its own refs before
-it gives its release locks back and reports `W244` when one survives, with exit code `0`, because a coordination
-branch carries no release record. An
-`E228` run retains the uncertain publication's authorization as evidence; follow the recovery order above before
-deleting it. For other branches of a crashed run, confirm that no process still uses them and that their current tips
-belong to that run's authenticated chain. Investigate a ref whose tip changed unexpectedly or cannot be authenticated
-rather than deleting it as this run's residue.
+Revoking an expired attempt or withdrawing one at shutdown waits at most `timeouts.cancel`. Closing coordination
+branches uses that timeout clamped between 30 seconds and two minutes, and happens before release locks are returned.
+An unresponsive mailbox can leave branches behind with `W244`; it does not prevent the run from returning locks that
+are otherwise eligible for release. Local refs fetched by the run are removed regardless of remote cleanup success.
+
+An internal coordination-branch failure is contained to that branch, node preflight or task. If publication was
+already authorized, it is handled as a missing response, not assumed to have failed.
+
+A completed run reports leftover coordination refs with `W244` and can still exit `0`; those refs are not release
+records. An `E228` authorization is different: it is evidence, and must follow the recovery order above.
+
+For other branches from a crashed run, confirm that no process uses them and that their tips belong to the run's
+authenticated chain before deleting them. Investigate unexpected or unauthenticated tips instead of treating them as
+routine leftovers.
 
 ## Security: what distributed execution exposes and how to contain it
 
-**Adding worker nodes widens the set of machines and repositories that can affect what a release publishes.** On one
-machine, the checkout, the credentials and the artefacts never leave it. With workers, source and command text
-travel through a repository, a shared secret decides what a node will execute, and an artefact another machine built
-becomes what gets published. Each of the seven items below is a real exposure of that arrangement and what contains
-it.
+Workers add machines and repositories that can affect a release. Source and commands pass through the mailbox,
+the shared secret authorizes work, and files built elsewhere may become the published artifact. Check these seven
+parts of the setup before assigning work.
 
 **1. The repository holds everything that travels.** Full source snapshots, untracked files that are not ignored and
 unpushed commits included, the command text of every delegated stage, the computed `DISPAT_*` values of each stage,
@@ -482,27 +590,27 @@ the values scripts exported through `DISPAT_OUTPUT` and the build outputs themse
 being released, or to the endpoint a link names instead, and a host keeps an object fetchable by its id for a while
 after its branch is deleted.
 
-Contain it by treating whatever travels as readable by everyone who can read that repository: on a public repository,
-delegate no work whose inputs or outputs must stay private, and keep the orchestrator's checkout free of untracked
-files that are not ignored. Protect release branches, release tags and the lock tag from worker credentials with the
-host's ref rules. Never export a secret as a script output, and never write one literally in `env` or in a command:
-write `$NAME`, which travels as the reference and is expanded on the node that runs the command.
+Treat transferred data as readable by everyone with access to that repository. With a public mailbox, do not delegate
+private inputs or outputs. Keep unintended untracked, non-ignored files out of the orchestrator checkout. Use host
+ref rules to protect release branches, tags and the lock tag from worker credentials.
+
+Never export secrets through script outputs or write them literally in `env` or commands. Use `$NAME`, which travels
+as a reference and is expanded from the executing node's environment.
 
 **2. The signing secret is shared and symmetric.** Every node holding the secret can sign any message. A compromised
 worker, or anyone holding the secret with push access to the repository the messages travel through, can forge an
 assignment, which is command execution on every other node sharing that secret, and can forge a result, which is a
 build output the orchestrator would admit.
 
-Contain it by treating every machine that holds one secret as one trust zone. Do not share a secret across trust
-levels: use a separate secret per zone. Keep the secret only in the CI secret store or an
-equivalent, never in a file in the repository, and rotate it whenever a worker is decommissioned or suspected.
-Per-link secrets are not implemented, so the secret is as strong as the least trusted machine holding it.
+All machines holding one secret belong to one trust zone. Use separate secrets for different trust levels, store them
+in the CI secret store or equivalent, and rotate them when a worker is removed or suspected of compromise. Never
+commit the secret. Per-link secrets are not implemented, so every holder must be trusted to the same level.
 
 **3. Workers run what they are told.** A worker executes the commands of any authentic assignment, with its own
 environment and its own credentials. That is what a worker is for, and it means an assignment is as powerful as the
 node it reaches.
 
-Contain it by running workers on dedicated machines, preferably ephemeral ones, with least-privilege credentials:
+Run workers on dedicated machines, preferably ephemeral ones, with least-privilege credentials:
 Git credentials that write `dispat-worker-*` branches and read the sources, and no release or registry credentials
 unless that worker must publish. Do not serve tasks on a shared machine or an untrusted runner.
 
@@ -510,7 +618,7 @@ unless that worker must publish. Do not serve tasks on a shared machine or an un
 the digest, the signature and the identity in the manifest, and not for honesty. A compromised worker can return a
 poisoned artefact that verifies perfectly.
 
-Contain it by keeping the builds that must be trusted on the trusted machine: `runOnly: orchestrator`, or the
+Keep builds that require that trust on the trusted machine: `runOnly: orchestrator`, or the
 `[build, publish]` pair form, for any package whose artefact is signed or shipped to users. Where builds are
 reproducible, compare the output of two nodes. Sign artefacts on the orchestrator rather than on the node that built
 them.
@@ -519,8 +627,8 @@ them.
 never need to exist on a worker. A publish without a login script may be delegated by `runOnly`, and the worker must
 then hold whatever that publish reads from its environment.
 
-The recommendation is plain: keep publishing on the orchestrator, with a login script or with `runOnly: both` or
-`[both, orchestrator]`, unless there is a specific reason not to.
+Keep publishing on the orchestrator with a login script, `runOnly: both` or `[both, orchestrator]`, unless you have a
+specific need for worker publication.
 
 **6. Logs.** A worker's log holds the output of the scripts it ran, which is whatever those scripts print. Treat
 worker logs exactly like CI logs: same retention, same access control, same care about what a build script echoes.
@@ -529,7 +637,7 @@ worker logs exactly like CI logs: same retention, same access control, same care
 ones. Delete them once the run is over. A retained lock is deliberate and is cleared only through the recovery order
 above.
 
-A checklist an operator can follow:
+Before starting the pool, confirm:
 
 - Everything that travels may be read by everyone who can read the repository being released, and the orchestrator's
   checkout holds no untracked file that is not ignored.
@@ -547,74 +655,6 @@ A checklist an operator can follow:
 
 [Worker nodes on Kubernetes](./examples/kubernetes-workers.md#secrets-and-isolation) adds the cluster-specific half
 of this: namespaces, service account tokens, network policy and which Secrets a pool mounts.
-
-## Where a stage runs
-
-`runOnly` is where one package's delegable stages may be placed. It takes one value for both stages or a
-`[build, publish]` pair, exactly as `concurrency` does:
-
-```yaml
-runOnly: orchestrator             # build and publish stay on the orchestrator
-
-packages:
-  ui:
-    runOnly: [both, orchestrator] # build anywhere there is room, publish here
-  signer:
-    runOnly: orchestrator         # this build signs its artefact
-  linux-image:
-    runOnly: [worker, both]       # this build must not run on the orchestrator
-```
-
-| Value          | What it means                                                                                     |
-|----------------|---------------------------------------------------------------------------------------------------|
-| `both`         | the default: a build goes to a worker when one has room and to the orchestrator when none has; a publish stays on the orchestrator |
-| `worker`       | the stage may only be delegated; a run with no worker links is refused with `E225` before any stage runs |
-| `orchestrator` | the stage may only run on the machine the release was started on                                   |
-
-The key rides the same ladder as `buildOutputs` and `buildPlatforms` (root, space, space folder file, package,
-package folder file) and replaces the pair whole: a level that states one value has said something about both stages.
-
-Five rules follow from what the two stages are:
-
-- **A frame runs as one unit on one node.** There is one placement question per frame, not one per command.
-- **The orchestrator is a node of last resort under `both`.** It joins its own pool with capacity
-  `execution.concurrency` and is chosen only when no worker has room. A build it keeps still captures and admits its
-  declared outputs through the same path a worker's result takes.
-- **A publish is delegated only by an explicit `worker`.** `both` keeps publication here.
-- **A login pins publication here.** A space with `flow.login` publishes on the orchestrator whatever the key says,
-  and `publish: worker` beside a login is refused when the configuration loads.
-- **Pinning costs parallelism.** A frame pinned to the orchestrator waits for one of this machine's own slots, and a
-  frame pinned to a worker waits for a worker even when this machine is free. A package pinned to the orchestrator is
-  not held to the workers' platforms at preflight, which is what lets one machine sign what a pool of other
-  architectures builds.
-
-`buildPlatforms` is the other placement filter: the `os/arch` values in Go's spelling that a package's build may run
-on, empty meaning any node. A preparation obeys the provider's own `runOnly` and `buildPlatforms`, not its
-consumer's.
-
-### The tests stage
-
-A package whose space configures [`flow.tests`](./configuration/spaces.md#stages-and-hooks) or one of its hooks runs
-its tests frame after its build and before its publish. The frame checks what the build produced, so it is placed the
-way the build is:
-
-- **It reads the build's `runOnly` value** with the build's meaning, and the same `buildPlatforms`. A space's login
-  does not pin it, because a login is the publication's affair.
-- **The node that built the package is asked for first.** Its cache already holds the objects the frame reads, and a
-  busy one is passed over rather than waited for.
-- **The package's own admitted outputs are installed first** on a node that did not build them, together with the
-  provider outputs its build was given, exactly as for a delegated publication. A frame placed on the orchestrator
-  installs nothing: the outputs are already in its checkout. A package that declares no `buildOutputs` hands a node
-  its sources alone, so declare what the tests read.
-- **It produces no output set.** The admitted set stays the one the build reported. What its scripts export travels
-  back in the signed result and reaches the publish, as a build's exports do.
-
-The frame travels as a task of its own, `<package>:tests`, and shares the build budget. Its assignment has the
-generic kind `stage` and names the stage in its own `stage` field, which is what the node's scripts read as
-`DISPAT_STAGE` and what its hooks are named after; the build and the publish keep the kinds `build` and `publish`, so
-their assignments read exactly as they always have. A worker that predates the generic kind leaves such an
-assignment unclaimed, so the task is placed again and fails its package once no node claims it. Run the same dispat
-on every node of a run that uses the stage.
 
 ## The coordination branches
 
@@ -642,25 +682,30 @@ Every transition is one compare-and-swap push by one party:
 | ack        | the node         | the withdrawn attempt has stopped, with the phase it was in                   |
 | closed     | the orchestrator | the ref is deleted at the end of the run                                      |
 
-**A push is never repeated to learn its outcome.** Git reports each ref of a push as applied, as refused because the
-lease no longer held (`[rejected]`), as refused by a server rule or hook (`[remote rejected]`), or not at all; a
-`[remote failure]` and a connection lost in the middle of a push leave the outcome unknown. A party that did not hear
-success reads the branch instead: its message on the tip, or on the tip's first-parent chain, landed; a refused message
-the branch does not carry did not; anything else is unknown, and is read three times over three seconds before it is
-treated as such. The branches a run creates are recorded for cleanup before they are pushed, so a push with no known
-outcome still leaves a branch the run closes. An assignment whose push stays unknown is revoked under a lease on
-itself and offered again when the branch is gone, and goes on when the node has already claimed it. A node's claim
-whose push stays unknown is run if it surfaces on the branch, and a withdrawal on top of it is acknowledged. A result a
-server rule refuses is reported once more without what was refused: a build, a preparation or a sweep task reports a
-failure with the reason `transfer-refused` and no outputs, and a publication keeps its status and drops its exports,
-so the run hears an answer rather than waiting out `timeouts.task`. The node logs the server's reason, redacted.
+**A push is never repeated to learn its outcome.** Git can report a ref as applied, rejected because its lease no
+longer holds (`[rejected]`), or rejected by a server rule or hook (`[remote rejected]`). A `[remote failure]`, lost
+connection or missing receipt leaves the result unknown.
 
-**One transfer never holds up another.** A push of a task's outputs takes as long as the outputs are large, and
-nothing else of the mailbox waits for it: on a node serving several tasks, a poll, a withdrawal and the read of a
-publication authorization go on while it is in flight. The orchestrator pushes an input state to several nodes at
-once, and two dispatches that need one state on one node share a single push of it. An orchestrator watching a
-mailbox other runs share fetches only the branches of its own attempts, never another run's output trees, and removes
-the refs it fetched when their branch closes and when the run ends.
+The sender then reads the branch. Its message at the tip or in the first-parent chain proves the push landed. An
+explicitly refused message absent from the branch did not land. Anything else remains unknown after three reads over
+three seconds. Branches are registered for cleanup before the push, so an uncertain result does not escape cleanup.
+
+Recovery depends on the message:
+
+- An assignment with an unknown push result is revoked under an exact lease and offered again once its branch is
+  gone. If the worker already claimed it, the attempt continues.
+- A worker with an unknown claim result runs the task if its claim appears on the branch, or acknowledges a
+  withdrawal written above it.
+- A result rejected by a server rule is reported once more without the refused content. Build, preparation and sweep
+  tasks report `transfer-refused` with no outputs. A publish retains its status but drops exports. The worker logs
+  the server reason with redaction, letting the orchestrator receive an answer before `timeouts.task` expires.
+
+**Transfers do not block mailbox control traffic.** While a worker pushes outputs, it can still poll, acknowledge
+withdrawals and read publication authorizations. The orchestrator can push one input state to several nodes at once;
+dispatches needing the same state on one node share a push.
+
+In a shared mailbox, the orchestrator fetches only its own attempts' branches, not other runs' output trees. It
+removes those local refs when their branches close and when the run ends.
 
 **What an assignment carries:** the protocol version, the kind, the run id, the plan digest, the task and attempt,
 the ownership generation, the node it is addressed to, the branch it may appear on and the instant it was issued;
@@ -688,8 +733,8 @@ of time is reported as a warning, and the next poll asks again.
 
 ## Diagnostics
 
-Every failure of a distributed run carries dispat's numbered code and, beside it, the outcome class a reader
-switches on.
+Each distributed failure has a numbered code and an outcome category. The category distinguishes configuration,
+authority, data integrity, uncertain publication and cleanup problems.
 
 | Code   | Category                    | Means                                                                            |
 |--------|-----------------------------|----------------------------------------------------------------------------------|
@@ -700,7 +745,7 @@ switches on.
 | `E229` | `transport-cleanup`         | transport state the run could not leave in a safe place: an attempt that had to be fenced, or owned refs whose survival leaves an effect unresolved |
 | `W244` | `transport-cleanup`         | the harmless half of the same subject: refs a completed run could not safely delete, and writes a build made outside what it declared. A run that is otherwise clean still exits `0`; inspect a retained ref before deleting it |
 
-Three conditions dispat already had a code for keep it and join the specification's `native-recording-or-lock` class:
+Existing record and lock diagnostics keep their codes and use the `native-recording-or-lock` category:
 `E220`, `E221` and `E222` for a tag or a record, and `E335` and `E336` for a lock.
 
 [Diagnostic codes](./reference/plan-errors.md#distributed-execution-diagnostics) gives the recovery for each one.

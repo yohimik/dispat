@@ -1,8 +1,7 @@
 # Registry login, once per space
 
-Define a `login` script to authenticate dispat to a registry. Authentication belongs to the space rather than any
-single package, so this script runs exactly once per space. The first package publish triggers it, and all other
-publishes in that space wait for it to finish.
+Use `flow.login` when several packages share registry credentials. The first publish in a space runs the login
+script, and the other publishes in that space wait for it to finish. It runs once per space per release.
 
 If the login fails, every publish in the space fails. dispat runs the script in the space folder, which keeps
 space-local config files in a predictable place.
@@ -36,6 +35,7 @@ For npm, you typically use this slot to write an `.npmrc` file:
 echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
 ```
 
-Pass values forward to publish scripts by appending `DISPAT_OUTPUT_<NAME>=value` lines to `$DISPAT_OUTPUT`. You can use
-this to share a short-lived token, and the publish scripts in that space then read `$DISPAT_OUTPUT_<NAME>`. See
+If login produces a value that publishers need, append `DISPAT_OUTPUT_<NAME>=value` to `$DISPAT_OUTPUT`. For example,
+a login command can obtain a short-lived token and the space's publish scripts can read it as `$DISPAT_OUTPUT_<NAME>`.
+See
 [Script outputs](../reference/environment.md#script-outputs).

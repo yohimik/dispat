@@ -1,13 +1,15 @@
 # Linked repositories
 
-Each repository in a linked fleet declares its identity, owns its configuration and records its releases locally.
-Two-sided Git submodule links connect the repositories, and a release can start from any of them. The links can form
-a star around one repository or a minimal tree. Both shapes use the same release engine.
+Link repositories when each team should keep its own release configuration, but packages need to release in one
+dependency order. Each repository declares an identity and records its own releases. Two-sided Git submodule links
+connect the peers, and a release can start from any of them.
 
-dispat distinguishes the arrangements by configuration ownership. This page describes peer-owned configuration,
-activated by repository identity rather than by a protocol selector. Its link graph may use the minimal tree or star
-shape described below; choosing star does not introduce central policy ownership. Existing control-repository
-configurations keep their established behavior.
+To set it up, [declare the peers](#the-identity-and-roster), [create their links](#linking-the-fleet-with-dispat-compute),
+then configure the [CI checkout](#ci-checkout). Read the link-recording and recovery sections before the first release.
+
+A non-empty repository identity enables this mode. The links can form a minimal tree or a star; either way, each peer
+still owns its policy. Choosing a star does not turn its centre into a control repository or change the behavior of
+existing [control-repository configurations](./control-repository.md).
 
 ## When to choose it
 
@@ -23,17 +25,17 @@ differ in where the fleet's configuration lives and in who starts a release.
 | Fleet-wide holds and directives      | a control commit reaches every package     | no unit reaches another repository's packages |
 | Extra repository to own and review   | yes                                        | no                                           |
 
-Choose a control repository when one team owns the fleet's release policy and you want fleet-wide directives. Choose a
-choreographed fleet when each repository owns its own release policy and any of them should be able to release the
-whole graph. The cost is that no commit can address the fleet as a whole: every unit is read against the repository
-that carries it.
+Use a control repository when one team owns release policy and needs fleet-wide directives. Use linked peers when
+each repository owns its policy and any peer should be able to start the combined release. In the peer model, a commit
+directly addresses only its own repository's packages; dependency propagation can still cross repositories.
 
 ## The identity and roster
 
-Each peer declares its own identity, which activates polyrepository composition automatically. Its optional roster
-names the other peers; it may be omitted or empty for a one-member fleet. A non-empty roster without the declaring
-repository's identity is `E339`. Here is a three-repository
-fleet of `sdk`, `api` and `web`, where `api` consumes `sdk` and `web` consumes `api`.
+Set `repository` in each peer and list the other peers under `repositories`. That list is the roster. It may be empty
+or omitted for a one-member fleet, but a non-empty roster without the declaring repository's identity fails with
+`E339`.
+
+Here, `api` consumes `sdk`, and `web` consumes `api`:
 
 ```yaml title="sdk/dispat.yaml"
 repository: sdk
@@ -89,8 +91,8 @@ commit:
 - **`repositories`** is the roster: every other peer by identity, with the `url` a link to it is cloned from, the
   `path` a link to it occupies inside this repository (default `.links/<name>`) and the `branch` the link follows.
 
-The roster states membership, not the links. A fleet of three repositories needs only two links, so a peer names every
-member of the fleet and is linked to some of them. dispat walks the links to reach the rest.
+Every peer's roster names the other members, even those it does not link to directly. Three repositories need only
+two links; dispat follows those links to reach the rest.
 
 Three settings belong to a control repository and are refused here, because a fleet with no control repository cannot
 honour a policy written for one: `configs` and `--configs`, a `repositoryOverrides.<peer>.commit` object, and a
@@ -98,8 +100,7 @@ honour a policy written for one: `configs` and `--configs`, a `repositoryOverrid
 
 ## Linking the fleet with `dispat compute`
 
-The roster is what you write. The links are what dispat creates from it. Run
-[`dispat compute`](./cli/compute.md) in any peer:
+After writing the rosters, run [`dispat compute`](./cli/compute.md) in any peer to propose the missing links:
 
 ```console
 $ dispat compute
@@ -109,24 +110,27 @@ $ dispat compute
 2 suggestion(s); apply all with --write, choose with --interactive
 ```
 
-There are three kinds of fleet change beside the dependency edges and baselines the command already proposes:
+Alongside dependency edges and baselines, compute can propose three fleet changes:
 
-- `+ link <repository> <peer>` creates a link that is missing. `--topology minimal`, the default, preserves existing
-  links and proposes the fewest additions that connect everything the rosters name, chosen so no two repositories are
-  ever joined twice. Three repositories get two links,
-  never three, because a third would be a second route between two of them and a run refuses that with `E338`. Every
-  proposal that connects the roster adds the same number of links, so the count does not choose between them. What
-  does is the longest route between two repositories: the work of reading link evidence and of settling a release
-  across the fleet grows with it. Minimal therefore joins the groups the existing links leave the fleet in at their
-  centres, the repository in each group whose farthest group member is nearest, so that the longest route stays as
-  short as the existing links allow. Two chains of five repositories joined at their centres leave a longest route of
-  five where joining them end to end leaves nine. The same line also proposes the half of a link only one of its two
-  repositories declares, which is the state `W332`
-  reports: the pair is already joined, so the proposal adds no route, fetches nothing, and writes the missing
-  declaration inside the checkout the declaring repository already holds.
-- `+ init <repository> <path>` materialises a link the fleet declares and this checkout does not have.
-- `+ repository <repository> <peer>` adds a roster entry a peer has not heard of. The entry is written into that
-  peer's own configuration file, because a roster is that repository's own statement.
+| Suggestion | What it changes |
+|---|---|
+| `+ link <repository> <peer>` | Creates a missing link or supplies its missing reverse declaration. |
+| `+ init <repository> <path>` | Creates the local checkout for a declared link. |
+| `+ repository <repository> <peer>` | Adds a missing roster entry to that peer's own configuration. |
+
+The default, `--topology minimal`, preserves existing links and adds the fewest needed to connect the roster without
+creating a second route between peers. Three repositories get two links; a third would create a second route and fail
+with `E338`.
+
+Several arrangements may add the same number of links. Minimal chooses between them by the longest route, because
+reading release evidence and recording links takes more work along longer routes. It joins existing connected groups
+at their centres: the repository whose farthest member in that group is nearest. Two chains of five joined at their
+centres have a longest route of five hops, compared with nine when joined end to end. Existing links are preserved,
+so they limit how short the route can be.
+
+A `+ link` can also repair a one-sided declaration reported by `W332`. The pair is already connected, so this adds no
+route and fetches nothing. It writes the missing declaration inside the checkout already held by the declaring
+repository.
 
 Use `--topology star` when every peer should link directly to the repository where the command starts. Star mode
 preserves existing links and errors if they cannot fit that shape; it never converts a tree by deleting links.
@@ -151,10 +155,10 @@ declared api inside web at .links/api
 created 2 fleet link operation(s); review and commit them in each repository
 ```
 
-The forward half is a real checkout, made with `git submodule add`. The other half is declared inside that checkout
-without cloning anything: dispat writes the `.gitmodules` entry, creates the empty folder and stages the gitlink,
-pinned at a revision the linking repository's own remote can already serve. A linking repository with no remote has
-that half withheld with a warning, because there is no revision a peer could fetch to pin it at.
+The forward link is a checkout created by `git submodule add`. For the reverse link, dispat writes `.gitmodules`,
+creates an empty folder and stages a gitlink without cloning again. The pin must name a revision already available
+from the linking repository's remote. If that repository has no remote, dispat warns and leaves out the reverse
+declaration because the peer would have no fetchable revision.
 
 What `--write` does not do:
 
@@ -165,17 +169,15 @@ What `--write` does not do:
 - **It never recurses.** The back half of a pair is deliberately left as an empty folder. Never run
   `git submodule update --recursive` in a linked fleet: it fills that folder with a second copy of the repository you
   are standing in.
-- **It writes no roster entry without a `url`.** An entry nothing can be fetched from would be a repair only halfway,
-  so dispat reports it and you supply the url where the fleet declares it. A url carrying a username and password is
-  refused outright, because `.gitmodules` is committed and pushed.
+- **It writes no roster entry without a `url`.** Supply the missing URL in the declaring configuration, then run
+  compute again. URLs containing a username and password are refused because `.gitmodules` is committed and pushed.
 
 Commit the result in each repository and push. The fleet composes from then on.
 
 ## How a run composes the fleet
 
-Any peer is a starting point. dispat reads the configuration of the repository you are standing in, follows its fleet
-links breadth first, reads each peer's own configuration as that repository's root, and stops when every identity has
-been entered once. The log says what it found:
+Start from any peer. dispat reads its configuration, follows fleet links breadth first, and loads each peer's
+configuration as that repository's root. Each identity is visited once. The log lists the resulting workspace:
 
 ```console
 $ dispat status
@@ -191,10 +193,11 @@ holds no repository is `E330`, and the message names the command
 that initialises exactly that link. That is also what you get when you start a run inside another repository's linked
 checkout: the back-link there is an empty folder by design.
 
-The pin a link records is **advisory**. Two repositories that link each other can never both record the other's
-current revision, so dispat composes at the revision each checkout actually holds and never fails because a pin
-disagrees. Everything else about the fixed snapshot is unchanged: the heads read at composition are the heads the plan
-is computed from, and a relevant head or tag that moves before publication is `E330`.
+Link pins are **advisory**. Two repositories cannot both record each other's current revision, so planning uses the
+revision actually checked out in each peer. A mismatch with a link pin does not fail the run.
+
+The snapshot is still fixed once composition finishes. The plan uses those captured heads, and a relevant head or
+tag moving before publication fails with `E330`.
 
 ### Which settings combine
 
@@ -225,13 +228,12 @@ what a release incorporated; the source commit in the other repository supplies 
 
 ## Settling the links before a package publishes
 
-A control repository writes a checkpoint after a release. A choreographed fleet has no such repository, so the same
-fact is written into the links themselves, and it is written **before** the package publishes so that the release
-commit the tag sits on already carries it.
+A release must record which revisions of other repositories it included. With no control repository to hold a
+checkpoint, peers record that evidence in their links **before** publication. This is called settling the links.
 
-Before a package whose plan read history from another repository publishes, every repository on the route to that
-repository records the revision of its next hop, deepest hop first, and the consumer records its own first hop. The
-settlement is an ordinary commit carrying the release's own message:
+For a package whose plan used another repository's history, dispat follows the route to that repository. Starting
+at the deepest hop, each repository commits the revision of its next hop. The consumer then records its first hop.
+These are ordinary commits using the release message:
 
 ```console
 $ git log --format=%s -3
@@ -242,24 +244,22 @@ $ git show --stat HEAD~1
  .links/sdk | 2 +-
 ```
 
-The first of the two is the release commit the tag names, and the one below it is the settlement that moved the link.
-The tag's own commit therefore carries the pin in its tree, which is exactly what the next plan reads back.
+The newest commit is the release commit named by the tag. The one below it moved the link. The tagged tree therefore
+contains the pin the next plan will read.
 
-Three properties make this safe to do before publication:
+The recording rules are:
 
-- **Nothing is published by it.** A settlement that is interrupted leaves ordinary commits and nothing external. The
-  next run reads what each repository already records, does nothing where it matches, and pushes a head the remote
-  does not hold yet.
+- **Settlement publishes no artifact.** An interruption leaves ordinary commits. The next run skips matching pins
+  and pushes a recorded head if the remote does not yet have it.
 - **It is all or nothing per package.** If a repository on the route has release commits disabled while the consumer's
   repository has them enabled, dispat refuses that package with `E333` before it publishes, rather than publishing a
   release whose evidence stops halfway.
-- **It never holds two repositories at once.** The publish lanes a settlement needs are taken in repository-name
-  order and all but the consumer's own are given back before publication, so two consumers with overlapping routes
-  cannot wait on each other.
+- **Overlapping routes cannot deadlock publication.** Settlement takes the required publish lanes in repository-name
+  order and releases all but the consumer's own before publishing.
 
-A consumer whose own release commits are disabled records nothing. That is a valid tag-only release, dispat says so at
-info level, and a later boundary across it needs the explicit tuple described below. No settlement is created where the
-recorded pins already equal the revisions to record, and no empty commit is ever made to mark one.
+If the consumer's release commits are disabled, it makes a valid tag-only release and logs that fact at info level.
+No link settlement is recorded, so a later cross-repository boundary needs the explicit tuple described below.
+dispat also skips settlement when all pins already match; it never creates an empty commit to mark one.
 
 Because a settlement commits and pushes in a repository, that repository's `beforeCommit`, `afterCommit`, `postCommit`,
 `beforePush` and `afterPush` hooks bracket it, outside the settlement's Git transactions and only when a commit or a
@@ -271,16 +271,15 @@ moved is still `E330`.
 
 ## Freshness, and a pin that never outruns its target
 
-Before it records a revision of a peer, a repository that pushes asks that peer's own remote whether it already holds
-that revision. The branch it asks about is the peer's own `commit.branch` when it has one, and otherwise the `branch`
-the fleet roster states for it. A recorded link therefore never names a commit nobody else can fetch, which is the same
-rule a control checkpoint follows.
+Before recording a peer revision, a repository that pushes checks whether the peer's remote already has it. It checks
+the peer's `commit.branch`, falling back to the roster's `branch`. This keeps a recorded link from naming a commit
+other checkouts cannot fetch, just as a control checkpoint must.
 
-Every participating repository that pushes is checked before anything is planned, the way a single repository's
-checkout is: its remote must be reachable and the branch it has checked out must not be behind it, so a checkout that
-is behind stops the run before a plan exists. A detached checkout has no branch to compare at that point. Once the
-plan names the repositories a release records a link in, each of them settles the branch its commit is pushed to,
-and that branch, when it is not the checked-out one, must not be behind either.
+Before planning, every participating repository that pushes must have a reachable remote, and its checked-out branch
+must not be behind. A detached checkout has no branch to compare at that point.
+
+Once the plan identifies where links must be recorded, dispat also checks each destination branch for those commits.
+If it differs from the checked-out branch, it must not be behind either.
 
 Every linked checkout is detached, because that is what `git submodule update` leaves behind. A repository that must
 push what it records therefore needs `commit.branch`, and `E337` stops the release before publication without one.
@@ -308,13 +307,13 @@ repositoryBaselines:
     revision: 6f1a9f0d2b90c8f96a4d74dcb6568fd373b22c16
 ```
 
-This says `api-pkg@2.4.0` incorporated `sdk` through that revision. Write the entry in whichever peer knows it: dispat
-merges the `repositoryBaselines` of every composed repository before it resolves a boundary, because there is no
-central file to collect them in. Two peers may state the same boundary: tuples for one consumer, release tag and
-repository whose revisions resolve to one commit are that boundary, stated twice. Tuples that resolve to different
-commits contradict each other, and dispat reports `E333` naming both peers and both revisions from whichever peer the
-run starts in, so correct the peer that is wrong. An explicit tuple wins over the link evidence. `control` is not a
-valid `repository` value here, because this fleet has no participant by that name.
+This says `api-pkg@2.4.0` included `sdk` through that revision. Put the entry in any peer that knows the association;
+dispat merges `repositoryBaselines` from every composed peer before resolving it.
+
+Two peers may declare the same consumer, release tag and repository if their revisions resolve to the same commit.
+If they resolve to different commits, `E333` names both peers and revisions, regardless of where the run started.
+Correct the conflicting entry before retrying. An explicit tuple takes precedence over link evidence. `control` is
+not a valid repository here because this fleet has no control participant.
 
 ## Repository participation
 
@@ -326,15 +325,13 @@ repositoryOverrides:
     enabled: false
 ```
 
-The difference is where it is read. A peer owns its own release policy, but whether it takes part in this run is the
-invocation's question, so participation is read from the configuration of the repository the run started in and from
-nowhere else. A key naming no member of that repository's roster is refused, and so is excluding the repository the
-run started in.
+Participation is read only from the peer where this run starts. Other peers' participation settings do not affect
+the invocation. A key naming no member of the entry peer's roster is refused, as is an attempt to exclude the entry
+peer itself.
 
 ## Releasing one peer alone
 
-`--polyrepo=false` is the local escape hatch. It overrides the polyrepository mode activated by identity and
-releases the repository you are standing in, by itself:
+Use `--polyrepo=false` to override the mode enabled by repository identity and release only the current repository:
 
 ```console
 $ dispat --polyrepo=false release
@@ -343,12 +340,13 @@ $ dispat --polyrepo=false release
 
 No fleet is composed, so nothing outside this repository is planned, locked, settled or recorded.
 
-Know the hazard before you use it on a repository that consumes packages from its peers. A dependency on a package in
-another repository has no provider in a standalone run, so package discovery fails with an unknown provider unless the
-edge is marked `external: true`. With that marking the edge goes inactive, `W330` says so, and the release proceeds and
-writes its release commit **without settling any link first**. The next fleet-wide plan then finds no evidence for that
-release tag and reports `E333`, and the remedy is the `repositoryBaselines` tuple above. Use the flag for a peer whose
-packages depend on nothing outside its own repository, or accept that you will state the boundary by hand.
+Check cross-repository dependencies before using this flag. Their providers are absent from a standalone run, so
+discovery fails unless the edges are marked `external: true`.
+
+An external edge becomes inactive and reports `W330`. The release can then proceed, but **it records no link
+settlement**. The next fleet plan has no evidence for that tag's cross-repository boundary and reports `E333`; supply
+the `repositoryBaselines` tuple above to resolve it. Use standalone release for an independent peer, or be prepared
+to state the boundary by hand.
 
 ## Selecting work with `--since`
 

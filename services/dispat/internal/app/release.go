@@ -122,7 +122,9 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if coordinator != nil {
 		// The pool passed: from here the run owns one poller per endpoint, and
 		// the deferred close above stops them before it deletes the refs.
-		a.openDispatch(ctx, coordinator, pl, runner)
+		if err := a.openDispatch(ctx, coordinator, pl, runner); err != nil {
+			return nil, err
+		}
 	}
 	// Resolve the GitHub releasers: one per distinct target the packages'
 	// resolved policies name — most runs resolve to a single one. Empty

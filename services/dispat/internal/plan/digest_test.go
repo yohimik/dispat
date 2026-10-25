@@ -95,10 +95,10 @@ func TestPlanDigestIsStableAcrossRecomputation(t *testing.T) {
 // purpose is legitimate and requires bumping DigestSchema in the same commit,
 // because a node running the older code has to disagree loudly rather than
 // agree by accident. The value is the fixture's digest under
-// dispat-plan-digest/3, the schema that added the tests stage's commands and
-// the version stage's name to every package.
+// dispat-plan-digest/5, the schema that binds publication and failure blocking
+// edge selections beside the configured stage graph.
 func TestPlanDigestGolden(t *testing.T) {
-	const golden = "4fab4a8044f678641a7f0575cf6fd768302e9e70efc916ddb3a489f67fecf7f8"
+	const golden = "0eb5774c33352144825e9b94c37ef2ee11aa17743857abfab4aed6212ae3bfd3"
 	assert.Equal(t, golden, digestOfFixture(t),
 		"changing the canonical document requires bumping DigestSchema in the same commit")
 }

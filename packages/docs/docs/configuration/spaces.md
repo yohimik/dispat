@@ -1,10 +1,14 @@
 # Spaces
 
-A space is a group of packages sharing build/publish behaviour. The space's `path` names one folder or a list of
-folders. Every direct sub-folder of every listed folder is a package named after it, unless a
-[`.dispatexclude`](#dispatexclude) file in that folder excludes it. Configure single-package exceptions through a
-top-level [`packages` entry](./packages.md). You do not need to carve the package out into a space of its own. Declare
-a package living outside every space through a [standalone entry](./packages.md#standalone-packages-path).
+A space groups packages that share build and publish settings. Set `path` to one folder or a list of folders. Each
+direct subfolder becomes a package named after that folder, unless [`.dispatexclude`](#dispatexclude) excludes it.
+
+Start with [stages and hooks](#stages-and-hooks) to choose what runs, then
+[the provider relation](#the-provider-relation) to control dependency ordering.
+Use [`versioning`](#versioning) when packages need to share a version.
+
+For an exception affecting one package, add a [`packages` entry](./packages.md). For a package outside every space,
+use a [standalone entry](./packages.md#standalone-packages-path).
 
 A space may be rooted at the repository itself with `path: .` (or `path: ./`), in which case its packages are the
 repository's top-level folders. The same rules decide what a package is there: hidden folders are skipped, and a
@@ -19,6 +23,7 @@ every package.
 |-------------------------|--------------------------|------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `path`                  | string or `[string, ...]` | yes        | One folder, or a list of folders, relative to the root, `.` included. Every direct sub-folder of every listed folder is a package named after it (hidden folders are skipped, and [`.dispatexclude`](#dispatexclude) excludes more). Package names must be unique across all spaces and across the folders of one space. Listed folders must not repeat or contain one another, so a space rooted at the repository lists nothing beside it. The first folder is the space's primary one. The [login script](#flowlogin) runs there, and [`dispat exec --in space:`](../cli/exec.md) resolves there.                                                    |
 | `isBuildWaitingPublish` | bool or object           | no (false) | What the consumers of this space's packages wait for, and what a failed package of this space does to them. `false` (the default) lets a consumer build as soon as the provider is built; `true` holds its version and build stages until the provider is *published*. The object form adds a third relation and lets the failure rule be stated separately. See [The provider relation](#the-provider-relation). Under all three a consumer's own publish waits for the provider's publish. |
+| `publish`               | object                   | no         | Publication policy inherited from the root through the space and package. `orderKinds` selects manifest edges that order records; `blockingKinds` selects edges that can propagate a failed provider. `adoptPublished` controls identity-verified adoption of an already published version. |
 | `revertOnFail`          | bool                     | no (false) | When `true`, dispat rolls back all local changes inside the package folder if the package fails at any stage, or is skipped after its version stage already modified files. Tracked files are restored from HEAD, and untracked files are removed. With [release commits](./records.md#commit) enabled, a skipped package's folder is restored this way whether or not the setting is on, unless the folder is the repository root or holds another package's folder. A failed package keeps this setting's rule, except that its tracked files are restored when the release commit's shared `commit.include` paths are re-synchronized. See [What a failed run leaves in the working tree](../reference/releasing/recovery.md#what-a-failed-run-leaves-in-the-working-tree). |
 | `publish`               | object                   | no         | What a release does beyond running the publish stage: whether a version the destination already holds is adopted as this release, and how its identity is checked. See [`publish`](#publish). |
 | `flow`                  | object                   | no         | What the space runs at which stage. See the table below.                                                                                                                                                                                                                                                                                                                                |
@@ -46,9 +51,9 @@ You can write every option except `path`, `packages` and `dependencies` at the t
 default for every space. See [Where a setting can live](./README.md#where-a-setting-can-live). A space inherits the
 top-level value unless it states its own.
 
-Write a single package's departures from these options in a `packages` map. Never put them in the space's own keys. You
-can use either this space's map or the top-level one. Configure the space itself from inside its folder by creating
-[the space configuration file](#the-space-configuration-file).
+Put settings for one package in a `packages` map, either inside the space or at the root. Settings directly on the
+space apply to all its packages. To keep space-wide settings beside the code, use a
+[space configuration file](#the-space-configuration-file).
 
 ## Stages and hooks
 
@@ -56,10 +61,15 @@ The space's `flow` object configures stages and hooks. Key it by stage or hook n
 of names. See the [sequence rules](./scripts.md). dispat looks up each name against the package the stage is running
 for. It checks that package's `scripts`, then the space's, then the file's. Writing `flow.build: build` can mean a
 single shared command or a different command per package, depending on where you write `build`. See
-[`scripts` and `dispat run`](#scripts-and-dispat-run).
+[`scripts` and `dispat run`](#scripts-and-dispat-run). A stage entry also accepts an object that names the scripts
+under `script` and gives the stage a `label` and a place in the order (see [the order of the
+stages](#the-order-of-the-stages)), and a key that is neither a built-in stage nor a hook defines a
+[stage of your own](#stages-of-your-own).
 
-A releasing package runs the stages below from top to bottom. Two of them are not scripts at all. They appear here
-because you need them to understand the ordering.
+A releasing package follows the order below by default. The table includes built-in writes alongside scripts so you
+can see exactly when files, tags, and records change. Every package has a version stage and a build; the other stages
+are in its graph where the flow gives them something to do, a script or a hook, and have no task, hook or event
+otherwise.
 
 | # | Key | Kind | Runs |
 |---|-----|------|------|
@@ -74,18 +84,19 @@ because you need them to understand the ordering.
 | 9 | `postVersion` or `postPropagate` | hook | After the version stage. Fails the release. |
 | 10 | `autoVersion.syncLock` | stage | Lock-file regeneration (`npm install`), between the version and the build. Lives on [`autoVersion`](./autoversion.md), not on `flow`. Runs only where the sign or version stage actually changed a manifest. |
 | 11 | `beforeBuild` | hook | Before the build stage. Fails the release. |
-| 12 | `build` | stage | Build stage command(s). |
+| 12 | `build` | stage | Build stage command(s). Every package has a build stage; one with no `build` entry runs no command there. |
 | 13 | `postBuild` | hook | After the build stage. Fails the release. |
 | 14 | `beforeTests` | hook | Before the tests stage. Fails the release. |
 | 15 | `tests` | stage | Command(s) checking what the build produced. Runs only for a package whose space sets any of `tests`, `beforeTests` and `postTests`; a package without them has no tests stage at all. |
 | 16 | `postTests` | hook | After the tests stage. Fails the release. |
+| - | *(your stages)* | stage | [Stages the flow defines](#stages-of-your-own) sit here by default, where the tests sit, unordered with the tests and with each other, each inside its `before<Name>` and `post<Name>` hooks. A constraint moves one anywhere between the preparing stages and the announce. |
 | 17 | `login` | stage | Authentication command(s). Runs once **per space**, before that space's first publish. Every other publish of the space waits on it. See [`flow.login`](#flowlogin). |
 | 18 | `beforePublish` | hook | Before the publish stage, after the login. The last **hook** that can still stop a release. Fails the release. |
-| 19 | `publish` | stage | Publish stage command(s). Still gating. A publish script that exits non-zero has not released the package, so it fails exactly like a failed build and nothing below runs. |
+| 19 | `publish` | stage | Publish stage command(s). Still gating. A publish script that exits non-zero has not released the package, so it fails exactly like a failed build and nothing below runs. Runs for a package whose flow sets `publish`, `beforePublish` or `postPublish`, or places `publish` with `before` or `after`; a package without them is recorded right after its last stage instead (see [the order of the stages](#the-order-of-the-stages)). |
 | 20 | *(records and tag)* | - | Not a script. Writes the changelog entry, the GitHub release and the annotated tag. Reached only once the publish **succeeded**, which is the point of no return. From here nothing can fail the package. |
 | 21 | `postPublish` | hook | After a successful publish. Only **warns**. |
 | 22 | `beforeAnnounce` | hook | Before the announce stage. Only **warns**, and does not stop the announce. |
-| 23 | `announce` | stage | Pushing the release out to update channels, with the release-notes variables. Only **warns**. |
+| 23 | `announce` | stage | Pushing the release out to update channels, with the release-notes variables. Only **warns**. Runs for a package whose flow sets any of `announce`, `beforeAnnounce` and `postAnnounce`. |
 | 24 | `postAnnounce` | hook | After the announce stage. Only **warns**. |
 | - | `onFail` | outcome | Instead of the rest. Runs once when the package **fails** at any stage above, in the folder's final state (after `revertOnFail`). Warn-only. See below. |
 | - | `onSkip` | outcome | Instead of the rest. Runs once when the package is **skipped** because a provider failed. Warn-only. See below. |
@@ -94,11 +105,10 @@ Steps 1 to 19 are the **gating** half. A failure anywhere in them fails the pack
 `revertOnFail` applies, and `onFail` runs instead of the rest. The publish stage itself is part of that half. A publish
 script that exits non-zero has *not* released the package, so the run treats it exactly like a failed build.
 
-The line falls between 19 and 20. Once the publish script has **succeeded**, the artefact is on its registry. No later
-failure can take it back, so 21 to 24 only warn. Every one of them runs even after an earlier one failed. Step 20 makes
-the release irreversible. A tag or a record that cannot be written there is reported as a
-[critical](../internals/architecture.md#after-the-point-of-no-return) and the package stays published. That split is
-the whole reason there are two kinds of hook.
+After step 19 succeeds, the artifact has been published and the package stays `published`. Failures in steps 21–24
+only warn, and later hooks still run. A tag or record failure at step 20 is
+[critical](../internals/architecture.md#after-the-point-of-no-return): dispat reports it without claiming the already
+published artifact was rolled back.
 
 The version stage is also called the propagate stage, and each of its three keys has a twin: `flow.propagate`,
 `flow.beforePropagate` and `flow.postPropagate` are `flow.version`, `flow.beforeVersion` and `flow.postVersion`. A pair
@@ -108,7 +118,7 @@ refused. The key that configured the stage names it at runtime. Under `flow.prop
 `beforeVersion` and `postVersion`, as they always have. The failed stage, the events and the log use the same name. See
 [Two names for one block](./autoversion.md#two-names-for-one-block) for the order in which the keys decide.
 
-The sign stage is the one stage that exists only where it is configured. A package gets one when its space sets
+The sign stage exists only where it is configured. A package gets one when its space sets
 [`autoSign`](./autosign.md) or any of `flow.sign`, `flow.beforeSign` and `flow.postSign`, and it is then the package's
 first stage: `beforeAll` runs before it, and it waits for the package's providers the way the version stage does when
 it comes first. It shares the build budget with the version stage and the build, and it runs on the machine the
@@ -121,6 +131,108 @@ does. What the build [exported](../reference/environment.md#script-outputs) reac
 publish. It shares the build budget, and with worker nodes it is placed the way the build is (see
 [distributed execution](../distributed-execution.md#the-tests-stage)). `dispat run tests` still runs the script named
 `tests`, whatever the flow names.
+
+### The order of the stages
+
+A package's stages form a graph, and the graph says what runs before what and what may run at once (the model is
+CCME §13.11). The preparing stages (`sign`, then `version` or `propagate`, then `autoVersion.syncLock`) always come
+first: they rewrite the files every other stage reads. Every package has a `version` stage and a `build`; `tests`,
+`publish` and `announce` are in the graph where the flow gives them a script, a hook, or a `before` or `after`
+placement. Stages you define are in the graph when they have an entry. With no constraint the built-in stages form
+the chain `sign → version → syncLock → build → tests → publish → announce`.
+Stages the package lacks are omitted.
+Each [stage of your own](#stages-of-your-own) sits where `tests` sits: after the
+build and before the publish, unordered with the tests and with each other, so a run with room starts them at once.
+
+A stage entry written as an object places its stage:
+
+```yaml
+flow:
+  build: build
+  tests: tests
+  publish: publish
+  announce: { script: announce, after: build }   # before the publication, where it gates
+  lint: { script: lint, parallel: tests }        # beside the tests, in its default place
+  docs: { script: docs, before: publish, label: "Build the docs" }   # may run beside the build
+```
+
+- `before: <stage>` runs the stage before the named one and `after: <stage>` after it. Each names a stage of the
+  package, or a list of them. A stage that states one **places itself**: it gives up its default place and sits where
+  its constraints and the two edges the engine needs put it.
+- `parallel: <stage>` states that the two are unordered, so a run with room starts them at once. It adds no edge and
+  moves nothing: a stage stating only `parallel` keeps its default place. It is refused where the other edges relate
+  the pair, so `parallel: publish` is refused for a stage before the publication; place it after the publish instead.
+- A stage that does not place itself keeps its default edge from the stages of the greatest rank below it (the ranks
+  are `sign` 1, `version` 2, `syncLock` 3, `build` 4, `tests` and your stages 5, `publish` 6, `announce` 7), whether
+  or not those place themselves: `tests` keeps `build → tests` when the build moves, and `announce` keeps
+  `publish → announce` when the publish moves. The edge belongs to the stage it enters, so an
+  `announce: { after: build }` entry drops it and lands before publication, whatever the publish states.
+- Two edges hold whatever the constraints say: the preparing stages precede every other stage, and the build precedes
+  the publish, which ships what the build produced.
+- A name that is a built-in stage this package lacks (an unconfigured `tests` or `announce`, the `publish` of a
+  package with none) is dropped rather than refused, so one shared flow stays valid across packages that differ.
+
+The release records (the changelog entry, the GitHub release and the tag) follow the publish at once, so
+`after: publish` means after the records too. Every stage the publish does not reach runs before the publication, and
+the stages it reaches run after the records. A package whose flow has no `publish` is recorded once every other stage
+has completed, except an `announce` that does not place itself, which follows the record with what it reaches. A
+package whose flow configures no script at all still runs its build, which runs no command, and is recorded after it,
+so no release is ever silently skipped.
+
+A stage **gates** the release when it precedes the record: its failure fails the package, nothing is tagged,
+`revertOnFail` and `onFail` apply. A stage after the record never withholds it: it only warns, its failure blocks only
+the stages that wait on it, and it runs on the machine the release was started on. A moved `announce` gates where it
+lands before the publish.
+
+What a stage exports through `DISPAT_OUTPUT` reaches exactly the stages that run after it in the graph. Two stages
+that may run at once never see each other's exports, and the record sees every export of the stages before it, merged
+in the stage order (rank, then name).
+
+A configuration no order realises is refused once the configuration is read, before `release`, `status` or `run` does
+anything, under the `execution-configuration` identifier with a code per condition: `E230` when a constraint names a
+word that is no stage, a stage of your own the package does not define, or the stage that carries it; `E231` when the
+constraints, the default edges and the engine's edges form a cycle, which `before` and `after` naming one stage, two
+stages each placed before the other and a preparing stage moved behind the build all are; `E232` when a `parallel`
+pair is related by the edges, the publication and record edges included. Every package of the workspace is read first,
+planned or not, and the diagnostics come by package name, then by condition, then in the stage order, each naming the
+package, the stage and the names involved. See
+[a stage order the engine cannot run](../reference/plan-errors.md#a-stage-order-the-engine-cannot-run).
+
+The resolved release plan has a second cycle check before any task starts. It includes the provider outcome waits
+needed by that plan, including waits before version preparation when a script or automatic versioning consumes a
+provider's selected version. An impossible combined task graph is reported as `E233`. This check can find a cycle
+even when the configuration-wide stage graph is valid.
+
+A `label` is shown beside the stage name in the log lines, in the `label` field of the
+[events](./webhooks.md#the-events), and in the summary. `DISPAT_STAGE` and the hook names keep the key.
+
+A flow entry still merges entry by entry along the ladder, and an entry is one value in both its forms: a nearer level
+that writes a stage key, as a list or as an object, replaces the whole inherited entry, scripts, label and constraints
+alike, and keeps the entries it does not write. To move an inherited stage, restate its scripts beside the constraint.
+
+### Stages of your own
+
+A flow key that is neither a built-in stage nor a hook defines a stage of that name, written in letters and starting
+with a lower-case one:
+
+```yaml
+scripts:
+  scan: trivy fs dist
+  fetch-db: ./fetch-vulnerability-db.sh
+flow:
+  build: build
+  scan: { script: scan, label: "Security scan" }   # after the build and before the publish, beside the tests
+  beforeScan: fetch-db
+  publish: publish
+```
+
+The stage gets `before<Name>` and `post<Name>` hooks (`beforeScan` and `postScan`), and a hook alone is enough to
+define it, so a hook somebody configured never goes silent. Its scripts read `DISPAT_STAGE=scan`, and its hooks read
+their own names. The stage reports as `scan` in the events, the log and a failed package's stage. What the stages
+before it in the graph [exported](../reference/environment.md#script-outputs) reaches it, and what it exports reaches
+the stages after it. It gates or observes by its place, like a built-in stage. It draws the build budget wherever it
+sits, and with worker nodes it is placed the way the build is: see [stages of your own in distributed
+execution](../distributed-execution.md#stages-of-your-own). `dispat run scan` still runs the script named `scan`.
 
 All script references are optional. A stage without a script still runs and preserves ordering, skip semantics,
 statuses, tags and release records. It just executes no shell command. An unconfigured hook is a no-op. Scripts run
@@ -154,8 +266,8 @@ the login's exports from its publish stage onward, sourced `<space>:login`.
 
 ### `flow.announce`
 
-This is a fourth per-package stage. It runs after the publish frame completes (publish script, release records, tag,
-`flow.postPublish`). Use it to push the release out to update channels like a Slack message, a webhook, or a docs feed.
+Use `flow.announce` to send a Slack message, notify a webhook, or update a documentation feed after publishing. It runs
+after the publish script, release records, tag, and `flow.postPublish` have completed.
 
 This stage is the natural consumer of the release-notes and channel variables. It gets them alongside the full stage
 environment. The [release-notes variables](../reference/environment.md#release-notes-data) are
@@ -170,8 +282,8 @@ publish failed, because there is nothing to announce.
 ### `flow.onFail` and `flow.onSkip`
 
 These two outcome scripts are the failure-side counterparts of the announce stage. `flow.onFail` runs once when a
-package of the space fails at any stage. This includes a failing gating hook, release recorder or tag. It runs after
-the package status has settled and after `revertOnFail`'s rollback, so the script sees the folder's final state.
+package of the space fails at a gating stage or hook. A record or tag failure after publishing does not run it.
+It runs after the package status has settled and after `revertOnFail`'s rollback, so it sees the folder's final state.
 `flow.onSkip` runs once when the package is skipped because a provider failed or was skipped. Both observe an outcome
 that has already happened, so an error in either only warns. Both receive the full package environment (`DISPAT_STAGE`
 is `onFail` / `onSkip`) plus the specifics:
@@ -185,6 +297,25 @@ is `onFail` / `onSkip`) plus the specifics:
 Neither runs for a package that published. That job belongs to `flow.postPublish` and the announce frame. The run-level
 [run outcome listing](../reference/environment.md#run-outcome-data) carries the same information for every package at
 once.
+
+## Publication edge kinds
+
+`publish.orderKinds` chooses which manifest dependency fields put a provider's release record before a
+consumer's. Its default is `[dependencies, peerDependencies, optionalDependencies]`. The default
+`publish.blockingKinds` is `[dependencies, peerDependencies]`: an optional provider may fail without
+blocking a consumer, although a successful optional provider is still ordered first.
+
+```yaml
+publish:
+  orderKinds: [dependencies, peerDependencies, optionalDependencies]
+  blockingKinds: [dependencies, peerDependencies]
+```
+
+These lists inherit from the root through the space and package; the nearest stated list replaces the
+inherited list. An explicit `[]` selects no edges. Each dependency uses the consumer package's resolved
+selection. The E200 acyclicity check uses the union of `propagation.kinds` and these publication edges.
+Build dependencies still follow the provider relation below; a build-only edge can therefore make a
+configured stage order unrealizable even when E200's publication and propagation graph is acyclic.
 
 ## `publish`
 
@@ -273,8 +404,8 @@ for when this check runs and what it recovers.
 
 ## The provider relation
 
-`isBuildWaitingPublish` is read on the *provider's* space, because what a consumer may do with a provider is a property
-of what that provider produces. It answers two questions, which is why it accepts an object as well as a boolean:
+Set `isBuildWaitingPublish` on the **provider's** space. It controls when consumers can start work and whether a
+provider failure blocks them. Use the object form to configure those two choices separately:
 
 ```yaml
 spaces:
@@ -295,8 +426,8 @@ was skipped does to a consumer that has a release reason of its own.
 | `build`   | the provider's build           | the provider's publish           | skips it only if every reason it is in the plan is that failure (default) |
 | `publish` | the provider's publish         | the provider's publish           | skips it (always)          |
 
-The two booleans are the two relations most repositories want, written short. `false` is `{build: build}` and `true` is
-`{build: publish}`, exactly as they have always behaved, and a configuration dispat rewrites keeps them as booleans.
+The boolean form is shorthand: `false` means `{build: build}` and `true` means `{build: publish}`. If dispat rewrites
+the configuration, it preserves that shorthand.
 
 Choose the relation by what the consumer's build actually reads:
 
@@ -332,10 +463,8 @@ real version, once the provider publishes. See
 
 ## `versioning`
 
-This key decides how the versions of a space's packages relate to each other. Two axes decide it. The first is how much
-of the version the group holds in common. The second is what happens to a member that has nothing of its own to release
-when the shared part moves. The walkthrough with worked examples is
-[Shared versions](../reference/releasing/versioning.md). This section is the reference.
+Choose how much of the version packages share, and whether unchanged members release when that shared version moves.
+The table below is the reference; [Shared versions](../reference/releasing/versioning.md) walks through examples.
 
 | Value                     | Shares          | Effect                                                                                                                                                                                                                             |
 |---------------------------|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -615,9 +744,8 @@ folder is a root in its own right.
 
 ## `.dispatexclude`
 
-Create a plain-text file listing names in its own folder that dispat must skip **when it looks around**. In a space
-folder, those are the direct sub-folders that are not packages. This includes scratch areas, fixtures or a vendored
-repository:
+Create `.dispatexclude` in a space folder to list direct subfolders that should not become packages, such as scratch
+areas, fixtures, or a vendored repository:
 
 ```
 # not packages

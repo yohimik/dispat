@@ -39,6 +39,29 @@ func TestPublicationCarriesNoDeclaredOutputs(t *testing.T) {
 		"a publisher describes no output set of its own")
 }
 
+func TestRemoteStageReceivesOnlyItsGraphAncestorOutputSets(t *testing.T) {
+	c := &Coordinator{outputs: newOutputRegistry(), Links: []Link{{Name: "worker-b", Endpoint: "mailbox"}},
+		dispatch: Dispatch{Inputs: func(string) []InputPackage { return nil }}}
+	for _, stage := range []string{"generate", "transform", "unrelated"} {
+		c.outputs.rememberStage("core", stage, &admittedOutputs{
+			node: "worker-a", endpoint: "mailbox", branch: "result-" + stage,
+			commit: "oid-" + stage, manifest: admittedManifest{
+				task: "core:" + stage, packageName: "core", digest: "digest-" + stage,
+			},
+		})
+	}
+	request := release.StageRequest{Release: &plan.Release{Pkg: &model.Package{
+		Name: "core", Repository: "repo", Space: &model.Space{},
+	}}, Descriptor: release.Stage{OwnOutputStages: []string{"generate", "transform"}}}
+	inputs, err := c.resolvePublishInputs(t.Context(), "worker-b", request,
+		[]Source{{Name: "repo", Path: "repo"}}, "pkg")
+	require.NoError(t, err)
+	require.Len(t, inputs, 2)
+	assert.Equal(t, []string{"core:generate", "core:transform"}, []string{inputs[0].Task, inputs[1].Task})
+	assert.Equal(t, "repo/pkg", inputs[0].Path)
+	assert.Equal(t, "result-transform", inputs[1].Branch)
+}
+
 // TestEveryAssignmentBoundsItself: the node enforces the run's own wait,
 // whatever the work is. A publication that outlived it would be acting on an
 // authorization the run has written off, and a build that outlived it would be
