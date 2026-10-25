@@ -14,8 +14,8 @@ autoVersion:
 # dispat is releasing, which is right because the images build only after it
 # publishes, and its released baseline otherwise, so a docs- or image-only
 # release installs the CLI that is actually out. The build script below
-# overrides it for the one case the default cannot cover (a planned version
-# nobody published yet).
+# always selects a published stable binary for named verification builds,
+# even when dispat has no pending change: a tag can lack a release asset.
 env:
   INSTALL_DISPAT_VERSION: ${DISPAT_WORKSPACE_DISPAT_VERSION}
 # The docs package depends on dispat-alpine and runs the release experiments
@@ -52,10 +52,9 @@ scripts:
   # everywhere but one place: in a release the images build after the CLI
   # published, and in a run where dispat is not releasing the workspace
   # version is its published baseline. The exception is the CI build gate
-  # (`dispat run build`, DISPAT_STAGE "run:build") while dispat has commits
-  # pending: the workspace version is then a plan nobody published, install.sh
-  # would 404 on it, and the gate's question is only whether the image still
-  # builds — so that one case substitutes the newest version that exists.
+  # (`dispat run build`, DISPAT_STAGE "run:build"): a workspace version or Git
+  # tag can exist without a GitHub release or binary asset. The installer
+  # chooses and verifies an actual published stable release for this gate.
   #
   # GITHUB_TOKEN reaches the Dockerfiles' fetch stages as the compose files'
   # github_token build secret, which raises install.sh's release lookups above
@@ -63,12 +62,15 @@ scripts:
   # there is none, so the secret's source always exists and an empty token is
   # an anonymous lookup, exactly as a build without the secret.
   build: |
+    set -eu
     export GITHUB_TOKEN="${GITHUB_TOKEN:-}"
-    if [ "$DISPAT_STAGE" != "build" ] && [ "$DISPAT_WORKSPACE_DISPAT_RELEASING" = "true" ]; then
-      tag=$(git tag -l 'services/dispat/v*' --sort=-v:refname | head -n 1)
-      INSTALL_DISPAT_VERSION=${tag##*/v}
+    if [ "$DISPAT_STAGE" != "build" ]; then
+      root=$(git rev-parse --show-toplevel)
+      check_bin=$(mktemp -d)
+      trap 'rm -rf "$check_bin"' EXIT
+      INSTALL_DISPAT_VERSION=$(unset DISPAT_VERSION; sh "$root/install.sh" --bin-dir "$check_bin")
       export INSTALL_DISPAT_VERSION
-      echo "gate: dispat $DISPAT_WORKSPACE_DISPAT_VERSION is planned and unpublished; building against $INSTALL_DISPAT_VERSION"
+      echo "gate: building against published dispat $INSTALL_DISPAT_VERSION"
     fi
     docker compose -f docker-compose.yml -f "$DISPAT_CHANNEL.yml" build
   tests: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml config -q

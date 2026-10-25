@@ -2,6 +2,7 @@ package selfupdate
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -133,8 +134,79 @@ func TestImagesInstallThroughTheScript(t *testing.T) {
 	// there is no token, so its source always exists and an empty token asks
 	// anonymously.
 	space := readRepoFile(t, filepath.Join("docker", "dispat.yaml"))
-	assert.Contains(t, space, "  build: |\n    export GITHUB_TOKEN=\"${GITHUB_TOKEN:-}\"\n")
+	assert.Contains(t, space, "  build: |\n    set -eu\n    export GITHUB_TOKEN=\"${GITHUB_TOKEN:-}\"\n")
 	assert.Contains(t, space, `  push-image: GITHUB_TOKEN="${GITHUB_TOKEN:-}" docker compose `)
+}
+
+// TestImageBuildGateChoosesAnExistingRelease covers a tag left by a failed
+// release: a verification build must use a release with an asset, whether or
+// not dispat has pending work. A real release build keeps the planned version.
+func TestImageBuildGateChoosesAnExistingRelease(t *testing.T) {
+	space := readRepoFile(t, filepath.Join("docker", "dispat.yaml"))
+	_, body, found := strings.Cut(space, "  build: |\n")
+	require.True(t, found)
+	body, _, found = strings.Cut(body, "\n  tests:")
+	require.True(t, found)
+	var lines []string
+	for _, line := range strings.Split(body, "\n") {
+		if line == "" {
+			continue
+		}
+		require.True(t, strings.HasPrefix(line, "    "), "not a build command: %q", line)
+		lines = append(lines, strings.TrimPrefix(line, "    "))
+	}
+	script := strings.Join(lines, "\n")
+
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	require.NoError(t, os.Mkdir(bin, 0o755))
+	installerCalls := filepath.Join(root, "installer-calls")
+	dockerCalls := filepath.Join(root, "docker-calls")
+	for name, script := range map[string]string{
+		"git":    "#!/bin/sh\nprintf '%s\\n' \"$MOCK_ROOT\"\n",
+		"docker": "#!/bin/sh\nprintf '%s\\n' \"$INSTALL_DISPAT_VERSION\" >> \"$MOCK_DOCKER_CALLS\"\n",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755))
+	}
+	installer := "#!/bin/sh\n" +
+		"[ -z \"${DISPAT_VERSION+x}\" ] || exit 11\n" +
+		"[ \"$1\" = --bin-dir ] && [ -d \"$2\" ] || exit 12\n" +
+		"printf '%s\\n' \"$2\" >> \"$MOCK_INSTALLER_CALLS\"\n" +
+		"printf '%s\\n' 1.10.0\n"
+	require.NoError(t, os.WriteFile(filepath.Join(root, "install.sh"), []byte(installer), 0o755))
+
+	for _, row := range []struct {
+		name, stage, releasing, want string
+		installerCalled              bool
+	}{
+		{name: "pending CLI", stage: "run:build", releasing: "true", want: "1.10.0", installerCalled: true},
+		{name: "unchanged CLI", stage: "run:build", releasing: "false", want: "1.10.0", installerCalled: true},
+		{name: "release build", stage: "build", releasing: "true", want: "1.11.0-rc.9"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			require.NoError(t, os.RemoveAll(installerCalls))
+			require.NoError(t, os.RemoveAll(dockerCalls))
+			cmd := exec.Command("sh", "-c", script)
+			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"),
+				"MOCK_ROOT="+root, "MOCK_INSTALLER_CALLS="+installerCalls, "MOCK_DOCKER_CALLS="+dockerCalls,
+				"GITHUB_TOKEN=", "DISPAT_STAGE="+row.stage, "DISPAT_CHANNEL=rc",
+				"DISPAT_WORKSPACE_DISPAT_RELEASING="+row.releasing,
+				"DISPAT_WORKSPACE_DISPAT_VERSION=1.11.0-rc.9",
+				"INSTALL_DISPAT_VERSION=1.11.0-rc.9", "DISPAT_VERSION=1.11.0-rc.9")
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, "%s", output)
+			called, err := os.ReadFile(dockerCalls)
+			require.NoError(t, err)
+			assert.Equal(t, row.want+"\n", string(called))
+			paths, err := os.ReadFile(installerCalls)
+			if row.installerCalled {
+				require.NoError(t, err)
+				assert.NoDirExists(t, strings.TrimSpace(string(paths)), "the temporary verification binary is removed")
+			} else {
+				assert.True(t, os.IsNotExist(err), "release build must not look up a different version")
+			}
+		})
+	}
 }
 
 // composeVarRef finds compose's interpolation of a dispat variable:
