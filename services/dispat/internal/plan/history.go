@@ -80,7 +80,9 @@ type historyCommit struct {
 	commit     gitx.Commit
 }
 
-func cloneHistoryCommit(repository, root string, commit gitx.Commit) historyCommit {
+// cloneCommit copies every string a commit keeps, so that none of them points
+// into a buffer a Git implementation holds anything else in.
+func cloneCommit(commit gitx.Commit) gitx.Commit {
 	parents := make([]string, len(commit.Parents))
 	for i, parent := range commit.Parents {
 		parents[i] = strings.Clone(parent)
@@ -89,21 +91,48 @@ func cloneHistoryCommit(repository, root string, commit gitx.Commit) historyComm
 	for i, file := range commit.Files {
 		files[i] = strings.Clone(file)
 	}
-	return historyCommit{
-		repository: strings.Clone(repository),
-		root:       strings.Clone(root),
-		commit: gitx.Commit{
-			SHA:         strings.Clone(commit.SHA),
-			Parents:     parents,
-			AuthorName:  strings.Clone(commit.AuthorName),
-			AuthorEmail: strings.Clone(commit.AuthorEmail),
-			Message:     strings.Clone(commit.Message),
-			Files:       files,
-			// Deferred files stay deferred: the planner reads them for the
-			// commits that need them, from the repository named above.
-			AreFilesDeferred: commit.AreFilesDeferred,
-		},
+	return gitx.Commit{
+		SHA:         strings.Clone(commit.SHA),
+		Parents:     parents,
+		AuthorName:  strings.Clone(commit.AuthorName),
+		AuthorEmail: strings.Clone(commit.AuthorEmail),
+		Message:     strings.Clone(commit.Message),
+		Files:       files,
+		// Deferred files stay deferred: the planner reads them for the
+		// commits that need them, from the commit's own repository.
+		AreFilesDeferred: commit.AreFilesDeferred,
 	}
+}
+
+// copyCommitFor is how much of a window's commit the canonical copy copies,
+// none of it pointing into a buffer the Git implementation holds anything
+// else in. Only LocalGitx is known to hand out commits that own their strings
+// already: its control history parser copies every field it keeps on its own
+// (parseControlGitlinkHistory), so those are kept as they are, and its log
+// copies each commit out of git's output as one record (gitx commitLog), so
+// those copy their text. Any other implementation's are copied whole.
+func (cp *computation) copyCommitFor(history RepositoryHistory) func(gitx.Commit) gitx.Commit {
+	if _, isLocal := history.Git.(*gitx.LocalGitx); !isLocal {
+		return cloneCommit
+	}
+	if history.Control && cp.controlIndexed {
+		return func(commit gitx.Commit) gitx.Commit { return commit }
+	}
+	return detachText
+}
+
+// detachText copies a LocalGitx log commit's text fields, each into a string
+// of its own. A plan keeps them for its lifetime, one without the others, and
+// LocalGitx lists them as slices of the commit's whole record, so a message
+// or an author kept alone would keep the rest of the record too. The parents
+// and paths are kept as listed: the plan drops the parents with the
+// computation, and LocalGitx copies every path on its own.
+func detachText(commit gitx.Commit) gitx.Commit {
+	commit.SHA = strings.Clone(commit.SHA)
+	commit.AuthorName = strings.Clone(commit.AuthorName)
+	commit.AuthorEmail = strings.Clone(commit.AuthorEmail)
+	commit.Message = strings.Clone(commit.Message)
+	return commit
 }
 
 type baselineKey struct {
@@ -369,6 +398,8 @@ func (cp *computation) load(idx *windowIndex, history RepositoryHistory, boundar
 		if cp.stats != nil && counted {
 			cp.stats.CommitWindows.Add(1)
 		}
+		repository, root := strings.Clone(history.Name), strings.Clone(history.Root)
+		copyCommit := cp.copyCommitFor(history)
 		keys = make([]string, 0, len(raw))
 		for _, commit := range raw {
 			item := historyCommit{repository: history.Name, root: history.Root, commit: commit}
@@ -380,10 +411,10 @@ func (cp *computation) load(idx *windowIndex, history RepositoryHistory, boundar
 			}
 			keys = append(keys, key)
 			if _, exists := idx.canonical[key]; !exists {
-				cloned := cloneHistoryCommit(history.Name, history.Root, commit)
-				idx.canonical[key] = cloned
+				canonical := historyCommit{repository: repository, root: root, commit: copyCommit(commit)}
+				idx.canonical[key] = canonical
 				if cp.stats != nil {
-					cp.stats.CanonicalBytes.Add(int64(historyCommitBytes(cloned)))
+					cp.stats.CanonicalBytes.Add(int64(historyCommitBytes(canonical)))
 				}
 			}
 		}
