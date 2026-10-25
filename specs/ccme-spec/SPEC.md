@@ -3275,12 +3275,17 @@ phase-specific statements. Neither `Ω(Z)` output work nor a dense `H × m` or `
 instance requires that representation or that the complete planner is jointly time- and space-optimal. Correction,
 reachability, scope and cache choices retain input-dependent tradeoffs.
 
-**The dispat theorem (the one fastest release plan, reached only by a saga).** For a fixed history, configuration
-and inventory there is one release plan (§17.2), so the fastest release is a question about how that one plan is
-executed. The plan runs as a task graph: the sign, version, build, tests and publication tasks of its packages,
-ordered by the precedence edges of §19.2, §19.2a and §28.5, each task `i` with a duration `d_i`. Write
-`Wk = sum(d_i)` for the run's total work, `Lk` for the duration of its longest precedence chain, and `s` for the task
-slots usable at once, the lesser of the summed node capacities and the applicable run-wide stage limits. Then:
+**The dispat theorem (the one fastest compiled plan, reached only by a saga).** The theorem is about a *compiled
+plan*: a finite set of tasks whose dependencies are known, each task `i` with a duration `d_i`, an acyclic precedence
+relation over them, and a subset `R` of tasks with potential unrecovery, whose effect no later action restores once
+it has taken place. A release plan of §13 compiles to one, and for a fixed history, configuration and inventory to
+exactly one (§17.2): every package's stages in their order, the sign, version, build, tests and publication tasks and
+the records after them, with the precedence edges of §19.2, §19.2a and §28.5, and with its publications, records and
+withdrawals in `R`. A command sweep (§28.10) compiles to one whose `R` is empty unless a command publishes, and a
+stage a configuration defines joins the graph like a built-in one. Everything below is stated for the compiled plan,
+so the fastest release is a question about how that one plan is executed. Write `Wk = sum(d_i)` for the plan's total
+work, `Lk` for the duration of its longest precedence chain, and `s` for the task slots usable at once, the lesser of
+the summed node capacities and the applicable run-wide stage limits. Then:
 
 1. **Lower bound.** No execution of the plan finishes before `max(Lk, Wk / s)`. The tasks of one chain run one after
    another, so no execution is shorter than the longest chain, and `s` slots complete at most `s` units of work in a
@@ -3296,13 +3301,16 @@ slots usable at once, the lesser of the summed node capacities and the applicabl
    not the pool is the limit, and more slots only close the gap between a greedy execution and `Lk`, which is below a
    factor of two. Where one owner's publications are serialized (§27.2, §28.6), `sum(p_i)` over them is a floor as
    well.
-4. **Only a saga reaches it.** A saga here is an execution with three properties: every task's effect is recorded
-   durably in the shared history the instant it completes, never before and never later; a task whose provider
-   failed is blocked rather than attempted; and a resumed run recomputes the remaining work from the records and runs
-   that alone. §19.1, §19.3 and §17.2 require exactly these. Across a failure the bound is on the work the plan still
-   owes: a release keeps it when no completed task is paid for a second time over all its attempts and the resumed
-   attempt obeys clause 1 on the remaining work. Suppose an execution keeps the bound and is not a saga. Then it
-   lacks one of the three properties, and each way of lacking one ends in a specific anomaly:
+4. **Only a saga reaches it.** A saga here is an execution with three properties: every completed task's effect is
+   recorded durably in the shared history the instant it completes, never before and never later; a task whose
+   provider failed is blocked rather than attempted; and a resumed run recomputes the remaining work from the records
+   and runs that alone. §19.1, §19.3 and §17.2 require exactly these. The records are mandatory for `R` and
+   economical for the rest: a recoverable task that is lost is run again at the cost of its own duration, which
+   breaks the bound by that much and no more, while a task in `R` without a record is the first anomaly below.
+   Across a failure the bound is on the work the plan still owes: a release keeps it when no completed task is paid
+   for a second time over all its attempts and the resumed attempt obeys clause 1 on the remaining work. Suppose an
+   execution keeps the bound and is not a saga. Then it lacks one of the three properties, and each way of lacking
+   one ends in a specific anomaly:
    * *No record kept.* Progress lives in the run's memory and a resumed run starts the plan over. Every finished task
      is paid again, so the work exceeds the bound by what the failed attempt had finished, and the second publication
      of a version already published is refused or duplicated, because a publication cannot be taken back (§19.1,
@@ -3365,8 +3373,8 @@ slots usable at once, the lesser of the summed node capacities and the applicabl
    execution that keeps the bound across a moving branch therefore joins, which the resumption rule of §17.2 and the
    immutability of records in §19.1 already require.
 
-The theorem bounds the fastest execution the one plan admits; it is not a conformance obligation (§17.2), and it says
-nothing about the time taken to compute the plan, which the table above accounts for. Its premises are what an
+The theorem bounds the fastest execution the one compiled plan admits; it is not a conformance obligation (§17.2),
+and it says nothing about the time taken to compile the plan, which the table above accounts for. Its premises are what an
 implementation has to watch: nodes differ in platform and speed, an output transfer delays the consumer it feeds, and
 under finite budgets a weaker constraint or an added slot can lengthen a greedy execution although never the best one.
 The two passages below work the theorem out for the build readiness relation and for distributed placement.

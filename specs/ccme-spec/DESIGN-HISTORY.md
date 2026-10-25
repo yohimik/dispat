@@ -232,8 +232,10 @@ the lock back before every publication of a release that delegates nothing as we
 
 ## 2026-10-25: The dispat theorem
 
-Section 13.11 states as one named theorem what its cost discussion had said in passing. For a fixed history,
-configuration and inventory there is one release plan, and the fastest execution of it is bounded below by the longer
+Section 13.11 states as one named theorem what its cost discussion had said in passing. Its object is the compiled
+plan: a finite set of tasks with known dependencies, durations and an unrecoverable subset, which a release plan,
+a command sweep or a configured stage compiles to. For a fixed history, configuration and inventory there is one
+release plan, and the fastest execution of it is bounded below by the longer
 of its longest precedence chain and its total work divided by the usable slots; an execution that never idles a usable
 slot while a task is ready stays within Graham's factor of that bound when slots are interchangeable and transfers
 cost nothing. The theorem adds, by contradiction, that only a saga reaches the bound across a failure: an execution that
