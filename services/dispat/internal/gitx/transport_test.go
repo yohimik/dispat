@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -218,6 +219,50 @@ func TestPushReportReadsEveryRefAsFindPushStatusDoes(t *testing.T) {
 	assert.Equal(t, pushStatus{flag: pushRejected, summary: "[rejected] (stale info)"}, report["refs/tags/b"],
 		"the first line about a ref is its answer")
 	assert.Len(t, report, 4, "a two-rune flag is no status line")
+}
+
+// TestPushStatusReadsWhatThePerRefScanRead pins the answers the per-ref scan
+// gave at c7b14d32, written out rather than computed, so that both the report
+// and findPushStatus are held to them independently of each other.
+func TestPushStatusReadsWhatThePerRefScanRead(t *testing.T) {
+	out := "To https://git.example/acme.git\n" +
+		"*\trefs/tags/a:refs/tags/a\t[new tag]\n" +
+		"!\trefs/tags/b:refs/tags/b\t[rejected] (stale info)\n" +
+		"=\trefs/tags/b:refs/tags/b\t[up to date]\n" +
+		"\xff\trefs/tags/c:refs/tags/c\t[invalid byte]\n" +
+		"!x\trefs/tags/d:refs/tags/d\t[two-rune flag]\n" +
+		"-\t:refs/heads/gone\t[deleted]\n" +
+		"-\t(delete):refs/heads/old\t[deleted]\r\n" +
+		"*\trefs/tags/e\t[no pair]\n" +
+		"*\tsrc:refs/x:y\n" +
+		"\trefs/tags/f:refs/tags/f\t[no flag]\n" +
+		"Done"
+	cases := []struct {
+		ref        string
+		want       pushStatus
+		isReported bool
+	}{
+		{"refs/tags/a", pushStatus{flag: '*', summary: "[new tag]"}, true},
+		{"refs/tags/b", pushStatus{flag: '!', summary: "[rejected] (stale info)"}, true},
+		{"refs/tags/c", pushStatus{flag: utf8.RuneError, summary: "[invalid byte]"}, true},
+		{"refs/tags/d", pushStatus{}, false},
+		{"refs/heads/gone", pushStatus{flag: '-', summary: "[deleted]"}, true},
+		{"refs/heads/old", pushStatus{flag: '-', summary: "[deleted]\r"}, true},
+		{"refs/tags/e", pushStatus{}, false},
+		{"refs/x:y", pushStatus{flag: '*', summary: ""}, true},
+		{"refs/x", pushStatus{}, false},
+		{"refs/tags/f", pushStatus{}, false},
+		{"Done", pushStatus{}, false},
+	}
+	report := readPushReport(out)
+	for _, c := range cases {
+		got, isReported := findPushStatus(out, c.ref)
+		assert.Equal(t, c.isReported, isReported, "findPushStatus %s", c.ref)
+		assert.Equal(t, c.want, got, "findPushStatus %s", c.ref)
+		got, isReported = report[c.ref]
+		assert.Equal(t, c.isReported, isReported, "report %s", c.ref)
+		assert.Equal(t, c.want, got, "report %s", c.ref)
+	}
 }
 
 // TestTransportPushOutcomesAgainstARealRemote: what git itself answers for the
