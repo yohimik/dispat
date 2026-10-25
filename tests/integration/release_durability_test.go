@@ -511,13 +511,14 @@ func writeReceiptByHand(t *testing.T, r *harness.Repo, pkg, version, commit stri
 // TestLeftoverReceiptsAreSettledUnderTheLock covers the receipts a run finds
 // that are not a publication it finishes. One whose tag the checkout and the
 // remote hold is left over from a run whose record finished, and is removed.
-// One whose tag only the checkout holds is what a failed finalize push leaves:
-// the tag is pushed first and the receipt removed after it. One on a commit the
+// In tag-only mode, one whose tag only the checkout holds is what a failed
+// tag push leaves: the tag is pushed first and the receipt removed after it.
+// One on a commit the
 // head does not reach cannot affect the plan and is left where it is. The
 // release itself proceeds as if none of them were there.
 func TestLeftoverReceiptsAreSettledUnderTheLock(t *testing.T) {
 	reg := newFileRegistry(t)
-	r, remote := durabilityRepo(t, reg, &models.CommitConfig{Enabled: models.Bool(true), Push: true})
+	r, remote := durabilityRepo(t, reg, &models.CommitConfig{Push: true})
 	r.ReleaseOK()
 	require.Empty(t, receiptsOn(remoteRefs(t, r, remote)), "a finished run leaves no receipt behind")
 
@@ -540,6 +541,26 @@ func TestLeftoverReceiptsAreSettledUnderTheLock(t *testing.T) {
 	assert.Contains(t, res.Stdout, "a receipt names a commit this checkout's head does not reach")
 	assert.Equal(t, 1, reg.uploads(t, "core@0.2.0"))
 	assert.Equal(t, 1, reg.uploads(t, "core@0.1.0"))
+}
+
+// A release-commit run cannot infer an unfinished atomic finalization from
+// a local tag alone. The prepared target is the evidence binding its tag,
+// branch and receipt; without that evidence it keeps the receipt and starts
+// no new publication.
+func TestUnpreparedCommitModeReceiptKeepsLocalTag(t *testing.T) {
+	reg := newFileRegistry(t)
+	r, remote := durabilityRepo(t, reg, &models.CommitConfig{Enabled: models.Bool(true), Push: true})
+	r.ReleaseOK()
+	writeReceiptByHand(t, r, "core", "0.1.0", r.Git("rev-parse", "core@0.1.0^{}"))
+	r.WriteFile("packages/core/second.txt", "second\n")
+	r.Commit("feat(core): second release")
+
+	res := r.Release()
+	require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout, "no prepared finalization matching its receipt")
+	assert.Contains(t, remoteRefs(t, r, remote), "refs/dispat/receipts/core@0.1.0")
+	assert.Equal(t, 1, reg.uploads(t, "core@0.1.0"), "the completed publication is not repeated")
+	assert.Equal(t, 0, reg.uploads(t, "core@0.2.0"), "no new publication starts after ambiguous evidence")
 }
 
 func TestReceiptRefusesALocalTagAtAnotherCommit(t *testing.T) {

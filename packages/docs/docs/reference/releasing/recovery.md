@@ -42,8 +42,8 @@ before anything runs, and settles each one:
   run never pushed may be missing.
 - **Its tag already exists.** In tag-only mode, local and remote peeled targets must match the receipt's tag target;
   a matching local-only tag is pushed first. A conflicting tag retains the receipt. In release-commit mode, the final
-  branch, tags and receipt deletion are one atomic remote update. A same-checkout retry uses a local marker written
-  before the tag to prove its exact receipt and target; a local tag without that marker fails closed.
+  branch, any new tags and receipt deletion are one atomic remote update. A same-checkout retry uses a local marker
+  written before the tag to prove its exact receipt and target; a local tag without that marker fails closed.
 - **On a commit the checkout's head does not reach.** It cannot affect this plan and is left alone, with a warning.
 
 In release-commit mode, finalize atomically pushes the branch and tags while deleting their receipts. An unsupported
@@ -52,6 +52,12 @@ receipts. A prepared same-checkout retry can resume the exact atomic push, inclu
 landed meanwhile. Before any marker or tag exists, retry records the receipt's original target and replans. A fresh
 checkout also works: it rebuilds on the receipt's planned head or records the original target after the head moved.
 The stopped run's changelog and manifest edits may remain in its working tree; inspect them before unrelated edits.
+
+This retry rule assumes authoritative release tags are not rewritten. A verified matching remote tag is a stable
+precondition, so an existing tag need not be written again when the branch and exact receipt deletion are updated
+atomically. Git can omit an unchanged tag from a push; that omission does not compare or fence the tag against a
+concurrent forced rewrite. A tag observed at another target is refused, and recovery does not claim to handle a
+rewrite between verification and finalization.
 
 With `commit.push` off, the remote learns of a release only when CI pushes, and a run stopped before that push leaves
 its tags in the runner's checkout. The next run meets those publications at their destinations instead.

@@ -123,6 +123,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 		// The pool passed: from here the run owns one poller per endpoint, and
 		// the deferred close above stops them before it deletes the refs.
 		if err := a.openDispatch(ctx, coordinator, pl, runner); err != nil {
+			a.logError(err).Msg("execution inputs could not be prepared")
 			return nil, err
 		}
 	}

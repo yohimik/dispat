@@ -138,10 +138,9 @@ func TestRecordsTagsAreAnnotatedWithReleaseMessages(t *testing.T) {
 //
 // A tag sitting at a foreign commit is the one tagging failure that is easy
 // to construct and the most dangerous to mishandle. The run must publish, say
-// so, refuse to move the tag, keep going through the packages after the
-// failing one, and still exit non-zero. What it must not do is call the
-// package failed: the artefact is out, and reporting otherwise would skip
-// every consumer and revert a folder for nothing.
+// so, refuse to move the tag, block consumers whose release requires the
+// incomplete record, and still exit non-zero. What it must not do is call the
+// published package failed: the artifact is out and cannot be reverted.
 func TestRecordsTagFailureDoesNotUnpublishTheRelease(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
@@ -176,8 +175,16 @@ func TestRecordsTagFailureDoesNotUnpublishTheRelease(t *testing.T) {
 		"a published package is not a failed one")
 	assert.Contains(t, res.Stdout, `"critical":1`, "and the totals account for it")
 
-	// The consumer had a published provider to build against and released.
-	assert.True(t, r.IsTagged("consumer@0.1.0"), "tags: %v", r.TagList())
+	// The provider's artifact is published, but its required record failed.
+	// A consumer may not record a provider movement that lacks that record.
+	assert.False(t, r.IsTagged("consumer@0.1.0"), "tags: %v", r.TagList())
+	consumerStatus := ""
+	for _, event := range res.Events {
+		if event.Package() == "consumer" && event.Str("message") == "summary" {
+			consumerStatus = event.Str("status")
+		}
+	}
+	assert.Equal(t, "skipped", consumerStatus, "the incomplete provider record blocks its consumer")
 
 	// The foreign tag was left exactly where it was: moving it would rewrite a
 	// record this run did not make.

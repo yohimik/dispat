@@ -372,11 +372,8 @@ func TestChoreographyFaultStopsComputeInitializingADeclaredLink(t *testing.T) {
 // settling on top of, and once inside the commit it builds through a temporary
 // index. Either read failing refuses the package before it publishes.
 //
-// The ordinals are this run's own: by the time the settlement starts, the
-// consumer has been asked what it is at three times, and the commit asks twice
-// more with the drift check between them. They are asserted through the
-// sentence each arm reports, so a run that asks differently fails here rather
-// than passing against the wrong call.
+// The provider is released first, so only the consumer can call the Git read
+// being faulted. This isolates the settlement from provider prepublish reads.
 func TestChoreographyFaultCannotReadTheConsumersOwnRevision(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -391,6 +388,7 @@ func TestChoreographyFaultCannotReadTheConsumersOwnRevision(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fleet, marker := faultingConsumerFleet(t)
 			api := fleet.peer("api")
+			api.ReleaseOK("--package", "sdk-pkg")
 			fault := harness.NewGitFault(t, harness.GitFault{
 				Pattern: "*-C " + canonicalRoot(t, api.Repo) + " rev-parse HEAD^{commit}*",
 				Nth:     tc.nth})

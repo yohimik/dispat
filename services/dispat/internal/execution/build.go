@@ -102,7 +102,8 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) error {
 		if err := c.snapshots.captureBaselines(ctx, baselineCapture{sources: dispatch.InitialSources,
 			roots: dispatch.OutputRoots, open: dispatch.OpenRepository, log: c.Log}); err != nil {
 			c.snapshots.closeBaselines()
-			return err
+			return NewDiagnostic(CodeIntegrity, CategoryIntegrity,
+				"execution input baseline could not be captured: %w", err)
 		}
 	}
 	watched, stop := context.WithCancel(ctx)

@@ -20,10 +20,9 @@ package integration
 // before anything publishes, and a consumer that failed after its provider
 // published there is reported with the one remedy left (E201, SPEC 19.3).
 //
-// Ordering is gated rather than slept. The provider's publish waits for a file
-// the consumer's postVersion hook writes, so "the provider died after the
-// consumer's manifests were written" is something the run either did or could
-// not do, rather than something a timer happened to catch.
+// A changed provider's outcome settles before a consumer version frame that
+// reconciles it. This makes the consumer's build read the settled inputs rather
+// than a planned provider version that could still fail.
 
 import (
 	"encoding/base64"
@@ -51,12 +50,8 @@ const (
 
 // admissionShape is what one fixture of this file differs in.
 //
-// hasBuild decides which half of SPEC 19.2a's failure bullet the fixture
-// exercises: with no build command the consumer has produced nothing that
-// could embed the provider's planned version and is re-reconciled, and with
-// one it has and is blocked instead. hasVersionScript decides which
-// reconciling strategy the re-reconciliation has to redo: the native one
-// alone, or the native one and the space's own `flow.version` scripts.
+// hasBuild adds a consumer build command, so a test can observe the dependency
+// version it read. hasVersionScript adds a script to native reconciliation.
 type admissionShape struct {
 	hasBuild              bool
 	hasVersionScript      bool
@@ -68,25 +63,17 @@ type admissionShape struct {
 // whose publish fails unless this run says otherwise, and `cli` in a space
 // that reconciles its manifest natively.
 //
-// The provider's publish waits on a gate the consumer's postVersion hook
-// opens, which is after the native reconciliation has written the provider's
-// planned version. That is what makes "the provider died after the consumer's
-// manifests were written" the thing the run either did or could not do: opened
-// from the version script instead, the gate would be a race against dispat's
-// own reconciliation. Every publication the provider makes is appended to a
-// log inside the repository's Git directory, where no commit can pick it up.
+// Every provider publication is appended to a log inside the repository's Git
+// directory, where no release commit can pick it up.
 func admissionRepo(t *testing.T, shape admissionShape, adjust ...func(*models.File)) *harness.Repo {
 	t.Helper()
 	r := harness.New(t)
-	gate := r.Path("cli-versioned.gate")
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{
 		"build": {"echo building $DISPAT_PACKAGE"},
-		"core-publish": {stageRelationGateWait(gate),
-			`if [ -n "$` + admissionProviderOK + `" ]; then echo published; echo "$DISPAT_NEW_VERSION" >> '` +
-				admissionPublicationLog(r) + `'; else exit 1; fi`},
-		"cli-version":      {"echo versioning $DISPAT_PACKAGE against ${DISPAT_UPDATED_PACKAGES:-nothing}"},
-		"cli-post-version": {"touch '" + gate + "'"},
+		"core-publish": {`if [ -n "$` + admissionProviderOK + `" ]; then echo published; echo "$DISPAT_NEW_VERSION" >> '` +
+			admissionPublicationLog(r) + `'; else exit 1; fi`},
+		"cli-version": {"echo versioning $DISPAT_PACKAGE against ${DISPAT_UPDATED_PACKAGES:-nothing}"},
 		"cli-publish": {`if [ -n "$` + admissionConsumerFails + `" ]; then exit 1; fi`,
 			"echo publishing $DISPAT_PACKAGE at $DISPAT_NEW_VERSION"},
 	}
@@ -96,8 +83,7 @@ func admissionRepo(t *testing.T, shape admissionShape, adjust ...func(*models.Fi
 			Name: "admission-test", Email: "admission@example.com"}
 		cfg.Scripts["cli-publish"] = models.Script{bin + " commit --tag"}
 	}
-	consumerFlow := &models.SpaceFlowConfig{
-		PostVersion: []string{"cli-post-version"}, Publish: []string{"cli-publish"}}
+	consumerFlow := &models.SpaceFlowConfig{Publish: []string{"cli-publish"}}
 	if shape.hasBuild {
 		consumerFlow.Build = []string{"build"}
 	}
@@ -174,6 +160,8 @@ func admissionManifest(t *testing.T, r *harness.Repo) string {
 func admissionProceeded(t *testing.T, shape admissionShape, adjust ...func(*models.File)) *harness.Repo {
 	t.Helper()
 	r := admissionRepo(t, shape, adjust...)
+	r.WriteFile("packages/libs/core/feature.txt", "streaming\n")
+	r.WriteFile("packages/apps/cli/feature.txt", "own flag\n")
 	r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
 	require.NotEqual(t, 0, r.Release().Code, "the provider's publish failed, so the run failed")
 	require.Equal(t, 1, r.TagCount("cli@0.2.0"), "the consumer proceeded on its own work; tags: %v", r.TagList())
@@ -207,8 +195,8 @@ func assertAdmissionSettled(t *testing.T, r *harness.Repo) {
 // BASELINE, and the next run that publishes the provider catches it up.
 func TestAdmissionCatchesUpAConsumerThatProceededOnItsOwn(t *testing.T) {
 	t.Run("the consumer proceeds naming the provider's baseline", func(t *testing.T) {
-		// With version scripts as well, so the re-reconciliation has both
-		// strategies to redo.
+		// With version scripts configured, a failed provider leaves no live
+		// pickup for either the native or scripted reconciliation.
 		r := admissionRepo(t, admissionShape{hasVersionScript: true})
 		r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
 
@@ -226,8 +214,8 @@ func TestAdmissionCatchesUpAConsumerThatProceededOnItsOwn(t *testing.T) {
 			"the published manifest names what the provider published (SPEC 19.5)")
 		assert.NotContains(t, manifest, `"@acme/core": "^0.2.0"`,
 			"a manifest naming a version that was never published must not be published")
-		assert.Contains(t, res.Stdout, "versioning cli against nothing",
-			"the version scripts are re-run with the dead provider out of DISPAT_UPDATED_*")
+		assert.Contains(t, res.Stdout, "version: no successfully updated providers, skipping scripts",
+			"a failed pickup never reaches the version script")
 	})
 
 	t.Run("the run that publishes the provider catches the consumer up", func(t *testing.T) {
@@ -271,22 +259,18 @@ func TestAdmissionCatchesUpAConsumerThatProceededOnItsOwn(t *testing.T) {
 	})
 }
 
-// TestAdmissionFailedReconciliationWithholdsConsumerPublication: when a
-// provider fails after the consumer's version stage, reverting its planned
-// input version is a publication prerequisite. Both native and script failures
-// withhold the consumer's upload; repairing the fault lets each package publish
-// exactly once at the still-pending version.
+// TestAdmissionFailedReconciliationWithholdsConsumerPublication: a provider
+// publishes first, then a failed native or scripted reconciliation withholds
+// the consumer's upload. Repairing the fault publishes the pending consumer
+// version once.
 func TestAdmissionFailedReconciliationWithholdsConsumerPublication(t *testing.T) {
 	for _, failure := range []string{"native", "script"} {
 		t.Run(failure, func(t *testing.T) {
 			r := admissionRepo(t, admissionShape{hasVersionScript: true}, func(cfg *models.File) {
-				cfg.Scripts["core-publish"] = models.Script{
-					cfg.Scripts["core-publish"][0],
-					`if [ "$DISPAT_IT_RECONCILE_FAILURE" = native ]; then chmod 555 ../../apps/cli; fi`,
-					cfg.Scripts["core-publish"][1],
-				}
+				cfg.Scripts["core-publish"] = append(cfg.Scripts["core-publish"],
+					`if [ "$DISPAT_IT_RECONCILE_FAILURE" = native ]; then chmod 555 ../../apps/cli; fi`)
 				cfg.Scripts["cli-version"] = append(cfg.Scripts["cli-version"],
-					`if [ "$DISPAT_IT_RECONCILE_FAILURE" = script ] && [ -z "$DISPAT_UPDATED_PACKAGES" ]; then exit 12; fi`)
+					`if [ "$DISPAT_IT_RECONCILE_FAILURE" = script ] && [ -n "$DISPAT_UPDATED_PACKAGES" ]; then exit 12; fi`)
 			})
 			consumer := r.Path("packages", "apps", "cli")
 			t.Cleanup(func() { _ = os.Chmod(consumer, 0o755) })
@@ -300,18 +284,17 @@ func TestAdmissionFailedReconciliationWithholdsConsumerPublication(t *testing.T)
 				require.True(t, os.IsPermission(probeErr), "fixture requires permission denial: %v", probeErr)
 			}
 			r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
-			require.NoError(t, os.Remove(r.Path("cli-versioned.gate")), "the failed publish must wait for this run’s version stage")
-			failed := r.CommandEnv([]string{"DISPAT_IT_RECONCILE_FAILURE=" + failure}, "release")
+			failed := r.CommandEnv([]string{"DISPAT_IT_RECONCILE_FAILURE=" + failure, admissionProviderOK + "=1"}, "release")
 			require.Equal(t, 1, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
-			assert.Contains(t, failed.Stdout, "reconciling to the providers that published failed")
+			assert.Contains(t, failed.Stdout, `"failedStage":"version"`)
 			assert.NotContains(t, failed.Stdout, "publishing cli at 0.2.0")
-			assert.Zero(t, r.TagCount("core@0.2.0"))
+			assert.Equal(t, 1, r.TagCount("core@0.2.0"), "the settled provider published once")
 			assert.Zero(t, r.TagCount("cli@0.2.0"))
 
 			require.NoError(t, os.Chmod(consumer, 0o755))
 			retried := r.CommandEnv([]string{admissionProviderOK + "=1"}, "release")
 			require.Equal(t, 0, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
-			assert.Equal(t, 1, r.TagCount("core@0.2.0"))
+			assert.Equal(t, 1, r.TagCount("core@0.2.0"), "retry does not republish the provider")
 			assert.Equal(t, 1, r.TagCount("cli@0.2.0"))
 			assert.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.2.0"`)
 		})
@@ -877,24 +860,32 @@ func TestAdmissionProviderAloneDoesNotCreateAConsumerRelease(t *testing.T) {
 	assert.Zero(t, r.TagCount("cli@0.2.1"))
 }
 
-// TestAdmissionBlocksAProceedingConsumerWhoseBuildEmbeddedThePlannedVersion is
-// the conservative half of SPEC 19.2a's failure bullet. The consumer's version
-// stage wrote the provider's planned version, its build then ran over the
-// reconciled manifests, and only afterwards did the provider die: what the
-// build produced may name a version nobody published, and dispat will neither
-// publish it nor silently rebuild.
-func TestAdmissionBlocksAProceedingConsumerWhoseBuildEmbeddedThePlannedVersion(t *testing.T) {
-	r := admissionRepo(t, admissionShape{hasBuild: true})
+// TestAdmissionBuildReadsTheSettledProviderVersion: a changed provider's
+// outcome precedes the consumer's version frame and build. If the provider
+// fails, the consumer's own cause may still release, but its build sees the
+// baseline dependency rather than a planned version that never published.
+func TestAdmissionBuildReadsTheSettledProviderVersion(t *testing.T) {
+	r := admissionRepo(t, admissionShape{hasBuild: true}, func(cfg *models.File) {
+		cfg.Scripts["cli-build"] = models.Script{
+			`if [ -n "$DISPAT_IT_BUILD_CAPTURE" ]; then cp package.json "$DISPAT_IT_BUILD_CAPTURE"; fi`,
+		}
+		apps := cfg.Spaces["apps"]
+		apps.Flow.Build = []string{"cli-build"}
+		cfg.Spaces["apps"] = apps
+	})
 	r.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
 
-	res := r.Release()
+	capture := r.Path(".git", "cli-build-input.json")
+	res := r.CommandEnv([]string{"DISPAT_IT_BUILD_CAPTURE=" + capture}, "release")
 	require.NotEqual(t, 0, res.Code)
-	assert.Zero(t, r.TagCount("cli@0.2.0"),
-		"the consumer had a cause of its own but its build is already stale; tags: %v", r.TagList())
-	require.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "cli"),
-		"events:\n%s", res.Stdout)
-	assert.Contains(t, res.Stdout, "already embedded its planned version",
-		"the reason says which of the two blocking rules applied")
+	assert.Zero(t, r.TagCount("core@0.2.0"), "the provider failed")
+	assert.Equal(t, 1, r.TagCount("cli@0.2.0"), "the consumer has an independent cause")
+	assert.False(t, harness.IsCodePresentForPackage(res.Events, "W194", "cli"))
+	built, err := os.ReadFile(capture)
+	require.NoError(t, err, "the consumer build ran after provider settlement")
+	assert.Contains(t, string(built), `"@acme/core": "^0.1.0"`)
+	assert.NotContains(t, string(built), `"@acme/core": "^0.2.0"`)
+	assert.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.1.0"`)
 }
 
 // TestAdmissionCatchesUpAConsumerThatOvertookAHeldProvider is vector 82b1: the

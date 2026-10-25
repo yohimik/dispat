@@ -5152,11 +5152,18 @@ publication receipt:
 * is written create-only under §19.1's rule: a receipt the store already holds as the same immutable receipt object
   is the retry of an uncertain write and succeeds; a different object is refused, even if it names the same commit;
 * is removed once the release tag it stands in for is in the authoritative store. If the final tag may target a later
-  release commit, the branch, tag and receipt removal MUST be one atomic remote update, or equivalent durable
+  release commit, any new tag, the branch and receipt removal MUST be one atomic remote update, or equivalent durable
   finalization evidence MUST identify that target before the tag is exposed. An unsupported atomic update fails
   closed with the receipt retained. A lost response is settled by reading all affected remote refs. A local prepared
   finalization MAY bind a same-checkout retry to the exact receipt object and tag target, but an unbound local tag
   MUST NOT be treated as authority to consume the receipt.
+
+This recovery guarantee assumes the authoritative release tags remain immutable as §19.1 requires. An existing remote
+tag whose peeled target was verified against the receipt is a stable precondition, not a tag written again by
+finalization. In that case the branch update, if any, and deletion of the exact receipt object are the refs changed
+atomically. Git may omit an unchanged tag from a push; that no-op is neither a comparison nor a fence for the tag.
+An observed tag at another target is refused. The guarantee does not cover an outside actor forcibly rewriting the
+tag between verification and finalization, which violates the immutable-tag premise.
 
 A run reads every publication receipt the store holds under its release lock, before any task starts, and settles each
 one against its plan:

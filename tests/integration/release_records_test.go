@@ -227,10 +227,9 @@ func TestReleaseRecordsIgnoreATagWithNoVersionInIt(t *testing.T) {
 	assert.Equal(t, parked, remoteRecord(t, bare, "core@backup"), "and the name is left alone")
 }
 
-// TestReleaseRecordsCreateOnlyPush: the window the comparison cannot close.
-// A record may appear on the store between this run's plan and its push, and
-// the push is where that is decided: the remote is asked to create the name
-// and refuses if it holds it, in one operation.
+// TestReleaseRecordsCreateOnlyPush: a record may appear on the store between
+// this run's plan and its push. A new name uses a create-only update; a name
+// already at the prepared commit is an immutable record this run can finish.
 //
 // The two answers are opposite. The same commit is this release's own record
 // arriving twice, which a partly delivered push leaves behind and which must
@@ -308,14 +307,13 @@ func TestReleaseRecordsCreateOnlyPush(t *testing.T) {
 		r.WriteConfigModel(cfg)
 		r.Commit("chore: let another run record while this one publishes")
 		r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
-		// The refused name is read back once to tell a retry from a published
-		// record. A store that cannot answer that question leaves the run
-		// unable to say which of the two it met.
+		// A store that cannot answer the authoritative preflight tag read
+		// leaves the run unable to distinguish a retry from a foreign record.
 		fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*ls-remote -- origin refs/tags/*"})
 
 		res := r.CommandEnv(fault.Env())
 		assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Equal(t, 1, fault.Matches(), "one read back per refused name")
+		assert.Equal(t, 1, fault.Matches(), "the unreadable preflight refuses before any atomic push")
 		assert.Contains(t, res.Stdout, "push failed")
 		assert.Equal(t, theirs, remoteRecord(t, bare, "core@0.1.0"),
 			"and the record the store published is still where it was")
@@ -333,29 +331,35 @@ func TestReleaseRecordsCreateOnlyPush(t *testing.T) {
 		other := harness.Clone(t, bare)
 
 		cfg := recordsConfig(registry)
-		cfg.Spaces["libs"] = models.SpaceConfig{
-			Path: models.PathList{"packages"},
-			Flow: &models.SpaceFlowConfig{
-				Build: []string{"build"}, Publish: []string{"publish"},
-				PostPublish: []string{"inject"},
-			},
-		}
-		cfg.Scripts["inject"] = inject(t, other)
+		cfg.Scripts["inject"] = models.Script{"git -C " + shellQuote(other.Root) + " fetch -q --no-tags " +
+			shellQuote(r.Root) + " HEAD && git -C " + shellQuote(other.Root) +
+			" tag -a core@0.1.0 -m 'another annotation of this release' FETCH_HEAD && git -C " +
+			shellQuote(other.Root) + " push -q origin refs/tags/core@0.1.0"}
+		cfg.Run = &models.RunConfig{PostCommit: []string{"inject"}}
 		r.WriteConfigModel(cfg)
 		r.Commit("chore: let the same record arrive twice")
 		r.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
-		// The other clone follows this head and writes the identical record,
-		// which is what a retry of a write whose answer was lost looks like.
-		other.Git("fetch", "-q", "origin")
-		other.Git("merge", "-q", "--ff-only", "origin/"+harness.DefaultBranch)
-		other.Git("tag", "-a", "core@0.1.0", "-m", "the same record")
-		same := other.Git("rev-list", "-n1", "core@0.1.0")
+		// postCommit runs after the exact release commit and local tag exist.
+		// The other clone writes a different annotation of that same target
+		// before the required atomic update; the remote annotation must stay.
 
 		res := r.Release()
 		assert.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Contains(t, res.Stdout, "already exists on the remote at this release's commit")
+		same := other.Git("rev-list", "-n1", "core@0.1.0")
 		assert.Equal(t, same, remoteRecord(t, bare, "core@0.1.0"))
+		assert.Equal(t, other.Git("rev-parse", "refs/tags/core@0.1.0"),
+			strings.TrimSpace(bareGit(t, bare, "rev-parse", "refs/tags/core@0.1.0")),
+			"the published annotation is not replaced by this run's tag object")
+		assert.Empty(t, r.Git("ls-remote", "origin", "refs/dispat/receipts/core@0.1.0"),
+			"the same-target record atomically discharges the receipt")
 		assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
+		again := r.Release()
+		assert.Equal(t, 0, again.Code, "same-checkout retry: stdout:\n%s\nstderr:\n%s", again.Stdout, again.Stderr)
+		assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry),
+			"a retry must not upload the published version again")
+		assert.Equal(t, other.Git("rev-parse", "refs/tags/core@0.1.0"),
+			strings.TrimSpace(bareGit(t, bare, "rev-parse", "refs/tags/core@0.1.0")),
+			"a retry must preserve the remote annotation")
 	})
 }
 
@@ -705,7 +709,8 @@ func TestReleaseRecordsTagRefusedByTheRemoteIsAFailedPush(t *testing.T) {
 	assert.Contains(t, res.Stdout, `"status":"published"`, "and is reported published")
 	assert.True(t, harness.IsCodePresent(res.Events, "E224"), "the push failed: %s", res.Stdout)
 	assert.False(t, harness.IsCodePresent(res.Events, "E221"), "no record is in the way: %s", res.Stdout)
-	assert.Contains(t, res.Stdout+res.Stderr, "pre-receive hook declined", "the remote's reason is named")
+	assert.Contains(t, res.Stdout+res.Stderr, "release tags are created by the release team",
+		"the remote's reason is named")
 	assert.Empty(t, remoteRecord(t, bare, "core@0.1.0"), "and the remote holds no record")
 }
 

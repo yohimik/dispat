@@ -2565,9 +2565,33 @@ func (c *LocalGitx) PushWithReceipts(ctx context.Context, remote string, refs []
 		if err != nil || target != marker.TagTarget {
 			return PushReport{}, fmt.Errorf("atomic release tag %s differs from its prepared target: %w", ref.Name, err)
 		}
-		pinned[ref.Name], targets[ref.Name] = object, target
-		args = append(args, "--force-with-lease="+name+":")
-		specs = append(specs, object+":"+name)
+		storedObject, err := c.RemoteTagObject(ctx, remote, ref.Name)
+		if err != nil {
+			return PushReport{}, fmt.Errorf("reading release tag %s before atomic push: %w", ref.Name, err)
+		}
+		targets[ref.Name] = target
+		if storedObject == "" {
+			pinned[ref.Name] = object
+			args = append(args, "--force-with-lease="+name+":")
+			specs = append(specs, object+":"+name)
+			continue
+		}
+		storedTarget, err := c.RemoteTagCommit(ctx, remote, ref.Name)
+		if err != nil {
+			return PushReport{}, fmt.Errorf("reading release tag %s's target before atomic push: %w", ref.Name, err)
+		}
+		if storedTarget == "" {
+			return PushReport{}, fmt.Errorf("reading release tag %s's target before atomic push: tag disappeared", ref.Name)
+		}
+		if storedTarget != target {
+			outcome := RefOutcome{Name: ref.Name, Result: RefAtOtherCommit, Commit: storedTarget}
+			return PushReport{Conflicts: []RefOutcome{outcome}},
+				fmt.Errorf("atomic release tag %s already names another commit", ref.Name)
+		}
+		// An immutable existing tag at the prepared commit is already this
+		// release's record. Git omits a no-op ref update, so no lease could
+		// fence it; the remote's no-tag-rewrite contract keeps it stable.
+		pinned[ref.Name] = storedObject
 	}
 	for _, receipt := range receipts {
 		if err := ValidRefName(receipt.Ref()); err != nil {
@@ -2605,6 +2629,21 @@ func (c *LocalGitx) PushWithReceipts(ctx context.Context, remote string, refs []
 	}
 	if len(report.Conflicts) > 0 {
 		return report, fmt.Errorf("atomic release push refused a foreign tag: %w", err)
+	}
+	// A raced branch update may be reported by a remote hook as only
+	// "cannot lock ref", without git's usual rejected status. Read the
+	// authoritative branch instead of relying on that wording; a changed
+	// branch calls for the caller's merge and retry, while a tag or policy
+	// refusal must retain the receipt and fail closed.
+	if ctx.Err() == nil {
+		behind, checkErr := c.BehindRemote(ctx, remote, branch)
+		if checkErr != nil {
+			return report, fmt.Errorf("atomic push failed and the remote branch could not be checked: %w",
+				errors.Join(err, checkErr))
+		}
+		if behind {
+			return report, fmt.Errorf("%w: %w", err, ErrRejected)
+		}
 	}
 	return report, classifyPush(err)
 }

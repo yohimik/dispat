@@ -610,14 +610,12 @@ func conflictBranch(rels []*plan.Release, now time.Time) string {
 // was already prepared to report.
 const mergeAttempts = 3
 
-// refuseRepublishing stops the recovery when the remote already carries a
-// release tag this run is about to push.
+// refuseRepublishing stops recovery from moving a release tag already held
+// by the remote. A matching immutable tag can complete receipt-backed work.
 //
-// The recovery pushes the same tags again, and commit.force defaults on, so
-// without this a checkout whose tags are stale enough to have re-planned an
-// already published version would force-move that published tag onto its own
-// commit. The push this recovers from never sent a tag at all, which is why
-// the hazard is new: the branch is refused before the tag refs are reached.
+// A checkout whose tags are stale enough to have re-planned an already
+// published version must not move that record. Receipt-backed finalization
+// may instead finish when the remote tag names the prepared release commit.
 //
 // The release tags come from the releases rather than from the commit
 // message's list, which leaves out any package that recorded itself through an
@@ -631,6 +629,22 @@ func (a *App) refuseRepublishing(ctx context.Context, remote string, rels []*pla
 	for _, rel := range rels {
 		tag := rel.TagName()
 		if existing[tag] {
+			if a.receipts != nil {
+				if _, held := a.receipts.findHeld(tag); held {
+					local, localErr := a.git.ResolveCommit(ctx, "refs/tags/"+tag)
+					stored, remoteErr := a.git.RemoteTagCommit(ctx, remote, tag)
+					if localErr != nil || remoteErr != nil {
+						return fmt.Errorf("checking %s before finishing its receipt: %w", tag,
+							errors.Join(localErr, remoteErr))
+					}
+					if stored == "" {
+						return fmt.Errorf("checking %s before finishing its receipt: tag disappeared", tag)
+					}
+					if stored == local {
+						continue
+					}
+				}
+			}
 			return fmt.Errorf(
 				"commits landed on %s during the release, and %s already carries %s: "+
 					"this checkout planned a version that is already published, "+

@@ -308,7 +308,7 @@ func TestInterruptInTheClosingPhaseStillRecordsWhatPublished(t *testing.T) {
 			r, bare := closingPhaseRepo(t, sink, tc.interrupted)
 			interrupt := func() harness.RunResult {
 				if tc.interrupted == "push" {
-					hold := harness.NewGitFault(t, harness.GitFault{Pattern: "*push origin HEAD", Hold: true})
+					hold := harness.NewGitFault(t, harness.GitFault{Pattern: "*push --atomic --porcelain*", Hold: true})
 					proc := r.StartReleaseEnv(hold.Env())
 					require.Eventually(t, hold.IsHeld, 60*time.Second, 20*time.Millisecond, "the release push never started")
 					proc.Signal(tc.signal)

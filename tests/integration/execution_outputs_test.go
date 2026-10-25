@@ -454,11 +454,24 @@ func TestExecutionOutputInstallRollsBackEarlierRoots(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			marker := filepath.Join(t.TempDir(), "published")
-			rig := newExecutionOutputWorkspace(t, func(cfg *models.File) {
-				cfg.BuildOutputs = []string{"a-dist", "z-assets/nested"}
-				cfg.Scripts["build"] = models.Script{
-					"mkdir -p a-dist z-assets/nested && printf new > a-dist/new.txt && printf new > z-assets/nested/new.txt",
+			var outside string
+			if linkedParent {
+				outside = t.TempDir()
+			}
+			rig := newExecutionOutputWorkspaceWith(t, func(repo *harness.Repo) string {
+				assetDir := repo.Path("packages", "assets")
+				block := fmt.Sprintf("printf 'blocking parent\\n' > %q", filepath.Join(assetDir, "z-assets"))
+				if linkedParent {
+					block = fmt.Sprintf("ln -s %q %q", outside, filepath.Join(assetDir, "z-assets"))
 				}
+				return "set -eu; mkdir -p a-dist z-assets/nested; " +
+					"printf new > a-dist/new.txt; printf new > z-assets/nested/new.txt; " +
+					fmt.Sprintf("if [ \"$DISPAT_PACKAGE\" = assets ]; then mkdir -p %q; "+
+						"printf 'old\\n' > %q; rm -rf %q; %s; fi",
+						filepath.Join(assetDir, "a-dist"), filepath.Join(assetDir, "a-dist", "old.txt"),
+						filepath.Join(assetDir, "z-assets"), block)
+			}, func(cfg *models.File) {
+				cfg.BuildOutputs = []string{"a-dist", "z-assets/nested"}
 				cfg.Scripts["publish"] = models.Script{
 					`[ "$DISPAT_PACKAGE" != assets ] || ` + fmt.Sprintf("printf published > %q", marker),
 				}
@@ -466,14 +479,6 @@ func TestExecutionOutputInstallRollsBackEarlierRoots(t *testing.T) {
 			})
 			rig.repo.WriteFile(".gitignore", "a-dist/\npackages/assets/z-assets\n")
 			rig.repo.Commit("chore(assets,ui,docs,app): ignore the output roots")
-			rig.repo.WriteFile("packages/assets/a-dist/old.txt", "old\n")
-			var outside string
-			if linkedParent {
-				outside = t.TempDir()
-				require.NoError(t, os.Symlink(outside, rig.repo.Path("packages", "assets", "z-assets")))
-			} else {
-				rig.repo.WriteFile("packages/assets/z-assets", "blocking parent\n")
-			}
 			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
 
 			res := rig.release()
@@ -481,6 +486,8 @@ func TestExecutionOutputInstallRollsBackEarlierRoots(t *testing.T) {
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.True(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, "assets"),
 				"the output installation failed as an integrity prerequisite")
+			assert.Contains(t, res.Stdout+res.Stderr, "destination-component",
+				"the second root was refused at its destination, after the worker produced both roots")
 			assert.Equal(t, "old\n", readRepoFile(t, rig.repo, "packages/assets/a-dist/old.txt"))
 			assert.NoFileExists(t, rig.repo.Path("packages", "assets", "a-dist", "new.txt"))
 			if linkedParent {
@@ -510,10 +517,24 @@ func TestExecutionOutputInstallPermissionFailureCanRetry(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			marker := filepath.Join(t.TempDir(), "published.log")
+			injected := filepath.Join(t.TempDir(), "fault-injected")
 			rig := newExecutionPlacementRig(t, []string{"assets", "spare"},
-				func(*harness.Repo) string {
-					return `mkdir -p a-dist z-assets/nested && ` +
-						`printf new > a-dist/new.txt && printf new > z-assets/nested/new.txt`
+				func(repo *harness.Repo) string {
+					assetDir := repo.Path("packages", "assets")
+					blocked := filepath.Join(assetDir, "z-assets")
+					if tc.isExistingRootMoveBlocked {
+						blocked = assetDir
+					}
+					removeNewRoot := ""
+					if !tc.isExistingRootMoveBlocked {
+						removeNewRoot = fmt.Sprintf("rm -rf %q; ", filepath.Join(assetDir, "z-assets", "nested"))
+					}
+					return "set -eu; mkdir -p a-dist z-assets/nested; " +
+						"printf new > a-dist/new.txt; printf new > z-assets/nested/new.txt; " +
+						fmt.Sprintf("if [ \"$DISPAT_PACKAGE\" = assets ] && [ ! -f %q ]; then "+
+							"mkdir -p %q; printf 'old\\n' > %q; %schmod 555 %q; touch %q; fi",
+							injected, filepath.Join(assetDir, "a-dist"), filepath.Join(assetDir, "a-dist", "old.txt"),
+							removeNewRoot, blocked, injected)
 				}, func(cfg *models.File) {
 					cfg.BuildOutputs = []string{"a-dist", "z-assets/nested"}
 					cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
@@ -523,15 +544,15 @@ func TestExecutionOutputInstallPermissionFailureCanRetry(t *testing.T) {
 				})
 			rig.repo.WriteFile(".gitignore", "a-dist/\nz-assets/\n")
 			rig.repo.Commit("chore(assets,spare): ignore build outputs")
-			rig.repo.WriteFile("packages/assets/a-dist/old.txt", "old\n")
 			blocked := rig.repo.Path("packages", "assets", "z-assets")
 			if tc.isExistingRootMoveBlocked {
 				blocked = rig.repo.Path("packages", "assets")
 			}
-			require.NoError(t, os.MkdirAll(blocked, 0o755))
-			require.NoError(t, os.Chmod(blocked, 0o555))
 			t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
-			probeErr := os.WriteFile(filepath.Join(blocked, "permission-probe"), []byte("x"), 0o600)
+			probeDir := t.TempDir()
+			require.NoError(t, os.Chmod(probeDir, 0o555))
+			t.Cleanup(func() { _ = os.Chmod(probeDir, 0o755) })
+			probeErr := os.WriteFile(filepath.Join(probeDir, "permission-probe"), []byte("x"), 0o600)
 			if probeErr == nil {
 				t.Skip("this user can write into a 0555 directory")
 			}
@@ -546,9 +567,18 @@ func TestExecutionOutputInstallPermissionFailureCanRetry(t *testing.T) {
 				"the write-denied root fails its own prerequisite")
 			assert.Contains(t, failed.Stdout+failed.Stderr, "permission denied",
 				"the refused install reached the destination filesystem")
+			if tc.isExistingRootMoveBlocked {
+				assert.Contains(t, failed.Stdout+failed.Stderr, "moving the previous build output root aside")
+			} else {
+				assert.Contains(t, failed.Stdout+failed.Stderr, "installing the build output root z-assets/nested")
+			}
 			assert.Equal(t, "old\n", readRepoFile(t, rig.repo, "packages/assets/a-dist/old.txt"))
 			assert.NoFileExists(t, rig.repo.Path("packages", "assets", "a-dist", "new.txt"))
-			assert.NoDirExists(t, rig.repo.Path("packages", "assets", "z-assets", "nested"))
+			assert.NoFileExists(t, rig.repo.Path("packages", "assets", "z-assets", "nested", "new.txt"),
+				"the second root never exposes the worker's new bytes")
+			if !tc.isExistingRootMoveBlocked {
+				assert.NoDirExists(t, rig.repo.Path("packages", "assets", "z-assets", "nested"))
+			}
 			assert.Empty(t, asideLeftoverNames(t, rig.repo.Path("packages", "assets")))
 			assert.False(t, rig.repo.IsTagged("assets@0.1.0"), "no partial installation can publish")
 			assert.True(t, rig.repo.IsTagged("spare@0.1.0"), "independent work still releases")

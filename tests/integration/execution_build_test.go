@@ -617,9 +617,9 @@ func (w *executionBranchWatch) seen() []string {
 	return <-w.found
 }
 
-// TestExecutionSnapshotGitFaults: the orchestrator's own git failing where an
-// input state is prepared fails the task that needed it rather than
-// dispatching a state nobody could describe, and publishes nothing.
+// TestExecutionSnapshotGitFaults: the orchestrator's own git failing while
+// the pinned input baseline is captured refuses the run before a task is
+// dispatched from a state nobody could describe, and publishes nothing.
 func TestExecutionSnapshotGitFaults(t *testing.T) {
 	for name, pattern := range map[string]string{
 		"the index cannot be located": "*rev-parse*--git-path*index*",

@@ -482,15 +482,13 @@ func TestReleaseMergesWhatLandedTwice(t *testing.T) {
 	assert.Contains(t, r.Git("ls-remote", "origin"), "refs/tags/core@0.1.0")
 }
 
-// TestReleaseRefusesToRepublishAnExistingTag: the recovery pushes this run's
-// tags again, so a checkout that planned a version somebody else has already
-// published would write its own tag over that published record. The push this
-// recovers from never reached a tag ref at all, so nothing used to stand
-// between the two; now the remote's tags are read first and the run stops.
+// TestReleaseRefusesToRepublishAnExistingTag: the atomic release push creates
+// each required tag or retains one already at the same target. A checkout
+// that planned a version somebody else has already recorded at another
+// commit must leave that foreign tag in place and retain its receipt.
 //
-// The record arrives while the run is working, which is the only way it can
-// still reach the recovery: a record the remote already held when the run
-// started is refused under the lock, before anything is planned (goal 59).
+// The record arrives while the run is working; a record the remote already
+// held when the run started is refused under the lock before planning.
 // Here the same clone that lands the mid-release commit publishes the version
 // too, on the commit this run planned from.
 func TestReleaseRefusesToRepublishAnExistingTag(t *testing.T) {
@@ -510,11 +508,16 @@ func TestReleaseRefusesToRepublishAnExistingTag(t *testing.T) {
 
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stdout, "already carries core@0.1.0")
-	assert.Contains(t, res.Stdout, "Pull and run again")
+	assert.True(t, harness.IsCodePresent(res.Events, "E221"),
+		"the foreign release record is reported: %s", res.Stdout)
+	assert.True(t, harness.IsCodePresent(res.Events, "E224"),
+		"the required atomic branch, tag and receipt update was refused: %s", res.Stdout)
+	assert.Contains(t, res.Stdout, `"status":"published"`, "the artifact was already published")
 	assert.Equal(t, published,
 		strings.TrimSpace(bareGit(t, bare, "rev-list", "-n", "1", "core@0.1.0")),
 		"the published tag is where its own release left it")
+	assert.Contains(t, r.Git("ls-remote", "origin", "refs/dispat/receipts/core@0.1.0"),
+		"refs/dispat/receipts/core@0.1.0", "the uncertain publication retains its durable receipt")
 }
 
 // midReleaseTag is a script fragment that publishes a release record from
