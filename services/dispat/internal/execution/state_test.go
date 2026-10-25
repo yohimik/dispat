@@ -479,3 +479,31 @@ func BenchmarkSeenSetRecord(b *testing.B) {
 		recorded++
 	}
 }
+
+// BenchmarkSeenSetRecordPruning is a node in steady state: claims come one
+// 5000th of the horizon apart, so the record holds about 5000 live attempts,
+// each claim forgets the oldest of them, and the file is rewritten every few
+// thousand claims. Run it for several thousand iterations, or the rewrite it
+// amortises does not appear in the figure.
+func BenchmarkSeenSetRecordPruning(b *testing.B) {
+	const live = 5000
+	path := filepath.Join(b.TempDir(), "seen.json")
+	now := time.Now()
+	step := seenRetentionWindow / live
+	seeded := make(map[string]time.Time, live)
+	for i := range live {
+		seeded[formatTriple(strings.Repeat("a", 64), "package-"+strconv.Itoa(i)+":build", 1)] =
+			now.Add(-seenRetentionWindow + time.Duration(i)*step)
+	}
+	content, err := json.Marshal(seeded)
+	require.NoError(b, err)
+	require.NoError(b, os.WriteFile(path, content, 0o644))
+	set, err := LoadSeenSet(path, now)
+	require.NoError(b, err)
+	recorded := 0
+	for b.Loop() {
+		recorded++
+		require.NoError(b, set.Record(strings.Repeat("b", 64), "package-"+strconv.Itoa(recorded)+":build", 1,
+			now.Add(time.Duration(recorded)*step)))
+	}
+}
