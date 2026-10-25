@@ -287,6 +287,8 @@ dispat status --package api --strict --log-format json
 dispat preview --package api --changelog --github
 ```
 
+To rebuild the notes of a release that already happened, for example a GitHub release that was never created, run `dispat preview --package api --version <version> --github`; a bare `--version` takes the latest release, and the notes are planned again at the tag's commit under the current configuration.
+
 Use the same selection for preview and release. Explicit `--package` (`-p`), `--space` (`-s`), or `--group` (`-g`) selection overrides implicit narrowing from the current folder. Quote globs, for example `-p '@acme/*'`. `-p '*'` includes standalone packages that a space selection may omit.
 
 Selection narrows which planned packages execute; the complete dependency graph still participates in version calculation. Review warnings about withheld consumers and split version groups. Use `--strict` when those conditions must fail the gate. Do not suppress them by editing configuration or selecting only the convenient half of a group.

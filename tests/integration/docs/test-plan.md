@@ -252,8 +252,9 @@ integration suite itself.
     sections carrying their own bump claims, the "no changes" sentence, commit bodies staying in their bullet, the
     spacing of the seam between entries, and the proof that a workspace configuring none of it gets the exact file it
     always got. Every scenario asserts the changelog file and the GitHub body from one configuration.
-17. **The `init` and `preview` commands** (`commands_test.go`): the starter config the very next `status` can load, the
-    pending release notes on stdout, and the CLI surface itself (per-command `--help`, the platform in `--version`).
+17. **The `init` and `preview` commands** (`commands_test.go`, `preview_version_test.go`): the starter config the very
+    next `status` can load, the pending release notes on stdout, a past release's notes rebuilt from its commits with
+    `preview --version`, and the CLI surface itself (per-command `--help`, the platform in `--version`).
 18. **The `dispat run` command** (`run_test.go`): a script executed inside changed packages over the dependency graph
     with the full environment, resolved per package through the three `scripts` levels, the `dispat <script>`
     shorthand, the `--package`/`--space` selection, the `--since` window and the `--consumers` expansion and how they
@@ -1333,7 +1334,7 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestRecordsRefuseACommitTypeWithTwoBumps` | A section's bump merges into the one commit parser the whole repository shares, so the fold runs across every layer that may declare one and a type two of them disagree about is refused naming the layer it was read in. |
 | `TestFinalFolderRecordPresentationKeepsRootCommitPolicy` | A package may customize changelog sections and commit links while its release version follows the root commit policy. |
 
-### Goal 17: the `init` and `preview` commands (`commands_test.go`, `command_release_edges_test.go`, `discovery_command_edges_test.go`, `preview_selection_edges_test.go`)
+### Goal 17: the `init` and `preview` commands (`commands_test.go`, `command_release_edges_test.go`, `discovery_command_edges_test.go`, `preview_selection_edges_test.go`, `preview_version_test.go`)
 
 | Test                                | Claim proven                                                                                                                                                                                                                                                                                 |
 |-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1350,6 +1351,8 @@ the fake GitHub API was handed: a feature that reaches only one of them is a bug
 | `TestCommandValidationExplainsSharedFlagsAndRepositoryFreeRollback` | Foreign shared flags identify their command owners; named rollback checks require no repository and report missing backups. |
 | `TestPreviewExplainsAnExplicitChangelogChannelMismatch` | Explicit changelog preview explains channel withholding while ordinary preview retains pending notes. |
 | `TestPreviewRefusesAnIncompletePlan` | A fatal cyclic plan produces no partial release preview. |
+| `TestPreviewVersionRendersWhatAPastReleaseWrote` | After two releases of one package, `preview --version` renders the first release's changelog entry and GitHub body byte for byte as that release wrote them, its provider's movement from the same run included and the second release absent, by version or by full tag; a bare `--version` renders the latest release; with and without release commits; nothing is written and no worktree is left behind. |
+| `TestPreviewVersionRefusals` | An unknown version, a version or `latest` beside a selection of several packages, and another package's tag are refused with exit 1, a sentence naming the problem, and no notes. |
 
 ### Goal 18: the `dispat run` command (`run_test.go`, `final_plan_faults_test.go`, `selection_depth_test.go`)
 

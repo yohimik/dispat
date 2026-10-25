@@ -255,6 +255,17 @@ Check that the GitHub release names the existing tag and contains the intended a
 create or move a tag, or choose a new version to repair metadata; do not run this production repair from a local
 workstation. An existing GitHub release is skipped by the standalone step (`W224`).
 
+To see the notes before the repair, or to create the release page by hand, rebuild them from the commits with
+[`dispat preview --version`](../../cli/preview.md#previewing-a-past-release). Later releases do not change the
+result, because the preview plans again at the tag's commit:
+
+```sh
+dispat preview --package core --version 0.1.0 --github
+```
+
+The output is the body the release would have sent. The preview reads the current configuration, so check that the
+`github` entry format has not changed since the release.
+
 ## When somebody pushes while the release runs
 
 The [behind-remote guard](./release-lock.md) closes before the plan is computed, so it cannot cover a commit pushed

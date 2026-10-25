@@ -17,13 +17,14 @@ type options struct {
 	nestedWorkspace bool
 
 	// global
-	root, cfgName         *string
-	configs               *[]string
-	polyrepo              *bool
-	envFiles              *[]string
-	logLevel, logFormat   *string
-	quietParser           *bool
-	showVersion, showHelp *bool
+	root, cfgName       *string
+	configs             *[]string
+	polyrepo            *bool
+	envFiles            *[]string
+	logLevel, logFormat *string
+	quietParser         *bool
+	version             *string
+	showHelp            *bool
 
 	// run
 	onError, since *string
@@ -391,7 +392,12 @@ func (o *options) declareReleaseFlags(fs *pflag.FlagSet) {
 
 // declareHelpFlags declares --version and --help, declared last.
 func (o *options) declareHelpFlags(fs *pflag.FlagSet) {
-	o.showVersion = fs.Bool("version", false, "print the dispat version and exit")
+	// One flag with two readings, because --version already printed dispat's
+	// own version on every command when preview came to need a release. Its
+	// bare form is "latest", so `preview --version` needs no value.
+	o.version = fs.String("version", "",
+		"print the dispat version and exit; on preview, render the notes of this past `release` instead of the pending ones: a version of the selected package, its full tag, or latest (the bare form)")
+	fs.Lookup("version").NoOptDefVal = app.LatestRelease
 	// Declaring help is what makes it a flag rather than pflag's own
 	// interception, which fires during Parse — before the command word has
 	// been read — and is why help used to be the whole program's, whatever

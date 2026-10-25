@@ -141,6 +141,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "dispat: %v\n", err)
 		return 2
 	}
+	args = joinPreviewVersion(args)
 	fs := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
 	fs.SetOutput(stderr)
 	o := declareFlags(fs)
@@ -413,6 +414,31 @@ func globalFlagInline(arg string) bool {
 		}
 	}
 	return arg == "--help" || arg == "--version" || arg == "--quiet-parser" || arg == "--polyrepo"
+}
+
+// joinPreviewVersion rewrites preview's `--version VALUE` as
+// `--version=VALUE`. pflag gives a flag with a bare form its value only
+// through "=", and a separate value would otherwise be read as a stray
+// argument to a command that takes none.
+func joinPreviewVersion(args []string) []string {
+	at := commandArgumentIndex(args, cmdPreview)
+	if at < 0 {
+		return args
+	}
+	joined := append([]string{}, args[:at+1]...)
+	for i := at + 1; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return append(joined, args[i:]...)
+		}
+		if arg == "--version" && i+1 < len(args) && args[i+1] != "" && !strings.HasPrefix(args[i+1], "-") {
+			joined = append(joined, "--version="+args[i+1])
+			i++
+			continue
+		}
+		joined = append(joined, arg)
+	}
+	return joined
 }
 
 func commandArgumentIndex(args []string, wanted string) int {

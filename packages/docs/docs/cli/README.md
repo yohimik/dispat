@@ -108,6 +108,9 @@ Release binaries carry the release tag's version, local builds report `dev`, and
 says so in the parenthesis because that decides how it is
 [updated](../reference/self-update.md#how-you-installed-it-matters).
 
+On `preview` the flag names a past release instead, and the preview renders that release's notes; see
+[Previewing a past release](./preview.md#previewing-a-past-release).
+
 ### `--help`, `-h`
 
 Print help and exit. Running this without a command word prints the command list and the global flags. Running it after

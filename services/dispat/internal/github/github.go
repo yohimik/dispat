@@ -420,15 +420,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	// interpolate against the same variables.
 	look := changelog.ReleaseLookup(rel)
 	changelog.LogRecordPolicy(r.Log, rel, r.Format)
-	var release string
-	if sha != "" {
-		release = "### Release\n\n- commit: " + sha + "\n- tag: " + tag + "\n"
-	}
-	// The release section sits inside the body, before the footer: it belongs
-	// to the release the entry describes, and a footer is the last word. A
-	// note about how the release reached the remote follows it, for the same
-	// reason and in the same place.
-	body := r.boundBody(rel, changelog.RenderBodyParts(rel, r.Format, look, release, r.Note))
+	body := r.boundBody(rel, renderReleaseParts(rel, r.Format, look, sha, r.Note))
 	// The release is named after its tag unless the format says otherwise. The
 	// tag itself is never renamed: it is what the release hangs off.
 	name := tag

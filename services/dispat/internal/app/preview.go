@@ -25,6 +25,10 @@ type PreviewOptions struct {
 	// body. Set together they render both, labelled.
 	Changelog bool
 	GitHub    bool
+	// Version selects a past release to render instead of the pending notes:
+	// a version of the selected package, a tag, or LatestRelease. Empty
+	// renders what is pending.
+	Version string
 }
 
 // bodies reports which record bodies to render, resolving "neither asked for"
@@ -62,7 +66,13 @@ type PreviewResult struct {
 // Each body is rendered under its own entry format, so the configured lines a
 // release would write — the ones the release's channel admits included — are
 // the lines the preview shows.
+//
+// With opts.Version set, the preview renders that past release's notes
+// instead; see previewRelease.
 func (a *App) Preview(ctx context.Context, opts PreviewOptions) (PreviewResult, error) {
+	if opts.Version != "" {
+		return a.previewRelease(ctx, opts)
+	}
 	pl, err := a.plan(ctx)
 	if err != nil {
 		return PreviewResult{}, err
@@ -92,11 +102,6 @@ func (a *App) Preview(ctx context.Context, opts PreviewOptions) (PreviewResult, 
 // previewOne renders one package's pending notes; empty when nothing is
 // pending.
 func (a *App) previewOne(rel *plan.Release, opts PreviewOptions) string {
-	// The preview resolves its link coordinates the way the recorders do, so
-	// what it shows is what the record will say. It is the same completion at
-	// the same point: nothing about a rendered entry depends on the
-	// environment once the format is built.
-	format := changelog.SpecFormat(rel.Pkg.Changelog.Format).WithRepoEnv()
 	// Whether there is anything to preview is whether the package has a
 	// reason to release at all — the sections themselves never render empty,
 	// so they cannot be the gate. A workspace-wide footer would otherwise
@@ -112,6 +117,18 @@ func (a *App) previewOne(rel *plan.Release, opts PreviewOptions) string {
 	if !rel.IsReleasable() {
 		return ""
 	}
+	return a.renderPreviewNotes(rel, opts, a.previewGitHubBody)
+}
+
+// renderPreviewNotes renders one release's header and the bodies asked for,
+// with the GitHub body from githubBody: a pending release and a past one
+// render it differently.
+func (a *App) renderPreviewNotes(rel *plan.Release, opts PreviewOptions, githubBody func(*plan.Release) string) string {
+	// The preview resolves its link coordinates the way the recorders do, so
+	// what it shows is what the record will say. It is the same completion at
+	// the same point: nothing about a rendered entry depends on the
+	// environment once the format is built.
+	format := changelog.SpecFormat(rel.Pkg.Changelog.Format).WithRepoEnv()
 	// The changelog entry's header carries the tag and a date; a preview has
 	// no date yet, so it shows the channel movement instead: the transition
 	// (§13.10) is the context a reader needs to judge the sections below.
@@ -124,7 +141,7 @@ func (a *App) previewOne(rel *plan.Release, opts PreviewOptions) string {
 			a.previewChangelogBody(rel, format, opts.Changelog))
 	}
 	if wantGitHub {
-		blocks = appendPreviewBlock(blocks, labelled, "github release", a.previewGitHubBody(rel))
+		blocks = appendPreviewBlock(blocks, labelled, "github release", githubBody(rel))
 	}
 	if len(blocks) == 0 {
 		return header

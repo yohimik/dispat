@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -98,7 +99,7 @@ func (r *runner) logger() zerolog.Logger {
 // versionOrHelp answers the two questions that must be answerable without a
 // config file, a git repository or a valid command line.
 func (r *runner) versionOrHelp() (int, bool) {
-	if *r.o.showVersion {
+	if r.isDispatVersionAsked() {
 		*r.update = startUpdateCheck(r.checkCtx, r.o, r.fs, orDefault(*r.o.logFormat, "pretty"), true)
 		r.update.status = true
 		fmt.Fprintln(r.stdout, logo)
@@ -117,6 +118,17 @@ func (r *runner) versionOrHelp() (int, bool) {
 		return 0, true
 	}
 	return 0, false
+}
+
+// isDispatVersionAsked reports whether --version asks for dispat's own
+// version. On preview it names a release instead. An explicit false keeps the
+// meaning it had while the flag was a boolean.
+func (r *runner) isDispatVersionAsked() bool {
+	if !r.fs.Changed("version") || commandWord(r.fs.Args()) == cmdPreview {
+		return false
+	}
+	asked, err := strconv.ParseBool(*r.o.version)
+	return err != nil || asked
 }
 
 // refuseForeignFlags refuses a flag that belongs to another command.
@@ -1186,7 +1198,7 @@ func (r *runner) dispatch(ctx context.Context, command configuredCommand) int {
 		}
 	case cmdPreview:
 		res, err := a.Preview(ctx, app.PreviewOptions{
-			Filter: sel, Changelog: *o.pvChangelog, GitHub: *o.pvGithub})
+			Filter: sel, Changelog: *o.pvChangelog, GitHub: *o.pvGithub, Version: *o.version})
 		if err != nil {
 			return 1
 		}

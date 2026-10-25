@@ -197,7 +197,14 @@ Nothing is written and nothing is released.
 
 --changelog prints the changelog entry body and --github the GitHub
 release body, each under its own entry format. Together they print both,
-labelled. Naming neither prints the changelog entry.`,
+labelled. Naming neither prints the changelog entry.
+
+--version renders a past release's notes instead, as that release rendered
+them: a version of the selected package (1.11.0-rc.8), its full tag
+(services/dispat/v1.11.0-rc.8), or latest, which a bare --version means.
+The plan is computed again at the tag's commit under the current
+configuration, so notes from a configuration that has changed since may
+differ.`,
 		flags: append([]string{"changelog", "github"}, selectionFlags...),
 	},
 	{
