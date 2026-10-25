@@ -2992,6 +2992,7 @@ For the execution profile of §28, let `Tk` be the run's tasks and `Dk` their pr
 repository. For configured stages, `S_p` is one package's stages, standing in a cost for their number, and `C_p` the
 stage names its constraints state, a list counting each name it holds (*Configured stages in the compiled plan*, below).
 A `sum` over them runs over the packages `p`, as `sum(Hq + Aq)` runs over the repositories `q`.
+In graph construction and readiness bounds, `Tk` includes zero-duration build and publication relay vertices.
 
 | Phase                      | Literal transcription | Achievable            | Note                                        |
 |----------------------------|-----------------------|-----------------------|---------------------------------------------|
@@ -3279,6 +3280,53 @@ phase-specific statements. Neither `Ω(Z)` output work nor a dense `H × m` or `
 instance requires that representation or that the complete planner is jointly time- and space-optimal. Correction,
 reachability, scope and cache choices retain input-dependent tradeoffs.
 
+**Planning bounds, inputs and outputs.** `plan.Compute` is the whole CCME planner, not the task graph compiler.
+It reads the fixed workspace, tag inventory and applicable history, resolves units and scopes, runs the channel
+and bump phases, and emits the semantic plan. Let `Bin` count primitive items and bytes in a supplied segment
+that the contract requires validating in full, with no trusted index or certificate. Let `Yout` count
+primitive entries and bytes in the required plan output under the same access model.
+`Yout` includes `P` order and release entries, the `E` provider references when the API retains them, and any
+explicitly emitted provenance and diagnostic entries. Full validation reads each position under this
+contract and costs `Omega(Bin)` inspections. Independently, on a common base input where each counted
+position is pivotal to its required output, leaving any position unread gives an indistinguishable input
+with a different required answer. Mere potential relevance on
+different inputs does not imply this bound. Writing the required output costs `Omega(Yout)`.
+An indexed adapter can avoid reading irrelevant old history.
+
+The workspace-order subproblem has a sharper conditional optimum. Suppose all `P` package declarations and `E`
+listed edges are validated, package names are opaque comparison keys in arbitrary order, and the output gives
+the byte-wise least available topological order plus the explicit provider references. Reading the declarations
+and writing those references costs `Omega(P + E)`. With `E = 0`, the required order sorts `P` arbitrary names,
+so comparison sorting costs `Omega(P log P)`. An adjacency-list Kahn pass with a comparison heap reads each
+edge once and handles each package once, giving `O(P + E + P log P)` time and `O(P)` auxiliary words beyond
+the retained graph and output. The two lower bounds and this upper bound match in the worst case for that
+subproblem. Supplied name ranks or byte-wise radix operations change the sorting model.
+
+For the remaining planner, summing the applicable achievable rows above gives a conditional upper account
+only after charging actual propagation traversals, unsuccessful probes, cache construction, adapter reads,
+identifier comparisons and output bytes. Full byte validation of all `N` relevant pending message bytes
+takes `Omega(N)` byte reads; validating every entry of a supplied tag inventory takes `Omega(T)` reads;
+explicit provenance output takes
+`Omega(Z)` writes when `Z` entries are required. None of these proves a matching lower bound for marker
+matrices, every propagation walk, correction probes or peak auxiliary memory. In particular, `R`, `Jcorr`,
+`Jc` and `Zv` include candidates examined by a chosen method, not mandatory output sizes. A sum of phase
+upper bounds does not become a joint minimum merely because some phases separately match lower bounds.
+
+For a concrete representation limit, take a linear history `c_0, ..., c_P`, `P` independent packages,
+and a distinct stable baseline for `p_i` at `c_{i-1}`. Commit `c_i` has one direct unit scoped only to `p_i`.
+Give all commits the same author and use no propagation or corrections. In a word RAM with
+`w = Theta(log(P + 1))` bits, interned package and commit identities occupy one word. There are
+`Theta(P)` relevant primitive input and output entries: one release and one unit
+per package, with one author identity in each release. The `P` pending windows are distinct suffixes.
+A method materializing one `Theta(P)`-bit set per suffix retains `Theta(P²)` bits. Scanning every suffix
+separately for its author also takes `Theta(P²)` visits although author output has `Theta(P)` entries.
+A chain-rank index stores one boundary rank per package, tests window membership in constant time, and
+shares the one-author aggregate in `O(P)` words, or `O(P log P)` bits, and `O(P)` work for these
+window and author subphases. Actual identifier strings and commit metadata bytes are charged separately.
+This is a gap for those methods on this family, not a universal planner lower bound. The dated implementation
+using them is identified in DESIGN-HISTORY.md. Comparison sorting of unsorted package names and other
+planner phases retain their separately charged costs even on this family.
+
 **The dispat theorem (bounds for a compiled plan).** A compiled plan is a finite directed acyclic graph of tasks.
 There is no fixed upper limit on its task, edge or worker counts; `Tk`, `Dk` and `Wn` remain input parameters,
 and constants in asymptotic claims do not depend on them.
@@ -3460,6 +3508,19 @@ next run derives a residual plan; it does not replay an unchanged full plan. Rep
 effect requests are safe under these premises, but arbitrarily many crashes can add unbounded work and time.
 This is an informative replay contract, not a claim that arbitrary external commands already satisfy it.
 
+**Correctness across the three layers.** Within each invocation, fix one source, configuration and record
+inventory snapshot for every layer. If `Compute` emits the unique semantic plan of §13, task compilation
+preserves exactly its stage and dependency precedences, and the executor admits irreversible effects only
+with the evidence and replay contract above, then every durable
+completed record describes an effect allowed by that plan. Induct on task precedences: a task starts only after
+its required predecessors, and a recorded irreversible task has a verified effect with the planned identity.
+After a crash, a later invocation reads the updated record inventory. If other inputs remain fixed and the
+retry invariant of §13.7c holds, immutable records discharge completed units and §17.2 derives the residual
+plan from verified state. Under the stated fairness and eventual-success premises, this reaches the intended
+final state. This is a correctness composition, not a minimum-cost theorem. Planner work, graph
+construction, failure-free task time and retry work have separate accounts; optimality of one phase would not
+make their sum or auxiliary memory jointly minimal.
+
 **Earliest starts with unlimited compatible capacity.** For any finite compiled DAG, take time zero as the origin
 and make every source task available then. Suppose every task has a fixed nonnegative duration and can hold its
 own compatible slot through completion. Dispatch, transfer and other capacities add no
@@ -3479,6 +3540,31 @@ finish by time 3 if both start at zero, and also if the shorter task starts at t
 unique graph representation or executor. With finite slots or other binding capacities, readiness alone does
 not decide which competing task starts first, and clause 2 gives the stated bound rather than exact `Lk`.
 
+**When immediate dispatch is the only universally exact online start policy.** Strengthen the preceding model:
+before each task starts, its duration is unobserved and may independently be any finite nonnegative value,
+with no upper bound, even when its realized value is zero. The deterministic dispatcher does not use future
+durations. Enough compatible slots exist to start every newly ready task immediately and keep every running task
+through completion. A policy is universally exact when it finishes at `Lk` for every assignment of these
+durations on every finite DAG. Immediate dispatch
+is universally exact by the recurrence above. Conversely, suppose such a policy delays task `i` from its
+actual readiness `R_i` to a later start `S_i`. Let `P_i` be the greatest duration of a path ending just before
+`i`, and `Q_i` the greatest duration of a path starting just after `i`. Feasibility gives `R_i >= P_i`.
+Keep every other duration fixed and choose the unobserved duration of `i` to be
+`M > sum_{j != i} d_j`. The policy is nonanticipating, so before it starts `i` it sees the same completions
+and still starts `i` at `S_i`. The new span is `P_i + M + Q_i`: a path through `i` attains it, while any
+path avoiding `i` is shorter than `M`. The policy finishes no earlier than `S_i + M + Q_i`, which is
+strictly greater than the span. This contradicts universal exactness. Thus every universally exact
+nonanticipating policy has the same earliest-start vector `E`. The claim concerns starts, not a unique
+algorithm, worker assignment, durable protocol or makespan-optimal schedule on one duration assignment.
+It also does not force immediate dispatch of a task whose zero duration is known in advance, or apply when
+durations have known bounds that permit harmless delay.
+
+Even under unlimited capacity, asymptotic optimality does not force this exact start policy. An online policy
+can compute `E_i` when the last predecessor finishes and start task `i` at `2E_i`. Inductively its
+predecessors finish by `2E_i`, so those starts are feasible without knowing `d_i` in advance. It finishes
+by `max_i(2E_i + d_i) <= 2Lk`, yet delays tasks with `E_i > 0`. This is another counterexample to a
+unique algorithm attaining the minimum asymptotic order.
+
 The graph input and scheduler state have distinct space accounts. A retained explicit adjacency-list task graph
 occupies `Theta(Tk + Dk)` words under that representation. Indegree counters, a ready queue and in-flight leases
 use `O(Tk + Wn)` auxiliary words, apart from compatibility and output-set metadata whose sizes depend on their
@@ -3492,6 +3578,36 @@ recomputation or succinct bookkeeping changes the space model. Deterministic rea
 `O(Tk log Tk)` comparisons with a heap, and the placement scan in the table costs `O(Tk · Wn)`; neither is included
 in the linear readiness claim. Durable records and task payloads are accounted for separately. Multiple executors
 can attain the same asymptotic task-time bound while using different state and different schedules.
+
+The task compiler and scheduler are separate algorithms. Given a materialized provider graph with `P`
+packages and `E` edges, and a required materialized compiled graph with `Tk` vertices and `Dk` edges,
+retaining both costs `Theta(P + E + Tk + Dk)` words under those explicit representations. Writing the
+compiled graph takes `Omega(Tk + Dk)` time. If the compiler also validates every supplied provider edge,
+reading them adds `Omega(P + E)` in the worst case. A linear adjacency construction attains their sum when
+input order and stage relations are already indexed. A fixed-stage compiler that sorts changed names and
+reached relay lists, as the dated implementation in DESIGN-HISTORY.md does, has the following upper account.
+Let `Pr` count releasing packages. With expected constant-time map access and constant-time policy calls,
+construction costs `O(P + E + Tk + Dk + Pr log(Pr + 1))`. Sorting newly ready batches in a relay graph
+can add `O(Tk log(Tk + 1))` comparisons to incremental readiness. The table's linear readiness entry is
+an achievable implementation bound, not an exact cost of that sorting path. The represented graph
+lower bound counts input and output structures. It does not establish minimum auxiliary bookkeeping memory,
+nor does it cover configured-stage constraint validation, placement or recovery.
+
+There is one restricted auxiliary-space lower bound. Take `n` independent sources `a_i`, one independent
+gate `g`, and targets `b_i` with edges `a_i -> b_i` and `g -> b_i`. Start the sources and gate at time zero
+with unlimited slots. Give `g` duration 1 and independently give each `a_i` duration `1/2` or 2 as a runtime
+outcome. The same immutable input graph is used for every choice, and durations are learned only from the
+one-pass completion events. No target
+is ready before `g` finishes. Immediately after it finishes, `b_i` is ready exactly when `a_i` was short.
+All `2^n` ready subsets occur. Assume the supplied graph is read-only and the scheduler reads each completion
+only once, keeps no accessible event log or external status oracle, and must answer readiness at the gate
+event. Count every mutable completion annotation or overlay as auxiliary scheduler state, even if stored in
+borrowed graph fields; immutable input and write-only output are excluded. Distinguishable state for all
+subsets then needs at least `n` auxiliary bits. An `n`-bit completion bitmap and one gate bit attain
+`O(n)` bits with `O(n)` total update and enumeration work on this family. For word size `w`, the
+lower bound is `Omega(n / w)` words, not `Omega(n)` words. Replaying durable evidence, querying workers,
+changing the output timing or changing the graph representation changes this model. The result proves no
+universal auxiliary-word minimum for the full executor or planner.
 
 The readiness scan is the adjacency-list form of
 [Kahn's topological elimination](https://doi.org/10.1145/368996.369025).

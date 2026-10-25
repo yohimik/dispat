@@ -250,6 +250,16 @@ task immediately therefore has a unique earliest-start vector and finishes at sp
 large the finite task graph is. Other schedules can attain the same makespan by delaying tasks with slack;
 this characterization does not imply a unique executor or remove finite-capacity placement choices.
 
+The stronger online result assumes enough compatible capacity for immediate starts. Before a task starts,
+its duration is unobserved and can independently be any finite nonnegative value without an upper bound.
+If a deterministic nonanticipating policy delays ready task `i` from `R_i` to `S_i > R_i`, let
+`P_i` and `Q_i` be longest weighted prefixes and suffixes around `i`. Change only its unseen duration to
+`M` larger than the sum of all other durations. The policy has the same observations before `S_i`, while
+the new span is `P_i + M + Q_i` and its finish is at least `S_i + M + Q_i`, strictly later. Therefore a
+policy exactly fastest for every duration assignment has the unique ASAP start vector. This does not cover
+known-zero tasks or known bounded durations. It also does not imply uniqueness at asymptotic order: starting
+task `i` at `2E_i` is feasible online and finishes within `2Lk`, while delaying tasks with `E_i > 0`.
+
 The scaling claim now uses `h` identical machines, `c` compatible slots each, and measured uniform per-task
 speedup `v`. It gives the lower bound `(1/v) max(Lk, Wk/(h c))` and the matching one-pool list-schedule order
 `Theta((Wk/(h c) + Lk)/v)`. A chain finishes in exactly `Lk/v`, independent of machine and slot count. For `n`
@@ -266,6 +276,42 @@ claimed. A binary heap and a balanced search tree can implement the same determi
 same asymptotic time and space bounds, so the proposed uniqueness of the executor is false even when semantic
 output and priority agree. The ratio `Wk / Lk` marks when the aggregate work lower bound reaches the span, not
 when runtime becomes exactly `Lk`; task packing can leave a gap.
+
+The full `plan.Compute` cost is distinct from task graph compilation. Full validation of an explicit
+workspace segment, relevant pending message bytes or a supplied tag inventory has an input-reading lower bound;
+writing the required `Plan` entries and diagnostics has an output lower bound. Under opaque comparison names,
+an unsorted independent workspace makes the least-name order a sort, giving `Omega(P log P)` comparisons;
+a heap with one adjacency pass matches `O(P + E + P log P)` for that subproblem. These premises do not
+make the full planner jointly optimal. Propagation traversals, ancestry markers, correction probes and
+cache state have input-dependent costs with no matching universal auxiliary-memory lower bound.
+
+A concrete family shows why the implementation at commit `74a7fdcd` is not fastest on every input. In a
+linear history `c_0, ..., c_P`, give each independent package `p_i` a distinct baseline at `c_{i-1}` and
+one direct unit at `c_i` scoped only to itself. Give all commits one author. With interned identifiers
+in a word RAM of `w = Theta(log(P + 1))` bits, input and `Plan` output have `Theta(P)` primitive entries;
+actual strings and commit metadata bytes are charged separately. Each pending window is a different suffix.
+`services/dispat/internal/plan/windows.go` materializes a bitset per boundary through the `commitSet` of
+`services/dispat/internal/plan/ancestry.go`, retaining `Theta(P²)` bits. Beyond the fixed marker budget,
+the per-boundary fallback can repeat `Theta(P²)` history listing work. Independently,
+`services/dispat/internal/plan/authors.go` scans each suffix for attribution, `Theta(P²)` visits although
+each release emits one author. On this verified chain, boundary ranks and a shared author aggregate answer
+these window and author questions in `O(P)` words, or `O(P log P)` bits, and `O(P)` work. Other planner
+phases retain their costs.
+This establishes a family-specific gap in the dated
+planner, not a lower bound for arbitrary history DAGs or a claim about every future algorithm.
+
+The current fixed-stage task compiler reads `Plan.Providers` and returns an explicit task scheduler graph.
+Those retained input and output representations occupy `Theta(P + E + Tk + Dk)` words when both coexist;
+their sizes do not give an auxiliary bookkeeping lower bound. Under indexed relations, constant-time map
+access and policy calls, graph construction has an upper account
+`O(P + E + Tk + Dk + Pr log(Pr + 1))` for `Pr` releasing packages, including changed-name and relay-list sorts.
+The scheduler can sort newly ready batches when relay nodes exist, so its current readiness path is not
+the table's achievable linear path. A restricted streaming readiness problem does have an exact `n`-bit
+lower bound: after a gate completes, each of `n` targets is ready according to whether its independent
+source finished earlier. The same read-only graph admits all subsets through durations learned only from
+one-pass completion events. With no event replay or external query, and every mutable completion annotation
+counted as scheduler RAM, the `2^n` subsets need `n` bits. A bitmap attains the
+bound on that family. In `w`-bit words this is `Omega(n/w)`, not `Omega(n)`.
 
 Durable recovery is separate from failure-free scheduling. Publication and its record are two writes against
 independent systems, with no general atomicity or undo. A record written first can claim an absent effect.
@@ -302,6 +348,13 @@ record, and after record therefore replay the same request, verify/adopt it, or 
 records discharge completed work into a residual plan; they do not leave the whole plan unchanged. Repeated
 builds and safe requests may cost extra work without changing the intended final state, while arbitrarily many
 failures give no total-work bound. Other external effects need their own idempotency contracts.
+
+The plan, task graph and durable-effect arguments compose within one fixed input snapshot: the semantic plan
+determines allowed work, graph edges enforce its predecessors, and verified immutable records let a later
+invocation discharge completed effects from an updated record inventory. Other inputs stay fixed and the
+retry invariant of §13.7c applies when claiming the same intended final state. Fair retries and eventual
+successful settlement give that state under the stated premises. Planning, compilation, scheduling and recovery retain
+separate time and memory accounts; this composition proves no joint asymptotic minimum.
 
 ## 2026-10-25: Configured stages in the compiled plan
 
