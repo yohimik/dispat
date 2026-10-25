@@ -1,4 +1,10 @@
-import {ExperimentsSummary, ExperimentsTable, ReportStamp} from '@site/src/components/TestReport';
+import {
+  ExperimentsPlanTable,
+  ExperimentsSummary,
+  ExperimentsTable,
+  ExperimentsTimingTable,
+  ReportStamp,
+} from '@site/src/components/TestReport';
 
 # Release experiments
 
@@ -12,7 +18,8 @@ what remains after a partial publication and what each tool does on retry. The s
 
 The protocols cover three failures: a registry rejects one package, a colleague pushes while the release is running,
 or a consumer fails after its provider has published. Each experiment records the local checkout, remote Git refs,
-and registry versions before making a recovery claim.
+and registry versions before making a recovery claim. A fourth experiment injects no fault: it times each tool's plan
+and release, and sets each tool's plan beside dispat's.
 
 The fixture has six npm packages. `cli`, `ui`, and `api` depend on `core`; `theme` and `docs` depend on `ui`.
 All six start at version 1.0.0, tagged and published. The original publication and push-race protocols use a minor
@@ -163,6 +170,66 @@ The propagation cells ask every tool the same questions about it: whether the pl
 consumer, whether the catch-up took one run and no manual step, whether the consumer shipped at the version first
 planned, whether the provider was published once, and whether the release converged.
 
+## Planning and release time
+
+The `timing` cells run each tool's own plan command and then its documented release, with no fault, and time both.
+The `six` scenario is the six-package fixture with its pending minor to `core`. The `wide` scenario is a generated
+fixture of the same kind with many more packages: `core`, a chain of four packages each depending on the one before it,
+and a row of leaves depending on `core` alone, so a release of all of them has a short longest chain beside a large
+total. dispat's commit there is `feat(core)^^`, which asks for every transitive consumer, the set lerna and nx release
+on their own; changesets is given `core: minor` alone in both scenarios and releases what its ranges then require.
+
+<ExperimentsTimingTable />
+
+**Planning** is the duration of the tool's plan command: `dispat status`, `lerna version` with nothing committed,
+tagged or pushed in a scratch clone (lerna has no dry run), `nx release --dry-run`, and `changeset status --verbose`.
+Each runs as it is; nx's dry run also runs its pre-version command, so its planning includes the builds that command
+starts. **Makespan** runs from the start of the release's first command to the end of its last: `dispat release`;
+`lerna version` and `lerna publish from-git`; `nx release` and the push of the commit it leaves on the clone;
+`changeset version`, the commit, `changeset publish` and the push.
+
+The tasks are timed by the fixture, never read from a tool's log, so all four tools are measured by one clock. Every
+build writes a line with its start and end, and holds for a fixed half second so a build lasts as long as a short
+compile rather than as long as node takes to start. An `npm` shim first on `PATH` during the release times every
+`npm publish` it forwards. lerna publishes in-process rather than through the npm CLI, so its publications are timed
+at the registry's proxy as the uploads it received. A build that runs inside its own package's `npm publish`, as
+`prepack` does under changesets, is cut out of that publish. No tool exposes per-package versioning, so a version
+command of its own, `lerna version` or `changeset version`, is one task timed whole, and dispat and nx version inside
+their one release command.
+
+The figures are the dispat theorem's ([CCME specification §13.11](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md)):
+**Wk** is the summed duration of the release's tasks, **Lk** the duration of the longest precedence chain through
+them, and **s** the most tasks the release ran at one instant. No execution of the plan finishes before
+**max(Lk, Wk / s)**, the bound, and the ratio is the makespan over it. The precedence is the plan's and the same for
+every tool: every package builds before it publishes, a provider publishes before its consumer, and a consumer's
+build follows its providers' builds rather than their publications (the `build` relation of §19.2a), because none of
+the four waits for a publication before it builds. dispat's `isBuildWaitingPublish` is left at its default, `false`,
+which lets a consumer build once its providers have built. `lerna publish` packs every package, running its `prepack`
+build, before it publishes any. nx runs every build through its pre-version command before it versions. `npm publish`
+under changesets runs a package's `prepack` right before its upload. Each cell's record names the relation it was
+measured under.
+
+A ratio of 1 is a release that took no longer than its own tasks allowed at the parallelism it used. What lies above 1
+is time outside those tasks or slots left idle: planning inside the release, version writes, commits, tags, pushes,
+registry queries, and waiting. A ratio below 1 would be a release that finished faster than the plan's precedence
+admits, which only a tool that ignored an edge, building or publishing a consumer ahead of its provider, can do.
+
+The ratio is relative to the parallelism each release used, so a release that ran its tasks one at a time has the
+whole work as its bound and can read close to 1 while taking longest; read it beside the makespan. Every cell is one
+container on a shared host, and tasks that run at once share its processors, so a release that runs many tasks at
+once also stretches each of them. The ratio and the planning times relative to one another are the figures to read;
+the absolute seconds belong to the machine the table names.
+
+<ExperimentsPlanTable />
+
+Every tool's plan is read from its own plan command's output as a set of packages at their next versions. dispat's
+plan of the same scenario is the reference, and each row says whether the tool's plan names the same packages at the
+same versions, or which differ: `also` for packages only that tool releases, `not` for packages only dispat releases,
+and a version beside dispat's where both release a package at different versions. A difference is a record of what
+each tool decided from one history, not a verdict on which decision is right. Every timing cell then checks its
+release against its own plan: the release exited 0, shipped every package the plan named at the version it named,
+shipped nothing else, left every shipped package consistent, and was timed building and publishing every one.
+
 ## Reproducing
 
 Every cell is one container, and the whole campaign is one command from the repository root:
@@ -189,7 +256,8 @@ EXPERIMENT=midrelease TOOL=dispat SCENARIO=conflict \
 | `EXPERIMENTS_EXPECT`          | `0` records a dispat cell without gating on its verdict                         |
 
 Each cell leaves a folder with the transcript, every step's output, one observation per step, every failed
-expectation's own output, the registry's logs, the git calls the tool made, and `verdict.json`. The harness itself, the
+expectation's own output, the registry's logs, the git calls the tool made, and `verdict.json`. A timing cell also
+leaves its timing records, `timing.jsonl`, its figures, `timing.json`, and the plan it read, `plan.json`. The harness itself, the
 fixture, the observer and the fault proxy are documented in
 [`tests/experiments/README.md`](https://github.com/yohimik/dispat/blob/main/tests/experiments/README.md).
 

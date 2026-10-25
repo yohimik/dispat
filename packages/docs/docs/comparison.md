@@ -163,6 +163,16 @@ every package dispat planned matched the released version exactly. The remainder
 dependent cascade, now measured rather than asserted. The fifth replayed release diverges wholesale. The repository's
 own history explains why: a documented manual force release after a publication error.
 
+### Planning and release time
+
+The timing cells give every tool the same pending change with no fault, run its own plan command and then its
+documented release, and time both. The builds and publications are timed by the fixture rather than read from any
+tool's log, and each release is set against the bound of the dispat theorem, `max(Lk, Wk / s)`, the time below which
+no execution of that plan can finish at the parallelism the release used. Each tool's plan is also read as a set of
+packages at their next versions and set beside dispat's plan of the same history, with the differences recorded as
+data. Both tables are on [release experiments](./internals/experiments.mdx#planning-and-release-time), with how to
+read the ratio and why the absolute seconds of one container are not the figures to compare.
+
 ### Scale and recovery growth
 
 On synthetic layered workspaces, planning takes 0.6 s at 100 packages, 2.8 to 6.7 s at 1,000, and 110 to 149 s at

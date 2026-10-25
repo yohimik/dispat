@@ -15,10 +15,13 @@ import type {
 import {validateArchivedReport} from '@site/plugins/test-report/validate';
 import {resolveArchivedState, type ArchivedState} from '@site/plugins/test-report/state';
 import {catchUpText, isSingleCommandCatchUp} from '@site/plugins/test-report/catchup';
+import {planRows, timingRows} from '@site/plugins/test-report/timing';
 import Admonition from '@theme/Admonition';
 import React, {useEffect, useState} from 'react';
 
+import {PlanTable} from './PlanTable';
 import styles from './styles.module.css';
+import {TimingTable} from './TimingTable';
 
 // The coverage, test-results, benchmarks and experiments pages, insofar as
 // they are numbers.
@@ -651,4 +654,45 @@ export function ExperimentsTable(): React.ReactElement | null {
       ))}
     </>
   );
+}
+
+/** The campaign's cells, from the report or from recovered evidence. */
+function useExperimentCells(): ExperimentCell[] {
+  const {report, evidence} = useReportState();
+  return (report?.experiments ?? evidence?.experimentResults)?.cells ?? [];
+}
+
+/**
+ * The timing cells' figures, with the platform every one of them was measured
+ * on, read from the cells: a reading of one machine is not a reading of
+ * another.
+ */
+export function ExperimentsTimingTable(): React.ReactElement | null {
+  const cells = useExperimentCells();
+  const rows = timingRows({cells});
+  if (rows.length === 0) {
+    return null;
+  }
+  const measured = new Set(rows.map((row) => row.id));
+  const platforms = Array.from(new Set(cells.filter((cell) => measured.has(cell.id)).map((cell) => cell.platform)));
+  return (
+    <>
+      <p>
+        <em>
+          {counted({total: rows.length, noun: 'timing cell'})} on {platforms.join(' and ')}, each in a container of its
+          own.
+        </em>
+      </p>
+      <TimingTable rows={rows} />
+    </>
+  );
+}
+
+/** Each timing cell's plan, set beside dispat's plan of the same scenario. */
+export function ExperimentsPlanTable(): React.ReactElement | null {
+  const rows = planRows({cells: useExperimentCells()});
+  if (rows.length === 0) {
+    return null;
+  }
+  return <PlanTable rows={rows} />;
 }

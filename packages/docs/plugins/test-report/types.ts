@@ -147,6 +147,72 @@ export interface ExperimentRecovery {
   converged: boolean;
 }
 
+/**
+ * A timing cell's figures in the vocabulary of the dispat theorem (CCME
+ * SPEC.md §13.11), as the harness's lib/timing.py computes them from the
+ * fixture's own records of every build and publication. Seconds throughout.
+ */
+export interface ExperimentTiming {
+  /** What a consumer's build waits for in the plan's precedence (§19.2a). */
+  relation: ExperimentRelation;
+  planningSeconds: number;
+  makespanSeconds: number;
+  /** Wk, the summed duration of the release's tasks. */
+  work: number;
+  /** Lk, the duration of the longest precedence chain. */
+  criticalPath: number;
+  /** s, the most tasks the release ran at one instant. */
+  parallelism: number;
+  /** max(Lk, Wk / s), which no execution of the plan beats. */
+  bound: number;
+  /** The makespan over the bound. */
+  ratio: number;
+  /** The tasks on the longest chain, `core build` first. */
+  criticalChain: string[];
+  tasks: ExperimentTimedTasks;
+  publishTimedAt: ExperimentPublishSources;
+}
+
+export type ExperimentRelation = 'build' | 'publish';
+
+/** The release's tasks by kind; a version task is a tool's version command timed whole. */
+export interface ExperimentTimedTasks {
+  version: number;
+  build: number;
+  publish: number;
+}
+
+/** Where each publication was timed: around `npm publish`, or at the registry. */
+export interface ExperimentPublishSources {
+  npm: number;
+  registry: number;
+}
+
+/** One package of a plan at the version planned for it. */
+export interface ExperimentPlannedPackage {
+  name: string;
+  version: string;
+}
+
+/** One package two plans disagree about; a version is empty where that plan releases none. */
+export interface ExperimentPlanDifference {
+  package: string;
+  version: string;
+  reference: string;
+}
+
+/**
+ * What a tool's own plan command said it would release, set beside dispat's
+ * plan of the same scenario. `reference` and `agrees` are absent for dispat's
+ * own plan and where no dispat cell recorded one.
+ */
+export interface ExperimentPlan {
+  packages: ExperimentPlannedPackage[];
+  reference?: string;
+  agrees?: boolean;
+  differences: ExperimentPlanDifference[];
+}
+
 /** One expectation about the state a run left behind, and whether it held. */
 export interface ExperimentCheck {
   check: string;
@@ -191,6 +257,9 @@ export interface ExperimentCell {
   final: ExperimentState;
   /** Absent for a protocol that measures no catch-up, and in every older record. */
   recovery?: ExperimentRecovery;
+  /** Present in the timing cells alone. */
+  timing?: ExperimentTiming;
+  plan?: ExperimentPlan;
 }
 
 /**

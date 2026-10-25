@@ -9,12 +9,17 @@ import type {
   ExperimentCell,
   ExperimentCheck,
   ExperimentPackage,
+  ExperimentPlan,
+  ExperimentPlanDifference,
+  ExperimentPlannedPackage,
   ExperimentRecovery,
+  ExperimentRelation,
   Experiments,
   ExperimentState,
   ExperimentStep,
   ExperimentStepKind,
   ExperimentStepPhase,
+  ExperimentTiming,
   FuzzTarget,
   Group,
   Report,
@@ -262,6 +267,110 @@ function experimentRecovery(options: ExperimentRecoveryOptions): ExperimentRecov
   return recovery;
 }
 
+interface ExperimentFieldOptions {
+  value: unknown;
+  at: string;
+}
+
+const RELATIONS: readonly ExperimentRelation[] = ['build', 'publish'];
+
+/** A duration in seconds, never below zero. */
+function duration(options: ExperimentFieldOptions): number {
+  const {value, at} = options;
+  const seconds = number(value, at);
+  if (seconds < 0) {
+    throw new ReportError(at, 'a duration', seconds);
+  }
+  return seconds;
+}
+
+/** A count of tasks or slots: a whole number, never below zero. */
+function tally(options: ExperimentFieldOptions): number {
+  const {value, at} = options;
+  const n = number(value, at);
+  if (n < 0 || !Number.isInteger(n)) {
+    throw new ReportError(at, 'a count', n);
+  }
+  return n;
+}
+
+/**
+ * A timing cell's figures. A release that ran a task ran it in a slot, so a
+ * parallelism below one is refused, and so is a longest chain longer than the
+ * work it is part of.
+ */
+function experimentTiming(options: ExperimentFieldOptions): ExperimentTiming {
+  const {value, at} = options;
+  const o = object(value, at);
+  const tasks = object(o.tasks, `${at}.tasks`);
+  const sources = object(o.publishTimedAt, `${at}.publishTimedAt`);
+  const relation = optionalWord({value: o.relation, at: `${at}.relation`, words: RELATIONS});
+  if (relation === undefined) {
+    throw new ReportError(`${at}.relation`, `one of ${RELATIONS.join(', ')}`, o.relation);
+  }
+  const timing: ExperimentTiming = {
+    relation,
+    planningSeconds: duration({value: o.planningSeconds, at: `${at}.planningSeconds`}),
+    makespanSeconds: duration({value: o.makespanSeconds, at: `${at}.makespanSeconds`}),
+    work: duration({value: o.work, at: `${at}.work`}),
+    criticalPath: duration({value: o.criticalPath, at: `${at}.criticalPath`}),
+    parallelism: tally({value: o.parallelism, at: `${at}.parallelism`}),
+    bound: duration({value: o.bound, at: `${at}.bound`}),
+    ratio: duration({value: o.ratio, at: `${at}.ratio`}),
+    criticalChain: optionalArray(o.criticalChain, `${at}.criticalChain`).map((task, i) =>
+      string(task, `${at}.criticalChain[${i}]`),
+    ),
+    tasks: {
+      version: tally({value: tasks.version, at: `${at}.tasks.version`}),
+      build: tally({value: tasks.build, at: `${at}.tasks.build`}),
+      publish: tally({value: tasks.publish, at: `${at}.tasks.publish`}),
+    },
+    publishTimedAt: {
+      npm: tally({value: sources.npm, at: `${at}.publishTimedAt.npm`}),
+      registry: tally({value: sources.registry, at: `${at}.publishTimedAt.registry`}),
+    },
+  };
+  if (timing.parallelism < 1) {
+    throw new ReportError(`${at}.parallelism`, 'at least one slot', timing.parallelism);
+  }
+  if (timing.criticalPath > timing.work + 0.002) {
+    throw new ReportError(`${at}.criticalPath`, `at most the work, ${timing.work}`, timing.criticalPath);
+  }
+  return timing;
+}
+
+function experimentPlannedPackage(options: ExperimentFieldOptions): ExperimentPlannedPackage {
+  const {value, at} = options;
+  const o = object(value, at);
+  return {name: string(o.name, `${at}.name`), version: string(o.version, `${at}.version`)};
+}
+
+function experimentPlanDifference(options: ExperimentFieldOptions): ExperimentPlanDifference {
+  const {value, at} = options;
+  const o = object(value, at);
+  return {
+    package: string(o.package, `${at}.package`),
+    version: string(o.version, `${at}.version`),
+    reference: string(o.reference, `${at}.reference`),
+  };
+}
+
+/** A tool's plan and, where there was one to set it beside, the comparison with dispat's. */
+function experimentPlan(options: ExperimentFieldOptions): ExperimentPlan {
+  const {value, at} = options;
+  const o = object(value, at);
+  return {
+    packages: optionalArray(o.packages, `${at}.packages`).map((p, i) =>
+      experimentPlannedPackage({value: p, at: `${at}.packages[${i}]`}),
+    ),
+    ...(o.reference === undefined ? {} : {reference: string(o.reference, `${at}.reference`)}),
+    ...(o.agrees === undefined ? {} : {agrees: boolean(o.agrees, `${at}.agrees`)}),
+    differences: optionalArray(o.differences, `${at}.differences`).map((d, i) =>
+      experimentPlanDifference({value: d, at: `${at}.differences[${i}]`}),
+    ),
+  };
+}
+
 function experimentCheck(value: unknown, at: string): ExperimentCheck {
   const o = object(value, at);
   return {check: string(o.check, `${at}.check`), ok: boolean(o.ok, `${at}.ok`)};
@@ -304,6 +413,9 @@ function experimentCell(value: unknown, at: string): ExperimentCell {
     // Absent from every record written before the harness measured a
     // catch-up, which is why the frozen archives still validate.
     ...(o.recovery === undefined ? {} : {recovery: experimentRecovery({value: o.recovery, at: `${at}.recovery`})}),
+    // Present in the timing cells alone, so every other record validates as it did.
+    ...(o.timing === undefined ? {} : {timing: experimentTiming({value: o.timing, at: `${at}.timing`})}),
+    ...(o.plan === undefined ? {} : {plan: experimentPlan({value: o.plan, at: `${at}.plan`})}),
   };
 }
 
