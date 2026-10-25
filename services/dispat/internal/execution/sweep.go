@@ -126,7 +126,7 @@ func (c *Coordinator) dispatchSweep(ctx context.Context, lease *Lease, task stri
 		lease.Release()
 		return outcome, c.refuseTask(task, lease.Node, attempt, err)
 	}
-	repositories, err := c.offerInputs(ctx, lease.Node, sources, commits)
+	repositories, err := c.carrySourceInputs(ctx, sources, commits)
 	if err != nil {
 		lease.Release()
 		return outcome, c.refuseTask(task, lease.Node, attempt, err)

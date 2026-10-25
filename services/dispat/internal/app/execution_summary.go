@@ -42,7 +42,6 @@ func (a *App) summarizeExecution(coordinator *execution.Coordinator, pl *plan.Pl
 		Tasks:       a.formatRecordedTasks(coordinator, results),
 		Prepared:    coordinator.PreparedRecords(),
 		Blocked:     formatBlockedTasks(pl, results),
-		Unknown:     coordinator.UnknownPublications(),
 		Wall:        took,
 		Invocations: coordinator.GitInvocations(),
 	}.Summarize(a.log)

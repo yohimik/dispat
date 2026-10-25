@@ -88,12 +88,6 @@ type App struct {
 	// run. It is opened once the locks are held and is nil for a run that
 	// holds none, which then asks nothing (CCME §28.6).
 	ownership *execution.OwnershipGate
-	// retention is the distributed run's answer to the one question the unlock
-	// path has to ask it: which repositories' exclusion must survive this run
-	// because a publication it authorized cannot be accounted for. It is nil
-	// for every run that delegates nothing, and the question is then never
-	// asked.
-	retention lockRetentionx
 	// coordination is the remote a worker link with no endpoint reaches, as
 	// resolved when a run that dispatches started: the release remote's name
 	// and push URL. It is empty when every link states an endpoint.

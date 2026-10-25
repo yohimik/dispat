@@ -33,19 +33,17 @@ const (
 		`>> "$DISPAT_IT_EXECUTION_LOG"`
 )
 
-// executionInputState is one prepared input state a crafted assignment points
-// at: the branch a node fetches it from and the exact commit it materializes.
+// executionInputState is one legacy prepared input state a crafted publish
+// assignment points at: the branch and the exact commit it would materialize.
 type executionInputState struct {
 	branch string
 	commit string
 }
 
-// prepareInputState writes one commit holding one file into the mailbox, on a
-// branch whose name says it carries a prepared input state rather than work.
-//
-// A node skips such a branch without reading it and fetches it by name when an
-// assignment points at it, which is exactly what a real run's snapshot branch
-// is for: this is that branch, made by hand.
+// prepareInputState writes the legacy snapshot ref for a deliberately old
+// publish assignment. Keeping its input present ensures the worker's refusal
+// tests publication authority rather than a missing file. Active v2 tasks
+// carry snapshots as Assignment parents and create no snapshot refs.
 func (o *executionFakeOrchestrator) prepareInputState(label string) executionInputState {
 	o.t.Helper()
 	branch := executionCraftedBranchName("snapshot", label)
@@ -95,7 +93,8 @@ func executionCraftedLimits() map[string]any {
 }
 
 func executionCraftedBranchName(kind, label string) string {
-	return "dispat-worker-" + executionNode + "-20260921-" + kind + "-" + label
+	return "dispat-worker-" + executionNode + "-20260921-" + kind + "-" +
+		strings.ReplaceAll(label, "-", "_")
 }
 
 func executionTipOID(t *testing.T, mailbox, branch string) string {

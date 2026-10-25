@@ -225,32 +225,24 @@ const executionThirdNode = "build-c"
 // for the release remote is always none.
 func executionWorkerRefs(t *testing.T, bare string) []string {
 	t.Helper()
-	var found []string
-	for _, ref := range executionMailboxBranches(t, bare) {
-		if strings.Contains(ref, "dispat-worker-") {
-			found = append(found, ref)
-		}
-	}
-	return found
+	return executionCoordinationBranches(t, bare)
 }
 
-// TestExecutionOutputsRelayAcrossDedicatedMailboxes: two nodes that read
-// different mailboxes still exchange outputs, because the orchestrator copies
-// the producer's answer onto the consumer's endpoint. Neither mailbox ever
-// holds the other node's work.
-func TestExecutionOutputsRelayAcrossDedicatedMailboxes(t *testing.T) {
+// TestExecutionOutputsTravelAsParentsAcrossDedicatedMailboxes: the consumer's
+// assignment directly names the provider's result object even when the two
+// nodes read different mailboxes. No separate relay ref is created.
+func TestExecutionOutputsTravelAsParentsAcrossDedicatedMailboxes(t *testing.T) {
 	second := executionMailbox(t)
 	rig := newExecutionOutputWorkspaceWith(t, func(repo *harness.Repo) string {
 		return executionOutputBuild + " && " +
 			repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE", executionStageWindow)
 	}, func(cfg *models.File) {
-		// The relay is a debug decision rather than user-visible progress, so
-		// the one scenario that reads the line asks for the level that has it.
+		// The assignment carriers are transport evidence, so retain debug logs.
 		cfg.LogLevel = "debug"
 		cfg.Execution.Workers[1].Endpoint = "file://" + second
 		// Two builds at once against one slot per node: `ui` and `docs` are
 		// placed together, so one of them is on the mailbox `assets` did not
-		// answer on and the bytes have to be copied there.
+		// answer on and the exact result object must be carried there.
 		cfg.Concurrency = []int{2, 1}
 	})
 	first := rig.startWorker(executionWorkerConfig(rig.mailbox,
@@ -260,7 +252,7 @@ func TestExecutionOutputsRelayAcrossDedicatedMailboxes(t *testing.T) {
 			settings.Name = executionSecondNode
 			settings.Concurrency = models.Int(1)
 		}), 0)
-	relayed := newExecutionRelayWatch(t, second)
+	carriers := newExecutionCarrierWatch(t, rig.mailbox, second)
 
 	res := rig.release()
 
@@ -270,11 +262,10 @@ func TestExecutionOutputsRelayAcrossDedicatedMailboxes(t *testing.T) {
 	assert.Equal(t, produced["assets"], produced["docs"], "and so did the other")
 	placed := rig.nodesByPackage()
 	assert.NotEqual(t, placed["ui"], placed["docs"], "the two consumers were on two machines")
-	assert.NotEmpty(t, relayed.seen(), "the producer's answer was copied onto the other endpoint")
-
-	relay, isRelayed := executionLine(res, "relay pushed")
-	require.True(t, isRelayed, "stdout:\n%s", res.Stdout)
-	assert.NotEmpty(t, relay.Str("branch"))
+	observed := carriers.seen()
+	assert.Contains(t, observed["ui:build"], "assets:build", "ui assignment directly carries the provider result")
+	assert.Contains(t, observed["docs:build"], "assets:build", "docs assignment directly carries the provider result")
+	assert.Empty(t, observed["legacy-relay"], "there is no runtime relay branch")
 	for _, ref := range executionMailboxBranches(t, rig.mailbox) {
 		assert.NotContains(t, ref, executionSecondNode, "one node's mailbox never holds the other's work")
 	}
@@ -286,34 +277,38 @@ func TestExecutionOutputsRelayAcrossDedicatedMailboxes(t *testing.T) {
 	stopAll(t, []*executionWorker{first, other})
 }
 
-// executionRelayWatch records the relay branches that appear in a mailbox
-// while a run is going on, because the run deletes them at the end.
-type executionRelayWatch struct {
+// executionCarrierWatch records direct result parents while task refs exist.
+// The run deletes those refs at completion, so the assertion needs a bounded
+// observation during the release rather than a post-run branch listing.
+type executionCarrierWatch struct {
 	done  chan struct{}
-	found chan []string
+	found chan map[string][]string
 }
 
-func newExecutionRelayWatch(t *testing.T, mailbox string) *executionRelayWatch {
+func newExecutionCarrierWatch(t *testing.T, mailboxes ...string) *executionCarrierWatch {
 	t.Helper()
-	watch := &executionRelayWatch{done: make(chan struct{}), found: make(chan []string, 1)}
+	watch := &executionCarrierWatch{done: make(chan struct{}), found: make(chan map[string][]string, 1)}
 	go func() {
-		seen := map[string]bool{}
+		seen := map[string][]string{}
 		ticker := time.NewTicker(50 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-watch.done:
-				names := make([]string, 0, len(seen))
-				for name := range seen {
-					names = append(names, name)
-				}
-				watch.found <- names
+				watch.found <- seen
 				return
 			case <-ticker.C:
-				for _, ref := range executionMailboxBranches(t, mailbox) {
-					name := strings.TrimPrefix(ref, "refs/heads/")
-					if executionBranchKind(name) == "relay" {
-						seen[name] = true
+				for _, mailbox := range mailboxes {
+					for _, ref := range executionMailboxBranches(t, mailbox) {
+						name := strings.TrimPrefix(ref, "refs/heads/")
+						if strings.Contains(name, "-relay-") {
+							seen["legacy-relay"] = append(seen["legacy-relay"], name)
+						}
+						task, sourceTasks := executionObservedAssignmentCarriers(mailbox, ref)
+						if task == "" || seen[task] != nil {
+							continue
+						}
+						seen[task] = sourceTasks
 					}
 				}
 			}
@@ -322,7 +317,57 @@ func newExecutionRelayWatch(t *testing.T, mailbox string) *executionRelayWatch {
 	return watch
 }
 
-func (w *executionRelayWatch) seen() []string {
+// executionObservedAssignmentCarriers tolerates a ref disappearing while the
+// run closes. It reads only an active assignment and its direct secondary
+// result parents, then returns the producer task names found there.
+func executionObservedAssignmentCarriers(mailbox, ref string) (string, []string) {
+	if !strings.HasPrefix(ref, "refs/heads/dispat-task-") {
+		return "", nil
+	}
+	listed, err := exec.Command("git", "-C", mailbox, "rev-list", "--first-parent", "--reverse", ref).Output()
+	if err != nil {
+		return "", nil
+	}
+	commits := strings.Fields(string(listed))
+	if len(commits) < 2 {
+		return "", nil
+	}
+	document, err := exec.Command("git", "-C", mailbox, "cat-file", "blob",
+		commits[1]+":dispat/assignment.json").Output()
+	if err != nil {
+		return "", nil
+	}
+	var assignment map[string]any
+	if json.Unmarshal(document, &assignment) != nil {
+		return "", nil
+	}
+	task, _ := assignment["task"].(string)
+	commit, err := exec.Command("git", "-C", mailbox, "cat-file", "-p", commits[1]).Output()
+	if err != nil {
+		return "", nil
+	}
+	var sources []string
+	for _, line := range strings.Split(string(commit), "\n") {
+		if !strings.HasPrefix(line, "parent ") || line == "parent "+commits[0] {
+			continue
+		}
+		oid := strings.TrimPrefix(line, "parent ")
+		blob, err := exec.Command("git", "-C", mailbox, "cat-file", "blob", oid+":dispat/result.json").Output()
+		if err != nil {
+			continue
+		}
+		var result map[string]any
+		if json.Unmarshal(blob, &result) != nil {
+			continue
+		}
+		if producer, ok := result["task"].(string); ok {
+			sources = append(sources, producer)
+		}
+	}
+	return task, sources
+}
+
+func (w *executionCarrierWatch) seen() map[string][]string {
 	close(w.done)
 	return <-w.found
 }
@@ -760,7 +805,8 @@ func newExecutionTipVandal(t *testing.T, rig *executionRig, gate string) *execut
 				}
 				for _, ref := range executionMailboxBranches(t, rig.mailbox) {
 					name := strings.TrimPrefix(ref, "refs/heads/")
-					if executionBranchKind(name) != "build" || !executionCarries(t, rig.mailbox, name, "result") {
+					task, _ := executionObservedAssignmentCarriers(rig.mailbox, ref)
+					if !strings.HasSuffix(task, ":build") || !executionCarries(t, rig.mailbox, name, "result") {
 						continue
 					}
 					tip := strings.TrimSpace(bareGit(t, rig.mailbox, "rev-parse", ref))
@@ -787,7 +833,7 @@ func (v *executionTipVandal) moved() int {
 // kind, without failing the test for a branch that has not.
 func executionCarries(t *testing.T, mailbox, branch, kind string) bool {
 	t.Helper()
-	for _, carried := range executionChain(t, mailbox, branch) {
+	for _, carried := range executionReadChain(mailbox, branch) {
 		if carried == kind {
 			return true
 		}
@@ -1019,12 +1065,38 @@ func (w *executionFakeWorker) close() {
 	w.waiting.Wait()
 }
 
-// tick answers every branch addressed to this node that still carries an
-// assignment and nothing else.
+// tick answers preflight probes and activated v2 slot notices for this node.
+// A reservation without an assignment is inert and never reaches answer.
 func (w *executionFakeWorker) tick(claimed map[string]bool) {
 	for _, ref := range executionMailboxBranches(w.t, w.mailbox) {
 		branch := strings.TrimPrefix(ref, "refs/heads/")
-		if claimed[branch] || !strings.HasPrefix(branch, "dispat-worker-"+w.node+"-") {
+		if strings.HasPrefix(branch, "dispat-slot-") {
+			document, err := exec.Command("git", "-C", w.mailbox, "cat-file", "blob",
+				"refs/heads/"+branch+":dispat/slot.json").Output()
+			if err != nil {
+				continue
+			}
+			var notice map[string]any
+			if json.Unmarshal(document, &notice) != nil {
+				continue
+			}
+			if notice["node"] != w.node {
+				continue
+			}
+			taskBranch, _ := notice["taskBranch"].(string)
+			if taskBranch == "" || claimed[taskBranch] {
+				continue
+			}
+			chain := executionReadChain(w.mailbox, taskBranch)
+			if len(chain) != 2 || chain[0] != "reservation" || chain[1] != "assignment" {
+				continue
+			}
+			claimed[taskBranch] = true
+			w.answer(taskBranch)
+			continue
+		}
+		if claimed[branch] || !strings.HasPrefix(branch, "dispat-worker-"+w.node+"-") ||
+			executionBranchKind(branch) != "probe" {
 			continue
 		}
 		// The run closes its branches while this loop is going, so a name
@@ -1619,13 +1691,11 @@ func executionCraftedPath(path string) func(*executionCraftedOutputs) {
 	}
 }
 
-// TestExecutionPartialOutputSetStaysUnready: a reference whose bytes cannot be
-// retrieved is not a transfer. The provider's answer is taken off the mailbox
-// after the run admitted it and before the consumer is let go, so what the
-// consumer is given is a branch name and an object id with nothing behind
-// them; it runs no command at all and reports the prerequisite it could not
-// install.
-func TestExecutionPartialOutputSetStaysUnready(t *testing.T) {
+// TestExecutionAdmittedOutputSurvivesBranchChange: a verified result object
+// stays the consumer's input after the producer task ref is removed or moved.
+// The assignment carries the exact admitted object as a parent, so neither
+// later ref state can substitute bytes or make the consumer refetch a tip.
+func TestExecutionAdmittedOutputSurvivesBranchChange(t *testing.T) {
 	for name, isReplaced := range map[string]bool{
 		"a branch that is no longer there":    false,
 		"an object that is not on the branch": true,
@@ -1646,17 +1716,14 @@ func TestExecutionPartialOutputSetStaysUnready(t *testing.T) {
 
 			res := rig.release(executionGateEnv + "=" + gate)
 
-			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.Positive(t, thief.taken(), "the provider's answer was taken off the mailbox")
+			require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Positive(t, thief.taken(), "the provider's task ref changed before consumer dispatch")
 			assert.Equal(t, 1, executionBuildCount(rig, "assets"), "the provider built once")
-			assert.Zero(t, executionBuildCount(rig, "ui"),
-				"and the consumer ran no command at all: %v", rig.runs())
-			assert.True(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, "ui"),
-				"the consumer fails on its prerequisite\nstdout:\n%s", res.Stdout)
-			reply := stopAll(t, []*executionWorker{worker})[0]
-			assert.Contains(t, reply.Stdout, "the task's inputs could not be installed",
-				"and says so before anything ran\nstdout:\n%s", reply.Stdout)
-			assert.False(t, rig.repo.IsTagged("ui@0.1.0"), "the consumer published nothing")
+			assert.Equal(t, 1, executionBuildCount(rig, "ui"), "the consumer used the admitted object: %v", rig.runs())
+			produced := executionProbeValues(rig, "inputs")
+			assert.Equal(t, produced["assets"], produced["ui"], "the consumer read exact original bytes")
+			assert.True(t, rig.repo.IsTagged("ui@0.1.0"), "the consumer published its verified output")
+			stopAll(t, []*executionWorker{worker})
 		})
 	}
 }
@@ -1688,7 +1755,8 @@ func newExecutionAnswerThief(t *testing.T, rig *executionRig, gate string, isRep
 				}
 				for _, ref := range executionMailboxBranches(t, rig.mailbox) {
 					name := strings.TrimPrefix(ref, "refs/heads/")
-					if executionBranchKind(name) != "build" ||
+					task, _ := executionObservedAssignmentCarriers(rig.mailbox, ref)
+					if !strings.HasSuffix(task, ":build") ||
 						!executionCarries(t, rig.mailbox, name, "result") {
 						continue
 					}
@@ -1713,49 +1781,6 @@ func newExecutionAnswerThief(t *testing.T, rig *executionRig, gate string, isRep
 func (a *executionAnswerThief) taken() int {
 	close(a.done)
 	return <-a.counts
-}
-
-// TestExecutionRelayFailureFailsTheConsumer: a copy that cannot be pushed
-// onto the consumer's endpoint is a prerequisite that did not arrive, so the
-// consumer is refused with E227, nothing is published and both mailboxes are
-// left closed.
-//
-// Only the push is faulted. A node polls its own branch namespace, and a
-// relayed copy is addressed to that node, so a fetch made to fail by name
-// would fail the node's poll as well as its task and stall the node rather
-// than the transfer: see the report for that finding.
-func TestExecutionRelayFailureFailsTheConsumer(t *testing.T) {
-	second := executionMailbox(t)
-	rig := newExecutionOutputWorkspaceWith(t, func(repo *harness.Repo) string {
-		return executionOutputBuild + " && " +
-			repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE", executionStageWindow)
-	}, func(cfg *models.File) {
-		cfg.Execution.Workers[1].Endpoint = "file://" + second
-		cfg.Concurrency = []int{2, 1}
-	})
-	// The create push alone, whose lease expects no ref: the run records a
-	// relay branch before it pushes it, so its own cleanup deletes it under a
-	// lease on the object and must not fail with it.
-	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*push*--force-with-lease=refs/heads/*-relay-*: --*", Onward: true, Nth: 1})
-	first := rig.startWorker(executionWorkerConfig(rig.mailbox,
-		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(1) }), 0)
-	other := rig.startWorker(executionWorkerConfig(second,
-		func(settings *models.ExecutionConfig) {
-			settings.Name = executionSecondNode
-			settings.Concurrency = models.Int(1)
-		}), 0)
-
-	res := rig.release(fault.Env()...)
-
-	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Positive(t, fault.Matches(), "the fault reached the invocation it names")
-	assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode),
-		"the consumer is refused with the integrity code\nstdout:\n%s", res.Stdout)
-	assert.False(t, rig.repo.IsTagged("app@0.1.0"), "the package that needed the copy published nothing")
-	assert.Empty(t, rig.branches(), "both mailboxes are closed")
-	assert.Empty(t, executionMailboxBranches(t, second))
-	stopAll(t, []*executionWorker{first, other})
 }
 
 // TestExecutionOversizedManifestIsRefusedWhereItIsWritten: a description

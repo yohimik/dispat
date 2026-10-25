@@ -94,8 +94,10 @@ func TestExecutionWithdrawalRefusesForeignPredecessors(t *testing.T) {
 			require.NoError(t, err)
 			pushes := strings.Fields(string(trace))
 			require.Len(t, pushes, 3,
-				"the assignment, refused withdrawal and cleanup each use an owned lease")
-			assert.True(t, strings.HasSuffix(pushes[0], ":"), "the assignment creates the branch")
+				"the activation, refused withdrawal and cleanup each use an owned lease")
+			reserved := strings.TrimSpace(bareGit(t, rig.mailbox, "rev-parse", offered+"^"))
+			assert.True(t, strings.HasSuffix(pushes[0], ":"+reserved),
+				"the assignment advances its preexisting reservation")
 			assert.True(t, strings.HasSuffix(pushes[1], ":"+offered) ||
 				strings.HasSuffix(pushes[1], ":"+claimed),
 				"the interrupted release withdraws from an owned assignment or claim: %v", pushes)

@@ -354,7 +354,7 @@ func TestExecutionLostResultPushIsRecognizedNotRepeated(t *testing.T) {
 	// The second push a node makes onto a build branch: the first is its
 	// claim, so this is the result, applied and then reported as rejected.
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*push*-build-*", Nth: 2, After: true})
+		Pattern: "*push*dispat-task-*", Nth: 2, After: true})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
 
 	res := rig.release()
@@ -544,7 +544,7 @@ func TestExecutionCleanupFailureKeepsPublishedOutcome(t *testing.T) {
 	// A push whose source side is empty is a deletion, and the only deletions
 	// this run makes are of the branches it created itself.
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*push* :refs/heads/dispat-worker-*", Nth: 1, Onward: true})
+		Pattern: "*push* :refs/heads/dispat-task-*", Nth: 1, Onward: true})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
 
 	res := rig.release(fault.Env()...)
@@ -556,7 +556,7 @@ func TestExecutionCleanupFailureKeepsPublishedOutcome(t *testing.T) {
 	require.True(t, isRetained, "stdout:\n%s", res.Stdout)
 	assert.Equal(t, executionRetainedCode, retained.Str("code"))
 	assert.Equal(t, "transport-cleanup", retained.Str("category"))
-	assert.Contains(t, retained.Str("error"), "dispat-worker-",
+	assert.Contains(t, retained.Str("error"), "dispat-task-",
 		"the refs that remain are named, so an operator can remove them")
 	assert.NotEmpty(t, rig.branches(), "and they really are still there")
 	stopAll(t, []*executionWorker{worker})

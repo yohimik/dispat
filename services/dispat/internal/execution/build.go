@@ -5,16 +5,10 @@ package execution
 
 // The orchestrator's side of one dispatched build.
 //
-// A build stage leaves this process as three things and comes back as one. It
-// leaves as a prepared input state, a placement and a signed assignment; it
-// comes back as a result the run believes because it is bound to the
-// assignment this run offered, on the branch this run created, signed with
-// this run's secret. Everything between the two is somebody else's machine.
-//
-// Waiting is one goroutine per endpoint rather than one per task. A run of
-// twenty packages on two nodes polls twice per tick, not twenty times: the
-// poll already lists every branch addressed to a node, so the only thing a
-// waiting task adds is a channel to be told on.
+// A build leaves as a signed assignment carrying exact source and predecessor
+// commits, then returns a signed result bound to that assignment. V2 task
+// branches are node-neutral. One watcher per endpoint polls only active task
+// refs, while workers poll their own fixed dispatch slots.
 
 import (
 	"context"
@@ -22,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -69,9 +64,8 @@ type Dispatch struct {
 	// it and the same frame as this process runs it, because where that frame
 	// is placed is the pool's decision and not the caller's.
 	Prepare func(packageName string) (*PreparedProvider, error)
-	// Store is the object store a reported result and its outputs are read
-	// from, and the one a relay is pushed out of. It is the repository the run
-	// was started in, which is where every mailbox of the run fetches.
+	// Store is the object store of assignments and worker results. Source and
+	// local result commits are imported here before their carrier is signed.
 	Store *gitx.LocalGitx
 }
 
@@ -111,8 +105,6 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) error {
 	c.outputs = newOutputRegistry()
 	c.sweepOutputs = newSweepOutputs()
 	c.preparations = map[string]*preparation{}
-	c.offered = map[string]offeredState{}
-	c.offering = map[string]*inputOffer{}
 	c.local = make(chan struct{}, max(dispatch.Concurrency, 1))
 	c.watchers = make(map[string]*watcher, len(c.Links))
 	for _, link := range c.Links {
@@ -409,7 +401,7 @@ func (c *Coordinator) prepareFrame(ctx context.Context, node string,
 	if request.Descriptor.IsProducingOutputs {
 		c.rememberConsumedSnapshot(request.Release.Pkg.Name, request.Release.Pkg.Repository, sources, commits)
 	}
-	if frame.repositories, err = c.offerInputs(ctx, node, sources, commits); err != nil {
+	if frame.repositories, err = c.carrySourceInputs(ctx, sources, commits); err != nil {
 		return frame, err
 	}
 	switch request.Descriptor.Inputs {
@@ -419,6 +411,23 @@ func (c *Coordinator) prepareFrame(ctx context.Context, node string,
 		frame.inputs, err = c.resolveTaskInputs(ctx, node, request.Release.Pkg.Name)
 	}
 	return frame, err
+}
+
+// carrySourceInputs imports exact source snapshots into the mailbox store.
+// The Assignment commit transports them as direct secondary parents; no
+// snapshot branch is created after task initialization.
+func (c *Coordinator) carrySourceInputs(ctx context.Context,
+	sources []Source, commits []string) ([]AssignmentRepository, error) {
+	repositories := make([]AssignmentRepository, 0, len(sources))
+	for index, source := range sources {
+		if err := c.dispatch.Store.ImportCommitFrom(ctx, source.Dir, commits[index]); err != nil {
+			return nil, fmt.Errorf("execution: importing the input state of %s: %w", source.Name, err)
+		}
+		repositories = append(repositories, AssignmentRepository{
+			Name: source.Name, Path: source.Path, Snapshot: commits[index],
+		})
+	}
+	return repositories, nil
 }
 
 // runTask offers one assignment and waits for its terminal result, settling
@@ -471,10 +480,9 @@ type taskOffer struct {
 // push, so that a node quick enough to answer at once is still heard and a
 // push with no known outcome still leaves a ref this run closes.
 //
-// A failed offer settles the lease here. An offer that provably never landed
-// placed nothing anywhere, so the slot is free and the task is offered again;
-// one whose outcome is unknown is settled by revoking it (see
-// settleUnknownOffer).
+// A failed offer settles the lease here. A provably refused activation frees
+// the slot; an ambiguous activation retains the node's capacity until the
+// signed attempt can be settled.
 func (c *Coordinator) offerAssignment(ctx context.Context, lease *Lease, task string,
 	assignment *Assignment) (taskOffer, error) {
 	// No new effect after lock loss (§28.6). An assignment is the first thing
@@ -486,7 +494,23 @@ func (c *Coordinator) offerAssignment(ctx context.Context, lease *Lease, task st
 	}
 	attempt, kind := assignment.Attempt, assignment.Kind
 	mailbox := c.mailboxes[lease.Node]
-	offered, err := mailbox.PrepareAssignment(ctx, assignment)
+	claimed, err := c.claimReservedAttempt(reservationClaim{
+		lease: lease, task: task, kind: kind, attempt: attempt,
+	})
+	if err != nil {
+		lease.Release()
+		return taskOffer{}, c.refuseTask(task, lease.Node, attempt, err)
+	}
+	assignment.Branch = claimed.attempt.branch
+	offered, err := mailbox.PrepareAssignmentOnReservation(ctx, assignment, claimed.attempt.oid)
+	if err != nil {
+		lease.Release()
+		return taskOffer{}, c.refuseTask(task, lease.Node, attempt, err)
+	}
+	notice := &SlotNotice{Header: c.formatOrchestratorHeader(KindSlot, task, attempt,
+		lease.Node, claimed.slot.branch), Sequence: claimed.next,
+		TaskBranch: claimed.attempt.branch, AssignmentOID: offered}
+	slotOID, err := mailbox.PrepareSlotNotice(ctx, notice, claimed.prior)
 	if err != nil {
 		lease.Release()
 		return taskOffer{}, c.refuseTask(task, lease.Node, attempt, err)
@@ -495,23 +519,23 @@ func (c *Coordinator) offerAssignment(ctx context.Context, lease *Lease, task st
 	offer := taskOffer{observer: observer, replies: observer.watch(assignment.Branch),
 		branch: assignment.Branch, kind: kind, offered: offered}
 	observer.bind(assignment.Branch, offered, assignment)
-	c.recordOwnedRef(ctx, ownedRefStep{node: lease.Node, branch: assignment.Branch, oid: offered})
-	resolution, err := mailbox.Offer(ctx, assignment.Branch, offered)
-	switch resolution {
-	case pushLanded:
-	case pushNotLanded:
+	err = mailbox.ActivateReserved(ctx, Activation{
+		TaskBranch: assignment.Branch, ReservationOID: claimed.attempt.oid, AssignmentOID: offered,
+		SlotBranch: claimed.slot.branch, SlotOldOID: claimed.prior, SlotNewOID: slotOID,
+	})
+	if err != nil {
 		observer.forget(assignment.Branch)
-		c.forgetOwnedRef(lease.Node, assignment.Branch)
-		lease.Release()
-		c.Log.Warn().Err(err).Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
-			Int("attempt", attempt).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
-			Msg("the mailbox did not take the assignment")
-		return taskOffer{}, fmt.Errorf("%w: %w", errOfferNotLanded, err)
-	default:
-		if settleErr := c.settleUnknownOffer(ctx, lease, task, attempt, offer, err); settleErr != nil {
-			return taskOffer{}, settleErr
+		if errors.Is(err, gitx.ErrPushUnknown) {
+			lease.Leak(LeakTransport)
+			return taskOffer{}, c.refuseTask(task, lease.Node, attempt,
+				fmt.Errorf("the atomic task activation has no known outcome: %w", err))
 		}
+		lease.Release()
+		return taskOffer{}, fmt.Errorf("%w: %w", errOfferNotLanded, err)
 	}
+	c.recordOwnedRef(ctx, ownedRefStep{node: lease.Node, branch: assignment.Branch,
+		oid: offered, parent: claimed.attempt.oid})
+	c.commitSlotNotice(ctx, lease.Node, claimed, slotOID)
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", lease.Node).
 		Str("branch", assignment.Branch).Str("commit", offered).Int("attempt", assignment.Attempt).
 		Str("kind", kind).Msg("task assigned")
@@ -523,34 +547,6 @@ func (c *Coordinator) offerAssignment(ctx context.Context, lease *Lease, task st
 // the revocation found no branch. Nothing was placed, so the caller offers
 // the task again under a new attempt, exactly as it does after errQueueExpired.
 var errOfferNotLanded = errors.New("execution: the assignment never reached the mailbox")
-
-// settleUnknownOffer decides an assignment push with no known outcome by the
-// one operation that settles it: a delete leased on the assignment itself.
-//
-// A branch the delete removed, or found already gone, held nothing anybody
-// claimed, so the slot is free and the task is offered again. A branch that
-// moved past the assignment is a push that landed and a node that already
-// answered it, so the attempt goes on and the poll is told to look again. A
-// branch that is still there, or a remote that cannot be read, is an
-// assignment a node may yet claim with nobody listening: the slot stays held,
-// the node leaves the pool and the task fails.
-func (c *Coordinator) settleUnknownOffer(ctx context.Context, lease *Lease, task string,
-	attempt int, offer taskOffer, pushErr error) error {
-	if c.revokeAttempt(ctx, lease.Node, task, attempt, offer.branch, offer.offered) {
-		offer.observer.forget(offer.branch)
-		lease.Release()
-		return fmt.Errorf("%w: %w", errOfferNotLanded, pushErr)
-	}
-	head, err := c.mailboxes[lease.Node].Reread(ctx, offer.branch)
-	if err == nil && head.OID != "" && head.OID != offer.offered {
-		offer.observer.reconsider(head.Name)
-		return nil
-	}
-	offer.observer.forget(offer.branch)
-	lease.Leak(LeakTransport)
-	return c.refuseTask(task, lease.Node, attempt, fmt.Errorf(
-		"the assignment push has no known outcome and the assignment could not be revoked: %w", pushErr))
-}
 
 // awaitResult waits for the node to report, for the task deadline, or for the
 // run to be interrupted, and settles the slot according to which of the three
@@ -640,8 +636,8 @@ func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, attempt 
 		return outcome, nil
 	}
 	if err := c.admitOutputs(ctx, task, producedOutputs{
-		node: result.Node, store: c.dispatch.Store, endpoint: c.endpointOf(result.Node),
-		branch: branch, commit: commit, manifest: result.Outputs, attempt: attempt,
+		node: result.Node, store: c.dispatch.Store,
+		commit: commit, manifest: result.Outputs, attempt: attempt,
 	}, request); err != nil {
 		// A build whose outputs cannot be used is a build that did not
 		// satisfy its consumers, so the package fails here rather than
@@ -737,120 +733,6 @@ func (c *Coordinator) captureInputs(ctx context.Context, sources []Source) ([]st
 		captured = append(captured, commit)
 	}
 	return captured, nil
-}
-
-// offerInputs puts every prepared state on a branch of the node's endpoint and
-// answers the checkouts the assignment names.
-//
-// A state that is already on that endpoint under this run's own branch is not
-// pushed again: a run of twenty packages whose working tree does not change
-// between dispatches offers one source branch, not twenty.
-func (c *Coordinator) offerInputs(ctx context.Context, node string, sources []Source, commits []string) ([]AssignmentRepository, error) {
-	offered := make([]AssignmentRepository, 0, len(sources))
-	for index, source := range sources {
-		branch, err := c.offerInput(ctx, node, source, commits[index])
-		if err != nil {
-			return nil, err
-		}
-		offered = append(offered, AssignmentRepository{
-			Name: source.Name, Path: source.Path, Snapshot: commits[index], Branch: branch,
-		})
-	}
-	return offered, nil
-}
-
-// offerInput answers the immutable branch one prepared state sits on at one
-// node, pushing it there when no dispatch of this run has.
-//
-// Each node and state is pushed once: a dispatch that needs a state already
-// travelling to its node waits for that push rather than starting its own,
-// and takes its branch. Nothing else waits: the first states of two nodes are
-// two pushes, and they travel at once. A push that failed is nobody's answer,
-// so a dispatch that waited for it pushes the state itself.
-func (c *Coordinator) offerInput(ctx context.Context, node string, source Source,
-	commit string) (branch string, err error) {
-	key := node + "\x00" + source.Dir
-	flight := key + "\x00" + commit
-	for {
-		c.offers.Lock()
-		if state, isOffered := c.offered[key]; isOffered && state.commit == commit {
-			c.offers.Unlock()
-			return state.branch, nil
-		}
-		pending, isPending := c.offering[flight]
-		if !isPending {
-			break
-		}
-		c.offers.Unlock()
-		select {
-		case <-pending.done:
-		case <-ctx.Done():
-			return "", fmt.Errorf("waiting for the input state of %s to reach %s: %w", source.Dir, node, ctx.Err())
-		}
-		if pending.branch != "" {
-			return pending.branch, nil
-		}
-	}
-	offer := &inputOffer{done: make(chan struct{})}
-	c.offering[flight] = offer
-	c.offers.Unlock()
-	// Deferred so that whatever ends the push, the dispatches waiting for it
-	// are let go.
-	defer func() {
-		c.offers.Lock()
-		delete(c.offering, flight)
-		if err == nil {
-			c.offered[key] = offeredState{commit: commit, branch: branch}
-			offer.branch = branch
-		}
-		c.offers.Unlock()
-		close(offer.done)
-	}()
-	return c.pushInput(ctx, node, source, commit)
-}
-
-// pushInput pushes one prepared state to one node, create-only, and answers
-// the immutable branch it now sits on.
-//
-// The push comes out of the repository the state was captured in rather than
-// out of the release's own store, because in a composed workspace those are
-// different object stores and only the first one holds the objects.
-func (c *Coordinator) pushInput(ctx context.Context, node string, source Source, commit string) (string, error) {
-	branch := FormatBranch(node, KindSnapshot, time.Now())
-	// Owned before it is pushed, so a push with no known outcome still leaves
-	// a ref this run closes.
-	c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: branch, oid: commit})
-	pushErr := c.dispatch.OpenRepository(source.Dir).PushCreate(ctx, c.endpointOf(node), commit, branch)
-	if err := c.settleCreate(ctx, node, branch, commit, pushErr); err != nil {
-		return "", fmt.Errorf("offering the input state of %s: %w", source.Dir, err)
-	}
-	c.Log.Debug().Str("worker", node).Str("repository", source.Name).Str("branch", branch).
-		Str("commit", commit).Str("run", c.Run).Msg("input state pushed")
-	return branch, nil
-}
-
-// settleCreate decides a create-only push of an immutable branch, an input
-// state or a relayed output set, that this run made out of some other object
-// store than the mailbox's own.
-//
-// Landed is the only answer the task goes on with. A branch that provably
-// never landed is forgotten, since there is nothing to close; one whose
-// outcome is unknown stays owned, so the run's own close removes it if it
-// landed after all, and the task is refused because no assignment exists yet
-// that could have depended on it.
-func (c *Coordinator) settleCreate(ctx context.Context, node, branch, oid string, pushErr error) error {
-	if pushErr == nil {
-		return nil
-	}
-	switch c.mailboxes[node].resolveOwnPush(ctx, branch, oid, pushErr) {
-	case pushLanded:
-		return nil
-	case pushNotLanded:
-		c.forgetOwnedRef(node, branch)
-		return pushErr
-	default:
-		return fmt.Errorf("the push has no known outcome: %w", pushErr)
-	}
 }
 
 // endpointOf is where one node reads its work, as the configuration named it.
@@ -1080,6 +962,19 @@ func (w *watcher) isWatched(branch string) bool {
 	return isWatched
 }
 
+// watchedBranches snapshots only active attempts. Polling exact refs keeps
+// inert reservations out of the steady-state poll cost.
+func (w *watcher) watchedBranches() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	branches := make([]string, 0, len(w.attempts))
+	for branch := range w.attempts {
+		branches = append(branches, branch)
+	}
+	sort.Strings(branches)
+	return branches
+}
+
 // isIdle reports whether this endpoint has nothing in flight, which is what
 // keeps a run that delegates nothing from polling anything.
 func (w *watcher) isIdle() bool {
@@ -1127,21 +1022,22 @@ func (w *watcher) tick(ctx context.Context) bool {
 	if w.isIdle() {
 		return false
 	}
-	// Only the branches of this run's own attempts are fetched: the mailbox
-	// is shared, and another run's output trees are none of this store's
-	// business.
-	heads, err := w.mailbox.Observe(ctx, FormatBranchPattern(w.link.Name), w.isWatched)
-	if err != nil {
-		if ctx.Err() == nil {
-			w.coordinator.Log.Warn().Err(err).Str("worker", w.link.Name).
-				Msg("the mailbox could not be polled")
-		}
-		return false
-	}
 	isProgress := false
-	for _, head := range heads {
-		if w.inspect(ctx, head) {
-			isProgress = true
+	branches := w.watchedBranches()
+	for start := 0; start < len(branches); start += gitx.MaxTransportBatch {
+		chunk := branches[start:min(start+gitx.MaxTransportBatch, len(branches))]
+		heads, err := w.mailbox.ObserveManyExact(ctx, chunk)
+		if err != nil {
+			if ctx.Err() == nil {
+				w.coordinator.Log.Warn().Err(err).Str("worker", w.link.Name).
+					Int("branches", len(chunk)).Msg("the mailbox could not be polled")
+			}
+			continue
+		}
+		for _, head := range heads {
+			if w.inspect(ctx, head) {
+				isProgress = true
+			}
 		}
 	}
 	return isProgress

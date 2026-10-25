@@ -164,6 +164,19 @@ type BranchLease struct {
 	ExpectedOld string
 }
 
+// CreateRef is one initially absent coordination ref in an atomic batch.
+type CreateRef struct {
+	Branch string
+	OID    string
+}
+
+// BranchAdvance is one exact compare-and-swap update in an atomic batch.
+type BranchAdvance struct {
+	Branch      string
+	OID         string
+	ExpectedOld string
+}
+
 // BranchResult is what one ref of a batched delete ended as, in the three
 // answers a push can give plus the success.
 type BranchResult int
@@ -220,6 +233,113 @@ func (c *LocalGitx) PushAdvance(ctx context.Context, remote, oid, branch, expect
 	return c.pushLeased(ctx, remote, oid, branch, expectedOld)
 }
 
+// PushCreateAtomic installs a bounded set of reservations together. An
+// already occupied ref prevents every other ref in this transaction from
+// being created. A lost response is reported as unknown for the caller to
+// settle by reading every exact remote object id.
+func (c *LocalGitx) PushCreateAtomic(ctx context.Context, remote string, refs []CreateRef) error {
+	updates := make([]BranchAdvance, len(refs))
+	for i, ref := range refs {
+		updates[i] = BranchAdvance{Branch: ref.Branch, OID: ref.OID}
+	}
+	return c.PushAtomicAdvances(ctx, remote, updates)
+}
+
+// PushAtomicAdvances moves all named refs under their individual exact leases
+// or moves none. In particular the task reservation and its node-slot notice
+// become visible in one transaction. This method never guesses after a lost
+// response: the caller must compare the remote refs with the proposed OIDs.
+func (c *LocalGitx) PushAtomicAdvances(ctx context.Context, remote string, refs []BranchAdvance) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	if len(refs) > MaxTransportBatch {
+		return fmt.Errorf("gitx: %d refs in one atomic push, at most %d: %w", len(refs), MaxTransportBatch, ErrTransportLimit)
+	}
+	args := []string{"push", "--atomic", "--porcelain", "--no-follow-tags"}
+	refspecs := make([]string, 0, len(refs))
+	refNames := make([]string, 0, len(refs))
+	seen := make(map[string]bool, len(refs))
+	for _, update := range refs {
+		ref, err := transportBranchRef(update.Branch)
+		if err != nil {
+			return err
+		}
+		if seen[ref] {
+			return fmt.Errorf("gitx: duplicate atomic push ref %s", ref)
+		}
+		seen[ref] = true
+		if !transportOID(update.OID) || (update.ExpectedOld != "" && !transportOID(update.ExpectedOld)) {
+			return fmt.Errorf("gitx: invalid object id for %s", ref)
+		}
+		args = append(args, "--force-with-lease="+ref+":"+update.ExpectedOld)
+		refspecs = append(refspecs, update.OID+":"+ref)
+		refNames = append(refNames, ref)
+	}
+	args = append(args, "--", remote)
+	out, runErr := c.runStream(ctx, gitStream{}, append(args, refspecs...)...)
+	report := readPushReport(out)
+	allApplied := runErr == nil
+	stale, refused := false, false
+	for _, ref := range refNames {
+		status, found := report[ref]
+		if !found {
+			allApplied = false
+			continue
+		}
+		switch status.resolve() {
+		case pushApplied:
+		case pushStale:
+			allApplied, stale = false, true
+		case pushRefused:
+			allApplied, refused = false, true
+		default:
+			allApplied = false
+		}
+	}
+	if allApplied {
+		return nil
+	}
+	// Git's atomic rejection leaves all refs unchanged. Only an explicit
+	// rejection is a definitive non-write; absent or other status is unknown.
+	if stale {
+		return fmt.Errorf("gitx: atomic push on %s: %w", RedactURL(remote), ErrLeaseRejected)
+	}
+	if refused {
+		return fmt.Errorf("gitx: atomic push on %s: %w", RedactURL(remote), ErrRemoteRefused)
+	}
+	return fmt.Errorf("%w: %w", ErrPushUnknown, transportError(runErr, remote, "atomically pushing %d refs", len(refs)))
+}
+
+func transportOID(oid string) bool {
+	if len(oid) != 40 && len(oid) != 64 {
+		return false
+	}
+	for _, digit := range oid {
+		if digit < '0' || digit > '9' && (digit < 'a' || digit > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// CommitParents reads the ordered direct parents of an exact commit. It does
+// not follow a ref or infer ancestry from an object merely present locally.
+func (c *LocalGitx) CommitParents(ctx context.Context, oid string) ([]string, error) {
+	if !transportOID(oid) {
+		return nil, fmt.Errorf("gitx: invalid commit object id")
+	}
+	out, err := c.run(ctx, "rev-list", "--parents", "--max-count=1", oid)
+	if err != nil {
+		return nil, fmt.Errorf("gitx: reading parents of %s: %w", oid, err)
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 || fields[0] != oid {
+		return nil, fmt.Errorf("gitx: %s did not resolve to itself as a commit", oid)
+	}
+	return fields[1:], nil
+}
+
 // pushLeased is one compare-and-swap push, answered as one of the three
 // outcomes the transport distinguishes: applied (nil), never applied
 // (ErrLeaseRejected or ErrRemoteRefused) and unknown (ErrPushUnknown).
@@ -228,7 +348,7 @@ func (c *LocalGitx) pushLeased(ctx context.Context, remote, oid, branch, expecte
 	if err != nil {
 		return err
 	}
-	out, runErr := c.runStream(ctx, gitStream{}, "push", "--porcelain",
+	out, runErr := c.runStream(ctx, gitStream{}, "push", "--porcelain", "--no-follow-tags",
 		"--force-with-lease="+ref+":"+expectedOld, "--", remote, oid+":"+ref)
 	status, isReported := findPushStatus(out, ref)
 	if !isReported {
@@ -318,6 +438,63 @@ func (c *LocalGitx) ListRemoteHeads(ctx context.Context, remote, pattern string)
 	}
 	sort.Slice(scanner.heads, func(i, j int) bool { return scanner.heads[i].Name < scanner.heads[j].Name })
 	return scanner.heads, nil
+}
+
+// ListRemoteHeadsExact reads at most one bounded batch of named coordination
+// branches in a single ls-remote. Unlike a wildcard listing it scales with
+// the active tasks a watcher owns, not with inert reservations on an endpoint.
+// An absent branch contributes no head. A conflicting duplicate name is an
+// ambiguous remote answer and is refused before any caller can use it.
+func (c *LocalGitx) ListRemoteHeadsExact(ctx context.Context, remote string, branches []string) ([]RemoteHead, error) {
+	if len(branches) == 0 {
+		return nil, nil
+	}
+	if len(branches) > MaxTransportBatch {
+		return nil, fmt.Errorf("gitx: %d refs in one exact listing, at most %d: %w",
+			len(branches), MaxTransportBatch, ErrTransportLimit)
+	}
+	args := []string{"ls-remote", "--heads", "--", remote}
+	wanted := make(map[string]bool, len(branches))
+	for _, branch := range branches {
+		ref, err := transportBranchRef(branch)
+		if err != nil {
+			return nil, err
+		}
+		if wanted[branch] {
+			return nil, fmt.Errorf("gitx: duplicate exact listing ref %s", ref)
+		}
+		wanted[branch] = true
+		args = append(args, ref)
+	}
+	scanner := &remoteHeadScanner{maxHeads: len(branches)}
+	_, err := c.runStream(ctx, gitStream{stdout: scanner}, args...)
+	if scanner.err != nil {
+		return nil, transportError(scanner.err, remote, "listing %d exact refs", len(branches))
+	}
+	if err != nil {
+		return nil, transportError(err, remote, "listing %d exact refs", len(branches))
+	}
+	if scanner.pending.Len() != 0 {
+		return nil, transportError(errors.New("the remote ref listing ended mid-entry"), remote,
+			"listing %d exact refs", len(branches))
+	}
+	seen := make(map[string]string, len(branches))
+	heads := make([]RemoteHead, 0, len(branches))
+	for _, head := range scanner.heads {
+		if !wanted[head.Name] {
+			continue
+		}
+		if oid, exists := seen[head.Name]; exists {
+			if oid != head.OID {
+				return nil, fmt.Errorf("gitx: conflicting exact remote answers for %s on %s", head.Name, RedactURL(remote))
+			}
+			continue
+		}
+		seen[head.Name] = head.OID
+		heads = append(heads, head)
+	}
+	sort.Slice(heads, func(i, j int) bool { return heads[i].Name < heads[j].Name })
+	return heads, nil
 }
 
 // FetchRefs brings coordination branches into this checkout's private
@@ -903,6 +1080,167 @@ func (p *Plumbing) CommitTree(ctx context.Context, tree string, parents []string
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+// CommitTreeCarried writes a transport commit with arbitrarily many direct
+// carrier parents without putting each parent on the process argument vector.
+// It first validates the tree and all parents in one batch-check process,
+// preserving commit-tree's refusal of missing or wrong-type objects. The
+// commit bytes then stream to hash-object under the same fixed identity and
+// message shape as CommitTree. No ref is created.
+func (p *Plumbing) CommitTreeCarried(ctx context.Context, tree string, parents []string, kind string) string {
+	if p.err != nil {
+		return ""
+	}
+	if !transportOID(tree) {
+		p.fail(fmt.Errorf("gitx: invalid transport tree object id"))
+		return ""
+	}
+	seen := make(map[string]bool, len(parents))
+	for _, parent := range parents {
+		if !transportOID(parent) {
+			p.fail(fmt.Errorf("gitx: invalid transport parent object id"))
+			return ""
+		}
+		if seen[parent] {
+			// commit-tree silently omits a duplicate parent. The carried
+			// protocol requires an exact secondary-parent set, so refusing is
+			// clearer than hashing a different object than the caller requested.
+			p.fail(fmt.Errorf("gitx: duplicate carried transport parent %s", parent))
+			return ""
+		}
+		seen[parent] = true
+	}
+	if err := p.git.validateTransportCommitObjects(ctx, tree, parents); err != nil {
+		p.fail(err)
+		return ""
+	}
+	now := time.Now().UTC()
+	stamp := strconv.FormatInt(now.Unix(), 10) + " +0000"
+	identity := TransportIdentityName + " <" + TransportIdentityEmail + "> " + stamp + "\n"
+	content := io.MultiReader(
+		strings.NewReader("tree "+tree+"\n"),
+		&oidLineReader{oids: parents, prefix: "parent "},
+		strings.NewReader("author "+identity+"committer "+identity+"\n"+transportMessagePrefix+kind+"\n"),
+	)
+	out, err := p.git.runStream(ctx, gitStream{stdin: content}, "hash-object", "-t", "commit", "-w", "--stdin")
+	if err != nil {
+		p.fail(fmt.Errorf("gitx: writing the carried transport commit for %s: %w", kind, err))
+		return ""
+	}
+	oid := strings.TrimSpace(out)
+	if !transportOID(oid) {
+		p.fail(fmt.Errorf("gitx: hashing the carried transport commit returned no object id"))
+		return ""
+	}
+	return oid
+}
+
+// oidLineReader serializes an already-held OID slice one line at a time for
+// Git's stdin protocols. The same reader writes batch-check requests and
+// direct parent headers without a second O(N) string allocation.
+type oidLineReader struct {
+	oids    []string
+	prefix  string
+	index   int
+	pending string
+}
+
+func (r *oidLineReader) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	written := 0
+	for written < len(p) {
+		if r.pending == "" {
+			if r.index == len(r.oids) {
+				if written == 0 {
+					return 0, io.EOF
+				}
+				return written, nil
+			}
+			r.pending = r.prefix + r.oids[r.index] + "\n"
+			r.index++
+		}
+		n := copy(p[written:], r.pending)
+		r.pending = r.pending[n:]
+		written += n
+	}
+	return written, nil
+}
+
+func (c *LocalGitx) validateTransportCommitObjects(ctx context.Context, tree string, parents []string) error {
+	requests := io.MultiReader(strings.NewReader(tree+"\n"), &oidLineReader{oids: parents})
+	checker := &transportObjectChecker{tree: tree, parents: parents}
+	_, err := c.runStream(ctx, gitStream{stdin: requests, stdout: checker}, "cat-file", "--batch-check")
+	if checker.err != nil {
+		return checker.err
+	}
+	if err != nil {
+		return fmt.Errorf("gitx: validating carried commit objects: %w", err)
+	}
+	if len(checker.pending) != 0 || checker.index != len(parents)+1 {
+		return fmt.Errorf("gitx: the carried commit object check ended before every object was verified")
+	}
+	return nil
+}
+
+// transportObjectChecker parses cat-file's one line per requested object as
+// it arrives. Its pending line has a fixed bound even when the parent count
+// does not, and it refuses a missing, reordered or wrong-type object.
+type transportObjectChecker struct {
+	tree    string
+	parents []string
+	index   int
+	pending []byte
+	err     error
+}
+
+func (c *transportObjectChecker) Write(data []byte) (int, error) {
+	original := len(data)
+	for len(data) != 0 {
+		end := bytes.IndexByte(data, '\n')
+		if end < 0 {
+			if len(c.pending)+len(data) > MaxObjectHeaderBytes {
+				c.err = fmt.Errorf("gitx: the carried commit object answer exceeds %d bytes: %w", MaxObjectHeaderBytes, ErrTransportLimit)
+				return 0, c.err
+			}
+			c.pending = append(c.pending, data...)
+			break
+		}
+		if len(c.pending)+end > MaxObjectHeaderBytes {
+			c.err = fmt.Errorf("gitx: the carried commit object answer exceeds %d bytes: %w", MaxObjectHeaderBytes, ErrTransportLimit)
+			return 0, c.err
+		}
+		c.pending = append(c.pending, data[:end]...)
+		if err := c.acceptLine(string(c.pending)); err != nil {
+			c.err = err
+			return 0, err
+		}
+		c.pending = c.pending[:0]
+		data = data[end+1:]
+	}
+	return original, nil
+}
+
+func (c *transportObjectChecker) acceptLine(line string) error {
+	if c.index > len(c.parents) {
+		return fmt.Errorf("gitx: carried commit object check returned an extra object")
+	}
+	wantOID, wantType := c.tree, "tree"
+	if c.index > 0 {
+		wantOID, wantType = c.parents[c.index-1], "commit"
+	}
+	fields := strings.Fields(line)
+	if len(fields) != 3 || fields[0] != wantOID || fields[1] != wantType {
+		return fmt.Errorf("gitx: carried commit object %s is missing or not a %s", wantOID, wantType)
+	}
+	size, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil || size < 0 {
+		return fmt.Errorf("gitx: carried commit object %s has an invalid size", wantOID)
+	}
+	c.index++
+	return nil
 }
 
 // WriteTreeFromPaths captures paths of a working folder as a tree, through a

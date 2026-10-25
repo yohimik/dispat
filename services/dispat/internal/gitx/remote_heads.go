@@ -14,6 +14,9 @@ type remoteHeadScanner struct {
 	pending bytes.Buffer
 	heads   []RemoteHead
 	err     error
+	// maxHeads is a tighter caller ceiling for an exact-ref query. Zero uses
+	// the namespace-wide MaxRemoteHeads ceiling.
+	maxHeads int
 }
 
 func (s *remoteHeadScanner) Write(p []byte) (int, error) {
@@ -51,8 +54,12 @@ func (s *remoteHeadScanner) appendHead(line string) {
 		s.err = fmt.Errorf("gitx: malformed remote ref entry: %w", err)
 		return
 	}
-	if len(s.heads) == MaxRemoteHeads {
-		s.err = fmt.Errorf("gitx: remote advertises more than %d refs: %w", MaxRemoteHeads, ErrTransportLimit)
+	limit := s.maxHeads
+	if limit == 0 {
+		limit = MaxRemoteHeads
+	}
+	if len(s.heads) == limit {
+		s.err = fmt.Errorf("gitx: remote advertises more than %d refs: %w", limit, ErrTransportLimit)
 		return
 	}
 	s.heads = append(s.heads, RemoteHead{Name: strings.TrimPrefix(ref, "refs/heads/"), OID: oid})

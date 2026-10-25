@@ -18,6 +18,7 @@ package integration
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -294,14 +295,29 @@ func TestExecutionBudgetsHoldAcrossNodes(t *testing.T) {
 // of its tasks in flight, and both of them still finish.
 func TestExecutionWorkerCapacityHoldsAcrossRuns(t *testing.T) {
 	mailbox := executionMailbox(t)
-	first := newExecutionRepositoryOn(t, mailbox, "first")
+	gate := filepath.Join(t.TempDir(), "first-build-may-finish")
+	t.Cleanup(func() { _ = os.WriteFile(gate, nil, 0o600) })
+	first := newExecutionRepositoryOn(t, mailbox, "first", gate)
 	second := newExecutionRepositoryOn(t, mailbox, "second")
 	worker := startWorker(t, first.repo, executionWorkerConfig(mailbox,
 		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(1) }), 0,
 		executionBuildLogEnv+"="+first.builds)
 
 	started := first.repo.StartReleaseEnv(first.env(), "release")
-	other := second.release()
+	require.Eventually(t, func() bool { return len(first.runs()) == 1 }, 60*time.Second, 50*time.Millisecond,
+		"the first build did not take the worker's only capacity slot")
+	otherStarted := second.repo.StartReleaseEnv(second.env(), "release")
+	var waitingSlot string
+	require.Eventually(t, func() bool {
+		waitingSlot = executionActiveSlotForTask(t, mailbox, "second:build")
+		return waitingSlot != ""
+	}, 60*time.Second, 50*time.Millisecond, "the second run did not activate its slot notice")
+	require.Never(t, func() bool {
+		return len(second.runs()) != 0 || executionActiveSlotForTask(t, mailbox, "second:build") != waitingSlot
+	}, 700*time.Millisecond, 50*time.Millisecond,
+		"a full worker must leave the second notice unchanged and the task unclaimed")
+	require.NoError(t, os.WriteFile(gate, nil, 0o600))
+	other := otherStarted.Wait()
 	res := started.Wait()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -313,14 +329,38 @@ func TestExecutionWorkerCapacityHoldsAcrossRuns(t *testing.T) {
 	require.Equal(t, 0, worker.proc.Wait().Code)
 }
 
+// executionActiveSlotForTask returns the notice object a worker may repeatedly
+// inspect while full. It reads the signed task identity rather than inferring
+// one from the node-neutral branch name.
+func executionActiveSlotForTask(t *testing.T, mailbox, task string) string {
+	t.Helper()
+	for _, branch := range executionProtocolRefs(t, mailbox, "dispat-slot-") {
+		notice := executionMessage(t, mailbox, branch, "slot")
+		taskBranch, _ := notice["taskBranch"].(string)
+		if taskBranch == "" {
+			continue
+		}
+		assignment := executionTaskAssignment(t, mailbox, taskBranch)
+		if assignment["task"] == task {
+			return strings.TrimSpace(bareGit(t, mailbox, "rev-parse", "refs/heads/"+branch))
+		}
+	}
+	return ""
+}
+
 // newExecutionRepositoryOn is one independent single-package repository
 // delegating to a mailbox somebody else may also be using, with a timing probe
 // labelled by the repository so two runs are told apart.
-func newExecutionRepositoryOn(t *testing.T, mailbox, label string) *executionRig {
+func newExecutionRepositoryOn(t *testing.T, mailbox, label string, gate ...string) *executionRig {
 	t.Helper()
 	repo := harness.New(t)
 	repo.SeedPackage("packages", label)
-	cfg := libsConfig(executionRecordingScript+" && "+
+	script := executionRecordingScript
+	if len(gate) != 0 {
+		quoted := "'" + strings.ReplaceAll(gate[0], "'", "'\\''") + "'"
+		script += " && for i in $(seq 1 600); do test -f " + quoted + " && break; sleep .1; done && test -f " + quoted
+	}
+	cfg := libsConfig(script+" && "+
 		repo.TsmarkScript("timeline.log", label, 3*time.Second), 1)
 	cfg.Execution = &models.ExecutionConfig{
 		SecretEnv: executionSecretEnv,
@@ -589,7 +629,7 @@ func newExecutionBranchWatch(t *testing.T, rig *executionRig) *executionBranchWa
 			case <-ticker.C:
 				for _, ref := range executionMailboxBranches(t, rig.mailbox) {
 					name := strings.TrimPrefix(ref, "refs/heads/")
-					if executionBranchKind(name) == "build" {
+					if executionAssignedTaskKind(t, rig.mailbox, name) == "build" {
 						seen[name] = true
 					}
 				}
@@ -599,10 +639,9 @@ func newExecutionBranchWatch(t *testing.T, rig *executionRig) *executionBranchWa
 	return watch
 }
 
-// executionBranchKind is the kind label of a coordination branch, which is
-// the second-to-last word of `dispat-worker-<id>-<date>-<kind>-<random>`. It
-// is read here rather than matched as a substring because a node is called
-// build-a, so a snapshot branch addressed to it also holds the word "build".
+// executionBranchKind is the diagnostic label of a legacy node-addressed
+// branch. Active task refs omit the kind; use executionAssignedTaskKind for
+// them. It reads from the right because node names may contain hyphens.
 func executionBranchKind(branch string) string {
 	words := strings.Split(branch, "-")
 	if len(words) < 2 {

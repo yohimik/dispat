@@ -32,6 +32,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +51,7 @@ import (
 // that the loop below can be read without knowing how a branch is fetched.
 type mailboxx interface {
 	Observe(ctx context.Context, pattern string, isWanted func(string) bool) ([]gitx.RemoteHead, error)
+	ObserveManyExact(ctx context.Context, branches []string) ([]gitx.RemoteHead, error)
 	Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTip, error)
 	Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]byte, error)
 	Advance(ctx context.Context, branch, expectedOld string, kind MessageKind, document []byte,
@@ -58,6 +60,12 @@ type mailboxx interface {
 	Fetch(ctx context.Context, branches []string) error
 	Reconsider(branch string)
 	Forget()
+}
+
+type slotMailboxx interface {
+	InspectChain(context.Context, gitx.RemoteHead) ([]ChainTip, error)
+	VerifyAssignmentCarriers(context.Context, string, int64) (*Assignment, error)
+	OpenCarriedAssignment(context.Context, string, int64) (*VerifiedCarriers, error)
 }
 
 // The poll rhythm. A node with nothing to do costs one ls-remote every five
@@ -431,7 +439,12 @@ func (w *Worker) inspectMailbox(ctx context.Context) (bool, error) {
 	}
 	isProgress := false
 	for _, head := range heads {
-		answered, err := w.handle(ctx, head)
+		var answered bool
+		if strings.HasPrefix(head.Name, FormatSlotPrefix(w.Node)) {
+			answered, err = w.handleSlot(ctx, head)
+		} else {
+			answered, err = w.handle(ctx, head)
+		}
 		isProgress = isProgress || answered
 		if err != nil {
 			return isProgress, err
@@ -468,7 +481,27 @@ func (w *Worker) observeMailbox(ctx context.Context) ([]gitx.RemoteHead, error) 
 	bound := w.resolvePollTimeout()
 	bounded, done := context.WithTimeout(ctx, bound)
 	defer done()
-	heads, err := w.Mailbox.Observe(bounded, FormatBranchPattern(w.Node), nil)
+	probes, err := w.Mailbox.Observe(bounded, FormatBranchPattern(w.Node), func(branch string) bool {
+		return ResolveBranchKindHint(branch) == KindProbe
+	})
+	heads := probes
+	if err == nil {
+		var slots []gitx.RemoteHead
+		slots, err = w.Mailbox.Observe(bounded, FormatSlotPattern(w.Node), nil)
+		heads = append(heads, slots...)
+	}
+	if err == nil {
+		branches := w.activeTaskBranches()
+		for start := 0; start < len(branches); start += gitx.MaxTransportBatch {
+			end := min(start+gitx.MaxTransportBatch, len(branches))
+			var active []gitx.RemoteHead
+			active, err = w.Mailbox.ObserveManyExact(bounded, branches[start:end])
+			heads = append(heads, active...)
+			if err != nil {
+				break
+			}
+		}
+	}
 	if err == nil || ctx.Err() != nil || bounded.Err() == nil {
 		return heads, err
 	}
@@ -479,6 +512,96 @@ func (w *Worker) observeMailbox(ctx context.Context) ([]gitx.RemoteHead, error) 
 		w.Mailbox.Reconsider(head.Name)
 	}
 	return nil, fmt.Errorf("%w after %s: %w", errPollExpired, bound, err)
+}
+
+// activeTaskBranches keeps cancellation and uncertain claims visible after a
+// slot notice stops moving. Running claims may finish while the poll is in
+// flight; pending claims belong to this same poll goroutine.
+func (w *Worker) activeTaskBranches() []string {
+	w.claims.Lock()
+	branches := make([]string, 0, len(w.claimed)+len(w.pending))
+	for branch := range w.claimed {
+		branches = append(branches, branch)
+	}
+	w.claims.Unlock()
+	for branch := range w.pending {
+		branches = append(branches, branch)
+	}
+	slices.Sort(branches)
+	return slices.Compact(branches)
+}
+
+// handleSlot follows one signed fixed-size index entry to its exact task
+// branch. An inert entry cannot start work, and an assignment on a different
+// branch or for another node cannot be substituted by moving a ref.
+func (w *Worker) handleSlot(ctx context.Context, head gitx.RemoteHead) (bool, error) {
+	carrier, ok := w.Mailbox.(slotMailboxx)
+	if !ok {
+		return false, fmt.Errorf("execution: this mailbox cannot verify dispatch carriers")
+	}
+	tip, err := w.Mailbox.Inspect(ctx, head)
+	if err != nil {
+		w.Mailbox.Reconsider(head.Name)
+		return false, err
+	}
+	if tip.Kind != MessageSlot {
+		return false, nil
+	}
+	document, err := w.Mailbox.Read(ctx, tip, w.Report.Limits.MaxManifestBytes)
+	if err != nil {
+		return false, err
+	}
+	var notice SlotNotice
+	if err := json.Unmarshal(document, &notice); err != nil {
+		return false, err
+	}
+	if notice.AssignmentOID == "" {
+		return false, nil
+	}
+	if reason := CheckHeader(notice.Header, Binding{Node: w.Node, Branch: head.Name}, time.Now()); reason != "" ||
+		notice.Kind != KindSlot || notice.Sequence == 0 || notice.TaskBranch == "" {
+		return false, NewDiagnostic(CodeAuthority, CategoryAuthority,
+			"a dispatch slot did not authenticate its task binding")
+	}
+	branches, err := w.Mailbox.Observe(ctx, "refs/heads/"+notice.TaskBranch, nil)
+	if err != nil || len(branches) == 0 {
+		return false, err
+	}
+	assignment, err := carrier.VerifyAssignmentCarriers(ctx, notice.AssignmentOID,
+		w.Report.Limits.MaxManifestBytes)
+	if err != nil {
+		return false, err
+	}
+	if assignment.Branch != notice.TaskBranch || assignment.Node != w.Node ||
+		assignment.Run != notice.Run || assignment.Task != notice.Task ||
+		assignment.Attempt != notice.Attempt || assignment.PlanDigest != notice.PlanDigest ||
+		assignment.Generation != notice.Generation {
+		return false, NewDiagnostic(CodeAuthority, CategoryAuthority,
+			"a dispatch slot named a different assignment")
+	}
+	for _, branch := range branches {
+		chain, err := carrier.InspectChain(ctx, branch)
+		if err != nil {
+			return false, err
+		}
+		found := branch.OID == notice.AssignmentOID
+		for _, step := range chain {
+			found = found || step.OID == notice.AssignmentOID
+		}
+		if !found {
+			return false, NewDiagnostic(CodeAuthority, CategoryAuthority,
+				"a dispatch slot's assignment is absent from its branch")
+		}
+		wasFull := cap(w.slots) > 0 && len(w.slots) == cap(w.slots)
+		answered, err := w.handle(ctx, branch)
+		if wasFull && !answered && err == nil {
+			// A queued task reconsidered only its task ref. The unchanged slot
+			// would otherwise hide that ref forever after capacity returned.
+			w.Mailbox.Reconsider(head.Name)
+		}
+		return answered, err
+	}
+	return false, nil
 }
 
 // resolvePollTimeout is the bound on one poll: the configured transfer window,

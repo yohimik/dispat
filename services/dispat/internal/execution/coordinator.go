@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,6 +77,8 @@ type Coordinator struct {
 	// Pool is where this run places its work, assembled by Preflight from what
 	// the nodes reported about themselves.
 	Pool *Pool
+	// reservations are created after preflight and before any task frame.
+	reservations *reservationState
 
 	// mailboxes is one open mailbox per link, opened by the caller so that
 	// this type never decides what a local object store is.
@@ -86,11 +89,6 @@ type Coordinator struct {
 	// nothing else in the process knows what this run put on a mailbox.
 	mu    sync.Mutex
 	owned map[string][]gitx.BranchLease
-	// unknownPublications are the authorized publications this run could not
-	// establish the outcome of. They are kept here rather than reported and
-	// forgotten because two later decisions read them: the summary, and which
-	// repositories may have their locks released.
-	unknownPublications []unknownPublication
 	// ownership is what this run asks before every new assignment, and the
 	// cancellations a lost lock has to reach. It is the release's own gate,
 	// borrowed through UseOwnership, and nil for a run that holds no lock.
@@ -110,16 +108,9 @@ type Coordinator struct {
 	guard sync.RWMutex
 	// local is this node's own capacity, as a slot per frame it keeps.
 	local chan struct{}
-	// snapshots is what this run has already captured. offered is what it has
-	// already pushed to which node, and offering the pushes in flight, one
-	// per node and state; offers guards both maps and is never held across a
-	// push, so the first states of two nodes travel at once.
+	// snapshots is what this run has already captured for assignment carriers.
 	snapshots *snapshots
-	offers    sync.Mutex
-	offered   map[string]offeredState
-	offering  map[string]*inputOffer
-	// outputs is what every package of this run produced, as it was admitted,
-	// and what has already been relayed to which endpoint.
+	// outputs is what every package of this run produced, as it was admitted.
 	outputs *outputRegistry
 	// sweepOutputs is what the tasks of a command sweep reported under the
 	// sweep's own roots, held until every task has answered (§28.10).
@@ -136,21 +127,6 @@ type Coordinator struct {
 	watchers     map[string]*watcher
 	stopWatching context.CancelFunc
 	watching     sync.WaitGroup
-}
-
-// offeredState is one prepared input state as one node has already been given
-// it: which commit, and the immutable branch it was put on.
-type offeredState struct {
-	commit string
-	branch string
-}
-
-// inputOffer is one push of a prepared state to one node while it is in
-// flight: done closes when it has ended, and branch is where the state landed,
-// empty for a push that failed.
-type inputOffer struct {
-	done   chan struct{}
-	branch string
 }
 
 // Timeouts are the bounded waits a distributed run makes, in the shape this
@@ -480,6 +456,7 @@ type ownedRefStep struct {
 // chain. A delayed poll may arrive after a cancel or acknowledgement was
 // recorded; it must not replace the newer lease with the older observed tip.
 func (c *Coordinator) recordOwnedRef(ctx context.Context, step ownedRefStep) {
+	step.node = c.ownerNode(step.node, step.branch)
 	for retry := 0; retry <= maxChainDepth; retry++ {
 		c.mu.Lock()
 		index := -1
@@ -547,6 +524,21 @@ func (c *Coordinator) recordOwnedRef(ctx context.Context, step ownedRefStep) {
 		Msg("the cleanup lease changed too often to record this coordination tip")
 }
 
+// ownerNode gives v2 refs one cleanup owner per exact endpoint string.
+func (c *Coordinator) ownerNode(node, branch string) string {
+	if !strings.HasPrefix(branch, reservationBranchPrefix) &&
+		!strings.HasPrefix(branch, slotBranchPrefix) {
+		return node
+	}
+	endpoint := c.endpointOf(node)
+	for _, link := range c.Links {
+		if link.Endpoint == endpoint {
+			return link.Name
+		}
+	}
+	return node
+}
+
 // isFirstParentSuccessor checks only the bounded coordination chain, not a
 // merge parent: cleanup ownership follows the exact branch history.
 func (c *Coordinator) isFirstParentSuccessor(ctx context.Context, node, earlier, candidate string) (bool, error) {
@@ -572,13 +564,7 @@ func (c *Coordinator) isFirstParentSuccessor(ctx context.Context, node, earlier,
 	return candidate == earlier, nil
 }
 
-// Close deletes settled refs this run created, in one push per node, and
-// answers what could not be removed. An unknown publication's branch remains
-// available for reconciliation, including a late result from its node.
-//
-// An unknown publication's branch is evidence the operator needs and is kept
-// deliberately. A different ref left behind by failed cleanup is reported as
-// a warning with the retained code; the run's own error stays its error.
+// Close deletes settled refs this run created and reports any ref still present.
 func (c *Coordinator) Close(ctx context.Context) error {
 	if c.snapshots != nil {
 		defer c.snapshots.closeBaselines()
@@ -599,31 +585,9 @@ func (c *Coordinator) Close(ctx context.Context) error {
 	c.mu.Lock()
 	owned := c.owned
 	c.owned = map[string][]gitx.BranchLease{}
-	unknownBranches := map[string]unknownPublication{}
-	for _, unknown := range c.unknownPublications {
-		if unknown.Branch != "" {
-			unknownBranches[unknown.Branch] = unknown
-		}
-	}
-	var preserved []unknownPublication
-	for node, leases := range owned {
-		cleanable := make([]gitx.BranchLease, 0, len(leases))
-		for _, lease := range leases {
-			unknown, isUnknown := unknownBranches[lease.Branch]
-			if isUnknown && unknown.Node == node {
-				preserved = append(preserved, unknown)
-				continue
-			}
-			cleanable = append(cleanable, lease)
-		}
-		owned[node] = cleanable
-	}
 	c.mu.Unlock()
-	for _, unknown := range preserved {
-		c.Log.Info().Str("run", c.Run).Str("task", unknown.Task).Str("worker", unknown.Node).
-			Str("branch", unknown.Branch).Msg("coordination ref retained for an unknown publication")
-	}
-	var retained []string
+	type retainedRef struct{ node, branch string }
+	var retained []retainedRef
 	var failures []error
 	for _, node := range sortedNodes(owned) {
 		outcomes, err := c.mailboxes[node].Close(ctx, owned[node])
@@ -632,16 +596,41 @@ func (c *Coordinator) Close(ctx context.Context) error {
 		}
 		for _, outcome := range outcomes {
 			if outcome.Result != gitx.BranchDeleted {
-				retained = append(retained, outcome.Branch)
+				retained = append(retained, retainedRef{node: node, branch: outcome.Branch})
 			}
 		}
 	}
+	// Distinct URLs may address the same Git repository. An earlier endpoint
+	// can report a stale lease before a later endpoint removes that exact ref.
+	// Only an absent final ref settles the alias without claiming it was ours.
+	remaining := retained[:0]
+	for _, ref := range retained {
+		heads, err := c.mailboxes[ref.node].remote.ListRemoteHeads(ctx,
+			c.endpointOf(ref.node), "refs/heads/"+ref.branch)
+		if err != nil {
+			remaining = append(remaining, ref)
+			continue
+		}
+		present := false
+		for _, head := range heads {
+			present = present || head.Name == ref.branch
+		}
+		if present {
+			remaining = append(remaining, ref)
+		}
+	}
+	retained = remaining
 	if len(retained) == 0 && len(failures) == 0 {
 		return nil
 	}
+	names := make([]string, 0, len(retained)+len(failures))
+	for _, ref := range retained {
+		names = append(names, ref.branch)
+	}
+	names = append(names, formatFailures(failures)...)
 	return NewIdentifiedDiagnostic(Identity{Run: c.Run}, CodeTransportRetained, CategoryTransportCleanup,
 		"%d coordination branches of this run could not be closed (%v): they carry no release record; inspect each current tip and ownership before deletion",
-		len(retained)+len(failures), append(retained, formatFailures(failures)...))
+		len(retained)+len(failures), names)
 }
 
 // minimumCloseBound is the least a run's close is given, for a run whose cancel

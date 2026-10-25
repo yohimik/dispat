@@ -246,14 +246,19 @@ func TestExecutionPreflightIgnoresUnauthenticReplies(t *testing.T) {
 	}
 }
 
-// executionAwaitBranch waits until the mailbox carries one coordination
-// branch of this kind and answers its name.
+// executionAwaitBranch waits until a task branch has an assignment of this
+// kind. In v2 the task ref name is node-neutral and carries no kind label;
+// an inert reservation is not yet an offered task. Probes retain their
+// node-addressed branch names.
 func executionAwaitBranch(t *testing.T, rig *executionRig, kind string) string {
 	t.Helper()
 	for range 600 {
 		for _, ref := range rig.branches() {
 			name := strings.TrimPrefix(ref, "refs/heads/")
-			if strings.Contains(name, "-"+kind+"-") {
+			if strings.HasPrefix(name, "dispat-worker-") && strings.Contains(name, "-"+kind+"-") {
+				return name
+			}
+			if executionAssignedTaskKind(t, rig.mailbox, name) == kind {
 				return name
 			}
 		}

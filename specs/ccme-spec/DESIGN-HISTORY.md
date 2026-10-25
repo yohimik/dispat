@@ -600,3 +600,36 @@ authorization, `E228` outcome and publisher-specific retained-lock path are not 
 orchestrator's local publish command can still fail after a destination accepted an artifact. A command error does not
 retain the lock or prove absence at the destination; verified adoption or a demonstrably safe repeatable publisher is
 needed before retry under §19.4. Opaque publishers without that evidence require operator reconciliation.
+
+## 2026-10-26: Upfront task reservations and fixed worker dispatch slots
+
+The distributed Git mailbox protocol now uses signed, node-neutral task reservations. After preflight and task-graph
+compilation, the orchestrator prepares every allowed attempt of each worker-eligible logical task and initializes a
+fixed set of notice slots for each worker before starting a package frame. Per-worker slot count is the smaller of
+reported capacity and tasks eligible on that worker. Bounded atomic batches must all settle. A refused later batch
+cleans earlier refs and starts no package frame. Endpoint aliases receive the same prepared reservation object ID.
+
+The orchestrator still chooses a compatible worker when a task becomes ready. One atomic ref update activates that
+task's reserved attempt and one slot notice. Workers poll only their own notice and probe refs, verify the signed
+assignment and exact source and predecessor result carrier parents, then execute without replanning. Source and
+result objects travel as assignment parents rather than through runtime snapshot or relay refs. Local preparation,
+version, signing and publication remain on the orchestrator and need no reserved task branch. The earlier
+node-addressed task and snapshot/relay branch scheme described in the 2026-10-25 entries is historical.
+
+Let `E_t` be the distinct physical mailbox endpoints carrying task `t`, `A = sum_t |E_t|`, and worker `i` have
+reported capacity `c_i` and `Q_i` eligible tasks. With three allowed attempts, this protocol initializes
+`3A + sum_i min(c_i, Q_i)` physical task and slot refs. On one shared mailbox, `A = Q` for `Q` eligible logical tasks.
+Different URLs for the same physical endpoint address the same refs and reuse exact prepared object IDs. This count
+excludes preflight probes, native release refs and Git objects; it does not establish a universal lower bound on
+scheduling time, memory or transport. Makespan depends on capacity, dependencies, task durations and transport costs.
+
+## 2026-10-26: Scoped node-player execution game
+
+Section 13.11 now casts the ideal fixed-DAG earliest-start theorem as a game with the orchestrator and each worker
+as separate players sharing task-makespan payoff. Under one online placement policy that sustains every immediate
+start, zero coordination costs and hidden independently variable durations, all immediate starts attain the span
+lower bound and form a pure Nash equilibrium by direct pathwise inequalities. Treating durations as an optional
+adversarial environment gives a zero-regret saddle. The proof does not invoke a finite-game existence theorem.
+Universal exactness determines observable online start times, not a unique program or equilibrium: the section
+gives an inefficient weak equilibrium with two pinned workers. Binding capacity, transport, release effects and
+recovery remain outside this ideal game and keep their separate bounds.

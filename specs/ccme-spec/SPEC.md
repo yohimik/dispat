@@ -3609,6 +3609,44 @@ algorithm, worker assignment, durable protocol or makespan-optimal schedule on o
 It also does not force immediate dispatch of a task whose zero duration is known in advance, or apply when
 durations have known bounds that permit harmless delay.
 
+**A node-player execution game.** Fix one finite compiled DAG and a finite set of compatible execution nodes.
+The orchestrator is one player: it chooses when and where to offer ready tasks. Each worker is a separate player:
+it chooses when to start an assigned task after the assignment and its predecessor outcomes arrive. These are
+nonanticipating policies; a worker does not replan the graph. An environment fixes arbitrary finite nonnegative
+task durations before play. Each duration coordinate may be chosen separately, without a probability law, and is
+learned only when that task completes.
+Admissible policies make legal decisions and eventually start every task for every finite duration vector.
+Assume there exists one nonanticipating compatible-placement policy that, on every duration history, can assign
+all newly ready tasks immediately while retaining slots for running tasks. There is no dispatch, communication,
+transfer or additional publication or record overhead, and no crashes, retries or other binding resources.
+Publication and record tasks represented in the DAG retain their chosen durations. Each play has finitely many
+tasks, with no configured bound on their number.
+
+For fixed durations `d`, give every execution player the same payoff `-(T(P,d) - Lk(d))`, where `P` is the joint
+policy and `T` its task makespan. The recurrence above proves `T(P,d) >= Lk(d)` for every feasible profile.
+The profile in which the orchestrator offers each newly ready task immediately under the stated placement policy
+and each assigned worker starts immediately attains `T = Lk(d)`. It is therefore a pure Nash equilibrium for
+each fixed `d`: no unilateral deviation can raise any player's payoff above zero. It is also a global team
+optimum under these premises because even a joint deviation cannot finish before `Lk(d)`. This is a direct
+equilibrium proof for infinite policy spaces, not an application of
+[Nash's finite-game existence theorem](https://doi.org/10.1073/pnas.36.1.48).
+
+An optional robust outer game makes the environment an adversary with payoff
+`r(P,d) = T(P,d) - Lk(d) >= 0` and gives each execution player payoff `-r`. For any duration vector `d*`,
+`r(ASAP,d) = 0 = r(ASAP,d*) <= r(P,d*)` for all `P,d`. Thus `(ASAP,d*)` is directly a pure equilibrium of
+the adversarial team game; the collapsed team-versus-environment zero-sum game has a saddle with minimax and
+maximin value zero. The regret form also covers an empty or all-zero plan. When `Lk(d) > 0`, `T/Lk` gives the
+same argument with value one. Nature is an optional outer adversary, not a substitute for the worker players.
+
+Equilibria need not be unique or efficient. For a fixed duration vector, take two independent unit tasks,
+each eligible only on its own worker. Let the orchestrator offer both at time zero and let both workers wait one
+unit before starting. The makespan is two although `Lk = 1`. If either worker alone starts immediately, the
+other task still finishes at time two; the orchestrator cannot reassign, duplicate or execute either pinned task.
+This is an inefficient weak Nash equilibrium under the common payoff. The preceding universal-exactness proof instead
+identifies the joint online start-time behavior required across every hidden unbounded duration vector. It does
+not identify unique code, individual strategies, worker mappings or an equilibrium profile. Binding capacity,
+transport, failure and recovery costs of an actual CCME run lie outside this ideal game.
+
 Even under unlimited capacity, asymptotic optimality does not force this exact start policy. An online policy
 can compute `E_i` when the last predecessor finishes and start task `i` at `2E_i`. Inductively its
 predecessors finish by `2E_i`, so those starts are feasible without knowing `d_i` in advance. It finishes
@@ -8093,18 +8131,32 @@ package release record.
 
 ### 28.4 Git synchronization branches
 
-The orchestrator MUST provision isolated task worktrees and temporary coordination branches named
-`dispat-worker-<id>-<workinfo>`, created atomically under `refs/heads/`. `<id>` is the node name of the execution link
-the branch is addressed to. `<workinfo>` is `<date>-<kind>-<random>`: the date SHOULD use UTC `YYYYMMDD`, `<kind>` is a
-short lowercase label of the work (for example `probe`, `build`, `publish`, `prepare`, `run` for a sweep task of §28.10,
-`snapshot` or `relay`), and the random suffix MUST provide at least 128 bits of cryptographic randomness. The date and
-the kind are diagnostic labels only. The name is an untrusted routing hint that lets a node list only the branches
-addressed to it; the authenticated manifest, not the branch name, identifies node, run, task and attempt, and a node
-MUST reject a manifest whose node or branch binding disagrees with where it was found. A branch is bound to one run,
-repository and task attempt; parallel attempts MUST NOT share a mutable branch.
+Protocol version 2 separates an inert task attempt from its later placement. After preflight and task-graph
+compilation, the orchestrator MUST create signed reservations for every permitted attempt of each worker-eligible
+logical task, before any package frame starts. A task ref is
+`refs/heads/dispat-task-<run>-<task-digest>-<attempt>`; the digest is the first 128 bits of SHA-256 of the task name,
+and the ref does not name a worker. For each worker, the orchestrator
+MUST also initialize a fixed set of signed slot-notice refs. Its slot count is
+`min(reported worker capacity, logical tasks eligible on that worker)`. A slot ref is
+`refs/heads/dispat-slot-<node-digest>-<run>-<slot>`, where the node digest is the first 128 bits of SHA-256 of its
+configured name. Names route and index work but grant no authority: signed
+messages bind the run, plan, task, attempt, node when assigned, branch and exact object identities. A worker polls
+only its own slot prefix and preflight probes, then fetches the task ref named by a verified notice. It MUST reject
+an unsupported protocol version before accepting work. Local version, sign and publication work, preflight probes,
+release tags and locks require no task reservation. The task and slot refs are execution state, not a serialized plan
+file or an input to a new worker-side planning pass.
 
-Workers synchronize declared source changes and result manifests through these
-branches. Each acknowledged checkpoint MUST identify an exact full object ID;
+The orchestrator MUST settle the complete initialization on every configured endpoint before the first package
+frame. It MAY use bounded atomic batches per endpoint, but if a later batch is refused or remains unresolved, it
+MUST settle or clean the refs it created and refuse the run without starting a package frame. Endpoint aliases for
+the same prepared reservation MUST receive the same exact object ID. At readiness, the orchestrator chooses a
+compatible node and atomically compares and swaps one reservation to a signed assignment together with one of
+that node's reusable slot notices. The assignment's first parent is the reservation. Exact source and predecessor
+result carrier objects are its secondary parents; the worker verifies the signed input identities and the required
+direct-parent membership before materializing them. The active protocol creates no separate runtime snapshot or
+relay refs. Neither a reservation nor an empty slot authorizes execution.
+
+Each acknowledged checkpoint MUST identify an exact full object ID;
 consumers fetch that object and validate its manifest rather than following a
 moving branch tip. A consumer MAY obtain the object by fetching a ref that advertises it and then resolving
 the exact object ID locally; it MUST then read only from that object ID and never from a ref whose tip can
@@ -8126,7 +8178,8 @@ purpose the snapshot has. A snapshot that descends from the planned head carries
 mailbox, every object reachable from that head, which for a large history is the dominant cost of the run and is paid
 again whenever cleanup removed the objects with the refs. A mailbox that already holds the repository's objects, the
 repository's own remote for one, a durable ref the mailbox keeps, or a history-free snapshot each avoid it. An
-implementation states which it does.
+implementation states which it does. Source and result carrier commits reachable through assignment parents do not
+become release records or additional mutable coordination refs.
 
 Transport commits MUST NOT be treated as release intent, a pending-window
 boundary, a successful release, or a §27 native-head admission. They MUST NOT
@@ -8421,9 +8474,12 @@ parser leniency.
 | Transport cleanup | `transport-cleanup` | Report owned temporary refs or bundles that could not be removed. Their existence cannot erase a release record. Harmless retained transport data MAY be a warning; lost exclusion or unresolved effects MUST be an error. |
 
 The task/run summary MUST distinguish completed computation, admitted outputs, successful publication, durable
-native recording, blocked dependents and unknown external outcomes. A completed task is not synonymous with a
-released package. A prepared provider (vector 9) has the shape completed computation, admitted outputs, no
-publication and no record; the summary states it so, and neither omits the provider nor lists it as released.
+native recording and blocked dependents. A completed task is not synonymous with a released package. An external
+publication whose outcome remains unresolved MUST NOT be counted as successful merely because a worker task
+completed; its retry still requires §19.4 reconciliation. The orchestrator-only publication path reports a local
+publish-command error as a failed package. It has no worker-publication `unknown` summary list or count, and that
+error does not prove the destination lacks the artifact. A prepared provider (vector 9) has completed computation,
+admitted outputs, no publication and no record; the summary states it so and does not list the provider as released.
 Diagnostic output order follows the semantic order of §17.2, independently of arrival order.
 
 ### 28.10 Command sweeps
@@ -8441,7 +8497,8 @@ execution links as it refuses a release with them.
 A sweep task carries the package's commands for the swept script alone, with the sweep's computed environment and the
 unresolved static environment of §28.3, and runs them in the snapshot of the package's input closure; the hooks that
 bracket a release stage do not bracket it. It consumes no output of another task, because a sweep installs nothing,
-and it returns its exports as a build returns its manifest. Its coordination branch carries the kind `run` (§28.4).
+and it returns its exports as a build returns its manifest. Its signed assignment carries kind `run` on a
+preinitialized task-attempt branch (§28.4).
 
 A sweep MAY declare, per script and in the entry configuration only, repository-relative roots its tasks write. They
 are captured on the node after the task succeeds under the manifest and validation of §28.5 and installed on the

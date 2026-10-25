@@ -56,9 +56,7 @@ func TestTheSummaryFollowsThePlanAndNotTheClock(t *testing.T) {
 
 // TestTheSummaryTellsTheFiveOutcomesApart: one run holding a published
 // package, a build that failed, a blocked dependent, a prepared provider and a
-// publication nobody can account for. Every column is read back from the
-// printed lines, because the point of the summary is that none of them can be
-// derived from another.
+// failed orchestrator publication. Every column is read back from the lines.
 func TestTheSummaryTellsTheFiveOutcomesApart(t *testing.T) {
 	var out bytes.Buffer
 	log := zerolog.New(&out)
@@ -77,16 +75,14 @@ func TestTheSummaryTellsTheFiveOutcomesApart(t *testing.T) {
 			{Package: "ui", Stage: StageBuild, Task: "ui:build", Node: "build-b",
 				Attempt: 2, Computation: ComputationFailed, Outputs: OutputsNone,
 				Publication: PublicationNone, Recording: RecordingNone},
-			{Package: "app", Stage: StagePublish, Task: "app:publish", Node: "build-b",
-				Attempt: 1, Computation: ComputationUnknown, Outputs: OutputsAdmitted,
-				Publication: PublicationUnknown, Recording: RecordingNone},
+			{Package: "app", Stage: StagePublish, Task: "app:publish", Node: "here",
+				Attempt: 1, Computation: ComputationFailed, Outputs: OutputsAdmitted,
+				Publication: PublicationFailed, Recording: RecordingNone},
 		},
 		Prepared: []PreparedRecord{{Package: "tooling", Task: "tooling:prepare", Node: "here",
 			Computation: PreparationCompleted, Outputs: PreparationAdmitted,
 			Publication: PreparationNone}},
-		Blocked: []BlockedTask{{Package: "docs", Reason: "ui"}},
-		Unknown: []unknownPublication{{Task: "app:publish", Attempt: 1, Node: "build-b",
-			Repository: "web"}},
+		Blocked:     []BlockedTask{{Package: "docs", Reason: "ui"}},
 		Wall:        time.Minute,
 		Invocations: 412,
 	}
@@ -101,8 +97,8 @@ func TestTheSummaryTellsTheFiveOutcomesApart(t *testing.T) {
 	assert.Equal(t, float64(4096), lines[0]["bytes"])
 	assert.Equal(t, "recorded", lines[1]["recording"])
 	assert.Equal(t, float64(2), lines[2]["attempt"], "the attempt that failed names itself")
-	assert.Equal(t, "unknown", lines[3]["publication"])
-	assert.Equal(t, "unknown", lines[3]["computation"])
+	assert.Equal(t, "failed", lines[3]["publication"])
+	assert.Equal(t, "failed", lines[3]["computation"])
 	assert.Equal(t, true, lines[4]["here"], "a frame the run placed on itself says so")
 	assert.Equal(t, "ui", lines[5]["blockedBy"])
 
@@ -112,15 +108,14 @@ func TestTheSummaryTellsTheFiveOutcomesApart(t *testing.T) {
 	assert.Equal(t, float64(1), totals["published"])
 	assert.Equal(t, float64(1), totals["recorded"])
 	assert.Equal(t, float64(1), totals["blocked"])
-	assert.Equal(t, float64(1), totals["unknown"],
-		"a publication nobody can account for is counted as neither published nor failed")
+	assert.NotContains(t, totals, "unknown", "workers no longer publish")
 
 	metrics := lines[len(lines)-1]
 	assert.Equal(t, "execution metrics", metrics["message"])
 	assert.Equal(t, float64(412), metrics["gitInvocations"])
 	assert.Equal(t, float64(3), metrics["files"])
-	assert.Equal(t, float64(4), metrics["delegated"])
-	assert.Equal(t, float64(1), metrics["local"])
+	assert.Equal(t, float64(3), metrics["delegated"])
+	assert.Equal(t, float64(2), metrics["local"])
 	assert.NotContains(t, metrics, "speedup", "no measurement here is a claim about one")
 }
 

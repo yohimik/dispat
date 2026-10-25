@@ -36,13 +36,19 @@ import (
 // The order is fetch, verify, install, per input, and the whole of it happens
 // before the frame: §28.5 puts the atomicity at the task-input boundary, so a
 // command may only start once every root of every input is in place.
-func (w *Worker) installTaskInputs(ctx context.Context, assignment Assignment, checkout *Checkout,
+func (w *Worker) installTaskInputs(ctx context.Context, assignmentOID string,
+	assignment Assignment, checkout *Checkout,
 	dir string, log zerolog.Logger) ([]ManifestInput, OutputReason, error) {
 	if len(assignment.Inputs) == 0 {
 		return nil, "", nil
 	}
-	if err := w.Mailbox.Fetch(ctx, formatInputBranches(assignment.Inputs)); err != nil {
-		return nil, ReasonBytesMissing, err
+	carrier, ok := w.Mailbox.(slotMailboxx)
+	if !ok {
+		return nil, ReasonBytesMissing, fmt.Errorf("execution: this mailbox cannot verify carried results")
+	}
+	view, err := carrier.OpenCarriedAssignment(ctx, assignmentOID, assignment.Limits.MaxManifestBytes)
+	if err != nil {
+		return nil, ReasonOutputIdentity, fmt.Errorf("execution: verifying carried results: %w", err)
 	}
 	installed := make([]ManifestInput, 0, len(assignment.Inputs))
 	type inputGroup struct {
@@ -52,7 +58,7 @@ func (w *Worker) installTaskInputs(ctx context.Context, assignment Assignment, c
 	groups := make(map[string]*inputGroup)
 	var ordered []*inputGroup
 	for _, input := range assignment.Inputs {
-		manifest, validated, reason, err := w.readInputManifest(ctx, assignment, input)
+		manifest, validated, reason, err := w.readInputManifest(ctx, view, assignment, input)
 		if err != nil {
 			return nil, reason, err
 		}
@@ -80,48 +86,22 @@ func (w *Worker) installTaskInputs(ctx context.Context, assignment Assignment, c
 	return installed, "", nil
 }
 
-// formatInputBranches is the branches one task's inputs are fetchable from,
-// each named once, so that two inputs of one provider cost one fetch.
-func formatInputBranches(inputs []AssignmentInput) []string {
-	branches := make([]string, 0, len(inputs))
-	named := make(map[string]bool, len(inputs))
-	for _, input := range inputs {
-		if input.Branch == "" || named[input.Branch] {
-			continue
-		}
-		named[input.Branch] = true
-		branches = append(branches, input.Branch)
-	}
-	return branches
-}
-
 // readInputManifest reads the provider's result at the exact object the
 // assignment named and answers the output manifest it carries, with what
 // validating it proved.
 //
-// Three things are proven before anything is believed. The object is on the
-// branch that was fetched, so a tip somebody moved cannot change what this
-// task consumes; the result is signed with this run's secret; and the manifest
-// is the one the orchestrator admitted, which is what the digest in the
-// assignment is for. The roots the entries are held to are the manifest's own,
-// and that is sound precisely because the digest covers them: the orchestrator
-// compared them with the plan before it named this manifest.
-func (w *Worker) readInputManifest(ctx context.Context, assignment Assignment,
+// The verified assignment carries the exact result as a direct parent, so a
+// moving branch tip cannot change what this task consumes. The result is
+// signed with this run's secret. Its manifest digest is the one the
+// orchestrator admitted after comparing the roots with the plan.
+func (w *Worker) readInputManifest(ctx context.Context, view *VerifiedCarriers, assignment Assignment,
 	input AssignmentInput) (*OutputManifest, ValidatedOutputs, OutputReason, error) {
 	if input.Digest == "" {
 		return nil, ValidatedOutputs{}, ReasonOutputDigest, fmt.Errorf(
 			"execution: the assignment names the outputs of %s without a manifest digest", input.Package)
 	}
-	tip, err := w.Mailbox.Inspect(ctx, gitx.RemoteHead{Name: input.Branch, OID: input.Commit})
-	if err != nil {
-		return nil, ValidatedOutputs{}, ReasonBytesMissing, fmt.Errorf(
-			"execution: reading the outputs of %s: %w", input.Package, err)
-	}
-	if tip.Kind != MessageResult {
-		return nil, ValidatedOutputs{}, ReasonBytesMissing, fmt.Errorf(
-			"execution: the object named as the outputs of %s carries no result", input.Package)
-	}
-	document, err := w.Mailbox.Read(ctx, tip, assignment.Limits.MaxManifestBytes)
+	document, err := view.ReadResult(ctx, input.Commit,
+		assignment.Limits.MaxManifestBytes)
 	if err != nil {
 		return nil, ValidatedOutputs{}, ReasonOutputIdentity, fmt.Errorf(
 			"execution: reading the outputs of %s: %w", input.Package, err)

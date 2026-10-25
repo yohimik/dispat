@@ -554,8 +554,8 @@ func pinPreparedPackage(name string, placement *models.RunOnly) func(*harness.Re
 // TestExecutionPreparedProviderObeysItsOwnPlacement: a preparation is that
 // package's build frame, so it is placed by that package's own `runOnly`. A
 // provider pinned to the machine the release was started on is built there
-// although this run releases nothing of it, and its outputs still reach the
-// consumer on a node over a relay branch.
+// although this run releases nothing of it, and its result object directly
+// parents the consumer assignment on a worker.
 func TestExecutionPreparedProviderObeysItsOwnPlacement(t *testing.T) {
 	rig := newExecutionPrepareWorkspace(t, func(_ *harness.Repo, cfg *models.File) {
 		// Which branch the consumers were handed is a debug decision rather
@@ -565,6 +565,7 @@ func TestExecutionPreparedProviderObeysItsOwnPlacement(t *testing.T) {
 	}, pinPreparedPackage("assets", placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator)))
 	rig.commitTo("the page and the manual use the new asset", "docs", "ui")
 	workers := rig.startWorkersHolding([]string{executionNode, executionSecondNode}, 2)
+	carriers := newExecutionCarrierWatch(t, rig.mailbox)
 
 	res := rig.release()
 
@@ -582,8 +583,9 @@ func TestExecutionPreparedProviderObeysItsOwnPlacement(t *testing.T) {
 	require.NotEmpty(t, bundle)
 	assert.Contains(t, bundle, executionOrchestratorLabel, "the bytes say where they were built")
 	assert.Equal(t, bundle, produced["ui"], "and the node read exactly them")
-	assert.Contains(t, executionRelayedPackages(res), "assets",
-		"which reached it over a relay branch\nstdout:\n%s", res.Stdout)
+	carried := carriers.seen()
+	assert.Contains(t, carried["ui:build"], "assets:prepare",
+		"the prepared provider result directly parents the consumer assignment")
 	assert.False(t, rig.repo.IsTagged("assets@1.1.0"), "the provider still released nothing")
 	stopAll(t, workers)
 }

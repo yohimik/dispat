@@ -57,6 +57,10 @@ func (m *fakeMailbox) Observe(context.Context, string, func(string) bool) ([]git
 	return heads, nil
 }
 
+func (m *fakeMailbox) ObserveManyExact(ctx context.Context, _ []string) ([]gitx.RemoteHead, error) {
+	return m.Observe(ctx, "", nil)
+}
+
 func (m *fakeMailbox) Inspect(_ context.Context, head gitx.RemoteHead) (ChainTip, error) {
 	if err, isBroken := m.unreadable["inspect:"+head.Name]; isBroken {
 		return ChainTip{}, err
@@ -310,6 +314,57 @@ func TestWorkerAdoptsAClaimWhosePushHadNoAnswer(t *testing.T) {
 		assert.Empty(t, worker.pending)
 		assert.Empty(t, worker.slots)
 	})
+}
+
+type pendingPollMailbox struct {
+	*fakeMailbox
+	head       gitx.RemoteHead
+	exactPolls int
+}
+
+func (m *pendingPollMailbox) Observe(context.Context, string, func(string) bool) ([]gitx.RemoteHead, error) {
+	return nil, nil // the v2 slot notice has not moved
+}
+
+func (m *pendingPollMailbox) ObserveManyExact(_ context.Context, branches []string) ([]gitx.RemoteHead, error) {
+	m.exactPolls++
+	if len(branches) != 1 || branches[0] != m.head.Name {
+		return nil, fmt.Errorf("unexpected active branch poll: %v", branches)
+	}
+	head := m.head
+	m.head = gitx.RemoteHead{}
+	if head.Name == "" {
+		return nil, nil
+	}
+	return []gitx.RemoteHead{head}, nil
+}
+
+// A claim whose push outcome is unknown must remain observable even when the
+// slot notice never changes again. Its later Cancel is acknowledged without
+// running commands or waiting for a new slot update.
+func TestWorkerPollsPendingClaimAfterUnchangedSlotNotice(t *testing.T) {
+	branch := "dispat-worker-build-a-20260921-build-abc"
+	assignmentTip := ChainTip{Branch: branch, OID: "assignment-oid", Kind: MessageAssignment}
+	assignment := validProbe(branch)
+	assignment.Kind, assignment.Task = KindBuild, "core:build"
+	worker, base := newWorkerFixture(t, branch, assignmentTip, assignment)
+	mailbox := &pendingPollMailbox{fakeMailbox: base,
+		head: gitx.RemoteHead{Name: branch, OID: "cancel-oid"}}
+	worker.Mailbox = mailbox
+	worker.slots = make(chan struct{}, 1)
+	worker.pending = map[string]*pendingClaim{branch: {
+		tip: assignmentTip, assignment: assignment, claims: []string{"claim-oid"},
+	}}
+	base.tips[branch] = ChainTip{Branch: branch, OID: "cancel-oid", Kind: MessageCancel,
+		Previous: MessageClaim, PreviousOID: "claim-oid"}
+	base.documents[branch] = mustMarshal(t, Withdrawal{
+		Header: assignment.Header, Assignment: "assignment-oid", Tip: "claim-oid",
+	})
+
+	assert.True(t, worker.tick(t.Context()))
+	assert.Equal(t, 1, mailbox.exactPolls)
+	assert.Equal(t, []MessageKind{MessageAck}, base.written)
+	assert.Empty(t, worker.pending)
 }
 
 // TestWorkerReportsAResultTheMailboxRefused: a result a server rule refused is

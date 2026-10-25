@@ -162,4 +162,18 @@ requireTrue["chain-window formulas match measured AuthorScans/op",
     newVisits[p] == measuredAfter[p], {p, Keys[measuredBefore]}]];
 Print["Chain-window AuthorScans/op: ",
   Table[{p, measuredBefore[p], measuredAfter[p]}, {p, Keys[measuredBefore]}]];
+
+(* Finite illustration of the node-player game, not an equilibrium theorem.
+   Each independent unit task is eligible only on its own node. The
+   orchestrator has already dispatched both at time zero and cannot reroute
+   or duplicate them, so the two node start delays are the only actions. *)
+requireTrue["bounded node game: ASAP and an inefficient weak equilibrium",
+  Module[{actions = Tuples[Range[0, 2], 2], payoff, isNash},
+    payoff[choice_] := -Max[choice + {1, 1}];
+    isNash[choice_] := And @@ Flatten[Table[
+      payoff[choice] >= payoff[ReplacePart[choice, node -> delay]],
+      {node, 1, 2}, {delay, 0, 2}]];
+    isNash[{0, 0}] && payoff[{0, 0}] == Max[payoff /@ actions] &&
+      isNash[{1, 1}] && payoff[{1, 1}] < payoff[{0, 0}]
+  ]];
 Print["All optional CCME mathematical checks passed."];

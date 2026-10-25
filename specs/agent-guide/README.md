@@ -711,9 +711,12 @@ restricted Git coordination access. Build commands may need separate credentials
 and stages after the records run on the orchestrator. This layout does not guarantee a faster run. See
 [stage placement](../../packages/docs/docs/distributed-execution.md#where-a-stage-runs).
 
-Workers verify signed assignments against the fixed plan digest and exact source snapshot object IDs, then run the
-assigned commands. They do not compute or revise the release plan. The number or timing of coordination branches is
-an execution detail; it is not a plan file or a second planning process.
+After preflight and graph compilation, the orchestrator creates signed, inert task-attempt reservations and a fixed
+set of notice slots for each worker before any package frame. It chooses a compatible worker only when a task is
+ready, then atomically activates the reservation and that worker's notice. Workers poll their own slots, verify the
+signed assignment against the fixed plan digest and exact source and predecessor result object IDs, then run the
+assigned commands. They do not compute or revise the release plan. The coordination refs are execution state, not a
+plan file or a second planning process.
 
 For a custom mailbox, a supported self-hosted Git server in the same data center as the orchestrator and
 workers can reduce transport latency. Set the worker link and worker `endpoint` to that server and measure actual
@@ -738,7 +741,12 @@ Before deleting a coordination ref, verify that its current tip still belongs to
 
 `dispat run` uses the same pool when the invocation has links: each package's task runs where its `runOnly` places a build, and the folders the entry configuration's `runOutputs` names for the script are carried back and merged into the orchestrator's checkout. A sweep takes no release lock and records nothing, so it neither waits for a release nor stops one; a sweep with no link runs every task locally, as it always has.
 
-Leftover `dispat-worker-*` branches on the repository, or on a mailbox a link names, are coordination state, not release records. A completed run deletes its own. They carry full source and command text, so report other leftovers for cleanup after checking that their current tips still belong to the run's authenticated chain and no process uses them. Investigate a changed or unauthenticated tip instead of deleting it as residue. Never write a `dispat-worker-*` branch yourself, and never run a release from a node whose `execution.role` is `worker`: a node refuses a message nobody signed, and a worker refuses the release with `E226`.
+Leftover `dispat-task-*`, `dispat-slot-*` or preflight `dispat-worker-*` branches on the repository, or on a mailbox a
+link names, are coordination state, not release records. A completed run deletes its own. They can carry full source
+and command text, so report other leftovers for cleanup after checking that their current tips still belong to the
+run's authenticated chain and no process uses them. Investigate a changed or unauthenticated tip instead of deleting
+it as residue. Never write a coordination branch yourself, and never run a release from a node whose
+`execution.role` is `worker`: a node refuses a message nobody signed, and a worker refuses the release with `E226`.
 
 A worker state folder has one serving process, and its `worker.lock` holds that process's id. A crashed worker's
 successor takes the folder over from the id of a process that is gone, or from its own id left by an earlier process

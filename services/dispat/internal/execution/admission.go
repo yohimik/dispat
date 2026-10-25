@@ -35,26 +35,14 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
-// admittedOutputs is one package's admitted output set as every consumer of it
-// has to be told about it: which node produced it, where that node's answer
-// can be fetched from, the exact object it is read at, and what names the
-// manifest that was admitted.
-//
-// The endpoint is carried rather than looked up again because it is what
-// decides whether a consumer can reach the bytes at all: two nodes sharing one
-// mailbox need no copy, and two nodes with mailboxes of their own need the
-// object relayed onto the consumer's.
+// admittedOutputs retains one verified result commit and its manifest identity.
+// A later assignment imports that commit into its own signed carrier.
 type admittedOutputs struct {
 	node     string
-	endpoint string
-	branch   string
 	commit   string
 	manifest admittedManifest
-	// store is the object store the bytes are in, which is what a relay is
-	// pushed out of. It is the run's own repository for a result that came
-	// back through a mailbox, and the repository that owns the package for a
-	// build this machine ran itself, and those are two stores in a composed
-	// workspace.
+	// Worker results live in the run store; local results can live in the
+	// package repository of a composed workspace until imported.
 	store *gitx.LocalGitx
 }
 
@@ -80,8 +68,7 @@ func newAdmittedManifest(manifest *OutputManifest) admittedManifest {
 	}
 }
 
-// outputRegistry is the run's record of what has been admitted and of what has
-// already been relayed where.
+// outputRegistry is the run's record of admitted package and stage output sets.
 //
 // One owner: the coordinator. Builds run concurrently, so the map is written
 // by whichever dispatch finished and read by whichever dispatch is starting,
@@ -90,13 +77,12 @@ type outputRegistry struct {
 	mu       sync.Mutex
 	admitted map[string]*admittedOutputs
 	stages   map[string]*admittedOutputs
-	relayed  map[string]string
 }
 
 // newOutputRegistry opens an empty record.
 func newOutputRegistry() *outputRegistry {
 	return &outputRegistry{admitted: map[string]*admittedOutputs{},
-		stages: map[string]*admittedOutputs{}, relayed: map[string]string{}}
+		stages: map[string]*admittedOutputs{}}
 }
 
 // remember records one package's admitted set, replacing nothing: a package is
@@ -130,22 +116,6 @@ func (r *outputRegistry) find(packageName string) *admittedOutputs {
 	return r.admitted[packageName]
 }
 
-// reuseRelay answers the branch one object was already copied onto an endpoint
-// under, so that three consumers on one mailbox cost one relay push.
-func (r *outputRegistry) reuseRelay(endpoint, commit string) (string, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	branch, isRelayed := r.relayed[endpoint+"\x00"+commit]
-	return branch, isRelayed
-}
-
-// rememberRelay records one copy.
-func (r *outputRegistry) rememberRelay(endpoint, commit, branch string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.relayed[endpoint+"\x00"+commit] = branch
-}
-
 // producedOutputs is one output set on its way into the run's record: where
 // its bytes are, how a consumer would be pointed at them, and whether this
 // checkout still has to receive them.
@@ -159,8 +129,6 @@ func (r *outputRegistry) rememberRelay(endpoint, commit, branch string) {
 type producedOutputs struct {
 	node     string
 	store    *gitx.LocalGitx
-	endpoint string
-	branch   string
 	commit   string
 	manifest *OutputManifest
 	// attempt is the attempt of the task that produced the set, which the
@@ -205,7 +173,7 @@ func (c *Coordinator) admitOutputs(ctx context.Context, task string, produced pr
 		}
 	}
 	accepted := &admittedOutputs{
-		node: produced.node, endpoint: produced.endpoint, branch: produced.branch,
+		node:   produced.node,
 		commit: produced.commit, manifest: newAdmittedManifest(produced.manifest), store: produced.store,
 	}
 	stage := request.Stage
@@ -307,46 +275,22 @@ func (c *Coordinator) resolveTaskInputs(ctx context.Context, node, packageName s
 				Str("package", provider.Package).Msg("the provider admitted no outputs")
 			continue
 		}
-		branch, err := c.reachOutputs(ctx, node, admitted)
-		if err != nil {
+		if err := c.carryAdmittedOutput(ctx, admitted); err != nil {
 			return nil, err
 		}
 		inputs = append(inputs, AssignmentInput{
-			Task: admitted.manifest.task, Package: provider.Package, Branch: branch,
+			Task: admitted.manifest.task, Package: provider.Package,
 			Commit: admitted.commit, Digest: admitted.manifest.digest, Path: provider.Path,
 		})
 	}
 	return inputs, nil
 }
 
-// reachOutputs answers the branch of one node's own endpoint that an admitted
-// set is fetchable from, copying the object there when it is somewhere else.
-//
-// A node talks to one mailbox and to nothing else, so a consumer whose
-// endpoint is not the producer's cannot be told about the producer's branch.
-// The copy is create-only and immutable, out of the store the objects are
-// already in after admission, and it is made once per endpoint however many
-// consumers of that provider are placed there.
-func (c *Coordinator) reachOutputs(ctx context.Context, node string, admitted *admittedOutputs) (string, error) {
-	endpoint := c.endpointOf(node)
-	if endpoint == admitted.endpoint {
-		return admitted.branch, nil
+// carryAdmittedOutput makes one verified result reachable from the Assignment
+// commit. Its direct secondary-parent proof replaces a runtime relay branch.
+func (c *Coordinator) carryAdmittedOutput(ctx context.Context, admitted *admittedOutputs) error {
+	if admitted.store == nil {
+		return fmt.Errorf("execution: admitted output %s has no object store", admitted.manifest.task)
 	}
-	if branch, isRelayed := c.outputs.reuseRelay(endpoint, admitted.commit); isRelayed {
-		return branch, nil
-	}
-	branch := FormatBranch(node, KindRelay, time.Now())
-	// Owned before it is pushed, so a push with no known outcome still leaves
-	// a ref this run closes.
-	c.recordOwnedRef(ctx, ownedRefStep{node: node, branch: branch, oid: admitted.commit})
-	pushErr := admitted.store.PushCreate(ctx, endpoint, admitted.commit, branch)
-	if err := c.settleCreate(ctx, node, branch, admitted.commit, pushErr); err != nil {
-		return "", fmt.Errorf("execution: relaying the outputs of %s to %s: %w",
-			admitted.manifest.packageName, node, err)
-	}
-	c.outputs.rememberRelay(endpoint, admitted.commit, branch)
-	c.Log.Debug().Str("run", c.Run).Str("worker", node).Str("branch", branch).
-		Str("commit", admitted.commit).Str("package", admitted.manifest.packageName).
-		Msg("relay pushed")
-	return branch, nil
+	return c.dispatch.Store.ImportCommitFrom(ctx, admitted.store.Dir, admitted.commit)
 }

@@ -138,6 +138,14 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if fleet != nil {
 		fleet.gh = gh
 	}
+	if coordinator != nil {
+		stages := release.CompiledReservationStages(pl)
+		if err := coordinator.InitializeStageTasks(ctx, stages); err != nil {
+			err = taskInitializationFailure(err)
+			a.logError(err).Msg("execution task branches could not be initialized")
+			return nil, err
+		}
+	}
 
 	// The run-level hooks share one environment: the workspace listing before
 	// the run, widened to the run outcome once the task graph finishes.
@@ -325,9 +333,6 @@ func (a *App) acquireReleaseLocks(ctx context.Context) (*workspaceRecorder, func
 	// how the lock is given back.
 	a.releaseLock = lock
 	return nil, func() error {
-		if a.isLockRetained("") {
-			return a.reportRetainedLock("", lockRemote)
-		}
 		return config.WithDiagnostic("E336", lock.Release(context.WithoutCancel(ctx)))
 	}, nil
 }

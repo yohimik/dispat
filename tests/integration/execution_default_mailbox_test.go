@@ -255,7 +255,9 @@ func executionCoordinationBranches(t *testing.T, remote string) []string {
 	t.Helper()
 	var branches []string
 	for _, branch := range executionMailboxBranches(t, remote) {
-		if strings.HasPrefix(branch, "refs/heads/dispat-worker-") {
+		if strings.HasPrefix(branch, "refs/heads/dispat-worker-") ||
+			strings.HasPrefix(branch, "refs/heads/dispat-task-") ||
+			strings.HasPrefix(branch, "refs/heads/dispat-slot-") {
 			branches = append(branches, branch)
 		}
 	}

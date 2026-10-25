@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
-	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
@@ -241,29 +240,6 @@ func TestPreflightResultRequiresAClaim(t *testing.T) {
 				"a probe result can only follow its worker claim")
 		})
 	}
-}
-
-// TestClosePreservesUnknownPublicationEvidence: a run whose publisher never
-// reported back leaves that attempt's branch for reconciliation, while its
-// unrelated temporary branch is cleaned normally.
-func TestClosePreservesUnknownPublicationEvidence(t *testing.T) {
-	mailbox := newMailboxFixture(t)
-	coordinator := &Coordinator{Run: "run-1", Log: zerolog.Nop(),
-		mailboxes: map[string]*GitMailbox{"build-a": mailbox.mailbox},
-		owned:     map[string][]gitx.BranchLease{}}
-	unknownBranch := FormatBranch("build-a", KindPublish, time.Now())
-	cleanBranch := FormatBranch("build-a", KindProbe, time.Now())
-	for _, branch := range []string{unknownBranch, cleanBranch} {
-		oid, err := assign(t.Context(), mailbox.mailbox, probeAssignment("build-a", branch))
-		require.NoError(t, err)
-		coordinator.recordOwnedRef(t.Context(), ownedRefStep{node: "build-a", branch: branch, oid: oid})
-	}
-	coordinator.rememberUnknownPublication(unknownPublication{
-		Task: "pkg:publish", Attempt: 1, Node: "build-a", Branch: unknownBranch})
-
-	require.NoError(t, coordinator.Close(t.Context()))
-	assert.Equal(t, []string{unknownBranch}, mailbox.remoteBranches(t),
-		"the authorization evidence stays reachable while unrelated refs are removed")
 }
 
 // TestPreflightRefusesBeforeAnythingIsDispatched: every way a node can fail

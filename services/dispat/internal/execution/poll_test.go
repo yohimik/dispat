@@ -39,6 +39,21 @@ func (t *unfetchableTransport) ListRemoteHeads(context.Context, string, string) 
 	return t.heads, nil
 }
 
+func (t *unfetchableTransport) ListRemoteHeadsExact(_ context.Context, _ string,
+	branches []string) ([]gitx.RemoteHead, error) {
+	wanted := make(map[string]bool, len(branches))
+	for _, branch := range branches {
+		wanted[branch] = true
+	}
+	var heads []gitx.RemoteHead
+	for _, head := range t.heads {
+		if wanted[head.Name] {
+			heads = append(heads, head)
+		}
+	}
+	return heads, nil
+}
+
 func (t *unfetchableTransport) FetchRefs(_ context.Context, _ string, branches []string) error {
 	t.batches = append(t.batches, branches)
 	for _, branch := range branches {
@@ -52,7 +67,7 @@ func (t *unfetchableTransport) FetchRefs(_ context.Context, _ string, branches [
 // TestMailboxPollSurvivesOneUnfetchableBranch: the whole poll used to fail on
 // the batched fetch, so a namespace holding one bad ref never reported any of
 // the work beside it. The batch is retried per branch, the good ones are
-// answered, and the bad one is named once.
+// answered, and the bad one is named once and retried when bytes recover.
 func TestMailboxPollSurvivesOneUnfetchableBranch(t *testing.T) {
 	transport := &unfetchableTransport{
 		heads: []gitx.RemoteHead{
@@ -74,8 +89,10 @@ func TestMailboxPollSurvivesOneUnfetchableBranch(t *testing.T) {
 	require.Len(t, transport.batches, 4, "one batch, then one call per branch")
 	assert.True(t, mailbox.quarantined["dispat-worker-build-a-20260922-relay-bb"])
 
-	// A second poll of unmoved branches reports nothing and fetches nothing:
-	// the quarantined tip is remembered, so the node does not pay for it again.
+	// The same remote OID becomes fetchable without any ref update. Its first
+	// failed fetch did not establish a verified observation, so it must be
+	// delivered now while the two already seen refs remain memoized.
+	delete(transport.broken, "dispat-worker-build-a-20260922-relay-bb")
 	transport.heads = []gitx.RemoteHead{
 		{Name: "dispat-worker-build-a-20260922-build-aa", OID: "oid-a"},
 		{Name: "dispat-worker-build-a-20260922-relay-bb", OID: "oid-b"},
@@ -84,8 +101,31 @@ func TestMailboxPollSurvivesOneUnfetchableBranch(t *testing.T) {
 	transport.batches = nil
 	moved, err = mailbox.Observe(t.Context(), FormatBranchPattern("build-a"), nil)
 	require.NoError(t, err)
-	assert.Empty(t, moved)
-	assert.Empty(t, transport.batches)
+	require.Equal(t, []gitx.RemoteHead{{Name: "dispat-worker-build-a-20260922-relay-bb", OID: "oid-b"}}, moved)
+	require.Equal(t, [][]string{{"dispat-worker-build-a-20260922-relay-bb"}}, transport.batches)
+	assert.Empty(t, mailbox.quarantined)
+}
+
+func TestExactTaskPollRetriesTransientFetchAtUnchangedOID(t *testing.T) {
+	branch := "dispat-task-run-deadbeef-1"
+	head := gitx.RemoteHead{Name: branch, OID: "same-oid"}
+	transport := &unfetchableTransport{
+		heads: []gitx.RemoteHead{head}, broken: map[string]bool{branch: true},
+	}
+	mailbox := NewGitMailbox("file:///srv/mailbox.git", nil, nil, zerolog.Nop())
+	mailbox.remote = transport
+
+	_, err := mailbox.ObserveManyExact(t.Context(), []string{branch})
+	require.Error(t, err)
+	require.True(t, mailbox.quarantined[branch])
+	require.Empty(t, mailbox.observed[branch], "failed fetch is not a verified observation")
+
+	delete(transport.broken, branch)
+	heads, err := mailbox.ObserveManyExact(t.Context(), []string{branch})
+	require.NoError(t, err)
+	require.Equal(t, []gitx.RemoteHead{head}, heads)
+	require.Equal(t, head.OID, mailbox.observed[branch])
+	require.False(t, mailbox.quarantined[branch])
 }
 
 // TestMailboxPollFailsWhenTheOnlyBranchIsUnreadable: a mailbox that is
@@ -178,9 +218,8 @@ func TestBranchKindHintTellsTransportBranchesApart(t *testing.T) {
 	}
 }
 
-// TestWorkerSkipsTransportBranchesWithoutReadingThem: a prepared input state
-// pushed into the node's own namespace used to be inspected and reported as an
-// assignment nobody could read, once per snapshot and at warning level.
+// TestWorkerSkipsTransportBranchesWithoutReadingThem: a legacy snapshot ref
+// is outside the probe and dispatch-slot polls, so it starts no work.
 func TestWorkerSkipsTransportBranchesWithoutReadingThem(t *testing.T) {
 	branch := "dispat-worker-build-a-20260922-snapshot-abc"
 	tip := ChainTip{Branch: branch, OID: "snapshot-oid", isProtocol: true}
@@ -190,7 +229,7 @@ func TestWorkerSkipsTransportBranchesWithoutReadingThem(t *testing.T) {
 
 	assert.False(t, isProgress)
 	assert.Empty(t, mailbox.written, "nothing is claimed and nothing is answered")
-	assert.Equal(t, 1, mailbox.polls)
+	assert.Equal(t, 2, mailbox.polls, "one probe poll and one dispatch-slot poll")
 }
 
 // TestWorkerIdleClockCountsFromTheLastThingItDid: the three states that are

@@ -7,8 +7,8 @@ package integration
 // time, on whichever of the two machines issues them.
 //
 // The per-feature scenarios fault the calls their own claim is about. These
-// two tables sweep what is left: the calls that prepare an input state, offer
-// an assignment, read what came back and tidy up afterwards. They were found
+// two tables sweep what is left: the calls that prepare an input state, reserve
+// task refs, activate an assignment, read what came back and tidy up. They were found
 // by running one distributed release at trace level on both sides and reading
 // the invocations off the log, so the rows are the shapes the code really
 // issues rather than the shapes it looks as though it might.
@@ -112,8 +112,8 @@ type executionGitFault struct {
 //
 // A read that can never succeed is a pool this machine cannot talk to at all,
 // so the release refuses before a stage runs anywhere. An input state that
-// could not be prepared or offered, and an assignment or a preparation that
-// could not be described or offered, are work that was never authorized, so
+// could not be prepared, and an assignment or a preparation that could not
+// be described or activated, are work that was never authorized, so
 // the package fails with the integrity code and nothing is published. A fetch
 // or a chain walk of what a node already answered is a report about work that
 // has already happened, so failing one of them costs a tick and the release
@@ -136,10 +136,6 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			pattern: "*commit-tree*dispat transport snapshot*", nth: 1, isOnward: true,
 			code: 1, diagnostic: executionIntegrityCode,
 		},
-		"the input state cannot be offered": {
-			pattern: "*push*[0-9]-snapshot-*", nth: 1, isOnward: true,
-			code: 1, diagnostic: executionIntegrityCode,
-		},
 		"the assignment cannot be described": {
 			// The probe of preflight wrote the first one, so the second is the
 			// first assignment this run dispatches work with.
@@ -147,25 +143,30 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			code: 1, diagnostic: executionIntegrityCode,
 		},
 		"the assignment cannot be offered": {
-			pattern: "*push*[0-9]-build-*", nth: 1, isOnward: true,
+			pattern: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
+			nth:     1, isOnward: true,
 			code: 1, diagnostic: executionIntegrityCode,
 		},
 		"a preparation cannot be offered": {
-			pattern: "*push*[0-9]-prepare-*", nth: 1, isOnward: true,
+			pattern: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
+			nth:     1, isOnward: true,
 			code: 1, diagnostic: executionIntegrityCode, newRig: newExecutionFaultPreparation,
 		},
 		"the answer cannot be retrieved once": {
-			pattern: "*fetch*[0-9]-build-*", nth: 1,
+			pattern: "*fetch*dispat-task-*", nth: 1,
+			armAfter: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
 		},
 		"a node's answer cannot be read once": {
 			// Counted from the push that offers the build: how many blobs the
 			// preflight probe reads before that depends on when its claim and
 			// its result are observed, so the first blob read after the offer
 			// is the first blob of a node's answer to the build.
-			pattern: "*cat-file blob*", nth: 1, armAfter: "*push*[0-9]-build-*",
+			pattern: "*cat-file blob*", nth: 1,
+			armAfter: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
 		},
 		"the chain cannot be walked once": {
-			pattern: "*rev-list*[0-9]-build-*", nth: 1,
+			pattern: "*rev-list --first-parent*", nth: 1,
+			armAfter: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -223,7 +224,7 @@ func executionReleasedPackages(res harness.RunResult) []string {
 // task it was given, past the calls its poll loop and its checkout are made of.
 //
 // The halves are the same two obligations seen from the other machine. An
-// input state that could not be fetched, a package folder that could not be
+// assigned input that could not be fetched, a package folder that could not be
 // resolved and a claim that could not be written are work that never started,
 // so the run is told and the package fails; the administrative record of a
 // checkout that could not be tidied away is disk rather than correctness, so
@@ -231,8 +232,13 @@ func executionReleasedPackages(res harness.RunResult) []string {
 // one task is not a failure of the machine.
 func TestExecutionWorkerTransportGitFaults(t *testing.T) {
 	for name, row := range map[string]executionGitFault{
-		"the input states cannot be fetched": {
-			pattern: "*fetch*[0-9]-snapshot-*", nth: 1, isOnward: true, code: 1,
+		"the assignment input cannot be fetched": {
+			pattern: "*fetch*dispat-task-*", nth: 1, isOnward: true, code: 1,
+			newRig: func(t *testing.T) *executionRig {
+				return newExecutionPushOutcomeRig(t, func(cfg *models.File) {
+					cfg.Execution.Timeouts.Task = 8
+				})
+			},
 		},
 		"the package folder cannot be resolved": {
 			pattern: "*rev-parse --verify --end-of-options*", nth: 1, isOnward: true, code: 1,
@@ -242,6 +248,11 @@ func TestExecutionWorkerTransportGitFaults(t *testing.T) {
 			// The probe of preflight wrote the first claim, so the second is
 			// the one that would take a build.
 			pattern: "*commit-tree*dispat transport claim*", nth: 2, isOnward: true, code: 1,
+			newRig: func(t *testing.T) *executionRig {
+				return newExecutionPushOutcomeRig(t, func(cfg *models.File) {
+					cfg.Execution.Timeouts.Task = 8
+				})
+			},
 		},
 		"the chain cannot be resolved once": {
 			pattern: "*rev-list --first-parent*", nth: 1,

@@ -77,12 +77,11 @@ func (c *Coordinator) resolvePublishInputs(ctx context.Context, node string,
 		if own == nil {
 			continue
 		}
-		branch, err := c.reachOutputs(ctx, node, own)
-		if err != nil {
+		if err := c.carryAdmittedOutput(ctx, own); err != nil {
 			return nil, err
 		}
 		inputs = append(inputs, AssignmentInput{
-			Task: own.manifest.task, Package: packageName, Branch: branch,
+			Task: own.manifest.task, Package: packageName,
 			Commit: own.commit, Digest: own.manifest.digest,
 			Path: resolveAnchoredPath(sources, request.Release.Pkg.Repository, dir),
 		})

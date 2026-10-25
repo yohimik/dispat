@@ -40,7 +40,7 @@ const (
 	// executionProtocolVersion is the version every message states and every
 	// reader requires exactly. It is spelled out rather than imported,
 	// because this suite knows the binary from outside.
-	executionProtocolVersion = 1
+	executionProtocolVersion = 2
 	// executionNode is the node name every scenario addresses.
 	executionNode = "build-a"
 	// executionSecret is what the fixtures sign with, in the variable the
@@ -329,6 +329,7 @@ type executionFakeOrchestrator struct {
 	mailbox string
 	secret  string
 	run     string
+	slots   int
 }
 
 func newExecutionFakeOrchestrator(t *testing.T, mailbox string) *executionFakeOrchestrator {
@@ -374,10 +375,55 @@ func (o *executionFakeOrchestrator) offer(branch string, message map[string]any,
 		// are not the JSON the message is supposed to be.
 		document = options.document
 	}
-	commit := o.commit(options, document, options.parents...)
+	parents := options.parents
+	if strings.HasPrefix(branch, "dispat-task-") && len(parents) == 0 {
+		reservation := make(map[string]any, len(message))
+		for field, value := range message {
+			reservation[field] = value
+		}
+		reservation["node"] = ""
+		reserved, marshalErr := json.Marshal(reservation)
+		require.NoError(o.t, marshalErr)
+		parents = []string{o.commit(executionMessageOptions{secret: o.secret, kind: "reservation", isSigned: true},
+			reserved)}
+	}
+	commit := o.commit(options, document, parents...)
 	bareGit(o.t, o.mailbox, "update-ref", "refs/heads/"+branch, commit)
+	if strings.HasPrefix(branch, "dispat-task-") {
+		o.offerSlot(branch, commit, message)
+	}
 
 	return commit
+}
+
+// offerSlot makes an authentic notice for a crafted task attempt. The task
+// document may itself be malformed; the worker still needs a valid index to
+// reach it and demonstrate the intended rejection.
+func (o *executionFakeOrchestrator) offerSlot(branch, assigned string, assignment map[string]any) {
+	o.t.Helper()
+	nodeDigest := sha256.Sum256([]byte(executionNode))
+	slotBranch := fmt.Sprintf("dispat-slot-%x-%s-%d", nodeDigest[:16], o.run, o.slots)
+	o.slots++
+	digest, ok := assignment["planDigest"].(string)
+	if !ok || digest == "" {
+		digest = strings.Repeat("0", 64)
+	}
+	header := map[string]any{
+		"protocol": executionProtocolVersion, "kind": "slot", "run": o.run,
+		"planDigest": digest, "task": "", "attempt": 0,
+		"generation": "generation", "node": executionNode, "branch": slotBranch,
+		"issuedAt": time.Now().UTC().Format(time.RFC3339),
+	}
+	initial, err := json.Marshal(header)
+	require.NoError(o.t, err)
+	root := o.commit(executionMessageOptions{secret: o.secret, kind: "slot", isSigned: true}, initial)
+	header["sequence"] = 1
+	header["taskBranch"] = branch
+	header["assignment"] = assigned
+	active, err := json.Marshal(header)
+	require.NoError(o.t, err)
+	tip := o.commit(executionMessageOptions{secret: o.secret, kind: "slot", isSigned: true}, active, root)
+	bareGit(o.t, o.mailbox, "update-ref", "refs/heads/"+slotBranch, tip)
 }
 
 // executionMessageOptions is how a crafted message differs from a correct
@@ -471,6 +517,37 @@ func executionChain(t *testing.T, mailbox, branch string) []string {
 	return kinds
 }
 
+// executionTaskAssignment reads the first assignment on a v2 task ref. A bare
+// reservation is inert, so it answers nil until activation.
+func executionTaskAssignment(t *testing.T, mailbox, branch string) map[string]any {
+	t.Helper()
+	if !strings.HasPrefix(branch, "dispat-task-") {
+		return nil
+	}
+	chain := executionChain(t, mailbox, branch)
+	if len(chain) < 2 || chain[0] != "reservation" || chain[1] != "assignment" {
+		return nil
+	}
+	commits := strings.Fields(bareGit(t, mailbox, "rev-list", "--first-parent", "--reverse", "refs/heads/"+branch))
+	require.GreaterOrEqual(t, len(commits), 2)
+	document := bareGit(t, mailbox, "cat-file", "blob", commits[1]+":dispat/assignment.json")
+	var assignment map[string]any
+	require.NoError(t, json.Unmarshal([]byte(document), &assignment))
+	return assignment
+}
+
+// executionAssignedTaskKind identifies active work whose ref name has no
+// kind or node label. It does not treat a reservation as an assignment.
+func executionAssignedTaskKind(t *testing.T, mailbox, branch string) string {
+	t.Helper()
+	assignment := executionTaskAssignment(t, mailbox, branch)
+	if assignment == nil {
+		return ""
+	}
+	kind, _ := assignment["kind"].(string)
+	return kind
+}
+
 // executionMessage reads one message off a branch: the document the party
 // that wrote it signed, as a map, because this suite has no access to the
 // types the binary marshalled it from.
@@ -526,5 +603,5 @@ func executionLine(res harness.RunResult, message string) (harness.Event, bool) 
 // executionBranchName is the name a crafted branch takes: addressed to this
 // node, with a label a person reading the mailbox can tell apart.
 func executionBranchName(label string) string {
-	return "dispat-worker-" + executionNode + "-20260921-probe-" + label
+	return "dispat-worker-" + executionNode + "-20260921-probe-" + strings.ReplaceAll(label, "-", "_")
 }

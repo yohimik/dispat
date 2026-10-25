@@ -57,7 +57,7 @@ func TestExecutionWorkerAcknowledgesWithdrawalThatBeatsItsResult(t *testing.T) {
 	require.True(t, waitForExecutionFile(barrier.entered, 30*time.Second),
 		"the worker did not reach its second build-branch push; trace: %s", readExecutionFile(barrier.trace))
 	branch := executionAwaitBranch(t, rig, "build")
-	assert.Equal(t, []string{"assignment", "claim"}, executionChain(t, rig.mailbox, branch),
+	assert.Equal(t, []string{"reservation", "assignment", "claim"}, executionChain(t, rig.mailbox, branch),
 		"the worker finished the command but its Result has not reached Git")
 	release.Signal(syscall.SIGINT)
 	executionAwaitMessage(t, rig.mailbox, branch, "cancel")

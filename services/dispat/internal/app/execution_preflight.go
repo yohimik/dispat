@@ -21,9 +21,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"time"
 
+	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
@@ -46,9 +48,7 @@ func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *worksp
 	if err != nil {
 		return nil, a.reportPreflightFailure(err)
 	}
-	// From here the run has a party that can answer the unlock path's one
-	// question, which it can only answer after it has dispatched anything.
-	a.retention, a.coordinator = coordinator, coordinator
+	a.coordinator = coordinator
 	if err := coordinator.Preflight(ctx, planPlatforms(pl)); err != nil {
 		// The refs this run offered are closed by the caller's own deferred
 		// cleanup, so a refusal here leaves nothing behind even though it
@@ -149,6 +149,18 @@ func planPlatforms(pl *plan.Plan) []execution.PackagePlatforms {
 func (a *App) reportPreflightFailure(err error) error {
 	a.logError(err).Msg("cannot dispatch this release")
 	return err
+}
+
+// taskInitializationFailure labels a run that cannot establish all required
+// task refs before its first frame. An unknown push remains unknown in the
+// wrapped cause; this diagnostic does not claim the remote refused or lacks
+// any particular ref. Close still reports unresolved cleanup separately.
+func taskInitializationFailure(err error) error {
+	if err == nil || errors.Is(err, context.Canceled) || config.DiagnosticCode(err) != "" {
+		return err
+	}
+	return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
+		"execution task branch initialization could not be established before dispatch: %w", err)
 }
 
 // coordinationCloseTimeout bounds the close of this run's coordination refs.

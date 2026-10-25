@@ -49,6 +49,10 @@ type Transition struct {
 // From is the branch not existing yet, which only a create-only push may
 // follow.
 var transitions = []Transition{
+	{From: "", To: MessageReservation, By: PartyOrchestrator},
+	{From: MessageReservation, To: MessageAssignment, By: PartyOrchestrator},
+	{From: "", To: MessageSlot, By: PartyOrchestrator},
+	{From: MessageSlot, To: MessageSlot, By: PartyOrchestrator},
 	{From: "", To: MessageAssignment, By: PartyOrchestrator},
 	{From: MessageAssignment, To: MessageClaim, By: PartyWorker},
 	{From: MessageClaim, To: MessageReady, By: PartyWorker},

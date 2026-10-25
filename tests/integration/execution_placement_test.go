@@ -71,6 +71,7 @@ func TestExecutionOrchestratorOnlyBuildFeedsWorkers(t *testing.T) {
 		"assets": placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator),
 	}))
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
+	carriers := newExecutionCarrierWatch(t, rig.mailbox)
 
 	res := rig.release()
 
@@ -92,25 +93,14 @@ func TestExecutionOrchestratorOnlyBuildFeedsWorkers(t *testing.T) {
 	assert.Equal(t, bundle, produced["docs"], "and so did docs")
 	assert.Equal(t, bundle+bundle, produced["app"])
 
-	assert.Contains(t, executionRelayedPackages(res), "assets",
-		"the pinned build's outputs reached the nodes over a relay branch\nstdout:\n%s", res.Stdout)
+	carried := carriers.seen()
+	assert.Contains(t, carried["ui:build"], "assets:build", "ui assignment directly parents the local producer result")
+	assert.Contains(t, carried["docs:build"], "assets:build", "docs assignment directly parents it")
 
 	assert.ElementsMatch(t,
 		[]string{"assets@0.1.0", "ui@0.1.0", "docs@0.1.0", "app@0.1.0"}, rig.repo.TagList())
 	assert.Empty(t, rig.branches(), "the run closed every coordination branch it created")
 	stopAll(t, workers)
-}
-
-// executionRelayedPackages is every package whose admitted outputs this run
-// copied onto a node's own mailbox.
-func executionRelayedPackages(res harness.RunResult) []string {
-	var relayed []string
-	for _, event := range executionEvents(res) {
-		if event.Str("message") == "relay pushed" {
-			relayed = append(relayed, event.Str("package"))
-		}
-	}
-	return relayed
 }
 
 // TestExecutionOrchestratorOnlyBuildConsumesWorkerOutputs: the pin works in

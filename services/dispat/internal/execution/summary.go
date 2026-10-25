@@ -37,18 +37,11 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 )
 
-// The words a task's computation is reported with. They are the four states a
-// dispatched frame can end in, and `unknown` is not one of them: a computation
-// either completed, failed or was stopped, and what is unknown about a
-// publication is its effect rather than its execution.
+// The words a delegated task's computation is reported with.
 const (
 	ComputationCompleted = "completed"
 	ComputationFailed    = "failed"
 	ComputationCancelled = "cancelled"
-	// ComputationUnknown is the computation of an attempt this run cannot
-	// establish anything about at all: an authorized publisher that never
-	// answered ran its command for some unknown distance.
-	ComputationUnknown = "unknown"
 )
 
 // The words an output set is reported with: verified and installed where its
@@ -60,13 +53,11 @@ const (
 	OutputsNone     = "none"
 )
 
-// The words a publication is reported with. `none` is the ordinary case for a
-// build task and for a prepared provider, and `unknown` is the one outcome
-// that makes a run incomplete however well everything else went.
+// The words an orchestrator publication is reported with. Delegated build
+// and preparation tasks report `none`.
 const (
 	PublicationSucceeded = "succeeded"
 	PublicationFailed    = "failed"
-	PublicationUnknown   = "unknown"
 	PublicationNone      = "none"
 )
 
@@ -149,9 +140,6 @@ type RunSummary struct {
 	// although no version of it was published.
 	Prepared []PreparedRecord
 	Blocked  []BlockedTask
-	// Unknown are the authorized publications whose outcome could not be
-	// established, with the identities an operator needs to settle them.
-	Unknown []unknownPublication
 	// Wall is the time the distributed part of the run took, and Invocations
 	// is how many git subprocesses it cost. Both are measured rather than
 	// derived, and neither is a claim about anything: §28.7 forbids calling a
@@ -279,10 +267,10 @@ func (s RunSummary) orderedBlocked() []BlockedTask {
 
 // reportTotals is the line §28.9 asks for in so many words: completed
 // computation, admitted outputs, successful publication, durable native
-// recording, blocked dependents and unknown external outcomes, each counted
+// recording and blocked dependents, each counted
 // separately because a completed task is not a released package.
 func (s RunSummary) reportTotals(log zerolog.Logger, lines []summaryLine) {
-	computed, admitted, published, recorded, unknown := 0, 0, 0, 0, 0
+	computed, admitted, published, recorded := 0, 0, 0, 0
 	for _, line := range lines {
 		if line.Computation == ComputationCompleted {
 			computed++
@@ -290,11 +278,8 @@ func (s RunSummary) reportTotals(log zerolog.Logger, lines []summaryLine) {
 		if line.Outputs == OutputsAdmitted {
 			admitted++
 		}
-		switch line.Publication {
-		case PublicationSucceeded:
+		if line.Publication == PublicationSucceeded {
 			published++
-		case PublicationUnknown:
-			unknown++
 		}
 		if line.Recording == RecordingRecorded {
 			recorded++
@@ -302,7 +287,7 @@ func (s RunSummary) reportTotals(log zerolog.Logger, lines []summaryLine) {
 	}
 	log.Info().Str("run", s.Run).Int("tasks", len(lines)).Int("computed", computed).
 		Int("admitted", admitted).Int("published", published).Int("recorded", recorded).
-		Int("blocked", len(s.Blocked)).Int("unknown", unknown).
+		Int("blocked", len(s.Blocked)).
 		Msg("distributed execution summary")
 }
 
@@ -403,15 +388,9 @@ func (c *Coordinator) TaskRecords() []TaskRecord {
 // resolveTaskOutcome is what one attempt's failure, or the absence of one,
 // says about the two things a task can be reported against.
 //
-// The order matters and it is the order of what a reader has to know first. An
-// authorized publication nobody can account for is neither a success nor a
-// failure and is reported as neither; a run that was interrupted cancelled its
-// work rather than failing it, which is what keeps a package out of the failure
-// hooks; and everything else is the ordinary pair.
+// An interrupted run cancels its work rather than failing it, which keeps a
+// package out of the failure hooks. Other attempts complete or fail.
 func (c *Coordinator) resolveTaskOutcome(task, stage string, err error) (computation, publication string) {
-	if c.isOutcomeUnknown(task) {
-		return ComputationUnknown, PublicationUnknown
-	}
 	if err == nil {
 		return ComputationCompleted, resolvePublicationOf(stage, PublicationSucceeded)
 	}
@@ -428,19 +407,6 @@ func resolvePublicationOf(stage, outcome string) string {
 		return PublicationNone
 	}
 	return outcome
-}
-
-// isOutcomeUnknown reports whether this run recorded an unknown publication
-// for one task.
-func (c *Coordinator) isOutcomeUnknown(task string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, unknown := range c.unknownPublications {
-		if unknown.Task == task {
-			return true
-		}
-	}
-	return false
 }
 
 // GitInvocations is how many git subprocesses this process has started, which

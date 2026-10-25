@@ -97,6 +97,10 @@ func (s *Scheduler[N]) AddEdge(before, after N) {
 // Len is the total number of nodes, pass-through nodes not counted.
 func (s *Scheduler[N]) Len() int { return len(s.nodes) }
 
+// Nodes returns runnable vertices in registration order before draining them.
+// Pass-through vertices carry dependencies and never require execution.
+func (s *Scheduler[N]) Nodes() []N { return append([]N(nil), s.nodes...) }
+
 // EdgeLen is the number of edges stated, pass-through nodes' own included,
 // which is what the graph costs to hold and to drain.
 func (s *Scheduler[N]) EdgeLen() int { return s.edgeCount }

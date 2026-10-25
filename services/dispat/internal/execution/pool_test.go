@@ -97,6 +97,42 @@ func TestPoolWaitsForACapacitySlot(t *testing.T) {
 	}
 }
 
+func TestPoolReturnsDispatchSlotBeforeWakingPlacement(t *testing.T) {
+	pool := newTestPool(linuxNode(1))
+	held, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
+	require.NoError(t, err)
+	entered := make(chan struct{})
+	allowSlotReturn := make(chan struct{})
+	held.onSettle = func(string) {
+		close(entered)
+		<-allowSlotReturn
+	}
+	returned := make(chan *Lease, 1)
+	go func() {
+		lease, _ := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")
+		returned <- lease
+	}()
+	go held.Release()
+	<-entered
+	select {
+	case lease := <-returned:
+		close(allowSlotReturn)
+		if lease != nil {
+			lease.Release()
+		}
+		t.Fatal("placement woke before its matching dispatch slot returned")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(allowSlotReturn)
+	select {
+	case lease := <-returned:
+		require.NotNil(t, lease)
+		lease.Release()
+	case <-time.After(5 * time.Second):
+		t.Fatal("placement did not resume after the dispatch slot returned")
+	}
+}
+
 // TestPoolLeakedSlotIsNeverReturned: an attempt whose node stopped answering
 // keeps its slot and takes the node out of the pool, so nothing else is
 // placed beside a process nobody can account for.

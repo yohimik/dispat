@@ -141,7 +141,7 @@ func TestAWorkerStartsWithAnEmptyCoordinationCache(t *testing.T) {
 		branches, snapshots = append(branches, branch), append(snapshots, snapshot)
 	}
 	killed := measureCache(t, fixture.node.store)
-	require.Equal(t, 6, killed.refs, "the killed node held a probe and an input state per task")
+	require.Equal(t, 3, killed.refs, "the killed node fetched probes but not legacy snapshot refs")
 	// The run ends while the node is down, so no poll of the old process
 	// ever sees the branches go.
 	for index := range branches {
@@ -158,7 +158,8 @@ func TestAWorkerStartsWithAnEmptyCoordinationCache(t *testing.T) {
 
 	branch, snapshot := fixture.offerTask(t, 4)
 	require.True(t, restarted.tick(t.Context()), "and serves the next task as usual")
-	require.Equal(t, 2, measureCache(t, fixture.node.store).refs)
+	require.Equal(t, 1, measureCache(t, fixture.node.store).refs,
+		"a new probe no longer carries a separate snapshot branch")
 	fixture.closeTask(t, branch, snapshot)
 	restarted.tick(t.Context())
 	require.Zero(t, measureCache(t, fixture.node.store).refs)
@@ -303,7 +304,8 @@ func TestAWorkerPollEndsAtItsOwnDeadline(t *testing.T) {
 	require.True(t, worker.tick(t.Context()), "the next poll serves the work")
 	require.Equal(t, []MessageKind{MessageClaim, MessageResult}, fake.written)
 	require.Equal(t, 1, fake.forgotten, "the store was opened once and never reopened")
-	require.Len(t, mailbox.deadlines, 2)
+	require.Len(t, mailbox.deadlines, 3,
+		"the retry polls the probe and slot prefixes under the same transfer deadline")
 	for _, remaining := range mailbox.deadlines {
 		require.LessOrEqual(t, remaining, worker.TransferTimeout, "every poll carries the transfer window")
 		require.Greater(t, remaining, time.Duration(0))

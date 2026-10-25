@@ -72,6 +72,29 @@ type LocalNode struct {
 	Capacity int
 }
 
+// EligibleWorker is a preflighted node that could run one declared task.
+// Capacity is the maximum number of its simultaneous one-slot tasks.
+type EligibleWorker struct {
+	Name     string
+	Capacity int
+}
+
+// EligibleWorkers lists every compatible worker before task execution starts.
+// The list is a superset of later placements; capacity and health may shrink.
+func (p *Pool) EligibleWorkers(platforms []string, placement Placement) []EligibleWorker {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var eligible []EligibleWorker
+	for _, node := range p.nodes {
+		if node.isLocal || !node.isHealthy || !isNodeAllowed(node, placement) ||
+			!isPlatformCompatible(node.platform, platforms) {
+			continue
+		}
+		eligible = append(eligible, EligibleWorker{Name: node.name, Capacity: node.capacity})
+	}
+	return eligible
+}
+
 // Lease is one node slot held by one attempt.
 //
 // It is a value the holder gives back rather than a counter the holder
@@ -88,6 +111,9 @@ type Lease struct {
 	IsLocal bool
 
 	pool *Pool
+	// onSettle releases the matching dispatch-index slot only when a remote
+	// attempt is known to have stopped. A leaked node keeps that slot fenced.
+	onSettle func(reason string)
 	// isSettled keeps a slot from being returned twice, which would hand out
 	// capacity the node never got back.
 	isSettled bool
@@ -291,6 +317,12 @@ func (l *Lease) settle(reason string) {
 		return
 	}
 	l.isSettled = true
+	// Return the matching dispatch slot before waking a placement waiter.
+	// Otherwise a new lease can be acquired while its signed slot is still
+	// marked busy and a ready task would fail despite free node capacity.
+	if l.onSettle != nil {
+		l.onSettle(reason)
+	}
 	pool := l.pool
 	pool.mu.Lock()
 	for _, node := range pool.nodes {

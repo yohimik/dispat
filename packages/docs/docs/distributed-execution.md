@@ -116,9 +116,10 @@ The mailbox is a Git repository used to exchange task messages. Without an expli
 URL of `commit.remote`, falling back to `origin`. In a composed workspace, this is the entry repository's remote.
 Workers either name that repository as their endpoint or start in its checkout and use the same remote.
 
-Coordination branches live under `refs/heads/dispat-worker-*`, beside the release branches. A run deletes its own
-branches when it ends. Using the source repository avoids retransferring objects the remote already has; it receives
-only the task's changes.
+Task reservations live under `refs/heads/dispat-task-*`, reusable worker notices under
+`refs/heads/dispat-slot-*`, and preflight probes under `refs/heads/dispat-worker-*`. A run deletes its own
+coordination branches when it ends. Using the source repository avoids retransferring objects the remote already
+has; it receives only the task's changes.
 
 Using the repository itself has consequences worth knowing before the first run:
 
@@ -127,7 +128,7 @@ Using the repository itself has consequences worth knowing before the first run:
   public. A snapshot is the working tree as the orchestrator had it, which includes files that are untracked and not
   ignored and commits that were never pushed, and a host keeps an object fetchable by its id for a while after the
   branch that carried it is deleted.
-- **The host's ref rules keep workers away from releases.** The credentials a worker writes `dispat-worker-*` branches
+- **The host's ref rules keep workers away from releases.** The credentials a worker writes coordination branches
   with can write any other ref their permissions reach. Protect the release branches, the release tags and the
   `dispat-release-lock` tag with the host's branch and tag rules, so that worker credentials create and delete
   coordination branches and nothing else, which is what CCME §28.4 requires of transport credentials.
@@ -138,7 +139,8 @@ Using the repository itself has consequences worth knowing before the first run:
   repository's remote, because that is where the node reads them from.
 
 Set `endpoint` to use a different mailbox. Several workers can share it, but each must name the same mailbox as its
-orchestrator link. If workers use different mailboxes, the orchestrator relays results between them.
+orchestrator link. If workers use different mailboxes, the orchestrator transports the exact predecessor result
+objects they need.
 
 For a custom mailbox, a supported self-hosted Git server in the same data center as the orchestrator and workers can
 reduce transport latency. Point each applicable worker link and worker configuration at that `endpoint`; measure
@@ -280,13 +282,18 @@ A distributed release follows the local release stages, with these additional co
    transfer ceilings. A node that does not answer, speaks another protocol version, reports no capacity, or would
    refuse what this run transfers fails the release with `E225`, before a single task is dispatched. So does a
    package whose `buildPlatforms` no node satisfies.
-4. **Each dispatch carries a prepared input state.** Before a task is assigned, the orchestrator captures the
-   current working state of every repository in that package's input closure as a commit of its own, and the
-   assignment names those exact object ids. A node builds from the state the orchestrator captured, never from a
-   branch tip that may have moved.
+4. **Attempt refs and worker slots are initialized.** After preflight and graph compilation, the orchestrator
+   creates signed, inert reservations for every allowed attempt of each worker-eligible task. It also creates a
+   fixed number of notice slots per worker: the smaller of its reported capacity and the count of tasks eligible
+   on that worker.
+   Bounded atomic batches must all settle before the first package frame; a failed later batch cleans earlier refs
+   and starts no package work. Probe, local preparation, version, sign and publication work need no task ref.
 5. **Tasks are placed as nodes become free.** A task asks the pool for a free slot on a node that satisfies its
    platforms and its `runOnly` value, and holds that slot until the attempt is terminal. Under the default `both` a
-   build is offered to the least loaded worker and to the orchestrator only when no worker has room.
+   build is offered to the least loaded worker and to the orchestrator only when no worker has room. At readiness,
+   one atomic update activates the preexisting task reservation and a notice slot for the chosen worker. The signed
+   assignment names exact source and predecessor output object ids; the worker verifies those objects and builds
+   from them, never from a moving ref tip.
 
 What stays on the orchestrator:
 
@@ -306,8 +313,8 @@ hook) runs on the orchestrator. A frame runs as one unit on one node, so its hoo
 adding workers does not multiply it. A task holds its stage slot while waiting for a node. `execution.concurrency`
 limits the assigned tasks one node accepts across all runs using it.
 
-Work waits in the mailbox when the node has no slot. An assignment unclaimed by its deadline is withdrawn and placed
-again, up to three times, then fails its package.
+Ready work waits for a compatible free slot. An assignment unclaimed by its deadline is withdrawn and placed again,
+up to three attempts, then fails its package.
 
 ## Build outputs as inputs
 
@@ -574,7 +581,7 @@ environment and its own credentials. That is what a worker is for, and it means 
 node it reaches.
 
 Run workers on dedicated machines, preferably ephemeral ones, with least-privilege credentials:
-Git credentials that write `dispat-worker-*` branches and read the sources, and no release or registry credentials
+Git credentials that write assigned coordination refs and read the sources, and no release or registry credentials
 unless a worker script itself needs another credential. Do not serve tasks on a shared machine or an untrusted runner.
 
 **4. A worker's build output becomes a published artefact.** Outputs are verified for integrity and origin, through
@@ -620,27 +627,34 @@ of this: namespaces, service account tokens, network policy and which Secrets a 
 
 ## The coordination branches
 
-One branch carries one attempt of one task, as a first-parent chain of commits whose trees hold the message
-`dispat/<kind>.json` and the detached signature `dispat/<kind>.sig` beside it. A build's result also carries its
-captured outputs in the same commit.
+One task branch carries one attempt as a first-parent chain of signed messages under `dispat/<kind>.json` and
+`dispat/<kind>.sig`. Its name is `dispat-task-<run>-<task-digest>-<attempt>`, with no node chosen at creation.
+The initial reservation is inert. Every allowed attempt has its reservation before the first package frame.
+Each worker has a fixed set of `dispat-slot-<node-digest>-<run>-<slot>` notice refs, initially empty, and polls only
+its own notice prefix and probe prefix. The worker reads a task branch only when its signed notice names it.
+Signed messages, not branch names, authorize a task.
 
-Branches are named `dispat-worker-<node>-<YYYYMMDD>-<kind>-<32 hex characters>`, with the kind one of `probe`,
-`build`, `stage`, `prepare`, `run` for a sweep task, `snapshot` or `relay`. The name is a routing hint and never an
-authority: it lets a node list only `refs/heads/dispat-worker-<its name>-*`, and nothing ever parses the date or the
-kind back out of it. The signed message inside decides what a node may act on. A worker named `build` also matches the
-branches of `build-a`, which is harmless for the same reason, but a glob written by hand for a single node should
-anchor on the date segment.
+At readiness, the orchestrator chooses a compatible worker. One atomic compare-and-swap push advances the task
+reservation to its assignment and that worker's slot notice to the assignment's exact object id. The assignment's
+first parent is the reservation; exact source and predecessor result carrier commits are its secondary parents.
+The worker verifies the signature, branch and node bindings, plan digest, input object ids and required parent
+membership before acting. A result commit may carry captured outputs in its tree. No separate runtime snapshot or
+relay ref is created. A new attempt uses another reservation; a free notice slot can be reused.
 
-Every transition is one compare-and-swap push by one party:
+The task's first-parent transitions remain compare-and-swap updates:
 
-| State      | Written by       | Means                                                                         |
-|------------|------------------|-------------------------------------------------------------------------------|
-| assignment | the orchestrator | the work, created only if the branch does not exist                           |
-| claim      | the node         | the node has a free slot and has taken the work                               |
-| result     | the node         | the terminal report of the attempt, with the captured outputs of a build      |
-| cancel     | the orchestrator | the attempt is withdrawn                                                      |
-| ack        | the node         | the withdrawn attempt has stopped, with the phase it was in                   |
-| closed     | the orchestrator | the ref is deleted at the end of the run                                      |
+| State       | Written by       | Means                                                                    |
+|-------------|------------------|--------------------------------------------------------------------------|
+| reservation | the orchestrator | an inert attempt, initialized before package work                       |
+| assignment  | the orchestrator | work for the dynamically chosen node, activated with one slot notice    |
+| claim       | the node         | the node has a free capacity slot and has taken the work                |
+| result      | the node         | the terminal report, with captured build outputs when applicable        |
+| cancel      | the orchestrator | the attempt is withdrawn                                                 |
+| ack         | the node         | the withdrawn attempt has stopped, with the phase it was in              |
+| closed      | the orchestrator | the ref is deleted at the end of the run                                 |
+
+Preflight probes still use node-addressed `dispat-worker-*` branches. The old snapshot and relay branch kinds are
+legacy transport vocabulary, not part of an active task dispatch.
 
 The old `publish` branch kind and its `ready` and `go` messages are reserved legacy protocol vocabulary. The current
 coordinator does not emit them and current workers refuse a publish assignment. An old branch still needs the same
@@ -656,8 +670,8 @@ three seconds. Branches are registered for cleanup before the push, so an uncert
 
 Recovery depends on the message:
 
-- An assignment with an unknown push result is revoked under an exact lease and offered again once its branch is
-  gone. If the worker already claimed it, the attempt continues.
+- An activation with an unknown push result is read back from both the task ref and slot notice. An exact landed
+  pair can proceed; an unresolved or mismatched pair cannot authorize a second attempt or be blindly repeated.
 - A worker with an unknown claim result runs the task if its claim appears on the branch, or acknowledges a
   withdrawal written above it.
 - A result rejected by a server rule is reported once more without the refused content. Build, preparation and sweep
@@ -665,10 +679,10 @@ Recovery depends on the message:
   orchestrator receive an answer before `timeouts.task` expires.
 
 **Transfers do not block mailbox control traffic.** While a worker pushes outputs, it can still poll and acknowledge
-withdrawals. The orchestrator can push one input state to several nodes at once;
-dispatches needing the same state on one node share a push.
+withdrawals. Exact source and predecessor result objects may serve several assignments without creating a new
+content ref for each consumer.
 
-In a shared mailbox, the orchestrator fetches only its own attempts' branches, not other runs' output trees. It
+In a shared mailbox, the orchestrator fetches only its own task and slot refs, not other runs' output trees. It
 removes those local refs when their branches close and when the run ends.
 
 **What an assignment carries:** the protocol version, the kind, the run id, the plan digest, the task and attempt,
@@ -692,8 +706,7 @@ The bounds come from `execution.transfer`: `maxFiles` (default 20000), `maxBytes
 the protocol and not only an output manifest, so a value below the size of an ordinary assignment makes a profile
 unusable. `transfer.timeout` bounds the fetch and install of a task's inputs and the push of a result that carries
 outputs; a result that carries no outputs reports under a fixed 30 second bound. It also bounds each poll of a
-worker's mailbox, because a poll fetches the input states and output sets addressed to the node: a poll that runs out
-of time is reported as a warning, and the next poll asks again.
+worker's slot and probe refs. A poll that runs out of time is reported as a warning, and the next poll asks again.
 
 ## Diagnostics
 
@@ -717,9 +730,10 @@ Existing record and lock diagnostics keep their codes and use the `native-record
 
 - **A mailbox elsewhere pays for the repository's history.** A prepared input state descends from the planned head, so
   the repository being released, which already holds that history, receives only what a task changed. An `endpoint`
-  that names another repository shares no objects with the source, and its first push sends everything reachable
-  from the planned head: for a very large repository, gigabytes and minutes. Normal completed-run cleanup deletes the
-  run's owned coordination refs, so nothing keeps those objects referenced there and the next run pays it again.
+  that names another repository shares no objects with the source. Its first input-bearing assignment can send
+  everything reachable from the planned head: for a very large repository, gigabytes and minutes. Completed-run
+  cleanup deletes the run's owned coordination refs, so nothing keeps those objects referenced there and the next
+  run pays it again.
 - **A heterogeneous pool waits for its slowest node.** Placement is first free, not fastest: one machine much slower
   than the others will be given work and the run will wait for it. Prefer a homogeneous pool, or separate the classes
   of machine with `runOnly` and `buildPlatforms`.

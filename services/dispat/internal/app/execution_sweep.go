@@ -102,6 +102,19 @@ func (a *App) openSweepDispatch(ctx context.Context, work *scriptWork, covered [
 	if err := a.openDispatch(ctx, coordinator, work.pl, work.runner); err != nil {
 		return coordinator, a.reportSweepRefusal(err)
 	}
+	var tasks []execution.ReservationTask
+	for _, rel := range work.resolveReachedReleases(covered) {
+		space := rel.Pkg.Space
+		tasks = append(tasks, execution.ReservationTask{
+			Task: rel.Pkg.Name + ":" + execution.KindRun, Kind: execution.KindRun,
+			Platforms: space.BuildPlatforms,
+			Placement: execution.ResolveStagePlacement(execution.StageBuild,
+				space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0),
+		})
+	}
+	if err := coordinator.InitializeTasks(ctx, tasks); err != nil {
+		return coordinator, a.reportSweepRefusal(taskInitializationFailure(err))
+	}
 	work.coordinator = coordinator
 	// Read from the entry configuration alone, as §28.10 requires: an imported
 	// or linked repository's own declaration is validated where its file is

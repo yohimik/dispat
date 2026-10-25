@@ -47,8 +47,11 @@ import (
 // a mailbox may do.
 type transportx interface {
 	PushCreate(ctx context.Context, remote, oid, branch string) error
+	PushCreateAtomic(ctx context.Context, remote string, refs []gitx.CreateRef) error
 	PushAdvance(ctx context.Context, remote, oid, branch, expectedOld string) error
+	PushAtomicAdvances(ctx context.Context, remote string, refs []gitx.BranchAdvance) error
 	ListRemoteHeads(ctx context.Context, remote, pattern string) ([]gitx.RemoteHead, error)
+	ListRemoteHeadsExact(ctx context.Context, remote string, branches []string) ([]gitx.RemoteHead, error)
 	FetchRefs(ctx context.Context, remote string, branches []string) error
 	DeleteRemoteBranchesLease(ctx context.Context, remote string, leases []gitx.BranchLease) ([]gitx.BranchOutcome, error)
 	DeleteLocalTransportRefs(ctx context.Context, branches []string) error
@@ -100,9 +103,9 @@ type GitMailbox struct {
 }
 
 // maxChainDepth bounds how far below a fetched ref's tip an object may sit
-// and still be read as part of that attempt. One attempt is at most
-// assignment, claim, ready, go and result, on top of one source commit, so
-// anything further away is not this protocol's chain.
+// and still be read as part of that attempt. A v2 task's first-parent chain
+// begins with a reservation, then assignment, claim and result (or a legacy
+// ready/go and cancellation path); carrier parents are deliberately excluded.
 const maxChainDepth = 8
 
 // NewGitMailbox opens a mailbox on one endpoint, with git as both the
@@ -143,6 +146,251 @@ func (m *GitMailbox) PrepareAssignment(ctx context.Context, message *Assignment)
 		return "", fmt.Errorf("execution: writing the assignment document: %w", err)
 	}
 	return m.commitMessage(ctx, MessageAssignment, document, nil, nil)
+}
+
+// PrepareReservation writes an inert, signed root commit for one logical
+// attempt. The coordinator creates every eligible endpoint's branch at this
+// object before any task starts; a worker cannot execute a reservation.
+func (m *GitMailbox) PrepareReservation(ctx context.Context, message *Reservation) (string, error) {
+	if message == nil {
+		return "", fmt.Errorf("execution: a reservation is required")
+	}
+	document, err := json.Marshal(message)
+	if err != nil {
+		return "", fmt.Errorf("execution: writing the reservation document: %w", err)
+	}
+	return m.commitMessage(ctx, MessageReservation, document, nil, nil)
+}
+
+// PrepareAssignmentOnReservation binds the selected task to its existing
+// reservation and carries its exact source snapshots and admitted input
+// results as secondary parents. The push of this assignment transports all
+// reachable objects without creating snapshot or relay refs later in a run.
+func (m *GitMailbox) PrepareAssignmentOnReservation(ctx context.Context, message *Assignment, reservationOID string) (string, error) {
+	if message == nil || reservationOID == "" {
+		return "", fmt.Errorf("execution: assignment and reservation are required")
+	}
+	carriers, err := assignmentCarrierOIDs(message)
+	if err != nil {
+		return "", err
+	}
+	for _, carrier := range carriers {
+		if carrier == reservationOID {
+			return "", fmt.Errorf("execution: a carrier duplicates the reservation")
+		}
+	}
+	document, err := json.Marshal(message)
+	if err != nil {
+		return "", fmt.Errorf("execution: writing the assignment document: %w", err)
+	}
+	return m.commitMessage(ctx, MessageAssignment, document, append([]string{reservationOID}, carriers...), nil)
+}
+
+// PrepareSlotNotice writes one signed dispatch-index value. Initial notices
+// have no parent; every later notice extends that slot's first-parent chain.
+func (m *GitMailbox) PrepareSlotNotice(ctx context.Context, notice *SlotNotice, previousOID string) (string, error) {
+	if notice == nil {
+		return "", fmt.Errorf("execution: a slot notice is required")
+	}
+	parents := []string(nil)
+	if previousOID != "" {
+		parents = []string{previousOID}
+	}
+	document, err := json.Marshal(notice)
+	if err != nil {
+		return "", fmt.Errorf("execution: writing the slot notice: %w", err)
+	}
+	return m.commitMessage(ctx, MessageSlot, document, parents, nil)
+}
+
+// Activation is the exact pair of refs one transaction makes visible: a
+// reserved task becomes an assignment as its selected node's fixed slot
+// points at that assignment. Neither ref may be overwritten from another
+// observed value.
+type Activation struct {
+	TaskBranch     string
+	ReservationOID string
+	AssignmentOID  string
+	SlotBranch     string
+	SlotOldOID     string
+	SlotNewOID     string
+}
+
+// ActivateReserved moves both task and dispatch slot in one remote atomic
+// push. A lost response is settled by reading both refs: the task may already
+// have advanced to Claim or Result, but the slot must hold the exact signed
+// notice this call prepared. No branch is pushed again after an unknown
+// outcome.
+func (m *GitMailbox) ActivateReserved(ctx context.Context, activation Activation) error {
+	refs := []gitx.BranchAdvance{
+		{Branch: activation.TaskBranch, OID: activation.AssignmentOID, ExpectedOld: activation.ReservationOID},
+		{Branch: activation.SlotBranch, OID: activation.SlotNewOID, ExpectedOld: activation.SlotOldOID},
+	}
+	err := m.remote.PushAtomicAdvances(ctx, m.endpoint, refs)
+	if err != nil {
+		taskLanded, taskReadErr := m.readOwnPush(ctx, activation.TaskBranch, activation.AssignmentOID)
+		slotTip, slotReadErr := m.readRemoteTip(ctx, activation.SlotBranch)
+		if taskReadErr != nil || slotReadErr != nil || !taskLanded || slotTip != activation.SlotNewOID {
+			resolution := pushUnknown
+			if taskReadErr == nil && slotReadErr == nil &&
+				(errors.Is(err, gitx.ErrLeaseRejected) || errors.Is(err, gitx.ErrRemoteRefused)) {
+				resolution = pushNotLanded
+			}
+			return &messagePushError{
+				cause:      fmt.Errorf("execution: activating %s and %s: %w", activation.TaskBranch, activation.SlotBranch, err),
+				resolution: resolution, oid: activation.AssignmentOID,
+			}
+		}
+	}
+	m.rememberObserved(activation.TaskBranch, activation.AssignmentOID)
+	m.rememberObserved(activation.SlotBranch, activation.SlotNewOID)
+	return nil
+}
+
+// assignmentCarrierOIDs is the sorted set of commits an assignment declares
+// as its complete source/input envelope. Duplicated references need just one
+// Git parent, but an empty object id cannot name a carried input.
+func assignmentCarrierOIDs(message *Assignment) ([]string, error) {
+	seen := map[string]bool{}
+	for _, repository := range message.Repositories {
+		if repository.Snapshot == "" {
+			return nil, fmt.Errorf("execution: a repository has no snapshot")
+		}
+		seen[repository.Snapshot] = true
+	}
+	for _, input := range message.Inputs {
+		if input.Commit == "" {
+			return nil, fmt.Errorf("execution: an input has no result commit")
+		}
+		seen[input.Commit] = true
+	}
+	carriers := make([]string, 0, len(seen))
+	for oid := range seen {
+		carriers = append(carriers, oid)
+	}
+	sort.Strings(carriers)
+	return carriers, nil
+}
+
+// VerifiedCarriers is an authenticated assignment with its exact direct input
+// parents indexed for repeated result reads. Its maps never change after the
+// initial verification.
+type VerifiedCarriers struct {
+	Assignment Assignment
+	mailbox    *GitMailbox
+	inputs     map[string]struct{}
+}
+
+// OpenCarriedAssignment verifies the signed assignment and its exact carrier
+// parents once. Its first parent must be a signed reservation for the same
+// run, task, attempt, generation, plan and branch. The returned view may read
+// each declared result without repeating the parent walk for every input.
+func (m *GitMailbox) OpenCarriedAssignment(ctx context.Context, assignmentOID string, maxBytes int64) (*VerifiedCarriers, error) {
+	parents, err := m.plumbing.CommitParents(ctx, assignmentOID)
+	if err != nil || len(parents) == 0 {
+		return nil, &Rejection{Reason: ReasonChain}
+	}
+	tree, err := m.readTree(ctx, assignmentOID)
+	if err != nil {
+		return nil, err
+	}
+	if tree.kind != MessageAssignment {
+		return nil, &Rejection{Reason: ReasonChain}
+	}
+	document, err := m.Read(ctx, ChainTip{OID: assignmentOID, Kind: tree.kind, document: tree.document, signature: tree.signature}, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	var assignment Assignment
+	if err := json.Unmarshal(document, &assignment); err != nil {
+		return nil, &Rejection{Reason: ReasonUnreadable}
+	}
+	want, err := assignmentCarrierOIDs(&assignment)
+	if err != nil {
+		return nil, &Rejection{Reason: ReasonChain}
+	}
+	got := append([]string(nil), parents[1:]...)
+	sort.Strings(got)
+	if len(got) != len(want) {
+		return nil, &Rejection{Reason: ReasonChain}
+	}
+	for i := range got {
+		if got[i] != want[i] || got[i] == parents[0] {
+			return nil, &Rejection{Reason: ReasonChain}
+		}
+	}
+	reservationTree, err := m.readTree(ctx, parents[0])
+	if err != nil {
+		return nil, err
+	}
+	if reservationTree.kind != MessageReservation {
+		return nil, &Rejection{Reason: ReasonChain}
+	}
+	reservationParents, err := m.plumbing.CommitParents(ctx, parents[0])
+	if err != nil || len(reservationParents) != 0 {
+		return nil, &Rejection{Reason: ReasonChain}
+	}
+	reservationBytes, err := m.Read(ctx, ChainTip{OID: parents[0], Kind: reservationTree.kind, document: reservationTree.document, signature: reservationTree.signature}, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	var reservation Reservation
+	if err := json.Unmarshal(reservationBytes, &reservation); err != nil {
+		return nil, &Rejection{Reason: ReasonUnreadable}
+	}
+	if reservation.Header.Run != assignment.Header.Run ||
+		reservation.Header.PlanDigest != assignment.Header.PlanDigest ||
+		reservation.Header.Task != assignment.Header.Task ||
+		reservation.Header.Attempt != assignment.Header.Attempt ||
+		reservation.Header.Kind != assignment.Header.Kind ||
+		reservation.Header.Protocol != assignment.Header.Protocol ||
+		reservation.Header.Generation != assignment.Header.Generation ||
+		reservation.Header.Branch != assignment.Header.Branch || reservation.Header.Node != "" {
+		return nil, &Rejection{Reason: ReasonChain}
+	}
+	inputs := make(map[string]struct{}, len(assignment.Inputs))
+	for _, input := range assignment.Inputs {
+		inputs[input.Commit] = struct{}{}
+	}
+	return &VerifiedCarriers{Assignment: assignment, mailbox: m, inputs: inputs}, nil
+}
+
+// VerifyAssignmentCarriers authenticates the assignment and checks its exact
+// direct carrier parents. Call OpenCarriedAssignment when reading many inputs.
+func (m *GitMailbox) VerifyAssignmentCarriers(ctx context.Context, assignmentOID string, maxBytes int64) (*Assignment, error) {
+	view, err := m.OpenCarriedAssignment(ctx, assignmentOID, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &view.Assignment, nil
+}
+
+// ReadCarriedResult reads an input result only when its commit is a direct
+// secondary parent of the authenticated assignment. Mere local object
+// existence or reachability through another history is insufficient.
+func (m *GitMailbox) ReadCarriedResult(ctx context.Context, assignmentOID, resultOID string, maxBytes int64) ([]byte, error) {
+	view, err := m.OpenCarriedAssignment(ctx, assignmentOID, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	return view.ReadResult(ctx, resultOID, maxBytes)
+}
+
+// ReadResult reads a signed result only when this verified assignment
+// declared it as an input. OpenCarriedAssignment already proved that every
+// declared input is an exact direct parent.
+func (v *VerifiedCarriers) ReadResult(ctx context.Context, resultOID string, maxBytes int64) ([]byte, error) {
+	if _, declared := v.inputs[resultOID]; !declared {
+		return nil, &Rejection{Reason: ReasonChain}
+	}
+	tree, err := v.mailbox.readTree(ctx, resultOID)
+	if err != nil {
+		return nil, err
+	}
+	if tree.kind != MessageResult {
+		return nil, &Rejection{Reason: ReasonUnreadable}
+	}
+	return v.mailbox.Read(ctx, ChainTip{OID: resultOID, Kind: tree.kind, document: tree.document, signature: tree.signature}, maxBytes)
 }
 
 // Offer creates a branch at a prepared commit, create-only, and answers what
@@ -370,6 +618,33 @@ func (m *GitMailbox) Observe(ctx context.Context, pattern string, isWanted func(
 		return nil, fmt.Errorf("execution: polling %s: %w", gitx.RedactURL(m.endpoint), err)
 	}
 	moved, vanished := m.resolveMoved(pattern, heads, isWanted)
+	return m.fetchMoved(ctx, moved, vanished)
+}
+
+// ObserveManyExact polls a bounded set of active task refs with one remote
+// listing and one batched fetch. Unlike a namespace poll it never scans the
+// inert reservation refs preallocated for other tasks or nodes. Each named
+// ref keeps Observe's memo, retry, quarantine and vanished-ref behavior.
+func (m *GitMailbox) ObserveManyExact(ctx context.Context, branches []string) ([]gitx.RemoteHead, error) {
+	if len(branches) == 0 {
+		return nil, nil
+	}
+	if len(branches) > gitx.MaxTransportBatch {
+		return nil, fmt.Errorf("execution: %d exact refs exceed a transport batch: %w",
+			len(branches), gitx.ErrTransportLimit)
+	}
+	heads, err := m.remote.ListRemoteHeadsExact(ctx, m.endpoint, branches)
+	if err != nil {
+		return nil, fmt.Errorf("execution: polling %d exact refs on %s: %w",
+			len(branches), gitx.RedactURL(m.endpoint), err)
+	}
+	moved, vanished := m.resolveMovedExact(branches, heads)
+	return m.fetchMoved(ctx, moved, vanished)
+}
+
+// fetchMoved is the common object/memo phase after either a wildcard or an
+// exact listing has selected the changed refs and the refs now absent.
+func (m *GitMailbox) fetchMoved(ctx context.Context, moved []gitx.RemoteHead, vanished []string) ([]gitx.RemoteHead, error) {
 	m.dropVanished(ctx, vanished)
 	if len(moved) > m.fetchSize {
 		moved = moved[:m.fetchSize]
@@ -391,6 +666,40 @@ func (m *GitMailbox) Observe(ctx context.Context, pattern string, isWanted func(
 		delete(m.quarantined, head.Name)
 	}
 	return moved, nil
+}
+
+// resolveMovedExact applies the same memo comparison as a wildcard poll but
+// forgets only refs this exact request named. A missing active task ref must
+// never make a different run's cached ref disappear.
+func (m *GitMailbox) resolveMovedExact(branches []string, heads []gitx.RemoteHead) ([]gitx.RemoteHead, []string) {
+	wanted := make(map[string]bool, len(branches))
+	for _, branch := range branches {
+		wanted[branch] = true
+	}
+	m.memo.Lock()
+	defer m.memo.Unlock()
+	present := make(map[string]bool, len(heads))
+	moved := make([]gitx.RemoteHead, 0, len(heads))
+	for _, head := range heads {
+		if !wanted[head.Name] {
+			continue
+		}
+		present[head.Name] = true
+		if m.observed[head.Name] != head.OID {
+			moved = append(moved, head)
+		}
+	}
+	var vanished []string
+	for _, branch := range branches {
+		if present[branch] {
+			continue
+		}
+		delete(m.observed, branch)
+		if m.fetched[branch] {
+			vanished = append(vanished, branch)
+		}
+	}
+	return moved, vanished
 }
 
 // resolveMoved compares one listing with the memo: the wanted branches whose
@@ -484,6 +793,11 @@ func (m *GitMailbox) fetchSeparately(ctx context.Context, moved []gitx.RemoteHea
 				return fetched, ctxErr
 			}
 			m.quarantineBranch(head, err)
+			// The ref advertised this object, but its bytes were not fetched.
+			// A transient transport failure can heal without any ref movement;
+			// leave it eligible for a later poll. The quarantine bit still keeps
+			// the warning to one per failing tip.
+			m.Reconsider(head.Name)
 			continue
 		}
 		m.memo.Lock()
@@ -501,13 +815,11 @@ func (m *GitMailbox) fetchSeparately(ctx context.Context, moved []gitx.RemoteHea
 	return fetched, nil
 }
 
-// quarantineBranch remembers a branch whose objects could not be fetched or
-// read, and says so once.
+// quarantineBranch remembers an unreadable branch and says so once.
 //
-// The tip is remembered as observed so that the poll stops offering the same
-// unreadable object every tick; the branch itself is not forgotten, so a
-// sender that pushes the missing objects, or moves the branch on, is noticed
-// the next time it does.
+// A watcher containing a handler panic leaves the tip observed until it moves.
+// A caller whose fetch failed calls Reconsider afterward instead: that tip
+// was never verified and may become fetchable without moving.
 func (m *GitMailbox) quarantineBranch(head gitx.RemoteHead, err error) {
 	m.memo.Lock()
 	defer m.memo.Unlock()
@@ -520,7 +832,7 @@ func (m *GitMailbox) quarantineBranch(head gitx.RemoteHead, err error) {
 	m.quarantined[head.Name] = true
 	m.log.Warn().Err(err).Str("branch", head.Name).Str("commit", head.OID).
 		Str("code", CodeTransportRetained).Str("category", CategoryTransportCleanup).
-		Msg("a coordination branch could not be read and is left alone for this run")
+		Msg("a coordination branch could not be fetched or handled; this fault is logged once")
 }
 
 // Reconsider forgets what one branch was last seen at, so that the next poll
@@ -930,21 +1242,55 @@ func (m *GitMailbox) settleDeletes(ctx context.Context, outcomes []gitx.BranchOu
 	return outcomes
 }
 
-// readPresentBranches is which of the named branches the remote advertises,
-// in one listing: the branch itself when there is one, and every
-// coordination branch of the endpoint otherwise.
+// readPresentBranches is which of the named branches the remote advertises.
+// A multi-ref cleanup reads the common prefix of legacy worker branches and
+// v2 task/slot branches once. If that namespace exceeds the listing ceiling,
+// it falls back to bounded exact reads of the refs being settled; a crowded
+// mailbox must not turn a retained reservation into an apparent deletion.
 func (m *GitMailbox) readPresentBranches(ctx context.Context, branches []string) (map[string]bool, error) {
-	pattern := "refs/heads/" + branchPrefix + "*"
+	if len(branches) == 0 {
+		return map[string]bool{}, nil
+	}
+	allDispat := true
+	for _, branch := range branches {
+		allDispat = allDispat && strings.HasPrefix(branch, "dispat-")
+	}
+	pattern := "refs/heads/dispat-*"
 	if len(branches) == 1 {
 		pattern = "refs/heads/" + branches[0]
 	}
-	heads, err := m.remote.ListRemoteHeads(ctx, m.endpoint, pattern)
+	var heads []gitx.RemoteHead
+	var err error
+	if allDispat || len(branches) == 1 {
+		heads, err = m.remote.ListRemoteHeads(ctx, m.endpoint, pattern)
+	}
+	if (!allDispat && len(branches) > 1) || (errors.Is(err, gitx.ErrTransportLimit) && len(branches) > 1) {
+		present := make(map[string]bool, len(branches))
+		for _, branch := range branches {
+			exact, exactErr := m.remote.ListRemoteHeads(ctx, m.endpoint, "refs/heads/"+branch)
+			if exactErr != nil {
+				return nil, fmt.Errorf("execution: reading coordination branch %s: %w", branch, exactErr)
+			}
+			for _, head := range exact {
+				if head.Name == branch {
+					present[branch] = true
+				}
+			}
+		}
+		return present, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("execution: reading %d coordination branches: %w", len(branches), err)
 	}
-	present := make(map[string]bool, len(heads))
+	wanted := make(map[string]bool, len(branches))
+	for _, branch := range branches {
+		wanted[branch] = true
+	}
+	present := make(map[string]bool, len(branches))
 	for _, head := range heads {
-		present[head.Name] = true
+		if wanted[head.Name] {
+			present[head.Name] = true
+		}
 	}
 	return present, nil
 }
@@ -1021,7 +1367,15 @@ func formatMessageCommit(ctx context.Context, git *gitx.LocalGitx, signer *Signe
 	tree := plumbing.MakeTree(ctx, append([]gitx.TreeEntry{
 		{Mode: gitx.TreeModeDir, Type: "tree", OID: inner, Name: messageDir},
 	}, carried...))
-	oid := plumbing.CommitTree(ctx, tree, parents, string(kind))
+	var oid string
+	if len(parents) > gitx.MaxTransportBatch {
+		// A high-fan-in assignment carries each exact input as a direct parent.
+		// Keep those OIDs off argv; the transport writer validates them through
+		// one streamed batch and hashes the commit from stdin.
+		oid = plumbing.CommitTreeCarried(ctx, tree, parents, string(kind))
+	} else {
+		oid = plumbing.CommitTree(ctx, tree, parents, string(kind))
+	}
 	if err := plumbing.Err(); err != nil {
 		return "", fmt.Errorf("execution: writing the %s message: %w", kind, err)
 	}

@@ -13,17 +13,13 @@ package execution
 // run was started in, holding one of this node's capacity slots and the
 // shared side of the snapshot guard; and what it produces is then captured,
 // described and admitted through exactly the code a worker's result goes
-// through. Everything downstream therefore cannot tell the two apart: a
-// consumer placed on a node is handed the same {branch, commit, digest}
-// triple whichever machine produced the bytes, and it verifies them the same
-// way.
+// through. A later assignment carries the same signed commit and manifest
+// digest whichever machine produced the bytes.
 //
 // Two things are deliberately not done. Nothing is installed: the bytes were
 // written into this checkout by the build itself, and installing them would
-// be replacing a folder with itself. And nothing is pushed until a consumer
-// needs it: the result lives in this repository's object store, and the relay
-// that carries it to a node's mailbox is made lazily, once per endpoint, by
-// the same routine that relays a worker's result across two mailboxes.
+// be replacing a folder with itself. The result commit is imported into the
+// run store only when a consumer needs it as an assignment carrier.
 
 import (
 	"context"
@@ -187,10 +183,8 @@ func (c *Coordinator) formatLocalInputs(request release.StageRequest) []Manifest
 // reportLocalResult writes the result a consumer reads, into the store the
 // outputs were captured in, and answers the commit it sits at.
 //
-// It is a root commit and it is pushed nowhere: what makes it reachable to a
-// consuming node is the relay branch the input resolution creates when a
-// consumer is actually placed on a mailbox, which is the same lazy copy two
-// workers with separate mailboxes already go through.
+// It is a root commit and is pushed nowhere by itself. A consuming task's
+// signed assignment names it as a direct secondary parent after import.
 func (c *Coordinator) reportLocalResult(ctx context.Context, store *gitx.LocalGitx,
 	manifest *OutputManifest) (string, error) {
 	document, err := json.Marshal(Result{

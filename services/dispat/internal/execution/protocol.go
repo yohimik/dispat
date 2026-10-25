@@ -5,12 +5,10 @@ package execution
 
 // What travels through a mailbox, and what each message is called.
 //
-// A coordination branch is the whole transport (CCME §28.4). One branch
-// carries one attempt, as a first-parent chain of commits whose trees hold
-// nothing but `dispat/<message>.json` and the detached signature beside it.
-// The branch name is a routing hint and never an authority: it lets a node
-// list only what is addressed to it, and the signed message inside decides
-// what the node may act on.
+// A task branch starts with an inert reservation and carries one attempt as
+// a first-parent message chain. Assignment secondary parents carry exact
+// source and predecessor objects. A separate signed slot ref tells a worker
+// which task branch to fetch. Ref names route work; signed messages authorize it.
 //
 // Everything here is data and pure functions over it, so both parties read
 // one description of the protocol rather than two agreeing ones.
@@ -19,6 +17,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,7 +26,7 @@ import (
 // requires exactly. There is no negotiation: two nodes of one run execute one
 // engine's plan, and a message a reader does not fully understand is a
 // message it must not act on.
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 // The kinds of work an assignment may carry. The kind is a diagnostic label
 // in the branch name and a decision in the signed message: it is what a
@@ -53,11 +52,12 @@ const (
 	// declared script binds for that package, run as `dispat run` runs them
 	// and never as a stage of a release (§28.10).
 	KindRun = "run"
-	// KindSnapshot carries a prepared input state.
+	// KindSnapshot names a legacy transport branch, never a v2 task.
 	KindSnapshot = "snapshot"
-	// KindRelay is one node's result copied onto another node's endpoint,
-	// which is how outputs cross two mailboxes.
+	// KindRelay names a legacy copied-result branch, never a v2 task.
 	KindRelay = "relay"
+	// KindSlot labels the per-node dispatch notice, which runs no command.
+	KindSlot = "slot"
 )
 
 // PreflightTask is the task name a probe is issued under, and the one task
@@ -76,8 +76,11 @@ type MessageKind string
 
 // The messages, in the order one attempt produces them.
 const (
-	// MessageAssignment is the orchestrator's create-only first commit: what
-	// is to be done, for which run and plan, by which node.
+	// MessageReservation is an inert, node-neutral task attempt.
+	MessageReservation MessageKind = "reservation"
+	// MessageSlot is one node's signed dispatch index entry.
+	MessageSlot MessageKind = "slot"
+	// MessageAssignment binds a reservation to exact work, node and inputs.
 	MessageAssignment MessageKind = "assignment"
 	// MessageClaim is the worker taking the assignment, which it does only
 	// when it has a free slot for it.
@@ -116,14 +119,13 @@ const messageDir = "dispat"
 // exists so that a push of the commit sends the blobs.
 const outputsDir = "outputs"
 
-// branchPrefix is what every branch addressed to one node begins with. The
-// node name is written as the file spelled it, because that is what the node
-// itself lists on.
+// branchPrefix retains the node-addressed probe namespace. V2 task refs are
+// node-neutral and slot refs use their own per-node prefix.
 const branchPrefix = "dispat-worker-"
 
-// FormatBranchPrefix is the beginning of every coordination branch addressed
-// to one node. A worker named `build` also matches `build-a`'s branches, and
-// that is harmless: the name routes, the signed message decides.
+// FormatBranchPrefix is the legacy and probe namespace addressed to one node.
+// A worker named `build` also matches `build-a`'s probe branches; the signed
+// message, not the name, decides what the worker accepts.
 func FormatBranchPrefix(node string) string { return branchPrefix + node + "-" }
 
 // FormatBranchPattern is the single ref pattern one node polls its mailbox
@@ -142,6 +144,33 @@ func FormatBranchPattern(node string) string { return "refs/heads/" + FormatBran
 // guessing a name must not let anybody address a node.
 func FormatBranch(node, kind string, at time.Time) string {
 	return FormatBranchPrefix(node) + at.UTC().Format("20060102") + "-" + kind + "-" + formatRandomHex(16)
+}
+
+const reservationBranchPrefix = "dispat-task-"
+const slotBranchPrefix = "dispat-slot-"
+
+// FormatReservationBranch names one inert attempt without choosing a node.
+// The task digest keeps arbitrary package names out of a Git ref. Its signed
+// reservation still carries the complete task name and is the authority.
+func FormatReservationBranch(run, task string, attempt int) string {
+	sum := sha256.Sum256([]byte(task))
+	return reservationBranchPrefix + run + "-" + hex.EncodeToString(sum[:16]) +
+		"-" + strconv.Itoa(attempt)
+}
+
+// FormatSlotPrefix isolates one node's fixed dispatch slots. A digest avoids
+// one node name being a prefix of another node name in ref listings.
+func FormatSlotPrefix(node string) string {
+	sum := sha256.Sum256([]byte(node))
+	return slotBranchPrefix + hex.EncodeToString(sum[:16]) + "-"
+}
+
+// FormatSlotPattern is the only new task-index pattern a worker polls.
+func FormatSlotPattern(node string) string { return "refs/heads/" + FormatSlotPrefix(node) + "*" }
+
+// FormatSlotBranch names one reusable dispatch slot for a run and node.
+func FormatSlotBranch(node, run string, slot int) string {
+	return FormatSlotPrefix(node) + run + "-" + strconv.Itoa(slot)
 }
 
 // ResolveBranchKindHint is the kind segment of a coordination branch name, and
@@ -252,6 +281,24 @@ type Header struct {
 	// and nothing else: no scheduling decision is made from it, because it is
 	// the writer's clock rather than the reader's.
 	IssuedAt string `json:"issuedAt"`
+}
+
+// Reservation is a signed, inert attempt created before execution begins.
+// Its Header.Node is empty because placement is decided at readiness, and
+// it has no source snapshot, commands or publication authority.
+type Reservation struct {
+	Header
+}
+
+// SlotNotice points one worker's reusable dispatch slot at an activated
+// assignment. An empty AssignmentOID is the initial inert notice. The
+// assignment branch and object are both signed so the worker fetches only
+// the exact task the orchestrator selected for this node.
+type SlotNotice struct {
+	Header
+	Sequence      uint64 `json:"sequence"`
+	TaskBranch    string `json:"taskBranch,omitempty"`
+	AssignmentOID string `json:"assignment,omitempty"`
 }
 
 // Assignment is one unit of work offered to one node.

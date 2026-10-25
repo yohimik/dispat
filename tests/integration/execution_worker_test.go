@@ -110,7 +110,10 @@ func TestExecutionWorkerRefusesLegacyPublication(t *testing.T) {
 	rig := newExecutionRig(t)
 	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
 	state := orchestrator.prepareInputState("legacy-publish")
-	legacy := executionCraftedBranchName("publish", "legacy")
+	// Legacy non-probe refs are no longer polled. Give this hostile document a
+	// probe routing hint so the worker actually authenticates and refuses its
+	// signed publish authority; the branch hint never grants that authority.
+	legacy := executionCraftedBranchName("probe", "legacy-publish")
 	orchestrator.offer(legacy, orchestrator.publication(legacy, "legacy", state))
 	control := executionCraftedBranchName("probe", "incomplete-control")
 	orchestrator.offer(control, orchestrator.probe(control, "incomplete-control"))

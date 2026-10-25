@@ -71,7 +71,7 @@ func runWorkerForeignWithdrawalAfterResultLeaseLoss(t *testing.T, scenario forei
 	require.True(t, waitForExecutionFile(barrier.entered, 30*time.Second),
 		"the worker did not reach its Result push; trace: %s", readExecutionFile(barrier.trace))
 	branch := executionAwaitBranch(t, rig, "build")
-	require.Equal(t, []string{"assignment", "claim"}, executionChain(t, rig.mailbox, branch))
+	require.Equal(t, []string{"reservation", "assignment", "claim"}, executionChain(t, rig.mailbox, branch))
 	assignment := executionMessage(t, rig.mailbox, branch+"^", "assignment")
 	claim := executionMessage(t, rig.mailbox, branch, "claim")
 	offered, ok := claim["assignment"].(string)

@@ -6,24 +6,33 @@ package execution
 // Worker stage inputs, deadlines and rejection of legacy publication tasks.
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 func TestRemoteStageReceivesOnlyItsGraphAncestorOutputSets(t *testing.T) {
+	dir := t.TempDir()
+	runGitIn(t, dir, "init", "-q")
+	runGitIn(t, dir, "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+		"commit", "-q", "--allow-empty", "-m", "admitted")
+	store := &gitx.LocalGitx{Dir: dir, Log: zerolog.Nop()}
+	commit := strings.TrimSpace(runGitIn(t, dir, "rev-parse", "HEAD"))
 	c := &Coordinator{outputs: newOutputRegistry(), Links: []Link{{Name: "worker-b", Endpoint: "mailbox"}},
-		dispatch: Dispatch{Inputs: func(string) []InputPackage { return nil }}}
+		dispatch: Dispatch{Inputs: func(string) []InputPackage { return nil }, Store: store}}
 	for _, stage := range []string{"generate", "transform", "unrelated"} {
 		c.outputs.rememberStage("core", stage, &admittedOutputs{
-			node: "worker-a", endpoint: "mailbox", branch: "result-" + stage,
-			commit: "oid-" + stage, manifest: admittedManifest{
+			node:  "worker-a",
+			store: store, commit: commit, manifest: admittedManifest{
 				task: "core:" + stage, packageName: "core", digest: "digest-" + stage,
 			},
 		})
@@ -37,7 +46,8 @@ func TestRemoteStageReceivesOnlyItsGraphAncestorOutputSets(t *testing.T) {
 	require.Len(t, inputs, 2)
 	assert.Equal(t, []string{"core:generate", "core:transform"}, []string{inputs[0].Task, inputs[1].Task})
 	assert.Equal(t, "repo/pkg", inputs[0].Path)
-	assert.Equal(t, "result-transform", inputs[1].Branch)
+	assert.Equal(t, commit, inputs[1].Commit)
+	assert.Empty(t, inputs[1].Branch, "the signed assignment carries the result commit directly")
 }
 
 // TestEveryAssignmentBoundsItself: the node enforces the run's own wait,

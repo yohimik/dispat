@@ -520,6 +520,7 @@ func (c *Coordinator) formatOrchestratorHeader(kind, task string, attempt int,
 // forgetOwnedRef drops one ref from the set this run closes at the end,
 // because it is already gone.
 func (c *Coordinator) forgetOwnedRef(node, branch string) {
+	node = c.ownerNode(node, branch)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	kept := make([]gitx.BranchLease, 0, len(c.owned[node]))

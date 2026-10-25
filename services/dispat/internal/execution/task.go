@@ -106,15 +106,8 @@ func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Log
 	dir := filepath.Join(w.StateDir, taskWorkDir,
 		formatTaskFolder(assignment.Run, assignment.Task, assignment.Attempt))
 	defer w.clearTaskDir(dir, log)
-	branches := make([]string, 0, len(assignment.Repositories))
-	for _, repository := range assignment.Repositories {
-		branches = append(branches, repository.Branch)
-	}
-	if err := w.Mailbox.Fetch(ctx, branches); err != nil {
-		log.Error().Err(err).Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
-			Msg("the task's input states could not be fetched")
-		return taskOutcome{status: StatusFailed}
-	}
+	// The task branch fetch brought the exact source commits as direct
+	// Assignment parents. Their identities were verified before the claim.
 	checkout := NewCheckout(w.Cache, filepath.Join(dir, taskCheckoutDir), log)
 	defer checkout.Remove(context.WithoutCancel(ctx))
 	if err := checkout.Materialize(ctx, assignment.Repositories); err != nil {
@@ -123,7 +116,7 @@ func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Log
 		return taskOutcome{status: StatusFailed}
 	}
 	owner := ownerPathOf(assignment)
-	installed, reason, err := w.installTaskInputs(ctx, assignment, checkout, dir, log)
+	installed, reason, err := w.installTaskInputs(ctx, task.tip.OID, assignment, checkout, dir, log)
 	if err != nil {
 		// No command of the stage has run, and none will: a prerequisite that
 		// could not be verified is a prerequisite, not a build failure (§28.5).

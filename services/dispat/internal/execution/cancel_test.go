@@ -134,32 +134,6 @@ func TestWithdrawalRereadOnlyOwnsItsTerminalMessage(t *testing.T) {
 	}
 }
 
-// TestOnlyAnUnfencedPublisherRetainsItsLock: the selection is per repository
-// and only for a publisher nobody heard from. A run that retained every lock
-// it held because one package went wrong would be taking repositories out of
-// service for a fact about a different one.
-func TestOnlyAnUnfencedPublisherRetainsItsLock(t *testing.T) {
-	coordinator := &Coordinator{Run: "run-1", owned: nil, Log: zerolog.Nop()}
-
-	assert.Empty(t, coordinator.RetainedRepositories(), "a run with nothing unknown retains nothing")
-
-	coordinator.rememberUnknownPublication(unknownPublication{
-		Task: "ui:publish", Attempt: 1, Node: "build-a", Repository: "web", IsQuiesced: true})
-	assert.Empty(t, coordinator.RetainedRepositories(),
-		"an acknowledged publisher has provably stopped, so its repository is released")
-
-	coordinator.rememberUnknownPublication(unknownPublication{
-		Task: "app:publish", Attempt: 1, Node: "build-b", Repository: "api"})
-	assert.Equal(t, []string{"api"}, coordinator.RetainedRepositories())
-
-	coordinator.rememberUnknownPublication(unknownPublication{
-		Task: "docs:publish", Attempt: 1, Node: "build-b", Repository: "api"})
-	assert.Equal(t, []string{"api"}, coordinator.RetainedRepositories(),
-		"one repository is named once however many of its publications are unknown")
-	require.Len(t, coordinator.UnknownPublications(), 3,
-		"every unknown outcome is still reported, whatever it does to a lock")
-}
-
 // TestOwnershipIsAskedAgainAndRememberedOnce: every new effect checks the
 // remote, even immediately after a success; a loss is remembered, because
 // ownership is not something a run gets back; and it ends in-flight attempts.
