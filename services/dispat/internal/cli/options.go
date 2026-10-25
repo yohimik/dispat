@@ -113,6 +113,9 @@ type options struct {
 	rpFiles                                *[]string
 	strict                                 *bool
 
+	// semver build
+	semverPrerelease, semverBuildMetadata *string
+
 	// release and status: the CI gate that turns an empty plan into a failure.
 	requireRelease *bool
 
@@ -141,9 +144,15 @@ func declareFlags(fs *pflag.FlagSet) *options {
 	o.declareAutoVersionFlags(fs)
 	o.declareHelperFlags(fs)
 	o.declareManifestFlags(fs)
+	o.declareSemverFlags(fs)
 	o.declareReleaseFlags(fs)
 	o.declareHelpFlags(fs)
 	return o
+}
+
+func (o *options) declareSemverFlags(fs *pflag.FlagSet) {
+	o.semverPrerelease = fs.String("pre-release", "", "semver build: dot-separated prerelease identifiers")
+	o.semverBuildMetadata = fs.String("build-metadata", "", "semver build: dot-separated build identifiers")
 }
 
 // declareGlobalFlags declares the global flags every command reads: the root,

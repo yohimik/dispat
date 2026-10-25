@@ -304,7 +304,9 @@ Zero-valued limit fields adopt their default limits. You cannot disable these li
 values and `NewParser` returns an error, so increase the limits if you need larger capacities.
 
 The package includes a SemVer 2.0.0 parser (`ParseVersion`, `Version.Compare`) to validate exact `Release-As` values
-during parsing and provide version comparisons for release engines.
+during parsing and provide version comparisons for release engines. `ParseVersionParts` validates the same lexical
+grammar with arbitrary-length decimal core strings and retains build metadata for the `dispat semver` CLI. The release
+engine's `Version` keeps `uint64` core values and intentionally omits build metadata from `Version.String`.
 
 ## Test
 

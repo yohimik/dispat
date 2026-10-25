@@ -678,6 +678,8 @@ func (r *runner) runPreConfig() (int, bool) {
 		return r.runInstall(), true
 	case cmd == cmdDiagnostics:
 		return r.runDiagnostics(), true
+	case cmd == cmdSemver:
+		return r.runSemver(), true
 	case manifestCommand(cmd):
 		return r.runManifests(), true
 	}

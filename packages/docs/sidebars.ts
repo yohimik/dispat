@@ -212,6 +212,7 @@ const sidebars: SidebarsConfig = {
             {type: 'doc', id: "cli/install", label: "install"},
             {type: 'doc', id: "cli/self-update", label: "self-update"},
             {type: 'doc', id: "cli/diagnostics", label: "diagnostics"},
+            {type: 'doc', id: "cli/semver", label: "semver"},
           ],
         },
       ],

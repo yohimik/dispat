@@ -32,6 +32,7 @@ const (
 	cmdPreview     = "preview"     // print one package's pending release notes
 	cmdCompute     = "compute"     // derive the graph and the baselines from manifests
 	cmdDiagnostics = "diagnostics" // diagnose one commit message, without repository discovery
+	cmdSemver      = "semver"      // parse or build one semantic version without a workspace
 	// cmdWorker serves the tasks an orchestrator addressed to this node. It
 	// is the one command that starts nothing and finishes nothing: it reads
 	// the node-startup settings of the config file, so it needs neither
@@ -481,6 +482,8 @@ type invocation struct {
 	progress          *int
 	message           string
 	diagnosticMessage string // diagnostics: the commit message, preserved byte-for-byte
+	semverAction      string
+	semverValues      []string
 }
 
 // parseInvocation maps the positional arguments onto a command, validating
@@ -549,6 +552,15 @@ func (inv *invocation) readPositionals(rest []string, usage func(string), log ze
 			return true
 		}
 		inv.diagnosticMessage = rest[1]
+	case cmdSemver:
+		if len(rest) < 2 || (rest[1] == "parse" && len(rest) != 3) ||
+			(rest[1] == "build" && len(rest) != 5) ||
+			(rest[1] != "parse" && rest[1] != "build") {
+			log.Error().Msg("semver takes parse <version> or build <major> <minor> <patch>")
+			usage(inv.cmd)
+			return true
+		}
+		inv.semverAction, inv.semverValues = rest[1], rest[2:]
 	case cmdInstall:
 		// One repository, or none: a rollback restores what is already
 		// installed and has no releases to read, so it takes --as instead.

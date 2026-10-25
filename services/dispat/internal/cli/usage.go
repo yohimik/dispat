@@ -222,6 +222,20 @@ JSON event per diagnostic.`,
 		flags: nil,
 	},
 	{
+		name:     cmdSemver,
+		args:     "parse|build",
+		argsLong: "parse <version> | build <major> <minor> <patch>",
+		short:    "parse or build a semantic version as JSON",
+		long: `Parse one strict semantic version, or build one from its three core numbers.
+Both forms print one JSON object with the full version, decimal-string core
+components, and prerelease and build identifier arrays. Build accepts
+--pre-release and --build-metadata as dot-separated identifier strings.
+Malformed input exits 2 without writing JSON. The CLI accepts arbitrarily
+long core numbers; the release engine's separate numeric version type has
+uint64 cores. No config file or Git repository is needed.`,
+		flags: []string{"pre-release", "build-metadata"},
+	},
+	{
 		name:  cmdChangelog,
 		short: "write the pending changelog entry now",
 		long: `Write each covered package's pending changelog entry now, so a custom

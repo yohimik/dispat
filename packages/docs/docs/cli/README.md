@@ -20,6 +20,7 @@ dispat [command] [flags]
 | `status` | Show the release plan and version bumps without changing files. [Options](./status.md). |
 | `preview` | Read pending release notes. [Options](./preview.md). |
 | `diagnostics <message>` | Check a commit message against parser rules. [Options](./diagnostics.md). |
+| `semver parse|build` | Parse or construct one semantic version as JSON. [Options](./semver.md). |
 | `compute` | Suggest dependencies and starting versions from manifests. [Options](./compute.md). |
 
 ### Release and record

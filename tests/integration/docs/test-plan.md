@@ -2369,6 +2369,12 @@ This goal owns checking supplied text without a commit operation. Goal 50 owns G
 | `TestDiagnosticsChecksLiteralWholeMessage` | Literal and multiline arguments reach the parser without Git cleanup; any invalid unit rejects the message. |
 | `TestDiagnosticsSeparatesUsageAndConfigErrors` | Arity and foreign flags exit 2; unreadable or malformed explicit configuration exits 1. |
 
+### Goal 63: standalone SemVer parsing and construction (`semver_test.go`)
+
+| Test | Invariant |
+| --- | --- |
+| `TestSemverCLIParsesAndBuildsWithoutWorkspace` | An unbounded decimal core, prerelease identifiers and build metadata round-trip as one structured JSON object without Git, a config or another executable; malformed core spelling exits 2 with no JSON. |
+
 ### Goal 52: repository-aware histories (`polyrepo*_test.go`, `config_import_chain_test.go`, `config_import_guards_test.go`, `config_import_precedence_test.go`, `config_release_edges_test.go`, `final_execution_boundaries_test.go`, `final_fleet_remote_preflight_test.go`, `final_fleet_snapshot_head_test.go`, `final_history_boundaries_test.go`, `final_ownership_boundaries_test.go`, `final_pins_faults_test.go`, `final_plan_boundaries_test.go`, `final_plan_config_faults_test.go`, `final_plan_polyrepo_faults_test.go`, `final_plan_projection_faults_test.go`, `final_polyrepo_github_recovery_test.go`, `final_release_faults_test.go`, `final_remaining_plan_test.go`, `final_remaining_release_test.go`, `fleet_history_edge_cases_test.go`, `fleet_wildcard_scope_test.go`, `record_recovery_edges_test.go`, `release_record_edges_test.go`)
 
 Every source in this goal is a disposable initialized Git repository checked out as a real submodule of a disposable
