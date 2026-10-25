@@ -8,6 +8,7 @@
 package changelog
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -230,14 +231,16 @@ func NoteEntry(rel *plan.Release, note string) (string, bool, error) {
 // Both matter because this is the idempotence check of the whole record path:
 // an entry the check fails to see is an entry written a second time.
 func IsEntryPresent(content []byte, tag string) bool {
-	marker := "## " + tag + " ("
-	_, text := cutBOM(string(content))
-	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, marker) {
-			return true
-		}
+	marker := []byte("## " + tag + " (")
+	// No line can contain a newline, so a marker carrying one matches nothing.
+	if bytes.IndexByte(marker, '\n') >= 0 {
+		return false
 	}
-	return false
+	text := bytes.TrimPrefix(content, []byte(utf8BOM))
+	if bytes.HasPrefix(text, marker) {
+		return true
+	}
+	return bytes.Contains(text, append([]byte{'\n'}, marker...))
 }
 
 // utf8BOM is the byte-order mark an editor on Windows leaves at the head of a
@@ -451,20 +454,6 @@ func (w *FileWriter) path(rel *plan.Release) string {
 	return filepath.Join(rel.Pkg.Dir, file)
 }
 
-// HasEntryFor reports whether the writer's file already carries the entry
-// for rel's planned tag — what Record's own skip checks, exposed so a caller
-// can tell a fresh write from a skip. A missing file has no entries.
-func (w *FileWriter) HasEntryFor(rel *plan.Release) (bool, error) {
-	existing, err := os.ReadFile(w.path(rel))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("changelog: %w", err)
-	}
-	return IsEntryPresent(existing, rel.TagName()), nil
-}
-
 // Record writes the release entry for rel at the top of the package
 // changelog, creating the file when missing.
 //
@@ -474,7 +463,16 @@ func (w *FileWriter) HasEntryFor(rel *plan.Release) (bool, error) {
 // a published package with no record, which is the one state the next run
 // cannot reason about. The parameter stays because ReleaseRecorderx is what
 // the GitHub recorder implements too, and that one does reach the network.
-func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
+func (w *FileWriter) Record(ctx context.Context, rel *plan.Release) error {
+	_, err := w.RecordEntry(ctx, rel)
+	return err
+}
+
+// RecordEntry is Record reporting whether it wrote the entry: false when the
+// file already carried it and the write was the W226 skip. A caller that
+// tells a fresh write from a skip asks here rather than reading the file a
+// second time.
+func (w *FileWriter) RecordEntry(_ context.Context, rel *plan.Release) (bool, error) {
 	now := time.Now
 	if w.Now != nil {
 		now = w.Now
@@ -486,7 +484,7 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 
 	existing, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("changelog: %w", err)
+		return false, fmt.Errorf("changelog: %w", err)
 	}
 	// A changelog that already exists keeps its own permissions across the
 	// rewrite; only a fresh file gets the default.
@@ -503,7 +501,7 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 		w.Log.Warn().Str("code", plan.CodeChangelogEntryExists).
 			Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).
 			Msg("changelog entry already exists, skipped")
-		return nil
+		return false, nil
 	}
 	// What the entry's own policy could not do, said once for the entry that
 	// is actually about to be written rather than for the skip above it.
@@ -526,14 +524,19 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 	// dependencies list ended one way and a section of bodiless bullets
 	// another — so a file's spacing recorded the shape of each release rather
 	// than one rule.
-	var b strings.Builder
+	top := strings.TrimRight(parts.top, "\r\n")
+	entry = strings.TrimRight(entry, "\n")
+	var b bytes.Buffer
+	// Sized once for the whole rewritten file, two closing newlines included,
+	// so the file's bytes are not copied again on every doubling.
+	b.Grow(len(bom) + len(top) + parts.blank + len(entry) + w.spacing() + len(parts.body) + 2)
 	b.WriteString(bom)
-	if top := strings.TrimRight(parts.top, "\r\n"); top != "" {
+	if top != "" {
 		b.WriteString(top)
 		b.WriteString("\n")
 		b.WriteString(strings.Repeat("\n", parts.blank))
 	}
-	b.WriteString(strings.TrimRight(entry, "\n"))
+	b.WriteString(entry)
 	b.WriteString("\n")
 	if parts.body != "" {
 		b.WriteString(strings.Repeat("\n", w.spacing()))
@@ -542,10 +545,10 @@ func (w *FileWriter) Record(_ context.Context, rel *plan.Release) error {
 	// The write replaces the whole file after the publish already happened; an
 	// interrupted plain write here would take the package's history with it,
 	// so it goes through the atomic replace.
-	if err := fsx.WriteFileAtomic(path, []byte(b.String()), mode); err != nil {
-		return fmt.Errorf("changelog: %w", err)
+	if err := fsx.WriteFileAtomic(path, b.Bytes(), mode); err != nil {
+		return false, fmt.Errorf("changelog: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // fileParts is how an existing changelog divides for a rewrite: what stays

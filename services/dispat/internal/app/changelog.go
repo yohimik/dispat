@@ -141,14 +141,11 @@ func (w *changelogWork) resolve(_ context.Context, rel *plan.Release) (task, err
 		fw.Format.ReleaseName = w.opts.ReleaseName
 	}
 	return func(ctx context.Context) error {
-		already, err := fw.HasEntryFor(rel)
+		written, err := fw.RecordEntry(ctx, rel)
 		if err != nil {
 			return fmt.Errorf("changelog write failed: %w", err)
 		}
-		if err := fw.Record(ctx, rel); err != nil {
-			return fmt.Errorf("changelog write failed: %w", err)
-		}
-		if !already { // Record logged the W226 skip itself otherwise
+		if written { // RecordEntry logged the W226 skip itself otherwise
 			w.app.log.Info().Str("package", rel.Pkg.Name).Str("tag", rel.TagName()).
 				Msg("changelog written")
 		}

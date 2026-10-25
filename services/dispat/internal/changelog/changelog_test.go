@@ -407,14 +407,15 @@ func TestFileWriterSkipsExistingEntry(t *testing.T) {
 	dir := t.TempDir()
 	rel := testRelease(dir, ccme.Version{Major: 1, Minor: 3})
 	w := &FileWriter{Now: func() time.Time { return time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC) }}
-	require.NoError(t, w.Record(context.Background(), rel))
+	written, err := w.RecordEntry(context.Background(), rel)
+	require.NoError(t, err)
+	assert.True(t, written, "the first write writes the entry")
 	first, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
 	require.NoError(t, err)
 
-	already, err := w.HasEntryFor(rel)
+	written, err = w.RecordEntry(context.Background(), rel)
 	require.NoError(t, err)
-	assert.True(t, already)
-	require.NoError(t, w.Record(context.Background(), rel))
+	assert.False(t, written, "the second write is the W226 skip")
 	second, err := os.ReadFile(filepath.Join(dir, "CHANGELOG.md"))
 	require.NoError(t, err)
 	assert.Equal(t, string(first), string(second), "a repeated write is byte-identical")
@@ -438,6 +439,32 @@ func TestHasEntryIsLineAnchored(t *testing.T) {
 	assert.False(t, IsEntryPresent(body, "core@9.9.9"), "mid-line mention does not count")
 	assert.False(t, IsEntryPresent(body, "core@2.0.0"), "indented text does not count")
 	assert.False(t, IsEntryPresent(nil, "core@1.0.0"), "an absent file has no entries")
+}
+
+// TestHasEntryMatchesTheLineByLineReading: the check scans the file once for
+// the marker at a line start, which must answer exactly what reading the file
+// line by line does, including a tag whose rendering carries a newline, which
+// no single line can match.
+func TestHasEntryMatchesTheLineByLineReading(t *testing.T) {
+	lineByLine := func(content []byte, tag string) bool {
+		marker := "## " + tag + " ("
+		for _, line := range strings.Split(strings.TrimPrefix(string(content), "\ufeff"), "\n") {
+			if strings.HasPrefix(line, marker) {
+				return true
+			}
+		}
+		return false
+	}
+	contents := []string{
+		"", "## core@1.0.0 (", "## core@1.0.0", "x\n## core@1.0.0 (2026)", "\ufeff\ufeff## core@1.0.0 (",
+		"## core@1.0.0 (2026)\r\n", "a\r\n## core@1.0.0 (b)\r\n", " ## core@1.0.0 (", "\n\n## core@1.0.0 (",
+		"## a\n## b (", "## core@1.0.0-beta.1 (", "#### core@1.0.0 (",
+	}
+	for _, content := range contents {
+		for _, tag := range []string{"core@1.0.0", "a\n## b", "core@1.0.0-beta.1", ""} {
+			assert.Equal(t, lineByLine([]byte(content), tag), IsEntryPresent([]byte(content), tag), "%q in %q", tag, content)
+		}
+	}
 }
 
 // TestRecordMultiLineFileTitle: a file title may be several lines, written
