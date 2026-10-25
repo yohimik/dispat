@@ -5,6 +5,9 @@ package plan
 
 import (
 	"context"
+	"math/rand"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/yohimik/dispat/pkg/ccme"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -465,4 +469,55 @@ func chainInitials(n int) map[string]ccme.Version {
 		out["p"+itoa(i)] = v(1, 0, 0)
 	}
 	return out
+}
+
+// TestLinkPeersAreTheScanOfEveryHistory checks the peer index against the
+// definition it replaced, a scan of every history for one repository, over
+// links declared at one end or both, spellings that differ only in case and
+// self links: the same peers, spelled the same way, in the same order.
+func TestLinkPeersAreTheScanOfEveryHistory(t *testing.T) {
+	rng := rand.New(rand.NewSource(13))
+	spellings := []string{"api", "API", "sdk", "Sdk", "core", "ui", ""}
+	scan := func(histories map[string]RepositoryHistory, name string) []string {
+		seen := map[string]bool{}
+		var out []string
+		add := func(peer string) {
+			if peer == "" || seen[globx.Fold(peer)] {
+				return
+			}
+			seen[globx.Fold(peer)] = true
+			out = append(out, peer)
+		}
+		for _, key := range sortedNames(histories) {
+			history := histories[key]
+			if strings.EqualFold(history.Name, name) {
+				for _, peer := range sortedNames(history.Links) {
+					add(peer)
+				}
+				continue
+			}
+			for peer := range history.Links {
+				if strings.EqualFold(peer, name) {
+					add(history.Name)
+				}
+			}
+		}
+		sort.Slice(out, func(i, j int) bool { return globx.Fold(out[i]) < globx.Fold(out[j]) })
+		return out
+	}
+	for round := 0; round < 300; round++ {
+		histories := map[string]RepositoryHistory{}
+		for i := 0; i < 1+rng.Intn(5); i++ {
+			name := spellings[rng.Intn(len(spellings)-1)]
+			links := map[string]string{}
+			for j := 0; j < rng.Intn(4); j++ {
+				links[spellings[rng.Intn(len(spellings))]] = ".links/" + itoa(j)
+			}
+			histories[globx.Fold(name)] = RepositoryHistory{Name: name, Links: links}
+		}
+		cp := &computation{histories: histories}
+		for _, name := range spellings {
+			require.Equalf(t, scan(histories, name), cp.linkNeighbours(name), "round %d, %q in %v", round, name, histories)
+		}
+	}
 }

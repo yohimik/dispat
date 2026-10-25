@@ -381,28 +381,47 @@ func (cp *computation) linkRoute(from, to string) []string {
 // linkNeighbours answers both ends of every link touching one repository, in
 // one stable order.
 func (cp *computation) linkNeighbours(name string) []string {
-	seen := map[string]bool{}
-	var out []string
-	add := func(peer string) {
-		if peer == "" || seen[globx.Fold(peer)] {
-			return
-		}
-		seen[globx.Fold(peer)] = true
-		out = append(out, peer)
+	if cp.linkPeers == nil {
+		cp.linkPeers = cp.indexLinkPeers()
 	}
+	return cp.linkPeers[globx.Fold(name)]
+}
+
+// indexLinkPeers lists every repository's link peers in one pass over the
+// histories: its own links, and the repositories whose links name it. A
+// repository's peers are met in history name order, its own links in name
+// order among them, and a peer spelled two ways keeps the spelling met first,
+// which is what a scan of every history per repository found.
+func (cp *computation) indexLinkPeers() map[string][]string {
+	met := make(map[string][]string)
 	for _, key := range sortedNames(cp.histories) {
 		history := cp.histories[key]
-		if strings.EqualFold(history.Name, name) {
-			for _, peer := range sortedNames(history.Links) {
-				add(peer)
+		own := globx.Fold(history.Name)
+		peers := sortedNames(history.Links)
+		met[own] = append(met[own], peers...)
+		for _, peer := range peers {
+			if linked := globx.Fold(peer); linked != own {
+				met[linked] = append(met[linked], history.Name)
 			}
+		}
+	}
+	for name, spellings := range met {
+		met[name] = distinctByFold(spellings)
+	}
+	return met
+}
+
+// distinctByFold keeps the first spelling of each name, ordered by folded
+// name.
+func distinctByFold(spellings []string) []string {
+	seen := make(map[string]bool, len(spellings))
+	var out []string
+	for _, spelling := range spellings {
+		if spelling == "" || seen[globx.Fold(spelling)] {
 			continue
 		}
-		for peer := range history.Links {
-			if strings.EqualFold(peer, name) {
-				add(history.Name)
-			}
-		}
+		seen[globx.Fold(spelling)] = true
+		out = append(out, spelling)
 	}
 	sort.Slice(out, func(i, j int) bool { return globx.Fold(out[i]) < globx.Fold(out[j]) })
 	return out
