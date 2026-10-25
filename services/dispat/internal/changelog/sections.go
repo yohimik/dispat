@@ -389,15 +389,15 @@ func linkable(value string) bool {
 // web UI on a host the API URL does not state, and inventing one would publish
 // a link into a repository that may not exist.
 func autoBase(f Format) string {
-	if f.LinkOwner == "" || f.LinkRepo == "" || !isPublicGitHub(f.LinkAPIURL) {
+	if f.LinkOwner == "" || f.LinkRepo == "" || !IsPublicGitHub(f.LinkAPIURL) {
 		return ""
 	}
 	return "https://github.com/" + f.LinkOwner + "/" + f.LinkRepo
 }
 
-// isPublicGitHub reports whether an API URL is github.com's own. Empty is the
+// IsPublicGitHub reports whether an API URL is github.com's own. Empty is the
 // default endpoint, which is.
-func isPublicGitHub(apiURL string) bool {
+func IsPublicGitHub(apiURL string) bool {
 	if apiURL == "" {
 		return true
 	}

@@ -282,6 +282,14 @@ const (
 	// sides, and only a person can.
 	CodePushConflicted = "W243"
 
+	// CodeGitHubBodyCut marks a GitHub release body cut to fit the API's
+	// limit on release notes. The body keeps its whole entries up to the last
+	// one that fits and ends with a link to the rest. A warning rather than a
+	// failure because GitHub's refusal would arrive after the tag is out, and
+	// a published package with no release page helps nobody. W245 because
+	// W244 is the execution profile's (internal/execution).
+	CodeGitHubBodyCut = "W245"
+
 	// --- release outcomes (§13.7a, §13.9) ---
 
 	// CodeCatchUp marks a release whose entire cause is propagation from a

@@ -132,6 +132,7 @@ func (w *githubWork) resolve(ctx context.Context, rel *plan.Release) (task, erro
 			return nil, fmt.Errorf("github verification failed: %w", err)
 		}
 		gh.TargetCommitish = w.opts.Target
+		gh.Root = w.app.root
 		w.releasers[spec.Key()] = gh
 	}
 	return func(ctx context.Context) error {

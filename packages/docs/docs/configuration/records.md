@@ -384,6 +384,17 @@ The release is named after the tag (`pkg@1.3.0`). Its body is the rendered chang
 [release-notes windowing](#changelog). A prerelease's release documents only its own changeset, and a graduation
 documents the whole train.
 
+**A body over GitHub's limit.** GitHub refuses release notes longer than 125,000 characters. dispat keeps a body
+within 120,000 characters, counted as characters rather than bytes. A longer body loses entries from the end of its
+sections, whole entries only, and the sections close with one line saying where the notes continue: the package's
+changelog file at the release tag, for example
+`The release notes continue in [packages/core/CHANGELOG.md](https://github.com/acme/mono/blob/core@1.3.0/packages/core/CHANGELOG.md).`
+The header, the authors, the `### Release` details and the footer are kept. When the changelog does not record the
+release, the line links the package folder's commit history at the tag instead. On GitHub Enterprise, the line names
+the file and the tag without a link, because the API URL does not say where the web pages are. The cut is logged once
+as [`W245`](../reference/plan-errors.md#a-record-that-renders-less-than-it-was-asked-to). A body within the limit is
+sent exactly as rendered. Any other refusal from GitHub still fails the package.
+
 dispat handles credentials in two steps. When `enabled` but no repository or token can be resolved at runtime, GitHub
 releases are skipped with a warning rather than failing the run. A configuration that *does* resolve is **verified
 against the API before any release work starts** (`GET /repos/{owner}/{repo}`). This verification happens whether the

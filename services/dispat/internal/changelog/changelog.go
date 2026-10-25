@@ -329,24 +329,53 @@ func correctionNote(rel *plan.Release, u *ccme.Unit) string {
 // configured or all of them are — and a body with none of them is byte for
 // byte the sections alone, as it was before they existed.
 func RenderBody(rel *plan.Release, f Format, look Lookup, extra ...string) string {
+	return RenderBodyParts(rel, f, look, extra...).String()
+}
+
+// BodyParts is one entry body split around its grouped sections, for a
+// recorder that has to shorten the sections and keep everything around them.
+// String joins the parts into exactly the body RenderBody renders.
+type BodyParts struct {
+	// Leading holds the configured header lines.
+	Leading []string
+	// Sections is the grouped sections, or the line saying why there are none.
+	Sections string
+	// Trailing holds the authors block, the caller's extra blocks and the
+	// configured footer lines, in that order.
+	Trailing []string
+}
+
+// RenderBodyParts renders the blocks RenderBody joins, with the same
+// arguments.
+func RenderBodyParts(rel *plan.Release, f Format, look Lookup, extra ...string) BodyParts {
 	f = f.withDefaults()
 	if look == nil {
 		look = ReleaseLookup(rel)
 	}
-	blocks := make([]string, 0, len(extra)+4)
-	blocks = appendBlock(blocks, RenderLines(f.Header, rel, look))
-	blocks = appendBlock(blocks, renderSections(rel, f, look))
+	parts := BodyParts{
+		Leading:  appendBlock(nil, RenderLines(f.Header, rel, look)),
+		Sections: renderSections(rel, f, look),
+	}
 	// The authors block sits after the sections it attributes and before
 	// anything the caller appends, so the GitHub recorder's "### Release"
 	// details stay the last thing before the footer. The footer staying last
 	// is load-bearing beyond taste: self-update reads release notes by cutting
 	// at the "---" a release footer conventionally opens with, and a block
 	// inserted after it would be read as part of the cut-away tail.
-	blocks = appendBlock(blocks, authorsSection(rel, f))
+	parts.Trailing = appendBlock(parts.Trailing, authorsSection(rel, f))
 	for _, e := range extra {
-		blocks = appendBlock(blocks, e)
+		parts.Trailing = appendBlock(parts.Trailing, e)
 	}
-	blocks = appendBlock(blocks, RenderLines(f.Footer, rel, look))
+	parts.Trailing = appendBlock(parts.Trailing, RenderLines(f.Footer, rel, look))
+	return parts
+}
+
+// String joins the parts into the entry body.
+func (p BodyParts) String() string {
+	blocks := make([]string, 0, len(p.Leading)+len(p.Trailing)+1)
+	blocks = append(blocks, p.Leading...)
+	blocks = appendBlock(blocks, p.Sections)
+	blocks = append(blocks, p.Trailing...)
 	return joinBlocks(blocks)
 }
 

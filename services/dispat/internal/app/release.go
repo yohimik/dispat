@@ -832,6 +832,7 @@ func (a *App) githubDispatch(pl *plan.Plan) *ghDispatch {
 			if gh, err = githubReleaser(spec, a.log); err != nil {
 				a.log.Warn().Err(err).Str("package", name).Msg("github releases disabled")
 			} else {
+				gh.Root = a.root
 				d.all = append(d.all, gh)
 			}
 			targets[spec.Key()] = gh

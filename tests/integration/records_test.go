@@ -23,6 +23,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -574,6 +575,72 @@ func TestRecordsGitHubAllPackages(t *testing.T) {
 	require.Len(t, releases, 2, "one release per published package, no export needed")
 	tags := []string{releases[0].TagName, releases[1].TagName}
 	assert.ElementsMatch(t, []string{"core@0.1.0", "utils@0.1.0"}, tags)
+}
+
+// TestRecordsGitHubBodyOverTheLimitIsCut: a release body over GitHub's limit
+// of 125,000 characters is cut at an entry and ends with a line naming the
+// package's changelog at the tag, through a release run and through the
+// github step alike, and the release is created instead of refused. The
+// services/dispat/v1.11.0-rc.8 release rendered 125,407 characters of perf
+// commits with benchmark tables, and GitHub's 422 arrived after its tag was
+// out.
+func TestRecordsGitHubBodyOverTheLimitIsCut(t *testing.T) {
+	type ghRelease struct {
+		TagName string `json:"tag_name"`
+		Body    string `json:"body"`
+	}
+	paragraph := strings.Repeat("The walk reads each commit once and keeps the answer for the next.\n", 70)
+	runs := map[string]func(r *harness.Repo) harness.RunResult{
+		"a release run": func(r *harness.Repo) harness.RunResult { return r.ReleaseOK() },
+		"the github step": func(r *harness.Repo) harness.RunResult {
+			return r.CommandEnv([]string{"DISPAT_EXPORT_GITHUB="}, "github", "--package", "core", "--log-format", "json")
+		},
+	}
+	for name, run := range runs {
+		t.Run(name, func(t *testing.T) {
+			srv, bodies := githubFake(t)
+			r := harness.New(t)
+			cfg := libsConfig(echoBuild, 1)
+			cfg.GitHub = &models.GitHubConfig{
+				Enabled: models.Bool(true), AllPackages: models.Bool(true),
+				Owner: "acme", Repo: "mono", APIURL: srv.URL, TokenEnv: "DISPAT_IT_TOKEN",
+			}
+			r.WriteConfigModel(cfg)
+			t.Setenv("DISPAT_IT_TOKEN", "tkn")
+			for i := range 30 {
+				r.WriteFile(filepath.Join("packages", "core", fmt.Sprintf("step%d.txt", i)), "step\n")
+				r.Commit(fmt.Sprintf("fix(core): speed up step %d\n\n%s", i, paragraph))
+			}
+
+			res := run(r)
+			require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+
+			releases := decodeAll[ghRelease](t, bodies())
+			require.Len(t, releases, 1)
+			body := releases[0].Body
+			require.Greater(t, len(paragraph)*30, 125_000, "the notes are over GitHub's limit")
+			assert.LessOrEqual(t, utf8.RuneCountInString(body), 120_000)
+			const continuation = "The release notes continue in packages/core/CHANGELOG.md at core@0.0.1.\n"
+			require.True(t, strings.HasSuffix(body, "\n\n"+continuation),
+				"the body ends with the line naming the rest: %s", body[max(0, len(body)-300):])
+			kept := strings.TrimSuffix(body, "\n\n"+continuation)
+			assert.True(t, strings.HasSuffix(kept, strings.TrimRight(indented(paragraph), "\n")),
+				"the cut falls after a whole entry, its commit body included")
+			assert.True(t, harness.IsCodePresentForPackage(res.Events, "W245", "core"),
+				"the cut is reported; stdout:\n%s", res.Stdout)
+		})
+	}
+}
+
+// indented is a commit body as an entry renders it, two spaces in.
+func indented(body string) string {
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = "  " + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // TestRecordsChannelsHoldPrereleasesBack: changelog.channels and

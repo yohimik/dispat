@@ -135,6 +135,11 @@ type Releaser struct {
 	// reached the remote that its changes cannot say. The mid-release merge
 	// recovery writes one when it had to set a conflicting change aside.
 	Note string
+	// Root is the repository root the package folders sit in. A body cut to
+	// the API limit links the rest of its notes by the package's path in the
+	// repository, which is the package folder relative to Root, or to the
+	// package's own repository root in a polyrepo.
+	Root string
 
 	// retries and retryDelay override the transient-failure retry of the
 	// read-only calls; the zero values mean defaultRetries/defaultRetryDelay.
@@ -423,7 +428,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	// to the release the entry describes, and a footer is the last word. A
 	// note about how the release reached the remote follows it, for the same
 	// reason and in the same place.
-	body := changelog.RenderBody(rel, r.Format, look, release, r.Note)
+	body := r.boundBody(rel, changelog.RenderBodyParts(rel, r.Format, look, release, r.Note))
 	// The release is named after its tag unless the format says otherwise. The
 	// tag itself is never renamed: it is what the release hangs off.
 	name := tag

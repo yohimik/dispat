@@ -32,6 +32,11 @@ lines are a table of movements and render as one tight block, with no blank line
 document with no entry beneath it, so the changelog file's
 [entry seam](../configuration/records.md#the-seam-between-entries) does not apply here.
 
+GitHub refuses a body over 125,000 characters. dispat cuts a longer one to 120,000 characters at the last whole entry
+that fits, and ends the sections with a line linking the package's changelog file at the release tag. The cut is
+logged as `W245`, and the release is created. See
+[a body over GitHub's limit](../configuration/records.md#github).
+
 See [Release records](../configuration/records.md) for the entry format options the body is rendered under.
 
 ## The selection it shares
