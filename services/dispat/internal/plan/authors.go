@@ -213,7 +213,7 @@ func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author
 		}
 	}
 	marks := &cp.authorMarks
-	marks.generation++
+	marks.begin()
 	attribute := func(rec *commitRec) {
 		a, id := cp.authorOf(rec)
 		if id < 0 {
@@ -293,6 +293,18 @@ func (cp *computation) authorOf(rec *commitRec) (Author, int) {
 type authorMarks struct {
 	window, fresh []uint32
 	generation    uint32
+}
+
+// begin starts an attribution with nobody listed. A stamp equal to the
+// generation reads as listed and unstamped ids hold 0, so a generation that
+// wraps to 0 clears the stamps and starts again at 1.
+func (m *authorMarks) begin() {
+	m.generation++
+	if m.generation == 0 {
+		clear(m.window)
+		clear(m.fresh)
+		m.generation = 1
+	}
 }
 
 // markListed records the author as listed in this generation and reports

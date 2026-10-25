@@ -5,6 +5,7 @@ package plan
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 
@@ -388,11 +389,11 @@ func TestWindowAttributionFoldsEachCommitsAuthorOnce(t *testing.T) {
 	assert.Zero(t, testing.AllocsPerRun(100, func() { cp.authorOf(first) }), "the id is the commit's from now on")
 
 	marks := &cp.authorMarks
-	marks.generation++
+	marks.begin()
 	assert.True(t, marks.markListed(&marks.window, id))
 	assert.False(t, marks.markListed(&marks.window, same))
 	assert.True(t, marks.markListed(&marks.fresh, id), "the fresh list is listed apart")
-	marks.generation++
+	marks.begin()
 	assert.True(t, marks.markListed(&marks.window, id), "a new attribution starts with nobody listed")
 }
 
@@ -494,4 +495,19 @@ func TestComposedAttributionVisitsTheWindowsNotTheUnion(t *testing.T) {
 			},
 		})
 	})
+}
+
+// TestAuthorMarksSurviveAWrappedGeneration: unstamped ids hold 0, so an
+// attribution numbered 0 would find every author it had not met listed
+// already. The generation that wraps clears the stamps instead.
+func TestAuthorMarksSurviveAWrappedGeneration(t *testing.T) {
+	marks := &authorMarks{generation: math.MaxUint32 - 1}
+	marks.begin()
+	require.True(t, marks.markListed(&marks.window, 2))
+	require.True(t, marks.markListed(&marks.fresh, 1))
+	marks.begin()
+	assert.True(t, marks.markListed(&marks.window, 0), "an id never stamped")
+	assert.True(t, marks.markListed(&marks.window, 2), "an id stamped before the wrap")
+	assert.True(t, marks.markListed(&marks.fresh, 1))
+	assert.False(t, marks.markListed(&marks.window, 2))
 }
