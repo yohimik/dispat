@@ -50,7 +50,18 @@ func TestCommitSetWithoutIsTheComplement(t *testing.T) {
 				}
 			}
 		})
-		require.Equalf(t, want, commitSetWithout(n, excluded), "round %d, n %d", round, n)
+		got := commitSetWithout(n, excluded)
+		require.Equalf(t, want.len(), got.len(), "round %d, n %d", round, n)
+		for rank := 0; rank < n; rank++ {
+			require.Equalf(t, want.has(rank), got.has(rank), "round %d, n %d, rank %d", round, n, rank)
+		}
+		for word := 0; word < (n+63)/64; word++ {
+			require.Equalf(t, want.word(word), got.word(word), "round %d, n %d, word %d", round, n, word)
+		}
+		var wantRanks, gotRanks []int
+		want.each(func(rank int) { wantRanks = append(wantRanks, rank) })
+		got.each(func(rank int) { gotRanks = append(gotRanks, rank) })
+		require.Equalf(t, wantRanks, gotRanks, "round %d, n %d", round, n)
 	}
 }
 

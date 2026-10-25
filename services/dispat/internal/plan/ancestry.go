@@ -7,16 +7,21 @@ import (
 	"math/bits"
 )
 
-// commitSet is an immutable set of the union's commits, one bit per rank. A
-// pending window is one of these, shared by every package released at the
-// same boundary: k+1 bitsets of C bits where a map per boundary keyed by
-// commit id was the larger part of a wide plan's memory (CCME §13.11).
+// commitSet is an immutable set of the union's commits. A chain's ancestry
+// and pending windows are intervals; other histories use one bit per rank.
+// A pending window is shared by packages released at the same boundary.
 type commitSet struct {
-	bits []uint64
-	size int
+	bits     []uint64
+	size     int
+	start    int
+	end      int
+	interval bool
 }
 
 func (s *commitSet) has(rank int) bool {
+	if s != nil && s.interval {
+		return rank >= s.start && rank < s.end
+	}
 	return s != nil && rank>>6 < len(s.bits) && s.bits[rank>>6]&(1<<(uint(rank)&63)) != 0
 }
 
@@ -33,6 +38,12 @@ func (s *commitSet) each(yield func(rank int)) {
 	if s == nil {
 		return
 	}
+	if s.interval {
+		for rank := s.start; rank < s.end; rank++ {
+			yield(rank)
+		}
+		return
+	}
 	for w, word := range s.bits {
 		for ; word != 0; word &= word - 1 {
 			yield(w<<6 + bits.TrailingZeros64(word))
@@ -42,16 +53,41 @@ func (s *commitSet) each(yield func(rank int)) {
 
 // word is the set's w-th word, zero past its end.
 func (s *commitSet) word(w int) uint64 {
-	if s == nil || w >= len(s.bits) {
+	if s == nil || w < 0 {
+		return 0
+	}
+	if s.interval {
+		wordStart := w << 6
+		if wordStart >= s.end || wordStart+64 <= s.start {
+			return 0
+		}
+		lo := max(s.start-wordStart, 0)
+		hi := min(s.end-wordStart, 64)
+		belowHi := ^uint64(0)
+		if hi < 64 {
+			belowHi = 1<<uint(hi) - 1
+		}
+		return belowHi & (^uint64(0) << uint(lo))
+	}
+	if w >= len(s.bits) {
 		return 0
 	}
 	return s.bits[w]
 }
 
-// commitSetWithout is every one of n commits but the excluded ones, built a
-// word at a time: a window is the union minus one marker's bits (CCME
-// §13.11), and a test per commit would cost a word's worth of steps for each.
+func commitInterval(start, end int) *commitSet {
+	return &commitSet{start: start, end: end, size: end - start, interval: true}
+}
+
+// commitSetWithout is every one of n commits but the excluded ones. A chain
+// suffix has a prefix complement; a general set is complemented word by word.
 func commitSetWithout(n int, excluded *commitSet) *commitSet {
+	if excluded == nil {
+		return commitInterval(0, n)
+	}
+	if excluded.interval && excluded.end == n {
+		return commitInterval(0, excluded.start)
+	}
 	s := &commitSet{bits: make([]uint64, (n+63)/64)}
 	for w := range s.bits {
 		s.bits[w] = ^excluded.word(w) & wordBelow(n, w)
@@ -81,13 +117,14 @@ func commitSetOf(n int, ranks func(yield func(int))) *commitSet {
 }
 
 // ancestryIndex answers "is a an ancestor-or-self of marker b" among the
-// commits of the union, by the marker pass of CCME §13.11.
+// commits of the union, by a rank interval on a verified chain or the marker
+// pass of CCME §13.11 on a general DAG.
 //
 // Every ancestry question planning asks has that shape, and its b is one of a
 // few commits: a window boundary, a cancel barrier, the commit of a
-// correction. Each marker takes one bit; the union is visited once, children
-// before parents, a marker's own bit is set when it is visited and the visited
-// commit's mask is ORed into each parent. c is an ancestor-or-self of x
+// correction. On a general DAG each marker takes one bit; the union is visited
+// once, children before parents. A marker's bit is set at its commit, then the
+// visited commit's mask is ORed into each parent. c is an ancestor-or-self of x
 // exactly when c is x or some child of c is, so when the pass ends bit x of
 // mask(c) says whether c is in reach(x). One pass costs O((C+A)·ceil(m/64))
 // where a walk per marker costs O(m·(C+A)).
@@ -98,6 +135,7 @@ func commitSetOf(n int, ranks func(yield func(int))) *commitSet {
 type ancestryIndex struct {
 	parents [][]int32 // by rank, parents inside the union only
 	order   []int32   // every rank, children before parents
+	chain   bool      // rank r has parent r+1, except the oldest rank
 
 	// reach is, per marker rank, its ancestors-or-self inside the union.
 	reach map[int32]*commitSet
@@ -145,11 +183,19 @@ func newAncestryIndex(n int, parentsOf func(rank int) []int32) *ancestryIndex {
 	if len(ai.order) != n {
 		return nil
 	}
+	ai.chain = n > 0
+	for rank, parents := range ai.parents {
+		if rank == n-1 {
+			ai.chain = ai.chain && len(parents) == 0
+		} else {
+			ai.chain = ai.chain && len(parents) == 1 && parents[0] == int32(rank+1)
+		}
+	}
 	return ai
 }
 
-// mark computes the ancestor set of every marker not yet indexed, a batch of
-// them per pass over the union.
+// mark computes the ancestor set of every marker not yet indexed. A chain
+// stores intervals directly; a general DAG batches markers per union pass.
 func (ai *ancestryIndex) mark(markers []int32) {
 	var fresh []int32
 	queued := make(map[int32]bool, len(markers))
@@ -160,6 +206,12 @@ func (ai *ancestryIndex) mark(markers []int32) {
 		}
 	}
 	n := len(ai.parents)
+	if ai.chain {
+		for _, marker := range fresh {
+			ai.reach[marker] = commitInterval(int(marker), n)
+		}
+		return
+	}
 	for len(fresh) > 0 && ai.held+n <= ancestryBudget {
 		batch := fresh[:min(len(fresh), ancestryBatch, (ancestryBudget-ai.held)/max(n, 1))]
 		fresh = fresh[len(batch):]
