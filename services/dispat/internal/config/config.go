@@ -2194,18 +2194,7 @@ var aliasSamples = []ccme.Version{
 // The refusal is at load time rather than a warning because what it prevents
 // is silent until a release has already gone wrong.
 func checkAliasTagsAreWriteOnly(pkgs []*model.Package) error {
-	type rendered struct {
-		tag   string
-		owner string
-	}
-	var all []rendered
-	for _, p := range pkgs {
-		for _, alias := range p.Space.AliasTags {
-			for _, v := range aliasSamples {
-				all = append(all, rendered{gitx.AliasFormat(alias.Format).Render(p.Name, v), p.Name})
-			}
-		}
-	}
+	all := renderAliasSamples(pkgs)
 	if len(all) == 0 {
 		return nil
 	}
@@ -2213,28 +2202,23 @@ func checkAliasTagsAreWriteOnly(pkgs []*model.Package) error {
 	// tag is read back per package, so an alias of A that reads as a tag of B
 	// corrupts B. Readable is ParseVersion rather than IsMatch: a name that
 	// only has the shape carries no version and is skipped when the tags are
-	// read, which is what makes the "v1" convention legal.
-	// One compiled format per package rather than one per package per alias
-	// sample: the formats do not change between samples, and a workspace with
-	// many packages and many aliases would otherwise recompile the same
-	// template a quadratic number of times.
-	readers := make([]gitx.VersionReader, len(pkgs))
-	formats := make([]gitx.TagFormat, len(pkgs))
+	// read, which is what makes the "v1" convention legal. The index asks only
+	// the packages whose format could read a tag, so a root-level alias over
+	// many packages is not one parse per package per tag.
+	formats := make([]gitx.PackageTagFormat, len(pkgs))
 	for i, p := range pkgs {
-		formats[i] = gitx.TagFormat(p.Space.TagFormat).WithDefault()
-		readers[i] = formats[i].Reader(p.Name)
+		formats[i] = gitx.PackageTagFormat{Package: p.Name, Format: gitx.TagFormat(p.Space.TagFormat).WithDefault()}
 	}
+	readers := gitx.NewReleaseReaderIndex(formats)
 	for _, a := range all {
-		for i, p := range pkgs {
-			if _, readable := readers[i].ParseVersion(a.tag); !readable {
-				continue
-			}
-			format := formats[i]
-			return fmt.Errorf(
-				"config: package %q: alias tag %q would be read back as a release tag of package %q (tagFormat %q); "+
-					"an alias must never be readable as a release tag, or it becomes that package's history",
-				a.owner, a.tag, p.Name, format)
+		i, readable := readers.FindFirstReader(a.tag)
+		if !readable {
+			continue
 		}
+		return fmt.Errorf(
+			"config: package %q: alias tag %q would be read back as a release tag of package %q (tagFormat %q); "+
+				"an alias must never be readable as a release tag, or it becomes that package's history",
+			a.owner, a.tag, pkgs[i].Name, formats[i].Format)
 	}
 	// And against each other: two packages writing one name — a fixed group
 	// whose members all declare "v{major}" — would force-move it between their
@@ -2253,6 +2237,37 @@ func checkAliasTagsAreWriteOnly(pkgs []*model.Package) error {
 		seen[a.tag] = a.owner
 	}
 	return nil
+}
+
+// renderedAlias is one alias tag rendered for one sample version, with the
+// package that writes it.
+type renderedAlias struct {
+	tag   string
+	owner string
+}
+
+// renderAliasSamples renders every package's aliases for every sample version,
+// in package, alias and sample order, compiling each distinct format once.
+func renderAliasSamples(pkgs []*model.Package) []renderedAlias {
+	count := 0
+	for _, p := range pkgs {
+		count += len(p.Space.AliasTags) * len(aliasSamples)
+	}
+	all := make([]renderedAlias, 0, count)
+	renderers := make(map[string]gitx.AliasRenderer)
+	for _, p := range pkgs {
+		for _, alias := range p.Space.AliasTags {
+			renderer, compiled := renderers[alias.Format]
+			if !compiled {
+				renderer = gitx.AliasFormat(alias.Format).Renderer()
+				renderers[alias.Format] = renderer
+			}
+			for _, v := range aliasSamples {
+				all = append(all, renderedAlias{tag: renderer.Render(p.Name, v), owner: p.Name})
+			}
+		}
+	}
+	return all
 }
 
 // canonicaliseEndpoints rewrites every declared edge's endpoints to the exact

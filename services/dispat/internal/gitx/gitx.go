@@ -317,7 +317,27 @@ func (f AliasFormat) Validate() error {
 
 // Render builds the alias name for a package version.
 func (f AliasFormat) Render(pkg string, v ccme.Version) string {
-	return compileTagFormat(string(f)).render(pkg, v)
+	return f.Renderer().Render(pkg, v)
+}
+
+// Renderer compiles this format once, for a caller rendering it for many
+// packages or versions.
+func (f AliasFormat) Renderer() AliasRenderer {
+	return AliasRenderer{tpl: compileTagFormat(string(f))}
+}
+
+// AliasRenderer is one alias format compiled for rendering. The zero
+// AliasRenderer renders the empty format.
+type AliasRenderer struct {
+	tpl *tagTemplate
+}
+
+// Render builds the alias name for a package version.
+func (r AliasRenderer) Render(pkg string, v ccme.Version) string {
+	if r.tpl == nil {
+		return ""
+	}
+	return r.tpl.render(pkg, v)
 }
 
 // Matcher compiles this format for one package, so that a caller reading a tag
