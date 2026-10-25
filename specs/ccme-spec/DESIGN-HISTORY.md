@@ -232,26 +232,192 @@ the lock back before every publication of a release that delegates nothing as we
 
 ## 2026-10-25: The dispat theorem
 
-Section 13.11 states as one named theorem what its cost discussion had said in passing. Its object is the compiled
-plan: a finite set of tasks with known dependencies, durations and an unrecoverable subset, which a release plan,
-a command sweep or a configured stage compiles to. For a fixed history, configuration and inventory there is one
-release plan, and the fastest execution of it is bounded below by the longer
-of its longest precedence chain and its total work divided by the usable slots; an execution that never idles a usable
-slot while a task is ready stays within Graham's factor of that bound when slots are interchangeable and transfers
-cost nothing. The theorem adds, by contradiction, that only a saga reaches the bound across a failure: an execution that
-records each completed task durably the instant it completes, blocks the consumers of a failure and resumes by
-recomputing from the records. Each other way of executing a release ends in a named anomaly, the double publication,
-the orphan record, the unrecorded publication, the dangling record, the stale plan or destination lag, and each
-repeats paid work, never converges or needs a further release to repair, which is what the tagging rules of 19.1, the
-blocking of 19.3 and the resumption rule of 17.2 already require. The publication-to-record window is named as the
-one no record closes and the reconciliation of 19.4 as the saga's answer to it. A branch that moves mid-release is
-covered the same way: the only execution that keeps the bound joins, recording on the planned commit and merging what
-arrived on top, and a rebase, an overwrite, a refused push, a replan or a rewritten release commit each end in one of
-the anomalies above.
-Section 13.11 then states the dispat algorithm: the distributed, saga-style executor of a compiled plan whose
-information is complete before the first task starts, in six steps with the cost of each, and shows it minimal in
-time in the theorem's sense, including that no engine that learns durations by running tasks can guarantee a better
-factor than Graham's, and minimal in memory in the ledger's sense. The build readiness and distributed placement
-passages now cite the theorem instead of restating it. This is an
-informative addition: no grammar, release plan, diagnostic or conformance obligation changes, and the theorem is
-explicitly not one.
+Section 13.11 now gives a scoped theorem for the failure-free task makespan of a compiled directed acyclic graph.
+A fixed history, configuration, inventory and execution policy determine one semantic plan, but not one schedule
+or implementation. With identical interchangeable slots and zero scheduling and transfer time, the span `Lk` and
+slot work `Wk / s` lower-bound every schedule. A work-conserving list schedule finishes within
+`Wk / s + (1 - 1/s) Lk`: trace the latest-finishing predecessor chain backward from a last-finishing task;
+when no task on that chain runs, all slots are busy. Thus the task makespan is asymptotically optimal under the
+stated model. For disjoint stage pools the analogous chain argument gives `Lk + sum(W_j / m_j)`, including the
+within-three-times build and publication case. The count of pools matters in that factor. Distributed execution
+also has node compatibility, transfers, record-unit reservations and owner lanes; the theorem gives valid
+resource-load lower bounds but no general matching factor for that full model.
+
+For sufficient compatible capacity to run every ready task through completion, the earliest-start recurrence
+`E_i = max(E_j + d_j)` over predecessors has one solution on any finite DAG. A topological induction proves
+both its feasibility and that no task can start earlier in another feasible schedule. Dispatching every ready
+task immediately therefore has a unique earliest-start vector and finishes at span `Lk`, regardless of how
+large the finite task graph is. Other schedules can attain the same makespan by delaying tasks with slack;
+this characterization does not imply a unique executor or remove finite-capacity placement choices.
+
+The scaling claim now uses `h` identical machines, `c` compatible slots each, and measured uniform per-task
+speedup `v`. It gives the lower bound `(1/v) max(Lk, Wk/(h c))` and the matching one-pool list-schedule order
+`Theta((Wk/(h c) + Lk)/v)`. A chain finishes in exactly `Lk/v`, independent of machine and slot count. For `n`
+independent equal-duration tasks of baseline duration `d`, the exact time is `(d/v) ceil(n/(h c))`: slot load
+gives the lower bound and full batches attain it. A bigger machine may add faster tasks, more slots, or both;
+more machines add slots. Faster tasks shorten both cases, while extra slots shorten the independent case.
+The claim assumes that fixed task durations scale uniformly. Stage, record, owner, transfer and compatibility
+limits retain their separate terms.
+
+The explicit task graph occupies `Theta(Tk + Dk)` words if retained as adjacency lists. Its indegree and ready
+state add `O(Tk)` words, and each task and edge can be processed once. That is a conditional graph-input and
+readiness bound. Priority and placement add their own work, and no universal minimum auxiliary-memory bound is
+claimed. A binary heap and a balanced search tree can implement the same deterministic ready priority with the
+same asymptotic time and space bounds, so the proposed uniqueness of the executor is false even when semantic
+output and priority agree. The ratio `Wk / Lk` marks when the aggregate work lower bound reaches the span, not
+when runtime becomes exactly `Lk`; task packing can leave a gap.
+
+Durable recovery is separate from failure-free scheduling. Publication and its record are two writes against
+independent systems, with no general atomicity or undo. A record written first can claim an absent effect.
+If the effect happens first, a crash before the record leaves the same local durable state as a crash before
+the effect. Blind retry can duplicate an effect or meet an immutable-version refusal; blind skip loses an
+unperformed effect. An absence query is also insufficient while an earlier request may still arrive. A retry
+needs that request settled or fenced, or destination deduplication. Section 19.4 permits identity-verified
+adoption; its `E198` applies when an existing version cannot be identified, not to every uncertain outcome.
+
+The informative executor checks crash readiness before dispatching an irreversible external task: stable effect
+identity, a durable record path and a supported way to settle an uncertain attempt. Such a
+capability check cannot prove future availability or arbitrary script behavior. Dispatch without the contract
+can expose a recovery-ambiguity anomaly after a crash: surviving evidence may not distinguish effect from no
+effect. Withholding new work can preserve safety but cannot promise completion or safe takeover before the old
+attempt settles. This adds no diagnostic number and
+claims no implementation already performs the check. Completed effects are retained, records become durable
+before work that requires them or success reporting, and §19.3 applies its blocking and own-cause rules. The
+next plan is recomputed from immutable records under §17.2. These are necessary observable invariants of a
+saga-style forward-recovery class under the stated crash model, not a unique implementation or a minimum
+auxiliary memory footprint. Conditional completion needs fair dispatch, settled attempts, stable inputs and an
+eventual crash-free interval long enough for effects and records to succeed. Arbitrary failures have no elapsed
+time or retry-work bound. This addition is informative; it changes no grammar, plan or conformance obligation.
+
+An idempotent replay result now states separate premises. Fixed source, configuration, task inputs, toolchain and
+environment identities plus deterministic tasks give the same artifact bytes and digest on rebuild; plan
+determinism alone does not constrain clocks, randomness, mutable networks or other scripts. A fixed
+owner/package/version key bound to source and digest is installed once, adopted only after identity verification,
+or rejected on mismatch. The effective immutable-key transition satisfies
+`F_{K,J}(F_{K,J}(x)) = F_{K,J}(x)` when the destination
+offers atomic request deduplication or the previous attempt is settled and its content verified. An in-flight
+request cannot be retried from an absence snapshot alone. The create-only canonical tag likewise accepts a
+matching existing identity and never rewrites a different one. Crash cases before effect, between effect and
+record, and after record therefore replay the same request, verify/adopt it, or skip it, respectively. New valid
+records discharge completed work into a residual plan; they do not leave the whole plan unchanged. Repeated
+builds and safe requests may cost extra work without changing the intended final state, while arbitrarily many
+failures give no total-work bound. Other external effects need their own idempotency contracts.
+
+## 2026-10-25: Configured stages in the compiled plan
+
+Section 13.11 now states the graph a configured stage joins. A package's stages are a function of its configuration and
+of its publish target, fixed at `HEAD`: `version` and `build` always, `publish` unless the target is `none`, the other
+built-in stages where configured, and the user stages its flow names. The login that runs once per space is no stage. A
+stage a plan does not run stays in the graph at duration zero, so whether a configuration is accepted never depends on
+the plan. An entry is a script name or an object whose `before`, `after` and `parallel` constraints each name a stage or
+a list, an empty list stating nothing, and a nearer level replaces the whole entry. A level that states both `version`
+and `propagate` stays refused when the configuration loads. A name of a built-in stage the package lacks is dropped, and
+so is the whole entry of such a stage, so one configuration serves every target. A stage places itself only when a
+`before` or `after` name survives that drop, and otherwise keeps its default place. Any other name that is no stage of
+the package is refused, and so is a name of the stage that carries it.
+
+A default edge runs into a stage that does not place itself, from the stages of the greatest rank below it, with every
+user stage ranked with `tests`. The section gives the consequences as examples: `tests` stays after `build` when `build`
+is constrained, `announce` stays after `publish` when `publish` is constrained, an `announce` placed after `build` gates
+the publication, a stage that states only `parallel` keeps its place, and, where the package states no constraints, user
+stages run beside `tests`. A stage placed after a stage that does not place itself closes a cycle with that stage's
+default edges when it is or reaches one of their sources, so `tests` or a user stage placed after `publish` needs
+`publish` to place itself; the section says so where it advises placing a stage after the publication. The preparing
+stages precede every other stage, and the build precedes the publication. The publication then waits for every stage not
+placed after it, and the record is a task of its own that follows the publication, with the stages after the publication
+following the record. A package whose target is `none` is recorded after every stage but an `announce` that does not
+place itself and what it reaches. A configuration that places such a package's build after that `announce` has it
+recorded before it builds, and a failed build then only reports; it is acyclic only where the package has a stage ranked
+with `tests` and the build reaches none of them. A lemma proves that these edges add no cycle. Section 19.1's bullet on
+target `none` now says that the tag is written once the package's stages before its record have completed. That is a
+patch under section 17.3, which defines one by the plan alone: it changes when a record is written and no plan. It does
+change conformance for an implementation that runs a build or tests for such a package and tagged it after the manifest
+write, since its tag now waits for them.
+
+A stage's failure falls in one of three cases. A stage before the record fails the package, as a failed build does, and
+a resumed run runs it again. A stage of the post-publication set starts only once the record is written, and the
+next release plan does not resume it. A stage unordered with the record only reports, and it is run again only
+when a run stops
+before the record; the publication and record edges leave no stage of an accepted configuration in this case. A
+configured stage is outside the unrecoverable set, since its effect is not declared irreversible, so a stage whose
+effect cannot be repeated belongs in the publish stage or in the post-publication set. Within a package a stage relies
+only on the exports of the stages that reach it, and reading any other export is a race the plan does not order. Between
+packages every stage of a consumer other than `sign` and `version` counts as its build and waits for what the relation
+of section 19.2a names, and a provider's record precedes the publication of every consumer that reaches it over
+`publish.orderKinds`. Blocking stays section 19.3's: a consumer with no cause of its own is blocked, one with a cause of
+its own proceeds, and a stage that reads a build that never happened fails at that stage for want of its input.
+
+A configuration is realisable when every package meets three conditions, constraints that name stages of the package
+other than the stage that carries them, an acyclic stage graph and no `parallel` pair the package graph orders, and the
+workspace meets a fourth: the graph of packages over the edge kinds of section 13.1, `propagation.kinds` and
+`publish.orderKinds`, and the build dependencies that are not `none` is acyclic. The second and third are necessary,
+given the first, for an order that realises the configuration, the first and fourth are premises, and with all four the
+closure of each package graph realises its configuration and the compiled plan is acyclic. The fourth refuses a cycle
+through a build dependency whose kind is outside the edge kinds of section 13.1, which a task graph can survive; section
+19.2a's bullet on cycles now says so. A cycle over the edge kinds of section 13.1 alone is already `E200`, so that is
+the only cycle the fourth condition meets. Its known cost is the test fixture of section 13.1: a fixture that depends at
+runtime on the library whose tests read the fixture's build is accepted by section 13.1 and refused by an implementation
+that offers configured stages, even where no flow is configured. A `parallel` constraint between `publish` and a stage
+not placed after it is refused, since the publication waits for that stage, and one between `publish` and a stage placed
+after it is refused too, since the publication reaches that stage. A configuration that is not realisable is refused
+before any effect, whether or not the package is planned, and alike for a release, read-only planning and a command
+sweep. Step 2 of the dispat algorithm compiles the package graphs with their cross-package edges once it finds the
+configuration realisable, and the compiled plan's unrecoverable set holds the publications and the records.
+
+The compiled plan's task list names `syncLock`. The revised theorem distinguishes the one-pool idealization
+from the distributed resource model. Its aggregate slot lower bound uses the summed node capacity, or the
+smaller sum of run-wide stage limits when every positive-duration task draws on one such limit. Each stage's own
+work over its slots is another lower bound. Where records use a separate capacity and owner publications and
+records are serialized, record work and each owner's work also bound makespan. The specified protocol reserves
+recording capacity for a whole publication-and-record unit, so its full duration over that capacity gives a
+stronger lower bound. These overlapping constraints have no general upper factor in the theorem. Its stage
+budget upper bound assumes disjoint pools, no other binding capacities and zero transfer and scheduler time.
+The build readiness case has two such pools. The scaling threshold applies to the aggregate slot lower-bound
+term only; stage, record and owner terms may dominate, and actual task packing may leave a gap.
+
+An implementation that gives records a capacity of their own and serializes an owner's publications and records takes a
+record unit's recording capacity, then its owner lanes, in the stable order of section 27.7 where there are several, and
+only then offers its publication for a slot; a record unit is a publication with its record, or a record alone. Where
+record units acquire capacity and owner lanes in one order, no wait cycle forms. Two corollaries follow. Among
+configurations with the
+same stages, scripts, durations, cross-package edges and stages after the publication, an edge no data dependency needs
+never shortens the fastest execution and can lengthen it. The fastest states as constraints the transitive reduction, on
+the package's stages, of the closure of the data dependencies, required stage edges, publication and record edges,
+and, without a
+publish stage, the order its `announce` puts on the stages after it. Once summed node capacity reaches slot work
+over span, more nodes cannot lower that aggregate term. Configured parallelism can lower the span term only when
+removing an actual chain constraint, and can lower the full lower bound only if no unchanged resource term remains
+as large. The cost table gains a row for checking a configured order and the ledger a line for its
+adjacency.
+
+Section 19.1's clarification aside, the normative passages are in sections 19.2a and 28.5. Section 19.2a requires an
+implementation that lets a configuration add or order stages to keep the publication order and the readiness relation,
+to treat a failed stage before the record as a failure of the package, and to refuse a configuration that is not
+realisable before any effect. The refusal emits one diagnostic for each carrying stage and stated name against the first
+condition, one for each package naming every stage on a cycle, one for each `parallel` pair the package graph relates,
+counted once whichever member states it, and one for the workspace naming the packages on a cycle, under the
+`execution-configuration` identifier of section 28.9. The diagnostics of the first three conditions are ordered by
+package name first, as section 17.2 requires, and the workspace's comes after them. No section 16 number is allocated,
+since the categories of section 28.9 are outcome classes and not allocations of new numbers, and `W194` keeps its
+condition. Section 28.5 makes the command task of every stage, a user stage and `announce` included, take node capacity
+and a stage budget where one applies, as a build does, with the implementation documenting which budget a stage that
+section 28.2 does not name draws on. It makes a user stage whose exports a later stage reads a producer of an admitted
+output set, which can be empty. It states a stage's inputs: from its own package the admitted sets of the stages that
+reach it in the package graph, an output set reaching no stage its producer does not reach, and from another package the
+provider's build output under `build`, the published artefact under `publish` and nothing under `none`. No grammar,
+release plan or diagnostic number changes, and outside the section 19.1 bullet nothing changes for an implementation
+that does not offer configured stages. For an implementation that runs neither builds nor tests, those are stages of
+duration zero, so its tag still follows the manifest write.
+
+The section states the model the dispat engine is to implement; nothing of it is released. What runs today is this. A
+`flow` entry is a list of script names, and an unknown `flow` key is refused. A package's stages run in the fixed chain
+`sign`, `version`, `syncLock`, `build`, `tests` and `publish`, each where present, and `build` and `publish` run for
+every releasing package. Provider waits attach to a package's first task, so a consumer whose first task is `sign` or
+`version` waits longer than section 19.2a requires. The engine has no publish target of its own: a package with nothing
+to publish still runs a publish task, which runs no publish script of its own but passes the space's login gate where a
+login is configured. Where tags are written as each package publishes, the package is recorded in that task's tail after
+its build and tests, and `announce` runs inside the publish task after the record, so a consumer waits through it. With
+a release commit or a composed workspace the tail writes the release recorders and runs `announce`, and the tag is
+written when the run finalizes, after every package. A provider that failed at any stage, or was skipped, blocks a
+consumer with no cause of its own, and blocks one with a cause of its own too where the provider's space makes its
+relation blocking.

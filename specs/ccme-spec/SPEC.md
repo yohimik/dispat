@@ -2989,7 +2989,9 @@ identity in every index and cache key.
 
 For the execution profile of §28, let `Tk` be the run's tasks and `Dk` their precedence edges, `Wn` the worker nodes,
 `Po` the packages whose outputs some other task consumes, and `Lr` the coordination refs alive in one transport
-repository.
+repository. For configured stages, `S_p` is one package's stages, standing in a cost for their number, and `C_p` the
+stage names its constraints state, a list counting each name it holds (*Configured stages in the compiled plan*, below).
+A `sum` over them runs over the packages `p`, as `sum(Hq + Aq)` runs over the repositories `q`.
 
 | Phase                      | Literal transcription | Achievable            | Note                                        |
 |----------------------------|-----------------------|-----------------------|---------------------------------------------|
@@ -3008,7 +3010,8 @@ repository.
 | Versions/plan (§13.9–10)   | repeated member/record scans | `O(P + I + Z + Oout)` | Consume already-built aggregates/provenance; scan each disjoint version group once |
 | Publish order (§19.2)      | `O(P² + E)`           | `O(E + P log P)`      | Scanning the ready set for the least name; a comparison heap instead |
 | Blocking closure (§19.3)   | **`O(P · (P + E))`**  | `O(P + E)` per run    | A walk per planned package; one multi-source reverse traversal instead. The cause test of §19.3 reads each planned package's admitted causes once, `O(P + I)` |
-| Build readiness (§19.2a)   | `O(P · (P + E))`      | `O(P + E)`            | A search per building pair through the packages between them; a pass-through node per package that does not build, or one memoised visit per package, instead. At most two task edges per dependency edge survive transitive reduction |
+| Build readiness (§19.2a)   | `O(P · (P + E))`      | `O(P + E)`            | Retain build and publish relay nodes per nonbuilding package and bounded mode-labeled edges per package edge. Eliminating relays can create `Theta(P²)` direct building-pair edges even when `E = O(P)` |
+| Stage order (configured)   | `O(sum(S_p · (S_p + C_p)))` | `O(sum((S_p + C_p) · ceil(S_p / wordSize)))` | A walk from every stage to find cycles and related `parallel` pairs; one depth-first search for the strongly connected components instead, which finds every stage on a cycle, then one reach bitset per task of the package graph, the union of its successors' sets in reverse topological order, and one bit test per `parallel` pair. Default, required, publication and record edges number `O(S_p)`, and `A_p` takes one traversal. A package typically has a few stages, and then each set is one word. Condition 4 is one such search over the packages, `O(P + E)` per workspace |
 | Polyrepository snapshots (§27) | repeated control scans | `O(G + sum(Hq + Aq))` input walk | Index control gitlinks once; walk each source snapshot once |
 | Polyrepository windows (§27) | `O(P · sum(Hq + Aq))` | `O(sum((Hq + Aq) · bw(mq)) + Iw)` | One marker pass per repository; `O(sum(Kq · (Hq + Aq)) + Iw)` with a walk per boundary |
 | Publication input closure (§27.2) | `O(P · (P + E + V))` | `O((P + E + V) · ceil(Q / wordSize))` | Condense the augmented graph, then one bitset union per edge |
@@ -3016,7 +3019,7 @@ repository.
 | Link settlement (§27.11)   | one commit per route hop | one commit per recording repository | Merge a package's routes into one tree: at most `Q - 1` commits, 2 in a star |
 | Record comparison (§13.2)  | `O(T)` per repository | `O(T)` per repository | One inventory read under the lock; one ancestry question per record the input lacks |
 | Task graph and readiness (§28.3) | `O(Tk · (Tk + Dk))` | `O(Tk + Dk)` | Rescanning every task after each completion; indegree counters decrement each successor once |
-| Placement (§28.2)          | `O(Tk · Wn)`          | `O(Tk · Wn)`          | `Wn` is small; a free list per compatibility class removes the scan and is rarely worth its bookkeeping |
+| Placement (§28.2)          | `O(Tk · Wn)`          | `O(Tk · Wn)`          | The node scan is charged for every task; indexed compatible free slots can trade additional state for fewer probes |
 | Output transfer (§28.5)    | up to `Tk · Po` transfers | at most `Po · Wn` transfers | One per distinct `(output set, node)`, not one per consumer task; verified bytes are not fetched again |
 | Coordination polling (§28.4) | `O(Lr)` refs per tick | refs addressed to the polling node per tick | The branch-name prefix routes; one fetch per changed tip; refs of dead runs tax every tick until removed |
 
@@ -3262,6 +3265,7 @@ inputs retained, a conservative storage ledger is:
 | Heap publish order / blocking membership | `O(P)` auxiliary | Shared graph excluded; all-cause/path diagnostics add output-sized storage |
 | Publication input closure bitsets | `O(P · ceil(Q / wordSize))` | Shared SCC sets may reduce actual storage; expanded lists cost up to `O(P · Q)` |
 | Link evidence cache | number of retained pins plus keys | `B` counts trees, not their entries or bytes; dense hub revisions can be large |
+| Configured stage graphs | `O(sum(S_p · ceil(S_p / wordSize) + C_p))` | One adjacency and one reach bitset per stage, freed after planning; the compiled task graph keeps its own edges |
 
 No implementation should add every alternative in this ledger by default. Account for peak simultaneously live
 allocations, construction scratch space, immutable input buffers, retained output and cache keys. Batching marker
@@ -3275,160 +3279,551 @@ phase-specific statements. Neither `Ω(Z)` output work nor a dense `H × m` or `
 instance requires that representation or that the complete planner is jointly time- and space-optimal. Correction,
 reachability, scope and cache choices retain input-dependent tradeoffs.
 
-**The dispat theorem (the one fastest compiled plan, reached only by a saga).** The theorem is about a *compiled
-plan*: a finite set of tasks whose dependencies are known, each task `i` with a duration `d_i`, an acyclic precedence
-relation over them, and a subset `R` of tasks with potential unrecovery, whose effect no later action restores once
-it has taken place. A release plan of §13 compiles to one, and for a fixed history, configuration and inventory to
-exactly one (§17.2): every package's stages in their order, the sign, version, build, tests and publication tasks and
-the records after them, with the precedence edges of §19.2, §19.2a and §28.5, and with its publications, records and
-withdrawals in `R`. A command sweep (§28.10) compiles to one whose `R` is empty unless a command publishes, and a
-stage a configuration defines joins the graph like a built-in one. Everything below is stated for the compiled plan,
-so the fastest release is a question about how that one plan is executed. Write `Wk = sum(d_i)` for the plan's total
-work, `Lk` for the duration of its longest precedence chain, and `s` for the task slots usable at once, the lesser of
-the summed node capacities and the applicable run-wide stage limits. Then:
+**The dispat theorem (bounds for a compiled plan).** A compiled plan is a finite directed acyclic graph of tasks.
+There is no fixed upper limit on its task, edge or worker counts; `Tk`, `Dk` and `Wn` remain input parameters,
+and constants in asymptotic claims do not depend on them.
+Its vertices and precedence edges are fixed before execution; task durations become known when the tasks run. For a
+fixed history, configuration and inventory, §17.2 determines one semantic release plan and hence one task graph under
+the execution policy: package stages, sign, version, syncLock, build, tests, publication and record tasks, and the
+edges of §19.2, §19.2a and §28.5. Let `R` name its publications, records and withdrawals whose effects require
+durable recovery evidence. This does not identify a unique schedule, representation or executor. A command sweep
+(§28.10) also compiles to a graph. Write `Wk = sum(d_i)` for its task work and `Lk` for the greatest sum of
+nonnegative durations on a precedence chain. A modeled record task's duration is included in `d_i`; extra
+protocol latency not represented by a task is outside the graph. The following bounds concern failure-free task
+makespan. Graph construction, scheduler decisions, transfers and task payload memory have their own costs.
 
-1. **Lower bound.** No execution of the plan finishes before `max(Lk, Wk / s)`. The tasks of one chain run one after
-   another, so no execution is shorter than the longest chain, and `s` slots complete at most `s` units of work in a
-   unit of time, so none is shorter than `Wk / s`. The bound holds for every engine, dispat included, whatever it
-   places where.
-2. **Greedy placement is near the bound.** An execution that never leaves a usable slot idle while a compatible task is
-   ready finishes within `Wk / s + (1 - 1/s) · Lk`, which is at most `(2 - 1/s)` times the lower bound, when slots are
-   interchangeable and transfers cost nothing. At every instant such an execution either runs a task of one fixed
-   longest chain or keeps every slot busy, so its idle slot-time is at most `(s - 1) · Lk`; this is Graham's bound for
-   list scheduling under precedence constraints. Under separate stage budgets the same argument gives the looser bound
-   stated under *Build readiness* below.
-3. **Where the bound binds.** On a chain `Lk = Wk`, and no number of nodes helps. Beyond `s = Wk / Lk` the chain and
-   not the pool is the limit, and more slots only close the gap between a greedy execution and `Lk`, which is below a
-   factor of two. Where one owner's publications are serialized (§27.2, §28.6), `sum(p_i)` over them is a floor as
-   well.
-4. **Only a saga reaches it.** A saga here is an execution with three properties: every completed task's effect is
-   recorded durably in the shared history the instant it completes, never before and never later; a task whose
-   provider failed is blocked rather than attempted; and a resumed run recomputes the remaining work from the records
-   and runs that alone. §19.1, §19.3 and §17.2 require exactly these. The records are mandatory for `R` and
-   economical for the rest: a recoverable task that is lost is run again at the cost of its own duration, which
-   breaks the bound by that much and no more, while a task in `R` without a record is the first anomaly below.
-   Across a failure the bound is on the work the plan still owes: a release keeps it when no completed task is paid
-   for a second time over all its attempts and the resumed attempt obeys clause 1 on the remaining work. Suppose an
-   execution keeps the bound and is not a saga. Then it lacks one of the three properties, and each way of lacking
-   one ends in a specific anomaly:
-   * *No record kept.* Progress lives in the run's memory and a resumed run starts the plan over. Every finished task
-     is paid again, so the work exceeds the bound by what the failed attempt had finished, and the second publication
-     of a version already published is refused or duplicated, because a publication cannot be taken back (§19.1,
-     §26): the double publication.
-   * *Record before effect.* The record is written ahead of the task, a tag before the publication. A failure between
-     them leaves a record of a task that did not happen; the resumed run trusts it and never does the task, and §13.3
-     reads the version as released: the orphan record, a version nothing can install and no run will publish, which
-     §19.1 calls unrecoverable. The release never converges, so it keeps no bound.
-   * *Record after effect, deferred.* Records are batched to the end of the run. A failure between a task and its
-     record leaves a publication no record names; the resumed run does the task again and meets the double
-     publication: the unrecorded publication, which is why §19.1 forbids batching.
-   * *Record not durable.* The record is kept in the local clone, is never pushed, or is moved or rewritten by a
-     rebase. Another machine, or the same one after the rewrite, sees no record and the next plan owes every finished
-     task again: the dangling record, with the double publication behind it, which is why §19.1 forbids moving or
-     deleting a release tag.
-   * *No blocking.* A consumer of a failed provider is attempted anyway. It was prepared against a version that never
-     published, so either §19.3 reconciles and rebuilds it, which is the task paid twice, or it ships a manifest that
-     names a version nothing holds, a state ancestry cannot order and no later run can repair (§13.7b).
-   * *Resume by replay.* The old plan is run again as written instead of being recomputed from the records. It
-     predates the outcome it resumes from: it attempts tasks the records show complete, the double publication, or
-     carries a consumer past a provider that did not ship, the state above: the stale plan.
-   * *Resume by querying the destination.* The remaining work is read from the registry rather than from the records.
-     A destination can answer that an upload succeeded before the version can be read back, can hold a version no
-     plan recorded, and may offer no query at all. The read fails for a version that shipped and the task is paid
-     again, or passes for one that did not and the task is never done: the double publication and the orphan record
-     once more, and where no query exists the variant does not exist.
-   * *Undo instead of resume.* The release takes its finished tasks back and starts over. A publication to an
-     independent registry cannot be taken back, and a withdrawal is a further record and a further effect, not an
-     undo (§26), so this variant is either a saga with compensations or the first case.
+1. **Lower bounds.** Suppose every positive-duration task consumes one of `s` identical slots throughout its
+   execution, where `s` is a positive integer. Every schedule has makespan at least
+   `B = max(Lk, Wk / s)`: a chain is sequential, and `s` slots complete at most `s` units of work per unit
+   time. If records instead use a separate positive integer capacity `m_rec`, take no node slot, and hold an
+   owner's lane through each publication and record (§28.2, §28.6), let `Wslot` be slot-task work, `Wrec` record
+   work, and `p_i`, `r_i` the publication and record durations for one owner's packages. When these are the only
+   positive-duration task types, every schedule has makespan at least
+   `Bcap = max(Lk, Wslot / s, Wrec / m_rec, max over owners of sum(p_i + r_i))`.
+   Each capacity and each owner lane supplies a separate work lower bound. If each record unit reserves recording
+   capacity before its publication and holds it through its record, as *Records and capacity* below specifies,
+   `Wunit / m_rec` strengthens the bound, where `Wunit = sum(p_i + r_i)` over all record units, taking `p_i = 0`
+   for a unit with no publication. This reservation bound follows from the time those units hold that capacity.
+   `Wk / s` is not a bound when records consume time without consuming a slot. A run-wide stage limit can also
+   supply `W_j / m_j` for work `W_j` charged to its `m_j` slots. Summed node capacity `n` gives `s = n` as a valid
+   aggregate slot divisor. If every positive-duration slot task draws on exactly one run-wide stage limit,
+   `s = min(n, sum(m_j))` is also valid. Each resource `r` with positive integer capacity `m_r` supplies the
+   lower bound `occupied_work(r) / m_r`. Stage, node, recording and owner resources overlap in the distributed
+   executor, so their maximum
+   is a lower bound, not a matching schedule theorem. Work confined to a compatible subset of nodes, divided by
+   that subset's capacity, can strengthen the aggregate node bound.
+2. **One-pool list scheduling.** Assume `s` is a positive integer, every positive-duration task occupies exactly
+   one of its interchangeable slots throughout, tasks are nonpreemptive, transfer and scheduling take no time,
+   no owner lane or other capacity binds, and the schedule is work-conserving: a slot is idle only when no ready
+   task can use it. Then
+   `T <= Wk / s + (1 - 1/s) Lk <= (2 - 1/s) B`.
+   Choose a task that finishes last. Trace backward by repeatedly choosing its latest-finishing immediate
+   predecessor, stopping at a source. This schedule-dependent chain has duration at most `Lk`. Whenever none of
+   its tasks is running before the last task finishes, its next unstarted task is ready: every predecessor of that
+   task has finished no later than the chosen predecessor. Work conservation fills all `s` slots then. During
+   chain execution at most `s - 1` slots are idle, so total idle slot-time is at most `(s - 1) Lk`. Since
+   `sT = Wk + idle slot-time`, the inequality follows. This proves asymptotically optimal task makespan,
+   `T = Theta(Wk / s + Lk)` for positive total work, under these premises. With all durations zero, task makespan
+   is zero while graph processing still costs `Theta(Tk + Dk)` in the explicit scan model.
+3. **Disjoint stage budgets.** Suppose every positive-duration task draws on exactly one of `q` disjoint,
+   interchangeable stage pools, pool `j` has a positive integer `m_j` of slots, these are the only binding
+   capacities, and transfers, scheduling and unmodeled record overhead take no time. A schedule that never idles
+   a pool slot while a task for that pool is ready satisfies
+   `T <= Lk + sum_j(W_j / m_j) <= (q + 1) max(Lk, max_j(W_j / m_j))`.
+   Use the same last-finishing predecessor chain. At a time when no chain task runs, the next chain task is ready,
+   so its pool is full. Charge that interval to the full pool. The total time chargeable to pool `j` is at most
+   `W_j / m_j`; chain-running time is at most `Lk`. For one build and one publication pool this gives the
+   within-three-times bound in *Build readiness* below. This is a constant factor only when `q` is fixed.
+   Placement restrictions, overlapping capacities, owner lanes, separate recording capacity and transfer time
+   fall outside this proof. `Bcap` remains a lower bound where its stated capacity model applies. No factor
+   against it follows here.
+4. **Vertical and horizontal scaling.** Fix the graph and baseline durations. Let positive integers `h` and `c`
+   count identical machines and compatible task slots per machine, so `s = h c`. Let a faster machine provide a
+   measured uniform per-task speed factor `v >= 1`, giving every task duration `d_i / v`. Under clause 2's
+   one-pool premises,
+   `Wk(v) = Wk / v`, `Lk(v) = Lk / v`, and every schedule has task makespan at least
+   `B(h, c, v) = (1 / v) max(Lk, Wk / (h c))`.
+   The list schedule finishes within
+   `(1 / v) [Wk / (h c) + (1 - 1 / (h c)) Lk]`, so its task makespan is
+   `Theta((Wk / (h c) + Lk) / v)` for positive work. The constants do not depend on `h`, `c` or task count.
+   A bigger machine (vertical scaling) can increase `c`, `v`, or both. Adding machines (horizontal scaling)
+   increases `h`. Extra cores do not shorten a fixed chain unless its tasks also run faster. An upgrade that
+   does not accelerate a task, such as an I/O-bound task, supplies no such `v` for it.
 
-   Every variant repeats paid work, never converges, or reaches a state only a further release can repair, so none
-   keeps the bound, against the assumption. An execution that keeps the bound is therefore a saga, and what it costs
-   is the records themselves, one per completed task. One window no record closes: a publication and its record are
-   two writes against two systems, and a run can stop between them. §19.4 is the saga's answer to it. A resumed run
-   that meets a version the destination already holds verifies the artefact's identity and adopts it with its record
-   (`W196`), and refuses it when identity cannot be shown (`E198`); without that rule the window is the double
-   publication, and every later run fails on it.
-5. **A branch that moves mid-release is joined, never rewritten.** The release lock (§13.2, §28.3) excludes a second
-   release, not a push by someone who is not releasing, so a commit can land on the branch after the plan was fixed
-   at `HEAD` and before the run's records reach the shared history. That commit is outside `Wk`: the plan is fixed
-   (§17.2), so the commit belongs to the next plan. The join records the completed tasks on the commit they were
-   planned at and merges what arrived on top of that commit, so the records stay where they are and the arrived
-   commits sit outside their ancestry for the next plan to read. Suppose an execution keeps the bound and does
-   anything else. Each other variant ends in an anomaly already named:
-   * *Rebase the release commit onto what arrived.* The records name a commit the branch no longer descends from:
-     the dangling record, and the next plan owes every finished task again.
-   * *Overwrite what arrived.* A forced push rewrites the shared history, and the arrived work is gone from the
-     branch and is paid again by its author: work outside the plan, paid twice.
-   * *Refuse the push.* The packages are already published, so their records never reach the shared history: the
-     unrecorded publication, and the double publication on retry.
-   * *Replan over what arrived.* The fixed `HEAD` of §17.2 is abandoned, finished tasks are repeated, and the plan is
-     no longer the one plan: the stale plan, from the other side.
-   * *Resolve a conflicting edit by rewriting the release commit.* The tagged tree is no longer the one that was
-     published, so the record lies about its own content: the orphan record by another route. A conflict is answered
-     inside the join, keeping the release's side and setting the arrived side aside under a record of its own, which
-     rewrites nothing.
+   On a chain `Wk = Lk`, every task waits for its predecessor. The chain lower bound and immediate dispatch
+   both give exact task makespan `Lk / v`, independent of `h` and `c`: only faster execution of its tasks helps.
+   For `n` independent equal-duration tasks of baseline duration `d > 0`, each slot can finish at most
+   `floor(Tv / d)` tasks by time `T`. Hence `T >= (d / v) ceil(n / (h c))`, attained by filling all slots in
+   successive batches. These tasks benefit from both faster tasks and more machines or slots, until packing
+   and the one-task span limit remain. No fixed upper bound on `n` is assumed.
 
-   The join repeats while the window stays open, a bounded number of times, and stops only where the remote already
-   carries a record this run is about to write, because moving a released record is the dangling record again. An
-   execution that keeps the bound across a moving branch therefore joins, which the resumption rule of §17.2 and the
-   immutability of records in §19.1 already require.
+   For positive `Lk`, `Wk / Lk` is the slot count at which the work term of `B(h, c, v)` ceases to exceed span;
+   it is a lower-bound threshold, not an exact runtime cap. More slots can still shorten a schedule that misses
+   the bound. Under separate stage, recording and owner capacities, their load terms can dominate. A configured
+   order shortens span only by removing a constraint on an actual longest chain; unordered stages need not be
+   on such a chain or able to overlap through their surrounding dependencies.
+5. **Recovery is a separate property.** The failure-free inequalities do not bound a run across failures,
+   retries, outages or reconciliation. §19.1 and §19.3 require durable publication records and failure blocking;
+   §17.2 recomputes a later plan from the records. A publication and its record are separate writes, so there
+   is no general guarantee that the effect and record are atomic across those systems. Before a dependent that
+   waits for publication or recording proceeds, or success is reported, the record is made durable. Section 19.4
+   reconciles a published version whose record was lost in the intervening crash window when identity can be
+   verified. Withdrawal uses the separate records
+   and recovery rules of §26; no time bound for it follows here. A moved branch is joined while the
+   release record stays attached to its original commit (§19.1, §27.7). These rules preserve the specified
+   release semantics, but the work-span proof neither makes a saga the unique executor nor proves a bound on
+   recovery time or durable history size.
 
-**The dispat algorithm.** The engine the theorem describes is a distributed, saga-style executor of a compiled plan
-whose information is complete before the first task starts: every task, every dependency and the unrecoverable set
-`R` are known in advance, and only durations are learned by running. It runs in six steps.
+**Forward-recovery necessity (the saga class).** Here a saga-style protocol means one that preserves completed
+irreversible effects, obtains durable evidence of their verified outcomes, gates work on the effects it actually
+requires, and derives later work from that evidence. Assume a publication can commit at an independent destination
+and cannot be undone, its canonical CCME release record is a separate immutable write, no transaction atomically
+commits both systems, and a crash erases volatile run state. Correct recovery never records an absent publication
+as completed and never blindly repeats a non-idempotent publication. Conditional progress is possible when
+destinations eventually respond, required tasks eventually succeed, and uncertain outcomes can be verified or
+safely deduplicated. Under these assumptions, every correct CCME recovery has the saga-class invariants:
 
-1. **Fix the inputs.** Take the release locks (§13.2, §28.3), then fix the history at `HEAD`, the configuration, the
-   record inventory and the receipts. Nothing that follows reads anything else, which is what makes the plan one
-   (§17.2).
-2. **Compile the plan.** Compute the release plan of §13 at the costs of the table above and the ledger below, then
-   its task graph: each package's stages in order, the edges of §19.2, §19.2a and §28.5, indegree counters per task.
-   The graph costs `O(Tk + Dk)` to build and to drain (the task graph row), and no task is added after this step.
-3. **Execute work-conservingly.** A task is ready when its indegree is zero. A ready task takes the first usable slot
-   of its stage budget on a node its placement admits, with the output sets it needs installed from the admitted sets
-   (one transfer per distinct set and node, the output transfer row). Among ready tasks the order is a deterministic
-   function of the plan, never of timing, so the events and the log are reproducible; no usable slot stays idle while
-   a compatible task is ready. Placement is `O(Tk · Wn)` in all, and the state held is the graph, the counters, one
-   lease per in-flight task and the admitted sets a consumer still needs.
-4. **Record as a saga.** When a task in `R` completes, its effect is recorded durably in the shared history before any
-   dependent proceeds and before the run reports it (§19.1, §28.6); a task that fails blocks every dependent that has
-   no cause of its own (§19.3); nothing a completed task did is ever undone. One record per completed task in `R`.
-5. **Resume by recomputation.** A later run repeats steps 1 and 2 against the records and finds the plan minus its
-   completed tasks (§17.2), adopts a version whose record was lost after verifying its identity (§19.4), and runs
-   step 3 on what remains.
-6. **Join a moved branch.** A commit that landed after step 1 is merged on top of the recorded commit, never the other
-   way round (clause 5 of the theorem).
+For an irreversible external task, call the modeled admission *crash-ready* when it has a stable request or
+artefact identity, a durable path for the canonical record, and a declared way to settle an uncertain attempt.
+That way can use destination-side deduplication or an atomic receipt, or authoritative identity verification
+after the prior attempt is settled or fenced (§28.6). Before dispatch, the modeled executor checks these
+capabilities. The check cannot prove future destination availability or the semantics of an arbitrary script.
+Starting a task without such a contract admits a **recovery-ambiguity anomaly** if a crash occurs around
+the effect and record writes: a committed
+effect and an uncommitted effect can leave identical surviving local evidence, with no supported safe path to
+retry, adopt or finish. The executor can withhold new effects and report uncertainty, but cannot claim
+conditional progress or safe takeover while a prior attempt remains unresolved.
+This is an informative anomaly description, not a new diagnostic number or a claim that an engine already
+performs this check.
 
-The algorithm is minimal in time in two senses. No execution of the plan beats `max(Lk, Wk / s)` (clause 1), and
-step 3 finishes within `(2 - 1/s)` of it (clause 2) without knowing any duration in advance; no algorithm that
-learns durations by running tasks can guarantee a better factor, because for `s(s - 1)` tasks of length 1 and one of
-length `s`, all independent, an adversary that fixes each duration only when the task starts can make the long task
-the last one started, for `2s - 1` against an optimum of `s`. Under the conditions of clause 3 the bound is met
-exactly. It is minimal in memory in the sense of the ledger: the compile phase retains what the ledger lists and
-nothing per package that an index already answers, the execution phase retains the task graph and its counters,
-one lease per in-flight task, and an output set only while a consumer that needs it has not run, and the records
-are the one per completed unrecoverable task that clause 4 proves necessary. An engine that retained less would
-re-derive a dependency, re-transfer an output or lose a record, each of which clause 4 names as an anomaly.
+* A record written before publication can survive a crash without its effect. The next plan would treat an
+  unpublished version as released (§13.3), so the canonical record follows a verified effect (§19.1).
+* A publication followed by its record has a crash window. After a crash, two histories can have the same local
+  durable state and no tag: in one the destination accepted the version, and in the other it did not. Blind
+  retry can duplicate the first effect or be refused by an immutable destination; blind skip loses the second.
+  A destination receipt or deduplication that is atomic with its effect, or authoritative identity verification
+  and adoption (§19.4), resolves the uncertainty. An absence response alone does not authorize retry while an
+  older request may still arrive: that attempt first needs settlement or fencing, or destination deduplication
+  (§28.6). If a registry already holds the version but identity cannot be established, §19.4 raises `E198`.
+  An unverified existence check cannot justify adoption, since the existing artefact may be foreign.
+* A completed irreversible publication remains part of the next state. Deleting its record or treating a
+  withdrawal as an undo would contradict that state; §26 treats withdrawal as a separate effect. The durable
+  record is made before work that requires that publication proceeds or the run reports success. A durable
+  record write is evidence of itself, so no recursive record per record task is needed.
+* On provider failure, §19.3 blocks consumers with no independent cause and the consumers whose every cause
+  is still owed by failed or blocked providers. A consumer with its own cause can proceed after reconciling to
+  what actually published. A later invocation recomputes from immutable records (§17.2), so it neither blindly
+  replays completed effects nor trusts an old plan after the durable state changes.
 
-Two things are outside the algorithm by its premise. A task discovered during execution, such as a dependency a
-build reveals, is not in the compiled plan: the engine does not learn it and the theorem does not bound it; it is
-the next plan's. And a destination whose irreversibility is not declared cannot be placed in `R`, so its record is
-not known to be necessary; declaring the publish target is what puts a task there.
+The first bullet is a false-record counterexample; the second uses indistinguishable post-crash histories.
+The latter two follow from irreversibility and the specified dependency semantics. Any implementation that
+uses destination-side deduplication, receipts,
+an outbox, or a different scheduler can satisfy the same observable invariants. Thus saga-style forward recovery
+is necessary as a semantic class under these assumptions, while no particular saga algorithm is unique. Given
+a fixed finite graph, stable inputs, fair dispatch and retry, an eventual crash-free interval long enough for
+effect and record writes to succeed, and settlement of every uncertain attempt, topological induction lets the
+remaining tasks finish and be recorded. Section 13.7c states the extra retry conditions for release convergence.
+Arbitrary crashes or unverifiable outcomes supply no completion-time or retry-work bound, and this argument
+establishes no minimum auxiliary memory.
 
-The theorem bounds the fastest execution the one compiled plan admits; it is not a conformance obligation (§17.2),
-and it says nothing about the time taken to compile the plan, which the table above accounts for. Its premises are what an
-implementation has to watch: nodes differ in platform and speed, an output transfer delays the consumer it feeds, and
-under finite budgets a weaker constraint or an added slot can lengthen a greedy execution although never the best one.
-The two passages below work the theorem out for the build readiness relation and for distributed placement.
+**Idempotent replay under stable inputs.** Fix the source revision, resolved configuration, toolchain, environment,
+task inputs and their identities. Suppose each build or stage is a deterministic function of those inputs and of
+its predecessors' outputs. Topological induction then gives the same output bytes and digest on every attempt:
+sources repeat, and a task repeats when its predecessors do. A deterministic plan alone does not prove this for
+scripts that read clocks, randomness, mutable network data or unrecorded environment. Those inputs need pinning
+or the task needs a separate repeatability contract before identical rebuilding can be claimed.
+An artifact digest does not make an unrelated webhook, charge or other external script effect idempotent;
+each such effect needs its own stable request identity and destination deduplication or settled outcome.
+
+For a publication, bind a fixed key `K = (owner, package, version)` to the planned source and artefact digest `J`.
+Let `F_{K,J}(x)` be the destination state after a permitted request. If `K` is absent, bind it to `J`.
+If `K` already names `J`, leave the state unchanged and report verified success. If it names different content,
+refuse. A destination can provide
+this as an idempotent conditional put or atomic request deduplication. An immutable destination that refuses a
+second put can implement the same effective transition through authoritative identity verification and adoption
+(§19.4). For absent or matching state at an immutable key, `F_{K,J}(F_{K,J}(x)) = F_{K,J}(x)`.
+A mismatch is refused, never silently skipped. The equation does not authorize retry across an intervening
+conflicting writer. A prior in-flight request is settled or fenced before an absence result authorizes retry,
+unless the destination deduplicates it
+(§28.6). A bare existence check is insufficient.
+
+The canonical tag has the analogous create-only transition at the planned commit: absent becomes that tag,
+matching existing tag is already complete, and a different tag is refused, never rewritten (§19.1). If a crash
+occurs before an effect attempt starts, rebuild and request the same `K, J`. If an attempt may have started,
+settle or fence it, or rely on destination deduplication. After publication but before its record, verify the
+same effect and write the tag; skip the put if the destination already holds verified `J`. After a durable
+tag, the next plan skips that completed package. Induction over any finite sequence of crashes preserves each
+verified effect and tag identity. With fair retries, stable inputs, settled attempts and eventual successful
+effect and record writes, the final state equals the crash-free intended state under the retry invariant of
+§13.7c. After partial success, new valid records change the inventory and discharge completed units, so the
+next run derives a residual plan; it does not replay an unchanged full plan. Repeated builds and identical
+effect requests are safe under these premises, but arbitrarily many crashes can add unbounded work and time.
+This is an informative replay contract, not a claim that arbitrary external commands already satisfy it.
+
+**Earliest starts with unlimited compatible capacity.** For any finite compiled DAG, take time zero as the origin
+and make every source task available then. Suppose every task has a fixed nonnegative duration and can hold its
+own compatible slot through completion. Dispatch, transfer and other capacities add no
+delay. A zero-duration task releases its successors immediately. Define the earliest start of task `i` by
+`E_i = max(E_j + d_j)` over its immediate predecessors `j`, with the empty maximum zero. Starting task `i` at
+`E_i` is feasible: a topological traversal computes the values, and every predecessor finishes by `E_i`.
+Event-driven dispatch realizes these starts without knowing
+durations beforehand: by induction, each final predecessor completion makes its successor ready at `E_i`.
+Conversely, induction in that same order shows that every feasible schedule starts `i` no earlier than `E_i`:
+each predecessor starts no earlier than its own `E_j` and finishes no earlier than `E_j + d_j`. Thus `E` is the
+unique componentwise earliest-start vector, and starting
+every ready task immediately realizes it. Its makespan is `max_i(E_i + d_i) = Lk`, the minimum possible for this
+graph. For an empty graph, define the maximum over tasks and its makespan as zero. This characterizes the
+maximal-parallel policy for arbitrary finite task counts, without a configured
+task-count cap. It does not make the makespan-optimal schedule unique: independent tasks of durations 3 and 1
+finish by time 3 if both start at zero, and also if the shorter task starts at time 1. It does not select a
+unique graph representation or executor. With finite slots or other binding capacities, readiness alone does
+not decide which competing task starts first, and clause 2 gives the stated bound rather than exact `Lk`.
+
+The graph input and scheduler state have distinct space accounts. A retained explicit adjacency-list task graph
+occupies `Theta(Tk + Dk)` words under that representation. Indegree counters, a ready queue and in-flight leases
+use `O(Tk + Wn)` auxiliary words, apart from compatibility and output-set metadata whose sizes depend on their
+inputs. Retaining both the explicit graph and a `Wn`-entry worker directory gives
+`Theta(Tk + Dk + Wn)` resident words for those chosen structures and conventional bookkeeping. This matches
+their required representation size; it supplies no universal auxiliary-memory lower bound.
+Each edge can be processed once, for `O(Tk + Dk)` readiness work. If every explicit task and edge must be
+inspected, this scan matches the `Omega(Tk + Dk)` input-reading lower bound for that phase. No universal
+`Omega(Tk)` auxiliary-word bound or minimum-memory executor follows: a different input representation, streaming,
+recomputation or succinct bookkeeping changes the space model. Deterministic ready priority can cost
+`O(Tk log Tk)` comparisons with a heap, and the placement scan in the table costs `O(Tk · Wn)`; neither is included
+in the linear readiness claim. Durable records and task payloads are accounted for separately. Multiple executors
+can attain the same asymptotic task-time bound while using different state and different schedules.
+
+The readiness scan is the adjacency-list form of
+[Kahn's topological elimination](https://doi.org/10.1145/368996.369025).
+Clause 2 is the [Graham list-scheduling bound](https://doi.org/10.1002/j.1538-7305.1966.tb01709.x) with its
+idle-time proof stated above. Neither result asserts uniqueness of an executor or a universal auxiliary-space minimum.
+
+For example, on a fixed explicit graph with distinct task names, one executor can select the least ready name
+with a binary heap and another with a balanced search tree. Both implement the same name priority, use `O(Tk)`
+auxiliary words beyond the graph, spend `O(Tk log Tk + Dk)` on readiness and priority, and are work-conserving
+under clause 2's model. Both therefore attain its asymptotically optimal task makespan. They are different
+algorithms even when they choose the same tasks. If the policy permits either ready task, FIFO and LIFO queues
+give different work-conserving schedules with the same bounds. With two slots and independent tasks `A`, `B`,
+`C` of durations 3, 2, 1 offered in that order, FIFO finishes at 3 and LIFO at 4. The heap/tree example still
+applies when the ready priority is fixed. These counterexamples rule out a theorem that only one algorithm has
+those asymptotic time and memory bounds.
+
+**Configured stages in the compiled plan.** A stage a configuration defines joins the graph like a built-in one. This
+passage says which graph that is, and when a configuration has one at all. It is a model, not an obligation: §19.2a
+states the obligations of an implementation that offers configured stages, and §28.5 how their outputs travel. `flow`
+and the stage names below are to be the dispat engine's configuration surface, configuration beyond §14 that §17.1
+permits; no key of §14 defines them. The passage is the model the dispat engine is to implement; nothing of it is
+released. What that engine runs today is stated by date in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md).
+
+*Stages.* For a package `p`, `S_p` is its set of stages. Its built-in stages are `version`, also spelled `propagate`,
+and `build`, which every package has; `publish`, unless the publish target fixed at `HEAD` is `none`; and `sign`,
+`syncLock`, `tests` and `announce` where its configuration gives it one. Its user stages are the keys of its `flow`
+object that are neither built-in stages, nor hooks, nor keys the implementation reserves for steps that are not the
+package's own. The login that runs once per space is such a step and is not a stage. In the model it waits on no task,
+so it lies on no cycle. `sign`, `version` and `syncLock` are the *preparing* stages. `S_p`, and `E_p` below, are
+functions of the resolved configuration and of the publish target fixed at `HEAD` (§13.1, §13.10a).
+A stage a plan does
+not run, such as a version stage with nothing to reconcile, is a task of duration zero that takes no slot, so nothing
+below depends on the plan.
+
+*Entries.* A flow entry is a script name or an object `{script, label, before, after, parallel}`. `script` names what
+the stage runs and `label` how it is reported. `before`, `after` and `parallel` are its *constraints*: each names one
+stage or a list of stages, and an empty list states nothing. `C_p` counts every name the constraints of `p` state. The
+levels of the configuration, the file's, the space's and the package's, merge the flow entry by entry: a nearer level
+that states an entry replaces the whole inherited entry, its constraints included. A level that states both `version`
+and `propagate` is refused when the configuration loads, by the rule that already refuses the two spellings together,
+before any graph is formed; it is no diagnostic of this passage. A constraint can name `version` by either spelling. A
+name of a built-in stage the package lacks, `publish` under target `none`, or `sign`, `syncLock`, `tests` or `announce`
+where it is not configured, is dropped from that package's constraints, and the entry of such a stage is dropped whole,
+its own constraints included, so one shared configuration stays valid across targets. A stage *places itself* when its
+entry states a non-empty `before` or `after` once those names are dropped. A stage whose stated `before` and `after`
+names were all dropped keeps its default place: a shared `announce {after: publish}` places itself where the package
+publishes, and under target `none` it takes its default edges. Any other name that is no stage of `S_p`, and the
+carrying stage's own name, fail condition 1 (below).
+
+*The stage graph `E_p`.* Write `s -> t` for "`s` happens before `t`". `E_p` has three kinds of edges.
+
+1. **Constraints.** For each `t` that `before(s)` names, `s -> t`; for each `t` that `after(s)` names, `t -> s`.
+   `parallel` gives no edge. For each `t` that `parallel(s)` names, it asserts that `s` and `t` are *incomparable*,
+   which condition 3 checks against the whole package graph.
+2. **Defaults.** The ranks are `sign` 1, `version` 2, `syncLock` 3, `build` 4, `tests` and every user stage 5, `publish`
+   6 and `announce` 7. `x -> y` is a default edge when `y` does not place itself and `x` is a stage of `S_p` at the
+   greatest rank below `y`'s that `S_p` holds. The *stage order* sorts stages by rank and then by name byte-wise, and
+   where §19.2a orders a diagnostic by a stated name that is no stage of `S_p`, that name ranks as a user stage.
+   Without
+   constraints the built-in stages form the chain
+   `sign -> version -> syncLock -> build -> tests -> publish -> announce`, less the stages `p` lacks. A default edge
+   depends only on whether its target places itself, and some direct consequences follow:
+   * `tests` keeps `build -> tests` when `build` places itself.
+   * `announce` keeps `publish -> announce` when `publish` places itself.
+   * In a package that publishes, `announce {after: build}` drops its default edge from `publish`. The publication edges
+     below then place it before the publication, which it gates.
+   * A stage whose entry states only `parallel` keeps its place.
+   * Where the package states no constraints, a user stage follows `build`, precedes the stages of the next rank `S_p`
+     holds, and is unordered with `tests` and with every other user stage.
+   * A stage placed after a stage `y` that does not place itself closes a cycle with `y`'s default edges, refused under
+     condition 2, when it is or reaches a stage at the greatest rank below `y`'s that `S_p` holds. So `tests` or a user
+     stage placed after `publish` needs `publish` to place itself, as `publish {after: build}` does. Under target `none`
+     a stage of rank 5 placed after an `announce` that does not place itself is refused in the same way, and so is
+     `build` placed there, unless `S_p` holds a stage of rank 5 and `build` reaches none of them.
+3. **Required edges `R_p`.** Each preparing stage precedes every stage that is not preparing, so preparation that
+   can rewrite manifests or lockfiles completes before another stage uses them (§19.5, §28.3).
+   `build -> publish` when `p` has a
+   publish stage, because the publication ships the build's outputs. The preparing stages have no required order among
+   themselves.
+
+*The package graph `G_p`.* The records of `p` are one task `rec_p`, whose duration `r_p` is the time its record takes to
+write. `G_p` is `E_p` on `S_p ∪ {rec_p}` with two kinds of edges more.
+Its *post-publication set* `A_p` is, when `p` has
+a publish stage, the set of stages other than `publish` that `publish` reaches in `E_p`. Without one, it is an
+`announce` that does not place itself together with the stages it reaches in `E_p`, and it is empty when `p` has no such
+`announce`.
+
+* **Publication edges.** When `p` has a publish stage, `s -> publish` for every stage `s` outside `A_p ∪ {publish}`. A
+  publication cannot be taken back (§19.1, §26), so it waits for every stage the configuration did not place after it.
+* **Record edges.** With a publish stage, `publish -> rec_p`, and `rec_p -> a` for every `a` in `A_p`. Without one,
+  `s -> rec_p` for every stage `s` outside `A_p`, and `rec_p -> a` for every `a` in `A_p`.
+
+*Lemma.* If `E_p` is acyclic, so is `G_p`. `A_p` is closed under reachability in `E_p`: a stage that a stage of `A_p`
+reaches is reached from `publish`, and is not `publish` itself since `E_p` is acyclic, or is reached from the `announce`
+that begins `A_p`. No added edge leaves `A_p` either, since a publication edge starts outside `A_p` and a record edge
+starts at `publish`, at a stage outside `A_p` or at `rec_p`. A path that enters `A_p` therefore stays in it. A cycle
+through `rec_p` leaves it into `A_p` and would have to return along an edge into `rec_p`, which starts at `publish` or
+outside `A_p`. A cycle through a publication edge `s -> publish` and not through `rec_p` leaves `publish` along an edge
+of `E_p`, since no added edge other than `publish -> rec_p` starts there. That edge enters `A_p`, and the cycle cannot
+return to `s`, which lies outside it. Any other cycle lies in `E_p`.
+
+*Before and after the record.* A stage *precedes the record* when it reaches `rec_p` in `G_p`. Every stage outside `A_p`
+does, by its publication edge, by `publish -> rec_p` or by its record edge, and every stage of `A_p` follows the record,
+so each stage is one or the other. A stage that precedes the record and fails fails the package as a failed build does
+(§19.3): the package is neither published nor recorded, and a resumed run runs the stage again. A stage of `A_p` starts
+only once the record is written. Its failure only reports, and the package's outcome stands. A package whose target is
+`none` is therefore recorded after every stage but an `announce` that does not place itself and the stages it reaches.
+In the default chain its build precedes the record, so a failed build fails such a package, as it does in the dispat
+engine. A configuration that places `build` after an `announce` that does not place itself puts `build` in `A_p`: such a
+package is recorded before it builds, and a failed build then only reports. That configuration is acyclic only where
+`S_p` holds a stage of rank 5 and `build` reaches none of them (*Defaults*, above), as in
+`S_p = {version, build, u, announce}` with `u {after: version}`.
+
+*Blocking.* Within a package, a stage whose predecessor failed or was blocked does not run. Between packages, blocking
+is §19.3's and is unchanged: a package whose provider failed or was blocked is blocked (`W194`) when it has no cause of
+its own, and otherwise proceeds on what its providers have published (§19.5). A stage that reads a build that never
+happened, the build a §19.2a `build` relation names or a provider build of §28.5, has no input.
+It fails at that stage,
+naming the provider (§28.5).
+
+*Cross-package edges.* Between packages the edges are those of §19.2, §19.2a and §28.5, taken over the whole graph as
+those sections take them, and none depends on a package's own order. For a consumer `C` of a provider `P` under a
+relation that is not `none`, what the relation names, `P`'s build under `build` and `rec_P` under `publish`, precedes
+every stage of `C` other than `sign` and `version`, since §19.2a counts every step that can read the provider as `C`'s
+build. Where `C` reaches `P` in the graph of `publish.orderKinds` (§19.2), through any packages, `rec_P` precedes `C`'s
+publish, which keeps the order of §19.2 and the recovery rule of clause 5. Where either package has no publish stage,
+its record
+stands in for it. §28.5 adds the build of a provider that needs no release as a task, with the edges of `build`. An
+owner's lane (§28.6) is a capacity, not an edge (*Records and capacity*, below).
+
+*Data.* What a stage *exports* is what it leaves in the package's workspace for a later stage to read. Under §28 it is
+the stage's output set (§28.5). A stage can rely only on the exports of the stages that reach it in `G_p`. Reading the
+export of a stage that does not reach it is a race the plan does not order: in a local run the read sees the export or
+not as the run happens to schedule them, and under §28 the read is impossible, since output sets travel along edges
+only. The *data dependencies* `D_p` are the pairs `(s, t)` where `t` reads what `s` exports. `R_p` is mandatory
+stage order even when a stage has no output or no later stage reads it. A configuration *serves* `D_p` when the
+transitive closure of `G_p` contains it.
+
+*Realisability.* An order *realises* the configuration of `p` when it is a strict partial order on
+`S_p ∪ {rec_p}` that
+contains `G_p` and leaves incomparable every pair a `parallel` constraint names. The conditions are these:
+
+1. every name a constraint of `p` states, once the names of built-in stages `p` lacks are dropped, is a stage of `S_p`
+   other than the stage that carries it;
+2. `E_p` is acyclic, and hence `G_p` by the lemma;
+3. no pair a `parallel` constraint names is related by the transitive closure of `G_p`;
+4. the graph of packages whose edges are those of the edge kinds of §13.1, the union of `propagation.kinds` and
+   `publish.orderKinds`, together with every build dependency of §19.2a and §28.5 whose relation is not `none`, is
+   acyclic.
+
+Conditions 1 to 3 hold per package, planned or not, and condition 4 per workspace. A configuration is *realisable* when
+every package meets conditions 1 to 3 and the workspace meets condition 4.
+
+Conditions 1 and 4 are premises. `E_p` is formed only from names that are stages of `S_p`, and a stage is never before
+itself and is no pair with itself. Condition 4 is what the projection below needs, and it is not necessary: a cycle it
+refuses can leave the task graph acyclic. Let `C` read `P`'s build over a build-only edge, as a library's tests read the
+build of a fixture over a `devDependency`, and let `P` depend on `C` over an edge of the kinds of §13.1 whose relation
+is `none`, as the fixture depends on the library at runtime. Then `P`'s build precedes `C`'s stages, `rec_C` precedes
+`P`'s publish, and no task waits on itself. Such a workspace is refused under the `execution-configuration` identifier
+of §28.9, although §13.1 accepts it. A cycle over the edge kinds of §13.1 alone is already `E200` (§13.1),
+which aborts
+before planning, so condition 4 meets only a cycle through a build dependency whose kind is outside `propagation.kinds`
+and `publish.orderKinds`, and no cycle is refused under both.
+
+Conditions 2 and 3 are necessary, given condition 1, for an order that realises the configuration. Such an order
+contains `G_p` and so its transitive closure. The closure of a cyclic relation puts a stage before itself, which no
+strict order does, and a pair the closure relates stays related in every such order. In particular `parallel` naming
+`publish` and a stage `s` that is not placed after `publish` is refused, because the publication waits for every stage
+not placed after it, so `s -> publish`. `publish` reaches every stage placed after it, so in a package that publishes a
+`parallel` that names `publish` is always refused, and in one that does not, the same holds for an `announce` that does
+not place itself. A stage meant to run beside the publication is placed after it instead, and it then starts once the
+record is written, since a stage after the publication follows the record. Where that stage is `tests` or a user stage,
+it is accepted only where `publish` places itself too, as `publish {after: build}` does, since otherwise the default
+edges into `publish` close a cycle (*Defaults*, above).
+
+With conditions 1 to 4, the transitive closure of each `G_p` realises the configuration of `p`, and the compiled plan is
+acyclic. By condition 2 and the lemma `G_p` is acyclic, so its transitive closure is a strict partial order that
+contains `G_p`, and by condition 3 it leaves every `parallel` pair incomparable. For the plan, map each task to its
+package. Every cross-package edge runs from a task of a provider to a task of a consumer that reaches the provider in
+the graph of condition 4 by a path of at least one edge: the publication-order and record edges along the edge kinds of
+§13.1, and the readiness edges and the provider builds of §28.5 along build dependencies that are not `none`,
+each taken
+over the whole graph and so through packages outside the plan as well. A cycle of tasks that uses a cross-package edge
+therefore maps to a closed walk of at least one edge in that graph, which contains a cycle, against condition 4. A cycle
+that uses none lies in one `G_p`. The same projection shows that no path between two stages of `p` leaves `p`, so the
+order the compiled plan puts on `S_p ∪ {rec_p}` is the closure of `G_p`, which realises the configuration of `p`.
+
+A configuration that is not realisable is refused before any effect, under the `execution-configuration` identifier of
+§28.9, with diagnostics in the order §19.2a gives. `S_p`, `E_p` and `G_p` are functions of the resolved configuration
+and of the publish targets fixed at `HEAD`, and the graph of condition 4 is a function of the manifests at `HEAD` and
+the configuration. The same `HEAD` therefore gives the same answer for a release, for read-only planning and for a
+command sweep (§28.10).
+
+*Records and capacity.* Where an implementation gives records a capacity of their own and serializes one owner's
+publications and records (clause 1), the *record unit* of `p` is `publish` with `rec_p` where `p` publishes, and
+`rec_p` alone where it does not. When its first task is ready, the record unit takes its recording capacity and then its
+owner lanes, in that order for every record unit, before that task starts, and its `publish` is offered for claim only
+once the record unit holds its recording capacity and every lane it needs. The slot is therefore the last resource a
+record unit takes. The argument has two premises. A record unit takes its lanes after its recording capacity, one where
+its publication and record touch one owner, and several in the one stable total order of §27.7 where they span
+repositories. The recording capacity of §28.2 is counted apart from transfer and control work, so only record units
+reserve it. A record unit that waits for a lane then holds at most a recording capacity and the earlier lanes in the
+order, and one that holds its lanes waits only for a slot. A slot is held only by a task that a node has claimed or
+runs (§28.2), and such a task waits on no record unit, so no wait cycle forms. `rec_p` takes no slot. It is ready when
+`publish` ends where `p` publishes, and otherwise when the stages outside `A_p` end. The lanes are held across
+`publish` and `rec_p`, so no other publication or record of the owner runs between them. Its builds can run meanwhile
+(§28.6), and so can its other stages, since §28.6 serializes only publication and recording.
+
+*The compiled plan.* The plan of the dispat theorem is the union over the planned packages of their package graphs with
+the cross-package edges, and its `R` holds the publications and the records. For a realisable configuration the
+theorem's premises hold: the tasks are finite, every dependency is known before the first task starts, and the
+precedence relation is acyclic. The clauses hold with `Lk` the longest chain of the whole task graph, `rec_p` included.
+Where every task that takes time takes a slot, clause 1's bound is `max(Lk, Wk / s)`. Under the capacities of §28.2 and
+§28.6 the separate resource terms of clause 1 apply, including `Wunit / m_rec` for reserved record units. Clause 2's
+factor is claimed
+only on that clause's whole premise: slots are interchangeable, transfers cost nothing, every task that takes time
+draws on one pool of `s` slots, and no owner lane binds. Two corollaries follow.
+
+1. **An edge no data needs never makes the plan faster.** Hold the configurations of the other packages fixed, and
+   compare the realisable configurations of `p` that serve `D_p` and share `S_p`, the scripts and their durations, the
+   cross-package edges and the post-publication set `A_p`. The publication and record edges depend only on `S_p` and
+   `A_p`, so they are one set `F_p` for all of them, and `G_p = E_p ∪ F_p` is monotone in `E_p`.
+   When the closure of one
+   configuration's `E_p` contains another's, so does the closure of its `G_p`, and so does that of the whole plan, since
+   the cross-package edges are shared. Every execution the larger order admits the smaller admits too, under the same
+   capacities, so the fastest under the larger is no faster. An edge added to `E_p` with `A_p` left as it was therefore
+   never shortens the fastest execution, and it can lengthen it: two stages of duration 1 that share no data end
+   together at 1 unordered and at 2 ordered, with two free slots. `A_p` is held fixed because moving a stage after the
+   publication changes which edges the publication adds, so two configurations with different `A_p` are not comparable
+   by containment.
+
+   Let `K` be the transitive closure of `D_p`, `R_p`, the publication and record edges and, where `p` has no
+   publish stage and `A_p` is not empty, the edges from the `announce` that begins `A_p` to every other stage of `A_p`,
+   which every compared configuration has in the closure of its `E_p`. The closure of every compared `G_p` contains `K`,
+   so a compared configuration whose `G_p` has the closure `K` is the fastest of them. One exists. Restrict `K` to
+   `S_p`, let `T` be the transitive reduction of that restriction, and let the configuration state every edge `s -> t`
+   of `T` as `t` in `before(s)` and `s` in `after(t)`, leaving out the side that is the `announce` beginning `A_p`. `K`
+   is acyclic, since it lies in the closure of a compared `G_p`. `R_p`, which lies in `K`, relates every stage to
+   `version` or `build`, and a stage that a finite order relates to another has an edge in its reduction, so every stage
+   has an edge in `T`, and every stage but that `announce` places itself and has no default edge into it. The `announce`
+   keeps its default edges `x -> announce`. Each such `x` lies outside `A_p`: a compared configuration has the same
+   default edges and puts every stage of `A_p` after the `announce`, so an `x` in `A_p` would close a cycle in it. Hence
+   `x -> rec_p -> announce` is in `K`. `E_p` is then `T` with `R_p` and those default edges, all in `K`, and its closure
+   is `K` restricted to `S_p`. Its post-publication set is the compared `A_p`: `K` puts every stage of `A_p` after
+   `publish`, or after that `announce`, and no other stage, since every other stage precedes `publish` or `rec_p` by
+   `F_p` and `K` is acyclic. Its `G_p` is `E_p ∪ F_p`, whose closure is `K`, so it serves `D_p`. It meets conditions 1
+   to 3, since its constraints name other stages of `S_p`, its `E_p` is acyclic and it states no `parallel` pair, and
+   condition 4 is shared. The transitive reduction of `K` on `S_p`, stated as constraints, thus gives an `E_p` that
+   reaches it.
+
+   `parallel` adds no edge and asserts that two stages stay unordered, which condition 3 checks: it is how a
+   configuration states independence.
+2. **Nodes affect aggregate work; order affects span.** The configured order changes neither tasks nor durations,
+   so `Wslot`, `Wunit`, `Wrec`, each stage load and each owner's sum are fixed. `Lk` cannot rise when an actual
+   precedence edge is removed, since every chain of the smaller order was a chain of the larger one. Let `n` be
+   summed node capacity and keep the graph, task durations, stage limits, recording capacity, owner lanes and node
+   compatibility fixed while varying interchangeable node slots. Define
+   `B0 = max(Lk, max_j(W_j / m_j), Wunit / m_rec, max_owner sum(p_i + r_i))`,
+   omitting terms for capacities absent from the model. The resource-load lower bound then contains
+   `B(n) = max(B0, Wslot / n)`. If `B0 > 0`, the aggregate node-work term ceases to dominate at
+   `n = Wslot / B0`. This is a knee of that lower bound, not a point where actual execution necessarily reaches
+   `B0`. In the one-pool case `B0 = Lk`, giving the threshold of clause 4. If `B0 = 0`, all modeled task
+   durations are zero and only graph and scheduler work remains. Compatibility restrictions or newly added
+   nodes with different capabilities can change other lower-bound terms, so summed capacity alone supplies no
+   universal fleet scaling threshold.
+
+   Above the knee `Wslot / n` still decreases, while `B(n)` stays at `B0`; more nodes can shorten a schedule
+   that misses the bound. Removing configured order can lower the span term only if an actual longest chain
+   becomes shorter. It lowers `B(n)` only if no unchanged resource term remains as large. One owner with ten
+   packages, each with `p_i + r_i = 10`, and `Lk = 12` has a lower bound of at least 100 from its lane,
+   regardless of stage order. With overlapping capacities no constant-factor schedule bound is claimed.
+
+**The dispat algorithm.** The execution model is a distributed executor of a compiled plan. It knows tasks and
+precedence before dispatch; task durations are learned by running. Its recovery protocol is stated separately from
+the failure-free makespan result. One implementation can use these six steps.
+
+1. **Fix inputs.** Take the release locks (§13.2, §28.3), then fix history at `HEAD`, configuration, record inventory
+   and receipts for the semantic plan (§17.2). If relying on identical rebuilds, also capture the task inputs,
+   toolchain and environment identities required by the replay contract above.
+2. **Compile the graph.** Compute §13's release plan, then create package stage tasks, the precedence edges of
+   §19.2, §19.2a and §28.5, and one indegree counter per task. The table and ledger above account for planning.
+   Once an explicit graph is built, its readiness scan costs `O(Tk + Dk)` and `O(Tk)` auxiliary words beyond the
+   graph. A configured-stage engine first checks that its graph is realisable.
+3. **Dispatch ready work.** Decrement successors' counters once as tasks finish and offer zero-indegree tasks
+   to admissible nodes and stage pools. A deterministic priority resolves a ready-set tie; completion timing can
+   still change the event order and log. The placement scan in the table costs `O(Tk · Wn)`; a comparison heap
+   for priority adds `O(Tk log Tk)` comparisons. Input transfer, leases and compatibility state add their stated
+   costs. Work conservation under all actual resource constraints is the dispatch policy. The factor in clause 2
+   applies only when its one-pool premises hold; clause 3 applies to disjoint stage pools under its premises.
+4. **Make effects durable.** Before admitting an irreversible external effect, check its stable identity, durable
+   record path and outcome resolution mechanism as the crash-ready condition above defines. If that contract is
+   absent, refuse dispatch and report the recovery-ambiguity anomaly. Persist the release records required by
+   §19.1 before
+   dependents that wait for an effect proceed or success is reported. A durable record write is evidence of
+   itself, not a task needing another recursive record.
+   External publication can precede its record; §19.4 handles that uncertain interval by identity verification.
+   Failed providers block consumers under §19.3.
+5. **Resume from evidence.** A later run recomputes the plan from durable records (§17.2). It reconciles an
+   already-published version when §19.4 can verify identity and refuses an ambiguous outcome. Under the replay
+   contract it can rebuild the same bytes, retry a settled or deduplicated request, and skip a verified existing
+   effect or matching tag. Repeated task work, reconciliation, outage time and new external writes are outside
+   the failure-free bound.
+6. **Join a moved branch.** When unrelated commits arrive after the planned `HEAD`, retain the release record on
+   its original commit and join the arrived history under §19.1 and §27.7.
+
+The readiness mechanism is linear in the explicit graph size, provided its task and edge counts include every
+pass-through vertex and edge. Total executor overhead is not generally linear: priority, placement, transfer,
+compatibility checks, durable writes and graph preparation have separate costs. The failure-free one-pool theorem
+proves a matching constant-factor task-makespan bound without knowing durations. The distributed resource model
+has additional node, stage, recording and owner constraints. Clause 1 supplies lower bounds for it, but no
+constant-factor upper bound or universal minimum auxiliary memory follows from those bounds.
+
+A task discovered during execution is absent from the fixed compiled graph and needs a newly defined plan before
+these bounds apply to it. A configured stage whose effect is not declared irreversible stays outside `R`. If it
+precedes the package record and the run stops before that record, a later run can repeat it. A stage after the
+record is not resumed by the next release plan. An effect that cannot safely be repeated needs the publication
+or post-publication recovery policy described in *Configured stages in the compiled plan*.
+
+The theorem is informative and changes no conformance obligation (§17.2). The next two passages apply its
+premises to build readiness and distributed placement.
 
 **Build readiness: what a weaker relation can and cannot buy.** Let `b_i` and `p_i` be the build and publication
-durations of package `i`, and let every slot be free. By the dispat theorem a run then lasts as long as the longest
-path of the task graph of §19.2a, and a weaker relation never lengthens it, because its constraints are a subset of
-the stronger one's. On a
+durations of package `i`. First suppose only those tasks take positive time, every ready task starts immediately
+because slots are unlimited, and no transfer or other capacity binds. Task makespan then equals the longest path
+of the graph of §19.2a. A weaker relation never lengthens the best makespan, since it removes constraints.
+On a
 chain of `n` packages, each consuming the one before it, under one relation throughout: `publish` gives
 `sum(b_i + p_i)`; `build` gives the greatest over `k` of `b_1 + … + b_k + p_k + … + p_n`; `none` gives the greatest
 over `k` of `b_k + p_k + … + p_n`. With equal durations these are `n · (b + p)`, `max(n · b + p, b + n · p)` and
-`b + n · p`: `build` saves `(n - 1) · min(b, p)` over `publish`, and `none` saves a further `(n - 1) · (b - p)`, and
-only where builds outlast publications. For one provider `0` and consumers `i` the three are
+`b + n · p`: `build` saves `(n - 1) · min(b, p)` over `publish`, and `none` saves a further
+`max(0, (n - 1) · (b - p))`, only where builds outlast publications. For one provider `0` and consumers `i`,
+the three are
 `b_0 + p_0 + max(b_i + p_i)`, `b_0 + max(max(b_i, p_0) + p_i)` and `max(max(b_i, b_0 + p_0) + p_i)`. For providers `i`
 of one consumer `c` they are `max(b_i + p_i) + b_c + p_c`, `max(max(b_i) + b_c, max(b_i + p_i)) + p_c` and
 `max(b_c, max(b_i + p_i)) + p_c`. Where one owner's publications are serialized (§27.2, §28.6) in the order `1 … n`,
@@ -3436,28 +3831,41 @@ every relation gives the greatest over `k` of `e_k + p_k + … + p_n`, with `e_k
 floor is `sum(p_i)` whatever the relation, and a weaker relation only lowers the `e_k`.
 
 Under budgets of `m_b` build slots and `m_p` publication slots, write `Wb = sum(b_i)`, `Wp = sum(p_i)` and `Lk` for the
-longest path. By the dispat theorem, applied per stage, no schedule beats `max(Lk, Wb / m_b, Wp / m_p)`. A placement
-that never idles a slot of a stage while a task of that stage is ready finishes within `Lk + Wb / m_b + Wp / m_p`,
-because at every instant either a task of one fixed chain is running or the stage that chain waits for has every slot
-busy; that is within three times the best possible, and it is not claimed tight for this shape of graph. The unlimited-slot result does not carry over: under
-budgets a weaker relation can lengthen such a schedule, although never the best one. With two build slots and one
-publication slot, packages `(b, p) = (2, 3)`, `(1, 2)` consuming the first, and an unrelated `(8, 3)` finish at 11 under
-`build` and at 12 under `none` when ready tasks start in package order, the consumer's before the unrelated one, because
-the consumer's early build takes the slot the long build would have had. This is Graham's scheduling anomaly, and it is
-why §19.2a promises a happens-before relation and no duration.
+longest path. By the dispat theorem, applied per stage, no schedule beats `max(Lk, Wb / m_b, Wp / m_p)`. Where builds
+and publications are the only tasks that take time, the two budgets are the only capacities that bind, no owner lane
+binds and records take no time of their own, a placement that never idles a slot of a stage while a task of that stage
+is ready finishes within `Lk + Wb / m_b + Wp / m_p`. Trace the latest-finishing predecessor chain backward from
+the last task. Whenever no task of that chain runs, its next task is ready and its stage pool is full. Chain time
+is at most `Lk`, and the full-pool intervals are charged to their respective pool loads. This is clause 3's
+two-budget case, within three
+times the best possible, and it is not claimed tight for this shape of graph. The unlimited-slot result
+does not carry over: under budgets a weaker relation can lengthen such a schedule, although never the best one. With two
+build slots and one publication slot, packages `(b, p) = (2, 3)`, `(1, 2)` consuming the first, and an unrelated
+`(8, 3)` finish at 11 under `build` and at 12 under `none` when ready tasks start in package order, the consumer's
+before the unrelated one, because the consumer's early build takes the slot the long build would have had. This is
+Graham's scheduling anomaly, and it is why §19.2a promises a happens-before relation and no duration.
 
-**Distributed execution: what placement can and cannot buy.** Let `Wk` be the summed duration of a run's command tasks,
-`Lk` the duration of its longest precedence chain, and `s` the task slots usable at once, the lesser of the summed node
-capacities and the applicable run-wide stage limits. The dispat theorem gives the two bounds: no schedule finishes
-before `max(Lk, Wk / s)`, and a placement that never leaves a usable slot idle while a compatible task is ready
-finishes within `Wk / s + (1 - 1/s) · Lk`, at most `(2 - 1/s)` times the best possible, when slots are interchangeable
-and transfers cost nothing. Neither premise holds in general: nodes differ in platform and speed, and an output
-transfer delays the consumer it feeds. This section therefore states no bound once transfers count,
-and the measurement §28.7 requires stands in its place. The inequality still says what to expect. On a chain `Lk = Wk`
-and no number of nodes helps. Beyond `s = Wk / Lk` the chain and not the pool is the limit: the lower bound is `Lk`,
-which a schedule can still miss by the packing of tasks into slots (four independent tasks of 10, 7, 7 and 6 on three
-slots end at 13, not 10), and more nodes can only close the gap between a greedy schedule and that bound, which is below
-a factor of two.
+**Distributed execution: what placement can and cannot buy.** First fix each task's duration across its eligible
+nodes. Let `Wslot` be the work of slot-taking command tasks, `Lk` the longest precedence-chain duration, and `n`
+the summed node capacity. Every such task takes a node slot
+(§28.2, §28.5), so `max(Lk, Wslot / n)` is a lower bound. If every positive-duration slot task takes exactly one
+run-wide stage budget, the aggregate divisor can be tightened to `s = min(n, sum(m_j))`; each stage also gives
+`W_j / m_j`. The recording capacity reserves entire record units under the protocol above, giving
+`Wunit / m_rec`, and each owner lane gives its own `sum(p_i + r_i)`. The maximum of these terms is a valid lower
+bound. A set of tasks confined by compatibility to a subset of nodes can strengthen it further. These resource
+loads can dominate even when the aggregate slot term reaches the chain duration. If duration depends on the assigned
+node, these occupancy bounds apply to an observed schedule's realized durations, but fixed `Wslot` and `Lk` no
+longer lower-bound every alternative placement without a speed model.
+
+On clause 2's whole one-pool premise, where slots are interchangeable, transfers and scheduling cost nothing,
+every positive-duration task draws on the same `s` slots and no other capacity binds, a work-conserving placement
+finishes within `Wk / s + (1 - 1/s) Lk`. Distributed runs need not satisfy that premise: nodes differ in platform
+and speed, budgets and owner lanes bind, and transfers delay consumers. Clause 3 covers only disjoint stage pools
+without those further constraints. For the full distributed resource model this section claims lower bounds but no
+matching upper factor; §28.7 measures actual time. On a fixed chain no extra node reduces span. Under the one-pool
+premise, `s = Wk / Lk` marks only the point where the aggregate work lower bound ceases to dominate. Packing can
+leave task makespan above `Lk`: four independent tasks of durations 10, 7, 7 and 6 on three slots can end at 13,
+although `Lk = 10`. More slots can shorten such a schedule even above that threshold.
 
 **What none of this may change.** These are all internal representations. The plan, the diagnostics, and their order
 MUST be identical to the literal reading (§17.2), and an implementation that trades a different plan for speed does not
@@ -4289,8 +4697,8 @@ adds per-owner publication serialization, fencing and reconciliation while prese
   by design is not a release record and is outside this rule.
 * For a package whose target is a private or internal registry, all of the above applies unchanged: it is published
   there first, then tagged.
-* For a package whose target is `none` there is no publish step, so there is nothing to wait for: the tag is written
-  once that package's manifest write succeeds.
+* For a package whose target is `none` there is no publish step, so there is no publication to wait for: the tag is
+  written once the package's stages that precede its record have completed (§13.11).
 
 ### 19.2 Publish order
 
@@ -4364,13 +4772,22 @@ deployment order: infrastructure before the application that runs on it, a schem
   is read. The value that governs is the one on the consumer's own edge: it is what the consumer's build waits for in
   every building package reached through packages that do not build, over edges that are not `none`, and the values on
   those further edges matter only in not being `none`. That can wait for a publication where a read of the build would
-  do, and never for less than the read needs. A pass-through node for each package that does not build keeps this at
-  `O(P + E)`; a memoised index of the nearest building packages each package reaches without a `none` edge costs its
-  visits plus the size of the sets it unions, the same bound only while those sets stay small; a search per pair is
-  neither.
-* **No new cycle.** Every build constraint runs along a dependency path and every package builds before it publishes,
-  so the task graph stays acyclic for every choice of relations, and weakening a relation only removes constraints.
-  `E197` cannot arise from a relation, because the publication order does not depend on it.
+  do, and never for less than the read needs. Two zero-duration relay nodes per nonbuilding package retain this at
+  `O(P + E)`: one relays build completion and one relays publication with its record. For each outgoing non-`none`
+  edge, each relay waits on the matching task if the provider builds, or on the provider's matching relay otherwise.
+  For a building consumer's edge, `none` adds no build prerequisite. Otherwise its build waits on the provider's
+  matching build or record task if that provider builds, or on the provider's matching relay if it does not.
+  This uses at most two relays per package and
+  a bounded number of mode-labeled edges per package edge. One untyped relay would lose the difference between
+  `build` and `publish` paths. Eliminating the relays can materialise `Theta(P²)` direct building-pair edges from
+  only `O(P)` package edges. A memoised index of the nearest building
+  packages each package reaches without a `none` edge costs its visits plus the size of the sets it unions, the
+  same bound only while those sets stay small; a search per pair is neither.
+* **No new cycle.** Every build constraint runs along a dependency path and every package builds before it publishes, so
+  the task graph stays acyclic for every choice of relations, and weakening a relation only removes constraints. `E197`
+  cannot arise from a relation, because the publication order does not depend on it. Under configured stages a cycle
+  through a build dependency whose kind is outside the edge kinds of §13.1 is refused by condition 4 of §13.11,
+  although the task graph may be acyclic.
 * **Failure is §19.3's.** Under `build` and `none`, `C` may be prepared and built against `P`'s planned version
   (§19.5) before the outcome of `P`'s publication is known. That is sound because §19.3 then either blocks `C` or, where
   `C` has a cause of its own, reconciles its manifest to `P`'s published version before `C` publishes and leaves `P`'s
@@ -4382,6 +4799,33 @@ deployment order: infrastructure before the application that runs on it, a schem
   edge. A `none` edge carries no output into the consumer's build task; the requirement that task inputs include every
   build dependency is met because the declaration says there is none. `C`'s publication task runs after `P`'s
   publication and MAY read what that publication exported.
+* **Configured stages.** An implementation MAY let a configuration add stages or order them, as the model of §13.11
+  does. That is configuration beyond §14 (§17.1), and this bullet and the next bind only an implementation that offers
+  it. Such an implementation MUST keep the publication order of §19.2 and the relation of this section between
+  packages,
+  whatever a package's own order says. Every stage of `C` other than its `sign` and `version` stages can read the
+  provider, so it counts as part of `C`'s build here and starts only after what the relation names. A stage that
+  precedes the package's record (§13.11) and fails is a failure of the package under §19.3, as a failed build is: the
+  package MUST NOT be published or recorded. A stage of the post-publication set (§13.11) runs after the record; its
+  failure is reported and the package's outcome stands. Blocking is §19.3's: a consumer with no cause of its own is
+  blocked (`W194`), and one with a cause of its own proceeds on what its providers have published (§19.5). A stage that
+  reads a build that never happened, under `build` or as a provider build of §28.5, has no input and fails at that
+  stage, naming the provider.
+* **Refusing an order.** Such an implementation MUST refuse a configuration that is not realisable (§13.11) when it
+  plans, before any effect, whether or not the package is in the plan; a release, read-only planning and a command sweep
+  refuse it alike. The refusal's stable identifier is `execution-configuration` (§28.9) in every profile, and its
+  diagnostics are these. For condition 1, one for each package and each pair of a carrying stage and a name it states
+  against the condition, a stated `propagate` counting as `version`, so that a name one stage states twice, by either
+  spelling, is one diagnostic. For condition 2, one for each package, naming in the stage order every stage that lies on
+  a cycle of `E_p`. For condition 3, one for each pair a `parallel` constraint names against the condition, counted once
+  whichever member states it, both members written in the stage order. For condition 4, one for the workspace, naming
+  byte-wise every package that lies on a cycle of its graph, after every diagnostic of conditions 1 to 3. A package
+  refused under one of conditions 1 to 3 is not checked against a later one of the three. The diagnostics of conditions
+  1 to 3 are ordered by package name byte-wise (§17.2), then by condition number, then by the carrying stage, or the
+  lesser stage of a pair, in the stage order, and then by the stated name, or the greater stage of a pair, in the stage
+  order, a stated name that is no stage of the package ranking as a user stage. The stage order sorts by rank, `sign` 1,
+  `version` 2, `syncLock` 3, `build` 4, `tests` and every user stage 5, `publish` 6 and `announce` 7, and then by name
+  byte-wise.
 
 §13.11 states the dispat theorem, gives the run durations the three values lead to, and says what no value promises.
 
@@ -7493,6 +7937,17 @@ and identical immutable blobs SHOULD be reused. Implementations SHOULD retain
 incremental Git objects and verified outputs between assignments, but any cache MUST be dispensable and validated against the complete semantic input identity. Cross-run
 reuse preserves the original output manifest as provenance and requires a new admission receipt bound to the
 current run, plan and task attempt. An old run's receipt never grants current execution or publication authority.
+
+An implementation that offers configured stages (§19.2a) moves output sets within a package along its package graph
+(§13.11). The command task of every stage of that graph, a user stage and `announce` included, MUST consume node
+capacity and a run-wide stage budget where one applies, as a build task does (§28.2), and the implementation MUST
+document which budget a stage that §28.2 does not name draws on. A user stage whose exports a later stage reads is a
+producer in the sense of this section: a successful one MUST emit a manifest and one admitted output set, as a build
+does, and that set MAY be empty. A stage's inputs from its own package are the admitted output sets of the stages that
+reach it in that graph, and an output set reaches no stage its producer does not reach. From another package a stage
+receives only what §19.2a admits: under `build` the provider's admitted build output, which every stage of the consumer
+other than `sign` and `version` may read; under `publish` the published artefact, whose publication no transfer of local
+bytes replaces (above); and under `none` nothing.
 
 ### 28.6 Publication, recording and recovery
 
