@@ -152,6 +152,32 @@ func kindSet(kinds []ccme.DependencyKind) map[model.DepKind]bool {
 	return out
 }
 
+// kindSetKey names a configured kind list by where it lives: every unit a
+// parser reads aliases that parser's one list (ccme's Directives.Kinds), so a
+// kind set is built per configuration rather than per unit.
+type kindSetKey struct {
+	first  *ccme.DependencyKind
+	length int
+}
+
+// sharedKindSet is kindSet, built once per configured list and shared
+// read-only by every unit that carries it.
+func (cp *computation) sharedKindSet(kinds []ccme.DependencyKind) map[model.DepKind]bool {
+	if len(kinds) == 0 {
+		return kindSet(kinds)
+	}
+	key := kindSetKey{first: &kinds[0], length: len(kinds)}
+	if set, ok := cp.kindSets[key]; ok {
+		return set
+	}
+	set := kindSet(kinds)
+	if cp.kindSets == nil {
+		cp.kindSets = make(map[kindSetKey]map[model.DepKind]bool)
+	}
+	cp.kindSets[key] = set
+	return set
+}
+
 // unitPropagation resolves the bump axis for one unit.
 //
 // "inherit" is resolved against the unit's own bump here rather than at the
@@ -166,7 +192,7 @@ func (cp *computation) unitPropagation(u *ccme.Unit, rec *commitRec, propagateSc
 	p := propagation{
 		Bump:  d.Propagate.Bump(u.Bump),
 		Depth: int(d.Depth),
-		kinds: kindSet(d.Kinds),
+		kinds: cp.sharedKindSet(d.Kinds),
 	}
 	if d.PropagateScopeSet {
 		res := cp.unitPropagateScope(u, rec, propagateScope)
@@ -196,7 +222,7 @@ func (cp *computation) unitChannelPropagation(u *ccme.Unit, rec *commitRec, prop
 	p := channelPropagation{
 		Value: d.PropagateChannel,
 		Depth: int(d.ChannelDepth),
-		kinds: kindSet(d.Kinds),
+		kinds: cp.sharedKindSet(d.Kinds),
 	}
 	switch {
 	case d.PropagateChannelScopeSet:

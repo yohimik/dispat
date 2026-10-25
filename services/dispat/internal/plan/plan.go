@@ -1283,6 +1283,7 @@ type computation struct {
 	withoutDelivery bool
 	closures        map[string]func(string) bool // cancel commit -> its closure, built once
 	walks           *walkCache                   // §9.2 traversals, shared between units
+	kindSets        map[kindSetKey]map[model.DepKind]bool
 	globs           *globIndex                   // §6.1 glob terms, resolved once each
 	windowRefs      map[string][]map[string]bool // composed package -> shared repository windows
 	// windowKeys names the history views a composed package's window was

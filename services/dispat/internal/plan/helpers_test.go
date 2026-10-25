@@ -291,6 +291,24 @@ func TestKindSet(t *testing.T) {
 		kindSet([]ccme.DependencyKind{ccme.KindPeerDependencies}))
 }
 
+// TestSharedKindSetIsBuiltOncePerList: every unit of a parser carries the
+// parser's one kind list, so its set is built once and handed to all of them,
+// and the nil and empty lists keep their opposite meanings.
+func TestSharedKindSetIsBuiltOncePerList(t *testing.T) {
+	cp := &computation{}
+	configured := []ccme.DependencyKind{ccme.KindDependencies, ccme.KindPeerDependencies}
+	first := cp.sharedKindSet(configured)
+	assert.Equal(t, kindSet(configured), first)
+	assert.Zero(t, testing.AllocsPerRun(100, func() { cp.sharedKindSet(configured) }),
+		"a second unit of the parser builds nothing")
+	assert.Equal(t, kindSet(configured[:1]), cp.sharedKindSet(configured[:1]),
+		"a shorter list over the same array is another list")
+	assert.Nil(t, cp.sharedKindSet(nil))
+	empty := cp.sharedKindSet([]ccme.DependencyKind{})
+	require.NotNil(t, empty)
+	assert.Empty(t, empty)
+}
+
 func TestUnderDir(t *testing.T) {
 	assert.True(t, underDir("r/libs/core/main.go", "r/libs/core"))
 	assert.True(t, underDir("r/libs/core", "r/libs/core"), "the folder itself")
