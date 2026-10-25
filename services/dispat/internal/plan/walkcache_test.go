@@ -100,8 +100,8 @@ func TestWalkCacheChargesBothTiersToOneBudget(t *testing.T) {
 		"b": {{to: "c", kind: model.KindDependencies}},
 		"c": {{to: "d", kind: model.KindDependencies}},
 	}}
-	cp.walks = &walkCache{single: make(map[walkKey][]target), exact: make(map[walkKey][]target),
-		held: walkCacheBudget - 2}
+	cp.walks = &walkCache{single: make(map[walkKey][]target), shallow: make(map[sourceKinds]boundedWalk),
+		exact: make(map[walkKey][]target), held: walkCacheBudget - 2}
 
 	fromA := cp.walk(map[string]bool{"a": true}, depthUnbounded, nil)
 	require.Equal(t, cp.walkLiteral(map[string]bool{"a": true}, depthUnbounded, nil), fromA)
@@ -110,12 +110,12 @@ func TestWalkCacheChargesBothTiersToOneBudget(t *testing.T) {
 
 	near := cp.walk(map[string]bool{"a": true}, 1, nil)
 	require.Equal(t, cp.walkLiteral(map[string]bool{"a": true}, 1, nil), near)
-	require.Len(t, cp.walks.single, 1, "one target does")
+	require.Len(t, cp.walks.shallow, 1, "one target does")
 	require.Equal(t, walkCacheBudget-1, cp.walks.held)
 
 	fromB := cp.walk(map[string]bool{"b": true}, depthUnbounded, nil)
 	require.Len(t, fromB, 2)
-	require.Len(t, cp.walks.single, 1, "two targets no longer do")
+	require.Empty(t, cp.walks.single, "two targets no longer do")
 }
 
 // TestBoundedWalkWalksItsOwnDepth pins what a depth-one ask over a chain
@@ -137,6 +137,30 @@ func TestBoundedWalkWalksItsOwnDepth(t *testing.T) {
 	require.Equal(t, []target{{name: "b", from: "a", level: 1}, {name: "d", from: "c", level: 1}},
 		cp.walk(pair, 1, nil))
 	require.EqualValues(t, 2, cp.stats.WalkTargets.Load(), "a composed walk reads its sources' bounded walks")
+}
+
+// TestShallowerAskReadsTheDeeperBoundedWalk pins what a source asked at two
+// depths costs when its unbounded walk is never kept: the deeper walk once,
+// and the shallower ask read off its prefix, one walk kept for the source.
+func TestShallowerAskReadsTheDeeperBoundedWalk(t *testing.T) {
+	cp := &computation{log: zerolog.Nop(), stats: &HistoryStats{}, edges: map[string][]edge{
+		"a": {{to: "b", kind: model.KindDependencies}},
+		"b": {{to: "c", kind: model.KindDependencies}},
+		"c": {{to: "d", kind: model.KindDependencies}},
+	}}
+	source := map[string]bool{"a": true}
+	require.Equal(t, []target{{name: "b", from: "a", level: 1}, {name: "c", from: "a", level: 2}},
+		cp.walk(source, 2, nil))
+	near := cp.walk(source, 1, nil)
+	require.Equal(t, []target{{name: "b", from: "a", level: 1}}, near)
+	require.Equal(t, len(near), cap(near), "the prefix cannot reach the deeper level")
+	require.EqualValues(t, 2, cp.stats.WalkTargets.Load(), "the depth-one ask walks nothing")
+	require.Len(t, cp.walks.shallow, 1)
+	require.Equal(t, 2, cp.walks.held)
+
+	require.Len(t, cp.walk(source, 3, nil), 3)
+	require.EqualValues(t, 5, cp.stats.WalkTargets.Load(), "a deeper ask walks to its own depth")
+	require.Equal(t, 3, cp.walks.held, "and replaces the shallower walk it covers")
 }
 
 // TestLiteralWalkAllocatesItsOutputAndSeenSet pins the walk's own heap: the

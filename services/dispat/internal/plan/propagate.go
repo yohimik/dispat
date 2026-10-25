@@ -63,8 +63,9 @@ type target struct {
 // cache keys, because they recur differently. A unit written over one package
 // is nearly every unit, and its walk at any depth is a prefix of that
 // package's unbounded walk, which lists level by level, when that walk is
-// already kept; otherwise it is walked to its own depth, since a unit written
-// "^" needs one level and not the whole reach (§13.11, appendix B.7a's chain).
+// already kept, or of the deepest bounded walk kept for that package;
+// otherwise it is walked to its own depth, since a unit written "^" needs one
+// level and not the whole reach (§13.11, appendix B.7a's chain).
 // A unit over several packages is composed from its sources' walks where they
 // are few, walked outright where they are many, and kept under its exact key
 // either way: a control unit is asked about several times a run.
@@ -76,7 +77,8 @@ func (cp *computation) walk(sources map[string]bool, depth int, kinds map[model.
 		return cp.walkLiteral(sources, depth, kinds)
 	}
 	if cp.walks == nil {
-		cp.walks = &walkCache{single: make(map[walkKey][]target), exact: make(map[walkKey][]target)}
+		cp.walks = &walkCache{single: make(map[walkKey][]target), shallow: make(map[sourceKinds]boundedWalk),
+			exact: make(map[walkKey][]target)}
 	}
 	kindsKey := kindsCacheKey(kinds)
 	if len(sources) == 1 {
@@ -120,11 +122,21 @@ type walkKey struct {
 }
 
 type walkCache struct {
-	// single holds walks from one source, level by level: unbounded ones, and
-	// bounded ones whose unbounded walk nobody asked for first.
+	// single holds the unbounded walks from one source, level by level.
 	single map[walkKey][]target
-	exact  map[walkKey][]target
-	held   int // targets retained under either key, against walkCacheBudget
+	// shallow holds, per source and kinds, the deepest bounded walk asked of a
+	// source whose unbounded walk nobody asked for first. A shallower ask is a
+	// prefix of it, so one bounded walk per source is kept, not one per depth.
+	shallow map[sourceKinds]boundedWalk
+	exact   map[walkKey][]target
+	held    int // targets retained under any key, against walkCacheBudget
+}
+
+type sourceKinds struct{ source, kinds string }
+
+type boundedWalk struct {
+	depth   int
+	targets []target
 }
 
 // keep retains a walk under its key while the budget allows.
@@ -157,18 +169,23 @@ func (wc *walkCache) within(cp *computation, source string, depth int, kindsKey 
 	if unbounded, ok := wc.single[walkKey{sources: source, depth: depthUnbounded, kinds: kindsKey}]; ok {
 		return withinDepth(unbounded, depth)
 	}
-	key := walkKey{sources: source, depth: depth, kinds: kindsKey}
-	if walked, ok := wc.single[key]; ok {
-		return walked
+	key := sourceKinds{source: source, kinds: kindsKey}
+	kept, ok := wc.shallow[key]
+	if ok && kept.depth >= depth {
+		return withinDepth(kept.targets, depth)
 	}
 	walked := slices.Clip(cp.walkLiteral(map[string]bool{source: true}, depth, kinds))
-	wc.keep(wc.single, key, walked)
+	if wc.held-len(kept.targets)+len(walked) <= walkCacheBudget {
+		wc.held += len(walked) - len(kept.targets)
+		wc.shallow[key] = boundedWalk{depth: depth, targets: walked}
+	}
 	return walked
 }
 
-// withinDepth is the part of an unbounded walk a bounded one would have
-// produced. A breadth-first walk lists its targets by level, and the walk to
-// depth N is exactly its targets at level N or less, so that part is a prefix.
+// withinDepth is the part of an unbounded walk, or of one bounded deeper, a
+// walk bounded at depth would have produced. A breadth-first walk lists its
+// targets by level, and the walk to depth N is exactly its targets at level N
+// or less, so that part is a prefix.
 // The capacity is clipped so that nothing appended by a caller can reach the
 // shared tail.
 func withinDepth(walked []target, depth int) []target {
