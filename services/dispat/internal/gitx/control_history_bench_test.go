@@ -67,9 +67,9 @@ func TestParseControlGitlinkHistoryDoesNotRetainTheLogBuffer(t *testing.T) {
 
 	t.Logf("input %d bytes, retained %d bytes (%.2fx)", input, retained, float64(retained)/float64(input))
 	require.Greater(t, retained, 0, "the parsed history is not free")
-	// The commits this input renders keep a little over half of it; pinning
-	// the answer as well puts the total above it. The line sits between the
-	// two measurements with room on either side: 0.54x of the input with the
+	// The commits this input renders keep under half of it; pinning the
+	// answer as well puts the total above it. The line sits between the two
+	// measurements with room on either side: 0.42x of the input with the
 	// copies, 1.09x without them, on the machine this was written on.
 	require.Less(t, retained, input*4/5,
 		"the parsed history must not pin the log answer it was read from")
