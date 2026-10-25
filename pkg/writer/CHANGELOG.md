@@ -1,5 +1,75 @@
 # Changelog
 
+## pkg/writer/v1.2.2-rc.2 (2026-10-25)
+
+### Fixes
+
+- open a file for rewriting into one buffer of its size ([62ae266](https://github.com/yohimik/dispat/commit/62ae266fb7e188aec2060b5a964cc268b46c4d01)) (by yohimik, Claude Opus 5.5)
+  Noticed while fixing Replace, not an audit finding: openSplicer, which
+  every writer entry point reads through, used io.ReadAll, which starts at
+  512 bytes and grows by copying, so a file cost about twice its size in
+  allocations and two dozen buffers. It now reads into one buffer sized
+  from the stat it already takes, with room to see the end of the file
+  without growing. The size cap, the error paths and the bytes read are
+  unchanged; a file that grew since the stat still reads whole up to the
+  cap.
+
+  TestAllocationBudget pins openSplicer of a 1 MiB file at 10
+  allocations (9 measured); the old code takes 32.
+
+  BenchmarkReplace, twenty expansions over a 1 MiB file, -benchtime 50x
+  -count 3, medians, same machine (Apple M5, shared with other agents:
+  allocations and bytes are the stable figures, timings are indicative;
+  "applied" includes the atomic write and its fsync):
+
+  | case      | B/op 38ec11ad | B/op this | allocs 38ec11ad | allocs this | time 38ec11ad | time this |
+  |-----------|--------:|--------:|---:|---:|---------:|---------:|
+  | applied   | 4356354 | 3176964 | 59 | 36 | 16176 us | 15918 us |
+  | unchanged | 2241316 | 1061922 | 44 | 21 | 10463 us | 10853 us |
+
+- answer Replace's probes without rescanning the file ([f6663ea](https://github.com/yohimik/dispat/commit/f6663ea338f501edae39c11f922f85bc8fdc1a31)) (by yohimik, Claude Opus 5.5)
+  Finding: ReplaceBytes scans the file once per replacement, twice per
+  rule expansion (pkg/writer/replace.go:124). The release Replacer hands
+  Replace every replacement followed by its probe, a replacement whose
+  Find is its Write. Replace only asks whether a probe occurs, so its own
+  pass now stops at the first occurrence, and does not scan at all for a
+  probe straight after the replacement that wrote its text, which is
+  present by construction. ReplaceBytes keeps its exact counts. Both now
+  replace in one Index pass sized by the count already taken, where
+  bytes.ReplaceAll counted a second time, and write each replacement into
+  the buffer the one before last produced instead of allocating a new
+  file-sized buffer per replacement.
+
+  The bytes, counts, Applied, Missing, Skipped and Count are those of the
+  literal reading: FuzzReplaceMatchesTheLiteralReading holds both paths
+  to it over replacement-and-probe lists, including a probe that does not
+  follow its replacement and a replacement that removes a later Find
+  (fuzzed one minute, 7.5M executions, no difference). The single-pass
+  multi-pattern variant the audit sketched is not taken: as the
+  equivalence vote shows, it changes which later Finds are counted.
+  TestAllocationBudget pins ReplaceBytes over twenty applied
+  replacements at 4 allocations (3 measured); the old code takes 21.
+
+  BenchmarkReplace, twenty expansions over a 1 MiB file, -benchtime 50x
+  -count 3, medians, same machine (Apple M5, shared with other agents:
+  allocations and bytes are the stable figures, timings are indicative;
+  "applied" includes the atomic write and its fsync):
+
+  | case      | B/op 6248eff8 | B/op this | allocs 6248eff8 | allocs this | time 6248eff8 | time this |
+  |-----------|---------:|--------:|---:|---:|---------:|---------:|
+  | applied   | 23378592 | 4356354 | 79 | 59 | 38150 us | 16176 us |
+  | unchanged |  2241636 | 2241316 | 45 | 44 | 14505 us | 10463 us |
+
+### Dependencies
+
+- [manifest](https://github.com/yohimik/dispat/releases/tag/pkg/manifest/v1.2.2-rc.2): 1.2.2-rc.1 -> 1.2.2-rc.2
+
+### Authors
+
+- yohimik
+- Claude Opus 5.5
+
+
 ## pkg/writer/v1.2.2-rc.1 (2026-09-25)
 
 ### Fixes
