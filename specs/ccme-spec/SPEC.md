@@ -3327,6 +3327,20 @@ This is a gap for those methods on this family, not a universal planner lower bo
 using them is identified in DESIGN-HISTORY.md. Comparison sorting of unsorted package names and other
 planner phases retain their separately charged costs even on this family.
 
+These comparisons are against specified methods, not against every possible planner. A method scanning
+all `P` package candidates at each extraction to select the least ready name, while processing edges once,
+takes `Theta(P² + E)`. A heap takes `O(E + P log(P + 1))`. With `E = O(P)`, the heap method is
+asymptotically smaller as `P` grows. With `E = Theta(P²)`, reading the explicit edges can dominate both.
+For windows, an adaptive method can first verify in `O(C + Au)` time that each repository's materialized
+pending union is a chain, assuming constant-time indexed union membership. Building that index is charged
+separately if it is not already present. `Au` counts all parent entries of union commits, including parents
+outside the union. It can use rank intervals on such a chain and a general DAG method otherwise. If the
+fallback already scans those same parent lists, verification adds only a linear pass to its bound.
+The strict saving above is for the chain family's window and author subphases with the shared aggregate.
+The implementation dated in DESIGN-HISTORY.md does not yet use this rank fast path.
+No workload distribution is specified,
+so these worst-case and family comparisons make no average-case planner claim.
+
 **The dispat theorem (bounds for a compiled plan).** A compiled plan is a finite directed acyclic graph of tasks.
 There is no fixed upper limit on its task, edge or worker counts; `Tk`, `Dk` and `Wn` remain input parameters,
 and constants in asymptotic claims do not depend on them.
@@ -3564,6 +3578,35 @@ can compute `E_i` when the last predecessor finishes and start task `i` at `2E_i
 predecessors finish by `2E_i`, so those starts are feasible without knowing `d_i` in advance. It finishes
 by `max_i(2E_i + d_i) <= 2Lk`, yet delays tasks with `E_i > 0`. This is another counterexample to a
 unique algorithm attaining the minimum asymptotic order.
+
+**Comparison with named execution methods.** Under clause 2's identical-slot, zero-overhead model, a
+completion-counter list scheduler processes each of `n = Tk` vertices and `e = Dk` edges once, using
+`O(n + e)` graph work and `O(n)` auxiliary words beyond its explicit adjacency input. A method that
+rescans all `n` vertices and `e` edges after each of `n` completions spends `Theta(n(n + e))` work by its
+definition. On a chain with `e = n - 1`, this is `Theta(n²)` against `Theta(n)` event-counter work.
+Actual sorted ready batches, placement and transport add their separately stated costs.
+
+With `n = s` independent unit-duration tasks and `s` interchangeable slots, sequential execution takes
+`s` units of task time; immediate list dispatch takes 1. The separation grows only when `s` grows.
+A level-barrier method can be worse even with a linear-size graph. For `k >= 2`, take `s = k`, a chain
+`z_1 -> ... -> z_k` of unit-duration tasks, and one duration-`k` leaf `b_i` after each `z_i`.
+This graph has `n = 2k`, `e = 2k - 1`, and span `Lk = 2k`. Immediate dispatch starts `b_i` at time `i`;
+at most `k` tasks overlap, and the final `b_k` finishes at `2k`, exactly the span. Barriers by edge depth
+take 1 for the first level, `k` for each of the next `k - 1` levels, and `k` for the last leaf level:
+`T_barrier = 1 + (k - 1)k + k = k² + 1`. Their task-time ratio is `Theta(k)` on this family.
+
+A static nonstealing assignment fixed before durations are known also has an unbounded worst-case gap.
+Take `s >= 2` and `n = s²` independent tasks on `s` one-slot workers. Some worker receives at least `s` tasks.
+Give `s` of its tasks duration 1 and every other task duration `epsilon = 1/s³`. Its completion time
+is at least `s`. A dynamic work-conserving list has `Wk < s + 1/s`, `Lk = 1`, and by clause 2 finishes
+before `2 + 1/s²`. This says nothing against static placement that knows durations or permits stealing.
+
+For every finite DAG and duration vector satisfying clause 2, the same bound holds pathwise against the
+optimal offline makespan `Topt`: `T_list <= (2 - 1/s) Topt`. For fixed `s`, taking expectations under any
+workload distribution with finite `E[Topt]` gives
+`E[T_list] <= (2 - 1/s) E[Topt]`. This is distribution-free constant-factor control, not a claim of
+strict expected superiority. Other work-conserving list schedulers share it; the examples prove
+separations from the named rescanning, sequential, barrier and nonstealing methods under their premises.
 
 The graph input and scheduler state have distinct space accounts. A retained explicit adjacency-list task graph
 occupies `Theta(Tk + Dk)` words under that representation. Indegree counters, a ready queue and in-flight leases

@@ -260,6 +260,20 @@ policy exactly fastest for every duration assignment has the unique ASAP start v
 known-zero tasks or known bounded durations. It also does not imply uniqueness at asymptotic order: starting
 task `i` at `2E_i` is feasible online and finishes within `2Lk`, while delaying tasks with `E_i > 0`.
 
+The new comparison corollary names its baselines. Indegree events take `O(n + e)` graph work, while an
+algorithm rescanning every vertex and edge after every completion takes `Theta(n(n + e))` by definition.
+Sequential execution takes `s` versus 1 for `s` independent unit tasks on `s` slots. With `s = k`, a
+chain `z_1 -> ... -> z_k` of unit tasks and a duration-`k` leaf `b_i` after each `z_i` has only
+`n = 2k`, `e = 2k - 1`, and span `2k`. Immediate dispatch finishes at `2k`; edge-depth barriers take
+`1 + k²`, an unbounded ratio. For `s²` independent tasks statically assigned before durations are known,
+some worker owns at least `s`; making those `s` tasks long gives static time at least `s`, while dynamic
+work-conserving dispatch finishes before `2 + 1/s²` under the stated short-task durations. The latter
+comparison does not cover duration-aware placement or stealing. The one-pool list bound holds on every
+finite instance, so for fixed `s` it also gives
+`E[T_list] <= (2 - 1/s) E[Topt]` under any distribution with finite expected optimum. It proves no
+strict average advantage or unique scheduler. Planning work, placement, transfers and retry time stay
+outside these ideal task-time comparisons.
+
 The scaling claim now uses `h` identical machines, `c` compatible slots each, and measured uniform per-task
 speedup `v`. It gives the lower bound `(1/v) max(Lk, Wk/(h c))` and the matching one-pool list-schedule order
 `Theta((Wk/(h c) + Lk)/v)`. A chain finishes in exactly `Lk/v`, independent of machine and slot count. For `n`
@@ -299,6 +313,17 @@ these window and author questions in `O(P)` words, or `O(P log P)` bits, and `O(
 phases retain their costs.
 This establishes a family-specific gap in the dated
 planner, not a lower bound for arbitrary history DAGs or a claim about every future algorithm.
+
+The planner comparison is likewise conditional. Scanning all `P` candidates at each least-ready extraction,
+while processing edges once, costs `Theta(P² + E)`; a heap costs `O(E + P log(P + 1))`.
+Sparse `E = O(P)` gives a strict order saving; dense `E = Theta(P²)` makes edge reads dominate both.
+A proposed adaptive method could verify each repository's materialized pending union is a chain in
+`O(C + Au)` time with constant-time indexed union membership, charging index construction separately.
+`Au` counts all parent entries of union commits, including edges leaving the union.
+It could use rank windows and a shared suffix author aggregate there, with a general DAG fallback.
+This adds a linear pass when the fallback already scans those same parent lists and saves window and author
+work on the one-author chain family. The engine at `0e495797` does not implement the rank fast path.
+No input distribution is asserted, so these are worst-case or stated-family comparisons.
 
 The current fixed-stage task compiler reads `Plan.Providers` and returns an explicit task scheduler graph.
 Those retained input and output representations occupy `Theta(P + E + Tk + Dk)` words when both coexist;
