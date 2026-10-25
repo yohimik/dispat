@@ -5,6 +5,7 @@ package plan
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,10 +62,12 @@ type target struct {
 // and handed to every unit that asks the same question (CCME §13.11). Two
 // cache keys, because they recur differently. A unit written over one package
 // is nearly every unit, and its walk at any depth is a prefix of that
-// package's unbounded walk, which lists level by level. A unit over several
-// packages is composed from its sources' walks where they are few, walked
-// outright where they are many, and kept under its exact key either way: a
-// control unit is asked about several times a run.
+// package's unbounded walk, which lists level by level, when that walk is
+// already kept; otherwise it is walked to its own depth, since a unit written
+// "^" needs one level and not the whole reach (§13.11, appendix B.7a's chain).
+// A unit over several packages is composed from its sources' walks where they
+// are few, walked outright where they are many, and kept under its exact key
+// either way: a control unit is asked about several times a run.
 //
 // With tracing on nothing is cached, so that every unit still narrates the
 // edges it crossed.
@@ -78,15 +81,7 @@ func (cp *computation) walk(sources map[string]bool, depth int, kinds map[model.
 	kindsKey := kindsCacheKey(kinds)
 	if len(sources) == 1 {
 		for s := range sources {
-			// Once the budget has turned a walk away, a bounded walk that is
-			// not cached is walked to its own depth: the unbounded one it
-			// would be a prefix of may not be kept either, and a unit written
-			// "^" needs one level of it, not the whole reach.
-			if _, isCached := cp.walks.single[walkKey{sources: s, kinds: kindsKey}]; !isCached &&
-				cp.walks.isSpilled && depth != depthUnbounded {
-				return cp.walkLiteral(sources, depth, kinds)
-			}
-			return withinDepth(cp.walks.from(cp, s, kindsKey, kinds), depth)
+			return cp.walks.within(cp, s, depth, kindsKey, kinds)
 		}
 	}
 	names := sortedKeys(sources)
@@ -100,10 +95,7 @@ func (cp *computation) walk(sources map[string]bool, depth int, kinds map[model.
 	} else {
 		walked = cp.walkLiteral(sources, depth, kinds)
 	}
-	if cp.walks.held+len(walked) <= walkCacheBudget {
-		cp.walks.held += len(walked)
-		cp.walks.exact[key] = walked
-	}
+	cp.walks.keep(cp.walks.exact, key, walked)
 	return walked
 }
 
@@ -120,7 +112,7 @@ const walkComposeLimit = 8
 const walkCacheBudget = 4 << 20
 
 // walkKey names one traversal. sources is one package for the single cache and
-// the sorted set, NUL-joined, for the exact one, where depth also counts.
+// the sorted set, NUL-joined, for the exact one.
 type walkKey struct {
 	sources string
 	depth   int
@@ -128,26 +120,49 @@ type walkKey struct {
 }
 
 type walkCache struct {
-	single map[walkKey][]target // one source, unbounded, level by level
+	// single holds walks from one source, level by level: unbounded ones, and
+	// bounded ones whose unbounded walk nobody asked for first.
+	single map[walkKey][]target
 	exact  map[walkKey][]target
 	held   int // targets retained under either key, against walkCacheBudget
-	// isSpilled records that the budget has turned a single-source walk away.
-	isSpilled bool
+}
+
+// keep retains a walk under its key while the budget allows.
+func (wc *walkCache) keep(walks map[walkKey][]target, key walkKey, walked []target) {
+	if wc.held+len(walked) > walkCacheBudget {
+		return
+	}
+	wc.held += len(walked)
+	walks[key] = walked
 }
 
 // from is the unbounded walk from one source package.
 func (wc *walkCache) from(cp *computation, source, kindsKey string, kinds map[model.DepKind]bool) []target {
-	key := walkKey{sources: source, kinds: kindsKey}
-	walked, ok := wc.single[key]
-	if !ok {
-		walked = cp.walkLiteral(map[string]bool{source: true}, depthUnbounded, kinds)
-		if wc.held+len(walked) <= walkCacheBudget {
-			wc.held += len(walked)
-			wc.single[key] = walked
-		} else {
-			wc.isSpilled = true
-		}
+	key := walkKey{sources: source, depth: depthUnbounded, kinds: kindsKey}
+	if walked, ok := wc.single[key]; ok {
+		return walked
 	}
+	walked := cp.walkLiteral(map[string]bool{source: true}, depthUnbounded, kinds)
+	wc.keep(wc.single, key, walked)
+	return walked
+}
+
+// within is the walk from one source package to a depth.
+func (wc *walkCache) within(cp *computation, source string, depth int, kindsKey string,
+	kinds map[model.DepKind]bool) []target {
+
+	if depth == depthUnbounded {
+		return wc.from(cp, source, kindsKey, kinds)
+	}
+	if unbounded, ok := wc.single[walkKey{sources: source, depth: depthUnbounded, kinds: kindsKey}]; ok {
+		return withinDepth(unbounded, depth)
+	}
+	key := walkKey{sources: source, depth: depth, kinds: kindsKey}
+	if walked, ok := wc.single[key]; ok {
+		return walked
+	}
+	walked := slices.Clip(cp.walkLiteral(map[string]bool{source: true}, depth, kinds))
+	wc.keep(wc.single, key, walked)
 	return walked
 }
 
@@ -206,7 +221,7 @@ func (wc *walkCache) compose(cp *computation, names []string, sources map[string
 	walks := make([][]target, len(names))
 	deepest := 0
 	for i, s := range names {
-		walks[i] = withinDepth(wc.from(cp, s, kindsKey, kinds), depth)
+		walks[i] = wc.within(cp, s, depth, kindsKey, kinds)
 		for _, t := range walks[i] {
 			if sources[t.name] {
 				continue

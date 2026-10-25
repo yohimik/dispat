@@ -108,16 +108,35 @@ func TestWalkCacheChargesBothTiersToOneBudget(t *testing.T) {
 	require.Empty(t, cp.walks.single, "three targets do not fit in the two left")
 	require.Equal(t, walkCacheBudget-2, cp.walks.held)
 
-	require.True(t, cp.walks.isSpilled)
 	near := cp.walk(map[string]bool{"a": true}, 1, nil)
-	require.Equal(t, cp.walkLiteral(map[string]bool{"a": true}, 1, nil), near,
-		"past the budget a bounded walk goes to its own depth only")
-	require.Empty(t, cp.walks.single)
+	require.Equal(t, cp.walkLiteral(map[string]bool{"a": true}, 1, nil), near)
+	require.Len(t, cp.walks.single, 1, "one target does")
+	require.Equal(t, walkCacheBudget-1, cp.walks.held)
 
 	fromB := cp.walk(map[string]bool{"b": true}, depthUnbounded, nil)
 	require.Len(t, fromB, 2)
-	require.Len(t, cp.walks.single, 1, "two targets do")
-	require.Equal(t, walkCacheBudget, cp.walks.held)
+	require.Len(t, cp.walks.single, 1, "two targets no longer do")
+}
+
+// TestBoundedWalkWalksItsOwnDepth pins what a depth-one ask over a chain
+// costs: one level, whether or not the source's unbounded walk is kept, and
+// nothing at all the second time it is asked.
+func TestBoundedWalkWalksItsOwnDepth(t *testing.T) {
+	cp := &computation{log: zerolog.Nop(), stats: &HistoryStats{}, edges: map[string][]edge{
+		"a": {{to: "b", kind: model.KindDependencies}},
+		"b": {{to: "c", kind: model.KindDependencies}},
+		"c": {{to: "d", kind: model.KindDependencies}},
+	}}
+	source := map[string]bool{"a": true}
+	for again := 0; again < 2; again++ {
+		require.Equal(t, []target{{name: "b", from: "a", level: 1}}, cp.walk(source, 1, nil))
+	}
+	require.EqualValues(t, 1, cp.stats.WalkTargets.Load(), "the unbounded reach of a is never walked")
+
+	pair := map[string]bool{"a": true, "c": true}
+	require.Equal(t, []target{{name: "b", from: "a", level: 1}, {name: "d", from: "c", level: 1}},
+		cp.walk(pair, 1, nil))
+	require.EqualValues(t, 2, cp.stats.WalkTargets.Load(), "a composed walk reads its sources' bounded walks")
 }
 
 // TestGlobMatchesIsTheScan checks the indexed glob against the definition it
