@@ -122,11 +122,12 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	// Packages only, deliberately without Discover's dependency validation: a
 	// stale edge naming a deleted package must reach diffEdges as a removal
 	// suggestion, not abort the one command able to fix it.
-	pkgs, declared, _, err := config.DiscoverWorkspacePackages(a.cfg, a.root, a.workspace)
-	if err != nil {
-		a.log.Error().Err(err).Msg("package discovery failed")
-		return 0, err
+	found := a.discovery()
+	if found.err != nil {
+		a.log.Error().Err(found.err).Msg("package discovery failed")
+		return 0, found.err
 	}
+	pkgs, declared := found.packages, found.declared
 	known := make(map[string]bool, len(pkgs))
 	for _, p := range pkgs {
 		known[p.Name] = true
@@ -216,7 +217,9 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	if apply.len() == 0 {
 		return sugs.len(), nil
 	}
-	if err := a.applySuggestions(ctx, cfgPath, apply, declared, topology, out); err != nil {
+	err = a.applySuggestions(ctx, cfgPath, apply, declared, topology, out)
+	a.forgetDiscovery()
+	if err != nil {
 		return sugs.len(), err
 	}
 	return sugs.len() - apply.len(), nil

@@ -155,6 +155,13 @@ func (a *App) discovery() workspaceDiscovery {
 	return a.discovered
 }
 
+// forgetDiscovery drops the remembered walk once compute has rewritten the
+// files it was read from, so a later caller on this App reads them as they
+// now are, the way alignDeclaredList keeps a.cfg in step with disk.
+func (a *App) forgetDiscovery() {
+	a.discoveryOnce, a.discovered = sync.Once{}, workspaceDiscovery{}
+}
+
 // packages is the discovered workspace. A single history answers with every
 // package on disk whatever its dependency declarations say; a composed
 // workspace also refuses invalid declarations, as config.DiscoverWorkspace
