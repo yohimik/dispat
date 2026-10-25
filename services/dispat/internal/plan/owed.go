@@ -4,8 +4,10 @@
 package plan
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -54,16 +56,18 @@ type owedPair struct {
 // listOwedPairs lists the pairs of §13.3 that can name a distinct window: D
 // reachable from P over propagation.kinds, P with at least one parsed release
 // and D with a baseline in P's repository, the first pair of each (provider,
-// baseline), since the window depends on nothing else. total counts every
-// pair. Providers come in plan order and consumers in walk order, so the
-// windows are read, and the union extended, the same way on every run.
+// baseline) in P's walk, since the window depends on nothing else. Providers
+// come in plan order and consumers in walk order, so the windows are read, and
+// the union extended, the same way on every run.
 //
 // Only the distinct pairs are kept: every consumer a provider reaches is a
 // pair, which in a long dependency chain is a quadratic number of them, and
-// packages released at one commit share a baseline.
-func (cp *computation) listOwedPairs() (pairs []owedPair, total int) {
+// packages released at one commit share a baseline. For the same reason the
+// pairs are not read off one walk per provider (listReachedBaselines).
+func (cp *computation) listOwedPairs() []owedPair {
 	kinds := cp.resolveOwedKinds()
-	found := make(map[[2]string]bool)
+	families := make(map[string]map[string][]reachedBaseline)
+	var pairs []owedPair
 	for _, provider := range cp.order {
 		if !isAnyReleaseParsed(cp.tags[provider]) {
 			continue // nothing released, so nobody can have got ahead of a release
@@ -72,19 +76,119 @@ func (cp *computation) listOwedPairs() (pairs []owedPair, total int) {
 		if p := cp.byName[provider]; p != nil {
 			repository = p.Repository
 		}
-		for _, t := range cp.walk(map[string]bool{provider: true}, depthUnbounded, kinds) {
-			baseline := cp.baselineBoundary(t.name, historyKey(repository, ""))
-			if baseline == "" {
-				continue // a consumer that never released has overtaken nothing
-			}
-			total++
-			if key := [2]string{provider, baseline}; !found[key] {
-				found[key] = true
-				pairs = append(pairs, owedPair{provider: provider, consumer: t.name, baseline: baseline})
-			}
+		family := cp.owedFamilyKey(repository)
+		reached, isListed := families[family]
+		if !isListed {
+			reached = cp.listReachedBaselines(func(consumer string) string {
+				return cp.baselineBoundary(consumer, historyKey(repository, ""))
+			}, kinds)
+			families[family] = reached
+		}
+		for _, b := range reached[provider] {
+			pairs = append(pairs, owedPair{provider: provider, consumer: b.consumer, baseline: b.baseline})
 		}
 	}
-	return pairs, total
+	return pairs
+}
+
+// owedFamilyKey names what a consumer's baseline depends on besides the
+// consumer: nothing in one history, the provider's repository in a fleet.
+func (cp *computation) owedFamilyKey(repository string) string {
+	if len(cp.histories) == 0 {
+		return ""
+	}
+	return globx.Fold(repository)
+}
+
+// reachedBaseline is one distinct baseline a package's unbounded walk meets:
+// the first target carrying it, and that target's level.
+type reachedBaseline struct {
+	baseline, consumer string
+	level              int
+}
+
+// listReachedBaselines is, for every package, the distinct non-empty
+// baselines its unbounded walk over kinds meets, in the order the walk first
+// meets them. It is built consumers first in one pass instead of one walk per
+// package, which on a chain is quadratic in the packages for an answer of a
+// few baselines each.
+//
+// The walk's queue is first-in first-out, so the walk from P lists its direct
+// consumers in edge order and then every later level grouped by the direct
+// consumer it came through, each group in that consumer's own walk order. A
+// baseline is therefore first met one level below the least level at which a
+// direct consumer's own walk meets it, in the first such consumer, where that
+// consumer's walk first meets it (CCME §13.11).
+func (cp *computation) listReachedBaselines(baselineOf func(string) string, kinds map[model.DepKind]bool) map[string][]reachedBaseline {
+	reached := make(map[string][]reachedBaseline, len(cp.order))
+	merge := baselineMerge{at: make(map[string]int)}
+	for i := len(cp.order) - 1; i >= 0; i-- {
+		name := cp.order[i]
+		group := 0
+		for _, e := range cp.edges[name] {
+			if kinds != nil && !kinds[e.kind] {
+				continue
+			}
+			if baseline := baselineOf(e.to); baseline != "" {
+				merge.offer(baselineCandidate{reachedBaseline: reachedBaseline{baseline: baseline, consumer: e.to, level: 1},
+					group: group, index: -1})
+			}
+			for index, b := range reached[e.to] {
+				b.level++
+				merge.offer(baselineCandidate{reachedBaseline: b, group: group, index: index})
+			}
+			group++
+		}
+		reached[name] = merge.drain()
+	}
+	return reached
+}
+
+// baselineCandidate is a baseline as a direct consumer offers it to its
+// provider's walk: its walk position is (level, group, index), group being
+// the consumer's place among the provider's edges and index the baseline's
+// place in that consumer's own list.
+type baselineCandidate struct {
+	reachedBaseline
+	group, index int
+}
+
+// baselineMerge keeps, per baseline, the candidate the walk meets first. It
+// is reused from package to package.
+type baselineMerge struct {
+	candidates []baselineCandidate
+	at         map[string]int
+}
+
+// offer keeps a candidate unless one already offered is met no later. Groups
+// are offered in order, so only a shallower level can come first.
+func (m *baselineMerge) offer(c baselineCandidate) {
+	i, isOffered := m.at[c.baseline]
+	if !isOffered {
+		m.at[c.baseline] = len(m.candidates)
+		m.candidates = append(m.candidates, c)
+		return
+	}
+	if c.level < m.candidates[i].level {
+		m.candidates[i] = c
+	}
+}
+
+// drain is the kept baselines in walk order, and empties the merge.
+func (m *baselineMerge) drain() []reachedBaseline {
+	if len(m.candidates) == 0 {
+		return nil
+	}
+	slices.SortFunc(m.candidates, func(a, b baselineCandidate) int {
+		return cmp.Or(cmp.Compare(a.level, b.level), cmp.Compare(a.group, b.group), cmp.Compare(a.index, b.index))
+	})
+	out := make([]reachedBaseline, len(m.candidates))
+	for i, c := range m.candidates {
+		out[i] = c.reachedBaseline
+	}
+	m.candidates = m.candidates[:0]
+	clear(m.at)
+	return out
 }
 
 // resolveOwedKinds is propagation.kinds (§8.4): the configured parser's in one
@@ -271,7 +375,7 @@ func (cp *computation) loadOwedWindows(ordinary []windowBoundary) error {
 	}
 	isLoaded := func(boundary string) bool { return loaded[boundary] }
 
-	pairs, total := cp.listOwedPairs()
+	pairs := cp.listOwedPairs()
 	var owed []windowBoundary
 	var frontier *unionFrontier
 	for _, pair := range pairs {
@@ -298,7 +402,7 @@ func (cp *computation) loadOwedWindows(ordinary []windowBoundary) error {
 			break
 		}
 	}
-	cp.log.Debug().Int("pairs", total).Int("boundaries", len(owed)).Msg("plan: owed windows examined")
+	cp.log.Debug().Int("pairs", len(pairs)).Int("boundaries", len(owed)).Msg("plan: owed windows examined")
 	if len(owed) == 0 {
 		return nil
 	}
@@ -451,7 +555,7 @@ func (cp *computation) loadRepositoryOwedWindows(idx *windowIndex) error {
 		history, ok := cp.histories[globx.Fold(repository)]
 		return ok && isRead(historyKey(history.Name, raw))
 	}
-	pairs, total := cp.listOwedPairs()
+	pairs := cp.listOwedPairs()
 	frontiers := make(map[string]unionFrontier)
 	listed := len(idx.lists)
 	for _, pair := range pairs {
@@ -481,7 +585,7 @@ func (cp *computation) loadRepositoryOwedWindows(idx *windowIndex) error {
 		decided[boundary] = true
 		queued = append(queued, owedLoad{history: history, boundary: boundary, consumer: pair.consumer})
 	}
-	cp.log.Debug().Int("pairs", total).Int("boundaries", len(queued)).Msg("plan: owed windows examined")
+	cp.log.Debug().Int("pairs", len(pairs)).Int("boundaries", len(queued)).Msg("plan: owed windows examined")
 	if len(queued) == 0 {
 		return nil
 	}
