@@ -142,3 +142,31 @@ func BenchmarkResolveAndLoadControl(b *testing.B) {
 	}
 	b.ReportMetric(float64(reads), "files-read/op")
 }
+
+// resolveAndLoadNode is what `dispat worker` does with --root and no
+// --config: find the configuration file, then load it as a node's.
+func resolveAndLoadNode(root string) (*File, error) {
+	found, err := ResolveConfigFile(root, defaultFileNames[0], false)
+	if err != nil {
+		return nil, err
+	}
+	return LoadNode(found.Path, nil)
+}
+
+// BenchmarkResolveAndLoadNode is BenchmarkResolveAndLoadControl for a serving
+// node's configuration.
+func BenchmarkResolveAndLoadNode(b *testing.B) {
+	root := writeComposedRepo(b)
+	load := func() error {
+		_, err := resolveAndLoadNode(root)
+		return err
+	}
+	reads := countFileReads(b, load)
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := load(); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportMetric(float64(reads), "files-read/op")
+}
