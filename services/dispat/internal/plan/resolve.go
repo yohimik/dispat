@@ -63,9 +63,7 @@ func (cp *computation) resolveCommit(rec *commitRec, data *ccme.Result) {
 	rec.units = data.ValidUnits()
 	rec.unitCount = len(data.Units)
 	cp.resolveAuthors(rec)
-	rec.scope = make([]map[string]bool, len(rec.units))
-	rec.propagations = make([]propagation, len(rec.units))
-	rec.channelPropagations = make([]channelPropagation, len(rec.units))
+	rec.scope, rec.propagations, rec.channelPropagations = newUnitRecords(len(rec.units))
 	for i, u := range rec.units {
 		// The commit behind the unit, recorded here because this is the
 		// one place a unit and the record that carried it are both in
@@ -87,12 +85,39 @@ func (cp *computation) resolveCommit(rec *commitRec, data *ccme.Result) {
 			// The unit's Propagate-Scope restricts both axes (§8.5a), so
 			// it is resolved once, by whichever axis asks first.
 			var propagateScope *scopeResult
-			rec.channelPropagations[i] = cp.unitChannelPropagation(u, rec, &propagateScope)
+			if isChannelAxisWritten(&u.Directives) {
+				rec.channelPropagations[i] = cp.unitChannelPropagation(u, rec, &propagateScope)
+			}
 			if u.Bump != ccme.BumpNone {
 				rec.propagations[i] = cp.unitPropagation(u, rec, &propagateScope)
 			}
 		}
 	}
+}
+
+// singleUnitRecords holds the per-unit records of a one-unit commit, which
+// is nearly every commit, in one allocation instead of three.
+type singleUnitRecords struct {
+	scope       [1]map[string]bool
+	propagation [1]propagation
+	channel     [1]channelPropagation
+}
+
+func newUnitRecords(units int) ([]map[string]bool, []propagation, []channelPropagation) {
+	if units == 1 {
+		records := new(singleUnitRecords)
+		return records.scope[:], records.propagation[:], records.channel[:]
+	}
+	return make([]map[string]bool, units), make([]propagation, units), make([]channelPropagation, units)
+}
+
+// isChannelAxisWritten reports whether resolving a unit's channel axis can
+// give anything but an inert record. At depth 0 with neither scope footer the
+// record is inert and every reader skips it as such, so the zero record
+// stands in for it; a scope footer is still resolved, for its diagnostics and
+// for the Propagate-Scope the bump axis shares.
+func isChannelAxisWritten(d *ccme.Directives) bool {
+	return d.ChannelDepth != 0 || d.PropagateChannelScopeSet || d.PropagateScopeSet
 }
 
 // liftDiagnostics carries ccme's diagnostics into the plan's, preserving code
