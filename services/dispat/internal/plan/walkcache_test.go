@@ -153,6 +153,27 @@ func TestLiteralWalkAllocatesItsOutputAndSeenSet(t *testing.T) {
 	require.LessOrEqual(t, allocations, 20.0)
 }
 
+// TestOneSourceReachesEveryTargetWithoutAnIndex: a unit over one package is
+// nearly every unit, and every target it reaches is reached from that
+// package, so the answer is one list and nothing per target.
+func TestOneSourceReachesEveryTargetWithoutAnIndex(t *testing.T) {
+	cp := &computation{log: zerolog.Nop(), edges: map[string][]edge{
+		"a": {{to: "b", kind: model.KindDependencies}, {to: "c", kind: model.KindDependencies}},
+		"b": {{to: "d", kind: model.KindDependencies}},
+	}}
+	source := map[string]bool{"a": true}
+	reaching := cp.reachingSources(source, depthUnbounded, nil)
+	for _, target := range cp.walk(source, depthUnbounded, nil) {
+		require.Equal(t, []string{"a"}, reaching.of(target.name))
+	}
+	allocations := testing.AllocsPerRun(100, func() { cp.reachingSources(source, depthUnbounded, nil) })
+	require.LessOrEqual(t, allocations, 1.0, "the source's name, and no map over the targets")
+
+	pair := cp.reachingSources(map[string]bool{"b": true, "c": true}, 1, nil)
+	require.Equal(t, []string{"b"}, pair.of("d"))
+	require.Nil(t, pair.of("a"))
+}
+
 // TestGlobMatchesIsTheScan checks the indexed glob against the definition it
 // replaced, a fold and a match of every package for every term: over the
 // sorted-run shortcut for a trailing "*", the general matcher for an interior

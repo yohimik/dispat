@@ -182,25 +182,36 @@ func withinDepth(walked []target, depth int) []target {
 // reachingSources is, for every target of a unit's walk, the sources of the
 // unit within the unit's depth of it, in name order: §9.2's from(d) and
 // §13.4a's reaching(u, D). A unit over one package, which is nearly every
-// unit, reaches every target from that package. A unit over several is read
-// off one walk per source, the cached walks its composed walk is built from,
-// because the composed walk visits a target once and knows only the package
-// it arrived from.
-func (cp *computation) reachingSources(sources map[string]bool, walked []target, depth int, kinds map[model.DepKind]bool) map[string][]string {
-	reaching := make(map[string][]string, len(walked))
+// unit, reaches every target from that package, so its answer is that one
+// name whatever the target. A unit over several is read off one walk per
+// source, the cached walks its composed walk is built from, because the
+// composed walk visits a target once and knows only the package it arrived
+// from.
+func (cp *computation) reachingSources(sources map[string]bool, depth int, kinds map[model.DepKind]bool) reachingSet {
 	if len(sources) == 1 {
-		names := sortedKeys(sources)
-		for _, t := range walked {
-			reaching[t.name] = names
-		}
-		return reaching
+		return reachingSet{everyTarget: sortedKeys(sources)}
 	}
+	byTarget := make(map[string][]string)
 	for _, s := range sortedKeys(sources) {
 		for _, t := range cp.walk(map[string]bool{s: true}, depth, kinds) {
-			reaching[t.name] = append(reaching[t.name], s)
+			byTarget[t.name] = append(byTarget[t.name], s)
 		}
 	}
-	return reaching
+	return reachingSet{byTarget: byTarget}
+}
+
+// reachingSet is reachingSources' answer: one list for every target when a
+// single source reaches them all, and a list per target otherwise.
+type reachingSet struct {
+	everyTarget []string
+	byTarget    map[string][]string
+}
+
+func (r reachingSet) of(target string) []string {
+	if r.byTarget == nil {
+		return r.everyTarget
+	}
+	return r.byTarget[target]
 }
 
 // compose is the multi-source walk read off its sources' walks.
@@ -713,7 +724,7 @@ func (cp *computation) propagateBumps() {
 			// source that reaches it through no path at all is never a cause
 			// of its release.
 			walked := cp.walk(sources, prop.Depth, prop.kinds)
-			reaching := cp.reachingSources(sources, walked, prop.Depth, prop.kinds)
+			reaching := cp.reachingSources(sources, prop.Depth, prop.kinds)
 
 			reached := 0
 			for _, t := range walked {
@@ -721,7 +732,7 @@ func (cp *computation) propagateBumps() {
 					continue
 				}
 				reached++
-				bump, isAdmitted := cp.admitBump(t.name, rec.key, reaching[t.name])
+				bump, isAdmitted := cp.admitBump(t.name, rec.key, reaching.of(t.name))
 				if !isAdmitted {
 					continue
 				}
