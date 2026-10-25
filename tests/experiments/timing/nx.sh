@@ -5,8 +5,11 @@
 # versions, commits, tags and publishes, and the push by hand of the release
 # commit nx 23.1.2 leaves on the clone alone, which belongs to the release.
 #
-# The relation is `build`: nx runs `release.version.preVersionCommand`, every
-# package's build, before it versions or publishes anything.
+# The relation is `none`: the pre-version command is `nx run-many -t build`,
+# and the fixture's nx.json declares no `dependsOn` for the build target, so
+# nx orders no package's build after its providers'. Every build still runs
+# before nx versions or publishes anything. The records are held to it, edge
+# by edge.
 
 run_experiment() {
   timing_fixture nx
@@ -21,6 +24,6 @@ run_experiment() {
   fi
   observe after-release
 
-  measure_timing build after-release
+  measure_timing none after-release
   timing_asserts after-release
 }

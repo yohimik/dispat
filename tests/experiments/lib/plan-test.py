@@ -6,6 +6,8 @@ missed a package would show as a difference between two tools that agree.
 import importlib.util
 import json
 import pathlib
+import subprocess
+import tempfile
 import unittest
 
 HERE = pathlib.Path(__file__).parent
@@ -27,6 +29,16 @@ class PlanTest(unittest.TestCase):
             {"packages": 6, "releasing": 2, "message": "release plan ready"},
         )) + "\nnot a JSON line\n"
         self.assertEqual(plan.read_plan("dispat", lines(output)), {"core": "1.1.0", "cli": "1.0.1"})
+
+    def test_dispat_s_own_count_is_held_against_the_reading(self):
+        output = "\n".join(json.dumps(entry) for entry in (
+            {"package": "core", "bump": "minor", "version": "1.0.0 -> 1.1.0"},
+            {"packages": 6, "releasing": 4, "message": "release plan ready"},
+        ))
+        with self.assertRaises(SystemExit):
+            plan.read_plan("dispat", lines(output))
+        with self.assertRaises(SystemExit):
+            plan.read_plan("dispat", lines(json.dumps({"package": "core", "bump": "minor", "version": "1.1.0"})))
 
     def test_lerna(self):
         output = ("lerna notice cli v10.0.1\nlerna info current version independent\n\nChanges:\n"
@@ -54,6 +66,20 @@ class PlanTest(unittest.TestCase):
     def test_an_unknown_tool(self):
         with self.assertRaises(SystemExit):
             plan.read_plan("rush", [])
+
+
+class ToldTest(unittest.TestCase):
+    def test_the_commit_at_the_head_or_the_pending_changesets(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+                            "--allow-empty", "-m", "feat(core)^: streaming reader"], check=True)
+            (root / ".changeset").mkdir()
+            (root / ".changeset" / "README.md").write_text("---\nnot: one\n---\n")
+            (root / ".changeset" / "streaming-reader.md").write_text('---\n"core": minor\n---\n\nstreaming reader\n')
+            self.assertEqual(plan.told("dispat", str(root)), "feat(core)^: streaming reader")
+            self.assertEqual(plan.told("changesets", str(root)), '"core": minor')
 
 
 if __name__ == "__main__":

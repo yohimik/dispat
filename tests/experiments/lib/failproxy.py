@@ -21,8 +21,9 @@ that silently drops something is a fault the experiment did not inject.
 
 When EXPERIMENT_TIMING names a file, every upload the proxy forwards is also
 appended to it as one JSON line, {package, task: "upload", start, end,
-status}: the timing experiment's record of a publication no npm process
-carried, which is how lerna publishes, in-process.
+status}: the timing experiment's record of every tool's publications, timed
+at the one point all of them pass through, whether an npm process carried the
+upload or the tool made it in-process, as lerna does.
 """
 import http.client
 import http.server

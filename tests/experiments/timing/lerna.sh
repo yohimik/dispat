@@ -8,11 +8,12 @@
 # and `lerna publish from-git`.
 #
 # lerna publishes in-process through libnpmpublish rather than through the npm
-# CLI, so the npm shim sees none of its publications; each is timed by the
-# registry's proxy as the upload it received.
+# CLI, so the npm shim sees none of its publications. Every tool's publication
+# is timed at the registry's proxy, so that is no difference here.
 #
 # The relation is `build`: `lerna publish` packs every package, which runs its
-# `prepack` build, in dependency order before it publishes any of them.
+# `prepack` build, in dependency order before it publishes any of them. The
+# records are held to it, edge by edge.
 
 lerna_plan() {
   (cd "$REPO-plan" && lerna version --conventional-commits --yes --no-git-tag-version --no-push)

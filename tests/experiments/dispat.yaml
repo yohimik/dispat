@@ -86,7 +86,9 @@ scripts:
         echo "timing $tool $scenario"
       done
     done
-  # Every cell of the campaign, four at a time. A completed campaign can be
+  # Every cell of the campaign, four at a time, then the timing cells one at
+  # a time: a timing cell measures durations, and a cell running beside it on
+  # the same host would be part of what it measured. A completed campaign can be
   # reused when it names this exact native image (which includes the released
   # dispat binary, pinned tools and harness) and every expected record still
   # parses. Failed, partial and corrupt campaigns have no valid manifest and
@@ -113,12 +115,15 @@ scripts:
     fi
     docker run --rm -v "$RESULTS:/results" --entrypoint find dispat-experiments \
       /results -mindepth 1 -delete
-    echo "running $(printf '%s\n' "$expected" | sed '/^$/d' | wc -l | tr -d ' ') cells, ${EXPERIMENTS_JOBS:-4} at a time, into $RESULTS"
+    echo "running $(printf '%s\n' "$expected" | sed '/^$/d' | wc -l | tr -d ' ') cells, ${EXPERIMENTS_JOBS:-4} at a time and the timing cells alone, into $RESULTS"
+    sweep() { # <jobs>: the cells on stdin, that many at a time
+      EXPERIMENTS_RESULTS="$RESULTS" xargs -P "$1" -L 1 sh -c \
+        'EXPERIMENT=$0 TOOL=$1 SCENARIO=${2:-} dispat exec cell --for pkg:experiments --in pkg:experiments'
+    }
+    cells=$(dispat exec cells --for pkg:experiments --in pkg:experiments)
     rc=0
-    dispat exec cells --for pkg:experiments --in pkg:experiments \
-    | EXPERIMENTS_RESULTS="$RESULTS" xargs -P "${EXPERIMENTS_JOBS:-4}" -L 1 sh -c \
-        'EXPERIMENT=$0 TOOL=$1 SCENARIO=${2:-} dispat exec cell --for pkg:experiments --in pkg:experiments' \
-      || rc=$?
+    printf '%s\n' "$cells" | grep -v '^timing ' | sweep "${EXPERIMENTS_JOBS:-4}" || rc=$?
+    printf '%s\n' "$cells" | grep '^timing ' | sweep 1 || rc=$?
     if [ "$rc" -eq 0 ]; then
       experiment_cache_write "$RESULTS" "$image" "$expected"
     fi

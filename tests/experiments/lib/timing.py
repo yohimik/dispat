@@ -1,50 +1,54 @@
 """One timing cell's figures, in the vocabulary of the dispat theorem (CCME
 SPEC.md §13.11): the makespan of the release, its total work Wk, its longest
-precedence chain Lk, the parallelism s it used, the lower bound max(Lk, Wk / s)
-no execution of the plan beats, and the makespan's ratio to that bound.
+precedence chain Lk, the parallelism s it was seen to use, the bound
+max(Lk, Wk / s) and the makespan's ratio to that bound, with each task's own
+duration and every edge of the precedence the records contradict.
 
     timing.py --steps steps.jsonl --records timing.jsonl --repo <clone>
-              --observation <observation> --relation build|publish
+              --observation <observation> --relation publish|build|none
 
 The inputs are records, never a tool's log:
 
   steps.jsonl   the protocol's steps with their wall-clock start and end. The
                 planning time is the `plan` step. The release is every step
                 named `run` or `run-<part>`, and its makespan runs from the
-                first one's start to the last one's end. A `run-version` step
-                is one task of the plan: no tool exposes per-package
-                versioning, so the version is timed as a whole.
+                first one's start to the last one's end.
   timing.jsonl  what the fixture recorded: a `build` line per package build,
-                a `publish` line per `npm publish` the npm shim forwarded, and
-                an `upload` line per upload the registry's proxy accepted.
-                Only the lines inside the release's span are the release's.
+                an `upload` line per upload the registry's proxy forwarded,
+                and a `publish` line per `npm publish` the npm shim forwarded.
   <clone>       the manifests, whose dependencies are the plan's graph.
 
-A package's publish is its `npm publish` when the shim saw one, and the
-registry's upload otherwise, which is how a tool that publishes in-process is
-timed. A build that runs inside its own package's publish, as `prepack` does,
-is cut out of that publish, so no second of it is counted twice.
+The tasks are the builds and the uploads, the same two kinds for every tool.
+A publication is timed as its upload at the registry, the one point every
+tool's publication passes through: lerna publishes in-process and runs no
+`npm publish` to time. The `npm publish` processes, where a tool runs them,
+are reported beside the tasks with their own package's build cut out, and are
+no part of Wk or Lk. No tool's versioning, commit, tags or push is a task, so
+all of them fall outside the tasks under every tool alike.
 
-The precedence is the plan's, the same for every tool, over the fixture's
-dependency graph. Every package builds before it publishes, and a provider
-publishes before its consumer (§19.2). The relation says what a consumer's
-build waits for (§19.2a): its providers' builds (`build`) or their
-publications (`publish`). The version task, where there is one, precedes all
-of them.
+The precedence is the plan's over the fixture's dependency graph (§19.2,
+§19.2a): every package builds before it publishes, a provider publishes
+before its consumer, and the relation the protocol declares says what a
+consumer's build waits for: its providers' publications (`publish`), their
+builds (`build`) or nothing (`none`). A package that ran no task of a kind
+passes its providers through. Every edge is checked against the records, and
+the ones a release did not honour are listed, because the bound holds only for
+an execution that honours them.
 """
 import argparse
 import glob
 import json
 import os
+import statistics
 import sys
 
 BASELINE = os.environ.get("EXPERIMENT_BASELINE", "1.0.0")
 RELEASE_STEP = "run"
-VERSION_STEP = "run-version"
 PLAN_STEP = "plan"
-# The slack around the release's span a record may stand outside it by: the
-# step's clock and the records' clocks are two readings of one wall clock,
-# taken microseconds apart.
+RELATIONS = ("publish", "build", "none")
+# The slack a record may stand outside a span by, and an edge's successor may
+# start before its predecessor's end by: the steps' clock and the records'
+# clocks are readings of one wall clock taken a few milliseconds apart.
 SLACK = 0.05
 
 
@@ -64,15 +68,20 @@ def release_span(steps):
     return min(s["started"] for s in release), max(s["ended"] for s in release)
 
 
-def planning_seconds(steps):
+def plan_span(steps):
     for s in steps:
         if s["step"] == PLAN_STEP:
-            return s["ended"] - s["started"]
+            return s["started"], s["ended"]
     raise SystemExit("timing.py: no plan step")
 
 
-def within(record, span):
-    return record["start"] >= span[0] - SLACK and record["end"] <= span[1] + SLACK
+def placed(record, span):
+    """inside, outside or straddling: where a record stands against a span."""
+    if record["start"] >= span[0] - SLACK and record["end"] <= span[1] + SLACK:
+        return "inside"
+    if record["end"] <= span[0] + SLACK or record["start"] >= span[1] - SLACK:
+        return "outside"
+    return "straddling"
 
 
 def subtract(interval, holes):
@@ -92,44 +101,60 @@ def subtract(interval, holes):
     return pieces
 
 
-def tasks_of(records, version_steps):
-    """Every task of the release as (package, kind, segments). A package's
-    publish is its npm publishes when there are any, else its accepted
-    uploads, each with the package's own builds cut out of it."""
-    builds, npm, uploads = {}, {}, {}
-    for r in records:
-        interval = (r["start"], r["end"])
-        if r["task"] == "build":
-            builds.setdefault(r["package"], []).append(interval)
-        elif r["task"] == "publish":
-            npm.setdefault(r["package"], []).append(interval)
-        elif r["task"] == "upload" and 200 <= r.get("status", 0) < 300:
-            uploads.setdefault(r["package"], []).append(interval)
-    tasks = [(None, "version", [(s["started"], s["ended"])]) for s in version_steps]
-    for package, intervals in builds.items():
-        tasks += [(package, "build", [interval]) for interval in intervals]
-    sources = {}
-    for package in sorted(set(npm) | set(uploads)):
-        sources[package] = "npm" if package in npm else "registry"
-        for interval in npm.get(package) or uploads[package]:
-            tasks.append((package, "publish", subtract(interval, builds.get(package, []))))
-    return tasks, sources
-
-
 def length(segments):
     return sum(end - start for start, end in segments)
 
 
+def accepted(record):
+    return 200 <= record.get("status", 0) < 300
+
+
+def tasks_of(records):
+    """The release's tasks as (package, kind, start, end, ok): every build
+    and every upload, accepted or not, since a refused upload still held a
+    slot for as long as it took."""
+    kinds = {"build": "build", "upload": "publish"}
+    return sorted(((r["package"], kinds[r["task"]], r["start"], r["end"],
+                    r["task"] == "build" or accepted(r))
+                   for r in records if r["task"] in kinds), key=lambda t: (t[2], t[0], t[1]))
+
+
+def npm_publishes(records):
+    """Each `npm publish` the shim timed, as (seconds, ok), with its own
+    package's builds cut out: `prepack` runs inside the process."""
+    builds = {}
+    for r in records:
+        if r["task"] == "build":
+            builds.setdefault(r["package"], []).append((r["start"], r["end"]))
+    return [(length(subtract((r["start"], r["end"]), builds.get(r["package"], []))), r.get("exit", 0) == 0)
+            for r in records if r["task"] == "publish"]
+
+
 def parallelism(tasks):
-    """The most task segments running at one instant. An end and a start at
-    the same instant do not overlap."""
-    events = sorted((t, delta) for _, _, segments in tasks for start, end in segments
-                    for t, delta in ((start, 1), (end, -1)))
+    """The most tasks running at one instant. An end and a start at the same
+    instant do not overlap."""
+    events = sorted((t, delta) for _, _, start, end, _ in tasks for t, delta in ((start, 1), (end, -1)))
     running = most = 0
     for _, delta in events:
         running += delta
         most = max(most, running)
     return most
+
+
+def busy(tasks, span):
+    """How long at least one task was running inside the span."""
+    covered, reach = 0.0, span[0]
+    for start, end in sorted((max(t[2], span[0]), min(t[3], span[1])) for t in tasks):
+        if end > reach:
+            covered += end - max(start, reach)
+            reach = end
+    return covered
+
+
+def stats(durations, failed=0):
+    return {"count": len(durations), "seconds": round(sum(durations), 3),
+            "median": round(statistics.median(durations), 3) if durations else 0,
+            "max": round(max(durations), 3) if durations else 0, "failed": failed}
 
 
 def read_graph(repo):
@@ -160,15 +185,84 @@ def topological(graph):
     return order
 
 
-def critical_path(tasks, graph, relation):
+class Timed:
+    """Each (package, kind)'s summed duration and its first start and last
+    end over every record of it."""
+
+    def __init__(self, tasks):
+        self.duration, self.start, self.end = {}, {}, {}
+        for package, kind, start, end, _ in tasks:
+            node = (package, kind)
+            self.duration[node] = self.duration.get(node, 0) + end - start
+            self.start[node] = min(self.start.get(node, start), start)
+            self.end[node] = max(self.end.get(node, end), end)
+
+    def __contains__(self, node):
+        return node in self.duration
+
+
+def nearest(graph, timed, package, kind):
+    """The providers of a package that ran a task of the kind, reached
+    through those that ran none (§19.2a)."""
+    found = set()
+    for provider in graph.get(package, []):
+        if (provider, kind) in timed:
+            found.add(provider)
+        else:
+            found |= nearest(graph, timed, provider, kind)
+    return found
+
+
+def edges(graph, timed, relation):
+    """Every edge of the precedence between two tasks that ran, (before,
+    after): a package's build before its publication, a provider's
+    publication before its consumer's, and the relation's edge into a
+    consumer's build."""
+    out = []
+    for package in topological(graph):
+        build, publish = (package, "build"), (package, "publish")
+        if build in timed and publish in timed:
+            out.append((build, publish))
+        if publish in timed:
+            out += [((p, "publish"), publish) for p in sorted(nearest(graph, timed, package, "publish"))]
+        if build in timed and relation != "none":
+            out += [((p, relation), build) for p in sorted(nearest(graph, timed, package, relation))]
+    return out
+
+
+def honoured(timed, edge):
+    before, after = edge
+    return timed.start[after] >= timed.end[before] - SLACK
+
+
+def name(node):
+    return f"{node[0]} {node[1]}"
+
+
+def consumer_builds(graph, timed):
+    """How many consumer builds started after their providers' builds, and
+    after their publications: the relation the records show, beside the one
+    the protocol declares."""
+    pairs = [(p, c) for c in graph if (c, "build") in timed for p in nearest(graph, timed, c, "build")]
+    after_build = sum(honoured(timed, ((p, "build"), (c, "build"))) for p, c in pairs)
+    after_publish = sum((p, "publish") in timed and honoured(timed, ((p, "publish"), (c, "build"))) for p, c in pairs)
+    return {"edges": len(pairs), "afterBuild": after_build, "afterPublish": after_publish}
+
+
+def observed_relation(builds):
+    if builds["edges"] == 0:
+        return None
+    if builds["afterPublish"] == builds["edges"]:
+        return "publish"
+    if builds["afterBuild"] == builds["edges"]:
+        return "build"
+    return "none"
+
+
+def critical_path(graph, timed, relation):
     """The longest precedence chain through the plan's task graph, and the
     tasks on it. A package without a task of a kind passes its providers'
     finish through, so a chain is never cut by a package that did not run."""
-    duration = {}
-    for package, kind, segments in tasks:
-        if package is not None:
-            duration[(package, kind)] = duration.get((package, kind), 0) + length(segments)
-    version = sum(length(segments) for package, kind, segments in tasks if package is None)
     finish, previous = {}, {}
 
     def latest(nodes):
@@ -181,23 +275,21 @@ def critical_path(tasks, graph, relation):
     for package in topological(graph):
         providers = graph.get(package, [])
         build, publish = (package, "build"), (package, "publish")
-        waits = [(p, relation) for p in providers]
-        before_build = latest(waits)
-        finish[build] = (finish[before_build] if before_build else 0) + duration.get(build, 0)
+        before_build = latest([] if relation == "none" else [(p, relation) for p in providers])
+        finish[build] = (finish[before_build] if before_build else 0) + timed.duration.get(build, 0)
         previous[build] = before_build
         before_publish = latest([build] + [(p, "publish") for p in providers])
-        finish[publish] = finish[before_publish] + duration.get(publish, 0)
+        finish[publish] = finish[before_publish] + timed.duration.get(publish, 0)
         previous[publish] = before_publish
     end = latest(finish)
+    longest = finish[end] if end else 0
     chain = []
     while end is not None:
-        if duration.get(end, 0) > 0:
-            chain.append(f"{end[0]} {end[1]}")
+        if end in timed:
+            chain.append(name(end))
         end = previous.get(end)
     chain.reverse()
-    if version > 0:
-        chain.insert(0, "version")
-    return version + (finish[latest(finish)] if finish else 0), chain
+    return longest, chain
 
 
 def shipped(observation):
@@ -206,29 +298,49 @@ def shipped(observation):
 
 
 def measure(steps, records, graph, observation, relation):
-    span = release_span(steps)
-    release_records = [r for r in records if within(r, span)]
-    tasks, sources = tasks_of(release_records, [s for s in steps if s["step"] == VERSION_STEP])
+    span, planning = release_span(steps), plan_span(steps)
+    where = [placed(r, span) for r in records]
+    release = [r for r, w in zip(records, where) if w == "inside"]
+    tasks = tasks_of(release)
+    if not any(kind == "build" for _, kind, *_ in tasks) or not any(kind == "publish" for _, kind, *_ in tasks):
+        raise SystemExit("timing.py: the records hold no build or no publication of the release")
+    timed = Timed(tasks)
     makespan = span[1] - span[0]
-    work = sum(length(segments) for _, _, segments in tasks)
-    slots = max(parallelism(tasks), 1)
-    longest, chain = critical_path(tasks, graph, relation)
+    work = sum(end - start for _, _, start, end, _ in tasks)
+    slots = parallelism(tasks)
+    longest, chain = critical_path(graph, timed, relation)
     bound = max(longest, work / slots)
-    timed = {(package, kind) for package, kind, _ in tasks}
+    builds = consumer_builds(graph, timed)
+    npm = npm_publishes(release)
+    plan_builds = [r["end"] - r["start"] for r in records if r["task"] == "build" and placed(r, planning) == "inside"]
+    accepted_publishes = {p for p, kind, _, _, ok in tasks if kind == "publish" and ok}
     return {
         "relation": relation,
-        "planningSeconds": round(planning_seconds(steps), 3),
+        "observedRelation": observed_relation(builds),
+        "consumerBuilds": builds,
+        "violations": [{"before": name(b), "after": name(a)}
+                       for b, a in edges(graph, timed, relation) if not honoured(timed, (b, a))],
+        "planningSeconds": round(planning[1] - planning[0], 3),
+        "planBuilds": {"count": len(plan_builds), "seconds": round(sum(plan_builds), 3)},
         "makespanSeconds": round(makespan, 3),
+        "idleSeconds": round(makespan - busy(tasks, span), 3),
         "work": round(work, 3),
         "criticalPath": round(longest, 3),
         "parallelism": slots,
         "bound": round(bound, 3),
-        "ratio": round(makespan / bound, 3) if bound > 0 else None,
+        "ratio": round(makespan / bound, 3),
         "criticalChain": chain,
-        "tasks": {kind: sum(1 for _, k, _ in tasks if k == kind) for kind in ("version", "build", "publish")},
-        "publishTimedAt": {source: sum(1 for s in sources.values() if s == source) for source in ("npm", "registry")},
-        "untimed": [p for p in shipped(observation)
-                    if (p, "build") not in timed or (p, "publish") not in timed],
+        "tasks": {
+            "build": stats([end - start for _, kind, start, end, _ in tasks if kind == "build"]),
+            "publish": stats([end - start for _, kind, start, end, _ in tasks if kind == "publish"],
+                             failed=sum(1 for _, kind, *_, ok in tasks if kind == "publish" and not ok)),
+            "npmPublish": stats([seconds for seconds, _ in npm], failed=sum(1 for _, ok in npm if not ok)),
+        },
+        "taskTimes": [{"package": p, "task": kind, "start": round(start - span[0], 3), "seconds": round(end - start, 3)}
+                      for p, kind, start, end, _ in tasks],
+        "untimed": [p for p in shipped(observation) if (p, "build") not in timed or p not in accepted_publishes],
+        "unknown": sorted({r["package"] for r in release if r["package"] not in graph}),
+        "straddling": where.count("straddling"),
     }
 
 
@@ -238,7 +350,7 @@ def main(argv):
     parser.add_argument("--records", required=True)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--observation", required=True)
-    parser.add_argument("--relation", required=True, choices=("build", "publish"))
+    parser.add_argument("--relation", required=True, choices=RELATIONS)
     args = parser.parse_args(argv)
     records = read_lines(args.records) if os.path.exists(args.records) else []
     with open(args.observation) as f:

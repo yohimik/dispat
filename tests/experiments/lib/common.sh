@@ -14,8 +14,8 @@ export EXPERIMENT_PACKAGES="core cli ui api theme docs"
 export EXPERIMENT_BASELINE=1.0.0
 
 # The timing experiment's records, one JSON line per build, per `npm publish`
-# and per accepted upload, appended by the fixture's build script, the npm
-# shim and the proxy. The wide scenario's packages are the fixture's to name.
+# and per upload, appended by the fixture's build script, the npm shim and the
+# proxy. The wide scenario's packages are the fixture's to name.
 if [ "${EXPERIMENT:-}" = timing ]; then
   export EXPERIMENT_TIMING=$OUT/timing.jsonl
   if [ "${SCENARIO:-}" = wide ]; then
@@ -413,29 +413,30 @@ with_npm_shim() {
   return "$rc"
 }
 
-# record_plan <query step>: the tool's plan, read from that step's output into
-# plan.json as {package: next version}.
+# record_plan <query step>: the tool's plan, read from that step's output, and
+# what the tool was told of the pending change, into plan.json.
 record_plan() {
-  python3 /exp/lib/plan.py "$TOOL" "$OUT/step-$1.log" > "$OUT/plan.json" || {
+  python3 /exp/lib/plan.py "$TOOL" "$OUT/step-$1.log" "$REPO" > "$OUT/plan.json" || {
     echo "the plan could not be read from step $1; the run is not a record"
     exit 1
   }
-  echo "   plan: $(jq -r 'to_entries | map(.key + "=" + .value) | join(" ")' "$OUT/plan.json")"
+  echo "   told: $(jq -r .told "$OUT/plan.json")"
+  echo "   plan: $(jq -r '.packages | to_entries | map(.key + "=" + .value) | join(" ")' "$OUT/plan.json")"
 }
 
 # measure_timing <relation> <observation>: the release's figures into
 # timing.json, from the steps, the timing records and the clone's manifests.
-# The relation is what a consumer's build waits for in this tool: its
-# providers' builds or their publications.
+# The relation is the one the tool's configuration declares for what a
+# consumer's build waits for (§19.2a): publish, build or none.
 measure_timing() {
   python3 /exp/lib/timing.py --steps "$OUT/steps.jsonl" --records "$EXPERIMENT_TIMING" \
     --repo "$REPO" --observation "$OUT/observe-$2.json" --relation "$1" > "$OUT/timing.json" || {
       echo "the timing records could not be measured; the run is not a record"
       exit 1
     }
-  jq -r '"   timing: planning \(.planningSeconds)s, makespan \(.makespanSeconds)s, Wk \(.work)s, Lk \(.criticalPath)s, s \(.parallelism), bound \(.bound)s, ratio \(.ratio)"' \
-    "$OUT/timing.json"
-  jq -r '"   critical chain: " + (.criticalChain | join(" -> "))' "$OUT/timing.json"
+  jq -r '"   timing: planning \(.planningSeconds)s, makespan \(.makespanSeconds)s, Wk \(.work)s, Lk \(.criticalPath)s, s \(.parallelism), bound \(.bound)s, ratio \(.ratio), idle \(.idleSeconds)s",
+         "   relation: \(.relation), the records show \(.observedRelation); \(.violations | length) edge(s) not honoured",
+         "   critical chain: " + (.criticalChain | join(" -> "))' "$OUT/timing.json"
 }
 
 # timing_asserts <observation>: one set of sentences for every tool, about the
@@ -444,17 +445,17 @@ measure_timing() {
 # shellcheck disable=SC2016 # $o, $plan and $base are jq's own variables
 timing_asserts() {
   local observation=$OUT/observe-$1.json
-  assert "the plan named the packages it would release" jq -e 'length > 0' "$OUT/plan.json"
+  assert "the plan named the packages it would release" jq -e '.packages | length > 0' "$OUT/plan.json"
   assert "the release exited 0" jq -e -s \
     '[.[] | select(.step == "run" or (.step | startswith("run-")))] | length > 0 and all(.exit == 0)' "$OUT/steps.jsonl"
   assert "the release shipped every package its plan named, at the version it named" \
-    jq -e --slurpfile plan "$OUT/plan.json" '. as $o | $plan[0] | to_entries | all($o.packages[.key].registry == .value)' "$observation"
+    jq -e --slurpfile plan "$OUT/plan.json" '. as $o | $plan[0].packages | to_entries | all($o.packages[.key].registry == .value)' "$observation"
   assert "the release shipped nothing its plan did not name" \
     jq -e --slurpfile plan "$OUT/plan.json" --arg base "$EXPERIMENT_BASELINE" \
-      '.packages | to_entries | all(.key as $p | ($plan[0] | has($p)) or .value.registry == $base)' "$observation"
+      '.packages | to_entries | all(.key as $p | ($plan[0].packages | has($p)) or .value.registry == $base)' "$observation"
   assert "every package that shipped is consistent" \
     jq -e --arg base "$EXPERIMENT_BASELINE" '.packages | to_entries | all(.value.registry == $base or .value.state == "consistent")' "$observation"
-  assert "every package that shipped was timed building and publishing" jq -e '.untimed == []' "$OUT/timing.json"
+  assert "the release honoured every edge of the precedence it was measured under" jq -e '.violations == []' "$OUT/timing.json"
 }
 
 # release_sha <tag>: the commit a tag the run wrote names, or empty when the
@@ -701,14 +702,17 @@ keep_registry_logs() {
   cp /registry/verdaccio.log /registry/failproxy.log "$OUT/registry/" 2>/dev/null || true
 }
 
-# validate_timing: a timing cell measured a release, or the run failed. A
-# cell whose release left no build or no publication in the records measured
-# the harness rather than the tool, and its row would read as a tool that did
-# no work.
+# validate_timing: a timing cell timed every task of its release, or the run
+# failed. A shipped package without a build or an accepted upload in the
+# records, a record of a package outside the graph, and a record that
+# straddles the release's span are each the fixture's or the proxy's failure
+# to record, and figures summed over them would read as the tool's.
 validate_timing() {
   [ "$EXPERIMENT" = timing ] || return 0
-  jq -e '.tasks.build > 0 and .tasks.publish > 0' "$OUT/timing.json" > /dev/null 2>&1 || {
-    echo "the timing records hold no build or no publication of the release; the run is not a record"
+  jq -e '.untimed == [] and .unknown == [] and .straddling == 0' "$OUT/timing.json" > /dev/null 2>&1 || {
+    jq -r '"untimed: \(.untimed), outside the graph: \(.unknown), straddling the release: \(.straddling)"' \
+      "$OUT/timing.json" 2>/dev/null || true
+    echo "the timing records do not cover the release; the run is not a record"
     exit 1
   }
 }
@@ -746,8 +750,8 @@ verdict() {
   recovery=$(recovery_summary)
   # The plan and the figures, present only in the cells that measure them.
   local plan=null timing=null
-  [ -s "$OUT/plan.json" ] && plan=$(jq -c '{packages: .}' "$OUT/plan.json")
-  [ -s "$OUT/timing.json" ] && timing=$(jq -c 'del(.untimed)' "$OUT/timing.json")
+  [ -s "$OUT/plan.json" ] && plan=$(jq -c . "$OUT/plan.json")
+  [ -s "$OUT/timing.json" ] && timing=$(jq -c . "$OUT/timing.json")
   jq -n --arg experiment "$EXPERIMENT" --arg tool "$TOOL" --arg scenario "$SCENARIO" \
         --arg dispat "$(dispat_version)" \
         --arg binaryId "${EXPERIMENTS_DISPAT_BINARY_ID:-unknown}" \

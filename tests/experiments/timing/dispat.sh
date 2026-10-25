@@ -7,7 +7,8 @@
 #
 # The relation is `build`: the fixture leaves isBuildWaitingPublish at its
 # default, false, which lets a consumer build as soon as its providers have
-# built, while a consumer still publishes after its providers (§19.2).
+# built, while a consumer still publishes after its providers (§19.2). The
+# records are held to it, edge by edge.
 
 run_experiment() {
   timing_fixture dispat

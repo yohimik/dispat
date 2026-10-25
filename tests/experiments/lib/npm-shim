@@ -1,7 +1,8 @@
 #!/bin/sh
 # An npm in front of npm. Placed first on PATH for the duration of one tool's
-# release command, it times every `npm publish` it forwards and appends one
-# JSON line to the file EXPERIMENT_TIMING names:
+# release command, it times every `npm publish` it forwards, start-up and
+# packing included, and appends one JSON line to the file EXPERIMENT_TIMING
+# names; the timing cells report these beside the uploads the proxy times:
 #
 #   {"package": ..., "task": "publish", "start": ..., "end": ..., "exit": ...}
 #

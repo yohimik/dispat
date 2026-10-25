@@ -5,9 +5,11 @@
 # documented one: `changeset version`, the commit it leaves to the operator,
 # `changeset publish`, and the push changesets never makes.
 #
-# The relation is `build`: `changeset publish` runs `npm publish` for every
-# package the registry lacks, and npm runs the package's `prepack` build right
-# before its upload, waiting for no provider.
+# The relation is `publish`: `changeset publish` publishes the packages the
+# registry lacks in chunks of their dependency graph, each chunk after the one
+# before it, and npm runs a package's `prepack` build inside its own
+# `npm publish`, so a consumer builds after its providers have published. The
+# records are held to it, edge by edge.
 
 run_experiment() {
   timing_fixture changesets
@@ -22,6 +24,6 @@ run_experiment() {
   step manual:run-push git push --follow-tags origin main
   observe after-release
 
-  measure_timing build after-release
+  measure_timing publish after-release
   timing_asserts after-release
 }

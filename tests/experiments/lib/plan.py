@@ -1,7 +1,9 @@
-"""A tool's plan, read from the output of its own plan command, as one JSON
-object of {package: next version}.
+"""A tool's plan, read from the output of its own plan command, and what the
+tool was told, as one JSON object:
 
-    plan.py dispat|lerna|nx|changesets <log>
+    {"packages": {package: next version}, "told": ...}
+
+    plan.py dispat|lerna|nx|changesets <log> <clone>
 
 Each tool states its plan its own way:
 
@@ -13,10 +15,19 @@ Each tool states its plan its own way:
 
 Colour codes are stripped first: a tool that colours its output when it
 believes a terminal is attached would otherwise hide every line from the
-patterns below.
+patterns below. dispat's own count of the packages it is releasing, on its
+`release plan ready` line, is held against the packages read, so a reading
+that missed one is refused rather than recorded as a difference.
+
+What the tool was told is what it reads of the pending change: the pending
+changesets' front matter for changesets, which reads no commit messages, and
+the subject of the commit at the clone's head for the others.
 """
+import glob
 import json
+import os
 import re
+import subprocess
 import sys
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -29,15 +40,20 @@ PATTERNS = {
 
 
 def dispat_plan(lines):
-    plan = {}
+    plan, releasing = {}, None
     for line in lines:
         try:
             entry = json.loads(line)
         except ValueError:
             continue
-        if not isinstance(entry, dict) or "bump" not in entry or "package" not in entry:
+        if not isinstance(entry, dict):
             continue
-        plan[entry["package"]] = str(entry.get("version", "")).split("->")[-1].strip()
+        if entry.get("message") == "release plan ready":
+            releasing = entry.get("releasing")
+        if "bump" in entry and "package" in entry:
+            plan[entry["package"]] = str(entry.get("version", "")).split("->")[-1].strip()
+    if releasing != len(plan):
+        raise SystemExit(f"plan.py: dispat says it is releasing {releasing}, and {len(plan)} were read")
     return plan
 
 
@@ -58,6 +74,21 @@ def read_plan(tool, lines):
     return matched_plan(PATTERNS[tool], lines)
 
 
+def told(tool, repo):
+    if tool == "changesets":
+        lines = []
+        for path in sorted(glob.glob(os.path.join(repo, ".changeset", "*.md"))):
+            if os.path.basename(path) == "README.md":
+                continue
+            with open(path) as f:
+                front = f.read().split("---")
+            lines += [line.strip() for line in (front[1] if len(front) > 2 else "").splitlines() if line.strip()]
+        return ", ".join(lines)
+    return subprocess.run(["git", "-C", repo, "log", "-1", "--format=%s"],
+                          check=True, capture_output=True, text=True).stdout.strip()
+
+
 if __name__ == "__main__":
-    with open(sys.argv[2]) as f:
-        print(json.dumps(read_plan(sys.argv[1], f.readlines()), sort_keys=True))
+    tool, log, repo = sys.argv[1:4]
+    with open(log) as f:
+        print(json.dumps({"packages": read_plan(tool, f.readlines()), "told": told(tool, repo)}, sort_keys=True))

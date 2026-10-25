@@ -137,62 +137,78 @@ The timing protocol is the same under every tool: the fixture with its pending m
 publication and an observation, then `query:plan`, the tool's own plan command, and the release, then an observation
 and the figures.
 
-| Tool         | `query:plan`                                                                          | The release (`run`, or `run-<part>` per command)                               |
-|--------------|---------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
-| `dispat`     | `dispat status --log-format json`                                                     | `dispat release --log-format json`                                             |
-| `lerna`      | `lerna version --conventional-commits --yes --no-git-tag-version --no-push` in a scratch clone taken just before it, since lerna has no dry run | `lerna version --conventional-commits --yes`, `lerna publish from-git --yes` |
-| `nx`         | `nx release --dry-run`, which also runs the pre-version command and so every build   | `nx release --yes`, and the push of the commit it leaves on the clone          |
-| `changesets` | `changeset status --verbose`                                                          | `changeset version`, the commit, `changeset publish`, the push                 |
+| Tool         | `query:plan`                                                                          | The release (`run`, or `run-<part>` per command)                               | Relation  |
+|--------------|---------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|-----------|
+| `dispat`     | `dispat status --log-format json`                                                     | `dispat release --log-format json`                                             | `build`   |
+| `lerna`      | `lerna version --conventional-commits --yes --no-git-tag-version --no-push` in a scratch clone taken just before it, since lerna has no dry run | `lerna version --conventional-commits --yes`, `lerna publish from-git --yes` | `build` |
+| `nx`         | `nx release --dry-run`, which also runs the pre-version command and so every build   | `nx release --yes`, and the push of the commit it leaves on the clone          | `none`    |
+| `changesets` | `changeset status --verbose`                                                          | `changeset version`, the commit, `changeset publish`, the push                 | `publish` |
 
 The planning time is the `plan` step's duration, and the makespan runs from the start of the first release step to
-the end of the last. `lib/plan.py` reads the plan step's output into `plan.json`, `{package: next version}`.
+the end of the last. `lib/plan.py` reads the plan step's output into `plan.json` as `{packages: {package: next
+version}, told}`, where `told` is what the tool read of the pending change: the pending changesets' front matter for
+changesets, the subject of the commit at the clone's head for the others. dispat's own `releasing` count on its
+`release plan ready` line is held against the packages read, and a mismatch is refused.
 
-The tasks are timed by the fixture. Every package's build script appends `{package, task: "build", start, end}` in
+The tasks are builds and publications, the same two kinds under every tool, and none of them is read from a tool's
+log. Every package's build script holds for `BUILD_HOLD_MS` and then appends `{package, task: "build", start, end}` in
 wall-clock seconds to the file `EXPERIMENT_TIMING` names, which `lib/common.sh` sets to `timing.jsonl` in the cell's
-folder, and holds for a fixed half second first, so a build lasts as long as a short compile rather than as long as
-node takes to start. `lib/npm-shim`, built like the git shim, stands first on `PATH` for each release step and
-appends `{package, task: "publish", start, end, exit}` around every `npm publish` it forwards, reading the package
-from the manifest of the folder the publish names, or of its working directory when it names none. It stands in
-`/work/node_modules/.bin` during the step: nx runs npm under npm-run-path, which puts every `node_modules/.bin` above
-the working directory and then node's own folder ahead of `PATH`. lerna publishes in-process through libnpmpublish, so
-the shim sees none of its publications; the proxy appends `{package, task: "upload", start, end, status}` for every
-upload it forwards, and a package without an `npm publish` is timed by its accepted upload. No tool exposes
-per-package versioning, so a `run-version` step, `lerna version` or `changeset version`, is one task timed whole.
+folder. The proxy appends `{package, task: "upload", start, end, status}` for every upload it forwards, and that upload
+is the publication's task for every tool: lerna publishes in-process through libnpmpublish, and the upload is the one
+point every tool's publication passes through. `lib/npm-shim`, built like the git shim, stands first on `PATH` for
+each release step and appends `{package, task: "publish", start, end, exit}` around every `npm publish` it forwards,
+reading the package from the manifest of the folder the publish names, or of its working directory when it names none.
+Those processes are reported beside the tasks, with their own package's build cut out (changesets' `prepack` runs
+inside one), and are no part of Wk or Lk. The shim stands in `/work/node_modules/.bin` during the step: nx runs npm
+under npm-run-path, which puts every `node_modules/.bin` above the working directory and then node's own folder ahead
+of `PATH`. No tool's versioning, commit, tags or push is a task under any tool.
 
 `lib/timing.py` computes the figures into `timing.json`, in the vocabulary of the dispat theorem (CCME SPEC.md
 §13.11), from the records inside the release's span:
 
-| Field             | What it is                                                                                       |
-|-------------------|--------------------------------------------------------------------------------------------------|
-| `planningSeconds` | the `plan` step's duration                                                                       |
-| `makespanSeconds` | the release's span, first release step's start to last release step's end                       |
-| `work`            | Wk, every task's duration summed; a build inside its own package's publish is cut out of it      |
-| `criticalPath`    | Lk, the longest precedence chain, with `criticalChain` naming its tasks                          |
-| `parallelism`     | s, the most tasks running at one instant                                                         |
-| `bound`           | max(Lk, Wk / s)                                                                                  |
-| `ratio`           | makespan over bound                                                                              |
-| `relation`        | what a consumer's build waits for: its providers' builds (`build`) or publications (`publish`)   |
+| Field              | What it is                                                                                         |
+|--------------------|----------------------------------------------------------------------------------------------------|
+| `planningSeconds`  | the `plan` step's duration; `planBuilds` counts and sums the builds that ran inside it             |
+| `makespanSeconds`  | the release's span, first release step's start to last release step's end                         |
+| `idleSeconds`      | the part of the makespan no task was running in                                                    |
+| `work`             | Wk, every build's and upload's duration summed                                                     |
+| `criticalPath`     | Lk, the longest precedence chain, with `criticalChain` naming its tasks                            |
+| `parallelism`      | s as observed: the most tasks running at one instant, not the theorem's slot count                 |
+| `bound`            | max(Lk, Wk / s)                                                                                    |
+| `ratio`            | makespan over bound                                                                                |
+| `relation`         | the build readiness relation the protocol declares, `publish`, `build` or `none` (§19.2a)          |
+| `observedRelation` | the strongest relation every consumer build in the records honoured, from `consumerBuilds`         |
+| `violations`       | every edge of the declared precedence whose later task started before the earlier one had ended     |
+| `tasks`            | per kind, `build`, `publish` (the uploads) and `npmPublish`: count, total, median, max and failed  |
+| `taskTimes`        | every build and upload: package, kind, start after the release's start, and duration               |
+| `untimed`, `unknown`, `straddling` | shipped packages without a build or an accepted upload, record packages outside the graph, and records crossing the release's edge |
 
 The precedence runs over the dependency graph the clone's manifests declare: every package builds before it
-publishes, a provider publishes before its consumer, and under the `build` relation a consumer's build follows its
-providers' builds, under `publish` their publications. Every tool is measured under `build`, because none waits for a
-publication before it builds: dispat's fixture leaves `isBuildWaitingPublish` at its default, `false`; `lerna publish`
-packs every package, running `prepack`, before it publishes any; nx runs every build through its pre-version command
-before it versions; `npm publish` under changesets runs `prepack` right before its upload. A version task precedes
-every other task.
+publishes, a provider publishes before its consumer, and a consumer's build waits for its providers' publications
+under `publish`, their builds under `build` and nothing under `none`; a package that ran no task of a kind passes its
+providers through. The relation is declared per tool in its protocol, from that tool's configuration: dispat's fixture
+leaves `isBuildWaitingPublish` at its default, `false`; `lerna publish` packs every package, running `prepack`, in
+dependency order before it publishes any; the nx fixture declares no `dependsOn` for the build target its
+pre-version command runs; `changeset publish` publishes in chunks of the dependency graph and npm runs `prepack`
+inside each `npm publish`. The records are held to it edge by edge, within the 50 ms the step and record clocks may
+differ by.
 
 The wide fixture (`fixture.py <root> <flavour> --wide`, with `fixture.py --packages wide` printing its names) is
-`core`, a chain of four packages `chain1` to `chain4` each depending on the one before it, and 36 leaves `leaf01` to
-`leaf36` depending on `core`, tilde ranges throughout, baselined and published like the six. `common.sh` exports the
-wide names as `EXPERIMENT_PACKAGES` for the wide cells, and the fixture refuses a list that is not its shape. Its
-pending change is `feat(core)^^` for dispat, every transitive consumer, which is what lerna and nx release on their
-own; changesets gets `core: minor` alone in both scenarios.
+`core`, a chain of `WIDE_CHAIN` packages `chain1`, `chain2`, ... each depending on the one before it, and `WIDE_LEAVES`
+leaves `leaf01`, `leaf02`, ... depending on `core`, tilde ranges throughout, baselined and published like the six.
+`common.sh` exports the wide names as `EXPERIMENT_PACKAGES` for the wide cells, and the fixture refuses a list that is
+not its shape. Its pending change is `feat(core)^^` for dispat, every transitive consumer, which is what lerna and nx
+release on their own; the six keeps `feat(core)^`, direct consumers only, and changesets gets `core: minor` alone in
+both scenarios.
 
 Every timing cell holds every tool to the same sentences: the plan named the packages it would release, the release
 exited 0, it shipped every package the plan named at the version it named and nothing else, every package that
-shipped is consistent, and every package that shipped was timed building and publishing. A cell whose records hold no
-build or no publication of the release is not a record and fails. The report sets each tool's plan beside the dispat
-cell's plan of the same scenario and records agreement or the differences.
+shipped is consistent, and the release honoured every edge of the precedence it was measured under. A cell whose
+records hold no build or no upload of the release, miss a shipped package's build or accepted upload, name a package
+outside the graph or straddle the release's span is not a record and fails. The report sets each tool's plan beside
+the dispat cell's plan of the same scenario and records agreement or the differences.
+
+The campaign runs the timing cells after every other cell, one at a time, so no other cell shares the host with one.
 
 ### The catch-up
 
@@ -345,8 +361,9 @@ Each run leaves `coverage/experiments/<experiment>[-<scenario>]-<tool>/` with th
 `steps.jsonl`, one observation per step, every failed expectation's own output, the registry's and the proxy's logs,
 the git calls the tool made (`git-calls.log`, one JSON object per line, with the injection marked), the worker's log
 for the distributed cell, `recovery.json` when a catch-up phase ran, and `verdict.json`. A timing cell adds
-`timing.jsonl` (the build, publish and upload records), `timing.json` (the figures, also the verdict's `timing`
-object) and `plan.json` (the plan read from `step-plan.log`, also the verdict's `plan` object). Every step in `steps.jsonl` carries its wall-clock `started` and `ended` besides its `seconds`. Mount the folder over `/exp`
+`timing.jsonl` (the build, upload and `npm publish` records), `timing.json` (the figures, also the verdict's `timing`
+object) and `plan.json` (the plan read from `step-plan.log` and what the tool was told, also the verdict's `plan`
+object). Every step in `steps.jsonl` carries its wall-clock `started` and `ended` besides its `seconds`. Mount the folder over `/exp`
 (`-v "$PWD/tests/experiments:/exp:ro"`) to iterate on the scripts without rebuilding.
 
 ## Layout
@@ -371,9 +388,10 @@ propagation/<tool>.sh
 timing/<tool>.sh
 ```
 
-The harness's own tests run in the `shellcheck` target of `Dockerfile.gotest` (`dispat exec shellcheck`), beside
-shellcheck over every script here: `lib/recovery-test.sh` holds the catch-up summary to each way a catch-up can go,
-`lib/fixture-test.py` holds each flavour to what it is told and where it builds, `lib/failproxy-test.py` holds the
-proxy to its decisions and its gate, `lib/cache-test.sh` holds the campaign cache to what it may reuse,
-`lib/npm-shim-test.sh` holds the npm shim to what it times, and `lib/plan-test.py` and `lib/timing-test.py` hold the
-plan readings and the figures to recorded outputs and hand-made records.
+The harness's own tests run in the `shellcheck` target of `Dockerfile.gotest` (`dispat exec shellcheck`). The shell
+ones run beside shellcheck over every script here: `lib/recovery-test.sh` holds the catch-up summary to each way a
+catch-up can go, `lib/cache-test.sh` holds the campaign cache to what it may reuse, and `lib/npm-shim-test.sh` holds
+the npm shim to what it times. The Python ones run in the step after it, which gives git the identity the fixture
+commits with: `lib/fixture-test.py` holds each flavour to what it is told and where it builds,
+`lib/failproxy-test.py` holds the proxy to its decisions and its gate, and `lib/plan-test.py` and
+`lib/timing-test.py` hold the plan readings and the figures to recorded outputs and hand-made records.
