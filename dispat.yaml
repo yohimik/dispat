@@ -17,7 +17,9 @@ scripts:
   # services spaces and both specification packages name them in flow.publish.
   # The third, `dispat github`, has one caller and lives with it, in
   # services/dispat.yaml.
-  changelog: dispat changelog
+  # The entry is written before the tag, so a write that fails must still
+  # stop the publication; github runs after the tag and keeps the default.
+  changelog: dispat changelog --ignore-errors=false
   commit: dispat commit --tag --push
 
   # The format sweep the lint job runs, as a build like every other gate.
