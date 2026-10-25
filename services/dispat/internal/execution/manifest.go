@@ -179,6 +179,16 @@ type OutputTotals struct {
 	Bytes int64
 }
 
+// ValidatedOutputs is what validating one output set proved: what it weighs,
+// and which object each of its entries is in the tree it was checked against.
+type ValidatedOutputs struct {
+	OutputTotals
+	// Objects is aligned with the manifest's Entries. They are the ids the
+	// validating walk read off the tree, so an installation can stream the
+	// bytes without listing the same immutable tree a second time.
+	Objects []string
+}
+
 // CaptureRequest is one capture: the repository the outputs sit in, the
 // package folder they are relative to, what was declared, and what the run
 // holds the transfer to.
@@ -520,18 +530,19 @@ type OutputExpectation struct {
 // expensive half and a manifest that fails on its own says nothing about what
 // is in the store.
 func ValidateOutputs(ctx context.Context, git *gitx.LocalGitx, manifest *OutputManifest,
-	expect OutputExpectation) (OutputTotals, error) {
+	expect OutputExpectation) (ValidatedOutputs, error) {
 	if err := checkManifestHeader(manifest, expect); err != nil {
-		return OutputTotals{}, err
+		return ValidatedOutputs{}, err
 	}
 	totals, err := checkManifestEntries(manifest, expect)
 	if err != nil {
-		return OutputTotals{}, err
+		return ValidatedOutputs{}, err
 	}
-	if err := checkOutputTree(ctx, git, manifest); err != nil {
-		return OutputTotals{}, err
+	objects, err := checkOutputTree(ctx, git, manifest)
+	if err != nil {
+		return ValidatedOutputs{}, err
 	}
-	return totals, nil
+	return ValidatedOutputs{OutputTotals: totals, Objects: objects}, nil
 }
 
 // checkManifestHeader asks whether this output set is this reader's at all:
@@ -761,12 +772,14 @@ func isClimbingAfterDescending(target string) bool {
 // description of bytes nobody can retrieve, and a tree holding a file the
 // manifest does not name is a file that would be installed without ever having
 // been checked. The walk streams, so the comparison costs one map of the
-// manifest rather than a second listing in memory.
-func checkOutputTree(ctx context.Context, git *gitx.LocalGitx, manifest *OutputManifest) error {
-	wanted := make(map[string]ManifestEntry, len(manifest.Entries))
-	for _, entry := range manifest.Entries {
-		wanted[entry.Path] = entry
+// manifest rather than a second listing in memory. It answers the object of
+// each entry, aligned with the manifest's entries.
+func checkOutputTree(ctx context.Context, git *gitx.LocalGitx, manifest *OutputManifest) ([]string, error) {
+	wanted := make(map[string]int, len(manifest.Entries))
+	for index, entry := range manifest.Entries {
+		wanted[entry.Path] = index
 	}
+	objects := make([]string, len(manifest.Entries))
 	seen := 0
 	plumbing := gitx.NewPlumbing(git)
 	plumbing.ListTree(ctx, manifest.OutputTree, func(entry gitx.TreeEntry) error {
@@ -777,26 +790,27 @@ func checkOutputTree(ctx context.Context, git *gitx.LocalGitx, manifest *OutputM
 		if err != nil {
 			return err
 		}
-		carried, isWanted := wanted[entry.Name]
+		index, isWanted := wanted[entry.Name]
 		if !isWanted {
 			return refuseOutputs(ReasonTreeExtra)
 		}
 		seen++
-		return checkTreeAgreement(carried, described)
+		objects[index] = entry.OID
+		return checkTreeAgreement(manifest.Entries[index], described)
 	})
 	// A tree that could not be listed at all is a reference whose bytes never
 	// travelled, which is the same refusal as a missing blob: a digest or a
 	// branch name without retrievable content is not a transfer (§28.5).
 	if err := plumbing.Err(); err != nil {
 		if OutputFaultReason(err) != "" {
-			return err
+			return nil, err
 		}
-		return refuseOutputs(ReasonBytesMissing)
+		return nil, refuseOutputs(ReasonBytesMissing)
 	}
 	if seen != len(manifest.Entries) {
-		return refuseOutputs(ReasonTreeMissing)
+		return nil, refuseOutputs(ReasonTreeMissing)
 	}
-	return nil
+	return objects, nil
 }
 
 // checkTreeAgreement requires one tree entry to be what the manifest said it

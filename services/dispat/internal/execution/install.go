@@ -65,6 +65,10 @@ type InstallRequest struct {
 	// because a path that reached this far has been held to every rule by the
 	// one function both readers use.
 	Manifest *OutputManifest
+	// Objects is the object of each manifest entry, aligned with its Entries,
+	// as ValidateOutputs read them off the manifest's tree. Nil, or of another
+	// length, has the tree listed again here.
+	Objects []string
 	// Dir is the folder the declared roots are installed into, absolute. It is
 	// the consuming package's folder in a task checkout, or the orchestrator's
 	// own checkout of the package that produced the set.
@@ -113,7 +117,7 @@ func stageOutputs(ctx context.Context, request InstallRequest) error {
 	if err := stageDeclaredRoots(request); err != nil {
 		return err
 	}
-	objects, err := readOutputObjects(ctx, request)
+	objects, err := resolveOutputObjects(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -122,11 +126,11 @@ func stageOutputs(ctx context.Context, request InstallRequest) error {
 		return fmt.Errorf("execution: reading the build outputs to install: %w", err)
 	}
 	defer func() { _ = reader.Close() }()
-	for _, entry := range request.Manifest.Entries {
+	for index, entry := range request.Manifest.Entries {
 		if entry.Type == EntrySymlink {
 			continue
 		}
-		if err := stageOneFile(request, reader, entry, objects[entry.Path]); err != nil {
+		if err := stageOneFile(request, reader, entry, objects[index]); err != nil {
 			return err
 		}
 	}
@@ -136,23 +140,37 @@ func stageOutputs(ctx context.Context, request InstallRequest) error {
 	return stageSymlinks(request)
 }
 
-// readOutputObjects is which object each path of the set is, read off the tree
-// rather than off the manifest.
+// resolveOutputObjects is which object each entry of the set is, aligned with
+// the manifest's entries and read off the tree rather than off the manifest.
 //
 // Off the tree on purpose. The tree is what validation compared the manifest
 // against, so the bytes installed under a name are the bytes that name was
 // checked for; a manifest naming its own object ids would be a manifest that
-// decides what it is a description of. The listing streams and the map is
-// bounded by the file ceiling the set has already been held to.
-func readOutputObjects(ctx context.Context, request InstallRequest) (map[string]string, error) {
-	objects := make(map[string]string, len(request.Manifest.Entries))
+// decides what it is a description of. The ids validation read off that tree
+// are those ids already, and the tree is immutable, so they are used as given.
+func resolveOutputObjects(ctx context.Context, request InstallRequest) ([]string, error) {
+	if request.Objects != nil && len(request.Objects) == len(request.Manifest.Entries) {
+		return request.Objects, nil
+	}
+	return readOutputObjects(ctx, request)
+}
+
+// readOutputObjects lists the set's tree for the object of each entry. The
+// listing streams and the map is bounded by the file ceiling the set has
+// already been held to.
+func readOutputObjects(ctx context.Context, request InstallRequest) ([]string, error) {
+	named := make(map[string]string, len(request.Manifest.Entries))
 	plumbing := gitx.NewPlumbing(request.Git)
 	plumbing.ListTree(ctx, request.Manifest.OutputTree, func(entry gitx.TreeEntry) error {
-		objects[entry.Name] = entry.OID
+		named[entry.Name] = entry.OID
 		return nil
 	})
 	if err := plumbing.Err(); err != nil {
 		return nil, refuseOutputs(ReasonBytesMissing)
+	}
+	objects := make([]string, len(request.Manifest.Entries))
+	for index, entry := range request.Manifest.Entries {
+		objects[index] = named[entry.Path]
 	}
 	return objects, nil
 }
@@ -165,10 +183,7 @@ func readOutputObjects(ctx context.Context, request InstallRequest) (map[string]
 // this, an empty output set would leave a stale folder in place and the
 // consumer would build against the previous run's bytes.
 func stageDeclaredRoots(request InstallRequest) error {
-	named := map[string]bool{}
-	for _, entry := range request.Manifest.Entries {
-		named[entry.Path] = true
-	}
+	named := findNamedRoots(request.Manifest)
 	for _, root := range request.Manifest.Roots {
 		if named[root] {
 			continue
@@ -178,6 +193,21 @@ func stageDeclaredRoots(request InstallRequest) error {
 		}
 	}
 	return nil
+}
+
+// findNamedRoots marks which declared roots an entry of the set names itself,
+// keyed by root so that it costs the roots rather than the entries.
+func findNamedRoots(manifest *OutputManifest) map[string]bool {
+	named := make(map[string]bool, len(manifest.Roots))
+	for _, root := range manifest.Roots {
+		named[root] = false
+	}
+	for _, entry := range manifest.Entries {
+		if _, isRoot := named[entry.Path]; isRoot {
+			named[entry.Path] = true
+		}
+	}
+	return named
 }
 
 // stageOneFile streams one blob onto disk, hashing as it goes, and refuses the

@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
@@ -84,6 +85,23 @@ func (f *admissionFixture) admit(tb testing.TB, packageName string) {
 	require.NoError(tb, f.coordinator.admitOutputs(context.Background(), "core:build", producedOutputs{
 		node: "build-b", store: f.git, manifest: manifest, attempt: 1,
 	}, request))
+}
+
+// TestAdmittingAnotherNodesSetListsItsTreeOnce: validation already walks the
+// tree an admitted set is read from, so installing it reads the objects that
+// walk found instead of listing the same immutable tree a second time. Three
+// processes remain: the validating listing, the lookup of the checkout's
+// private folder, and the one object reader the bytes stream through.
+func TestAdmittingAnotherNodesSetListsItsTreeOnce(t *testing.T) {
+	fixture := newAdmissionFixture(t, 8)
+	before := gitx.GitInvocations()
+
+	fixture.admit(t, "core")
+
+	assert.Equal(t, uint64(3), gitx.GitInvocations()-before)
+	installed, err := os.ReadFile(filepath.Join(fixture.destination, "dist", "chunk-07", "file-00007.js"))
+	require.NoError(t, err)
+	assert.Equal(t, "export const value = 7;\n", string(installed))
 }
 
 // BenchmarkAdmitOutputsFromAnotherNode admits one 1000-file set per

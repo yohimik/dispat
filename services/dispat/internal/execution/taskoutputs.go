@@ -46,12 +46,12 @@ func (w *Worker) installTaskInputs(ctx context.Context, assignment Assignment, c
 	}
 	installed := make([]ManifestInput, 0, len(assignment.Inputs))
 	for _, input := range assignment.Inputs {
-		manifest, reason, err := w.readInputManifest(ctx, assignment, input)
+		manifest, validated, reason, err := w.readInputManifest(ctx, assignment, input)
 		if err != nil {
 			return nil, reason, err
 		}
 		if err := InstallOutputs(ctx, InstallRequest{
-			Git: w.Cache, Manifest: manifest, Dir: checkout.Dir(input.Path),
+			Git: w.Cache, Manifest: manifest, Objects: validated.Objects, Dir: checkout.Dir(input.Path),
 			Staging: filepath.Join(dir, stagingDirName, formatIdentityHash(input.Package)), Log: log,
 		}); err != nil {
 			return nil, OutputFaultReason(err), err
@@ -81,7 +81,8 @@ func formatInputBranches(inputs []AssignmentInput) []string {
 }
 
 // readInputManifest reads the provider's result at the exact object the
-// assignment named and answers the output manifest it carries.
+// assignment named and answers the output manifest it carries, with what
+// validating it proved.
 //
 // Three things are proven before anything is believed. The object is on the
 // branch that was fetched, so a tip somebody moved cannot change what this
@@ -91,43 +92,44 @@ func formatInputBranches(inputs []AssignmentInput) []string {
 // and that is sound precisely because the digest covers them: the orchestrator
 // compared them with the plan before it named this manifest.
 func (w *Worker) readInputManifest(ctx context.Context, assignment Assignment,
-	input AssignmentInput) (*OutputManifest, OutputReason, error) {
+	input AssignmentInput) (*OutputManifest, ValidatedOutputs, OutputReason, error) {
 	if input.Digest == "" {
-		return nil, ReasonOutputDigest, fmt.Errorf(
+		return nil, ValidatedOutputs{}, ReasonOutputDigest, fmt.Errorf(
 			"execution: the assignment names the outputs of %s without a manifest digest", input.Package)
 	}
 	tip, err := w.Mailbox.Inspect(ctx, gitx.RemoteHead{Name: input.Branch, OID: input.Commit})
 	if err != nil {
-		return nil, ReasonBytesMissing, fmt.Errorf(
+		return nil, ValidatedOutputs{}, ReasonBytesMissing, fmt.Errorf(
 			"execution: reading the outputs of %s: %w", input.Package, err)
 	}
 	if tip.Kind != MessageResult {
-		return nil, ReasonBytesMissing, fmt.Errorf(
+		return nil, ValidatedOutputs{}, ReasonBytesMissing, fmt.Errorf(
 			"execution: the object named as the outputs of %s carries no result", input.Package)
 	}
 	document, err := w.Mailbox.Read(ctx, tip, assignment.Limits.MaxManifestBytes)
 	if err != nil {
-		return nil, ReasonOutputIdentity, fmt.Errorf(
+		return nil, ValidatedOutputs{}, ReasonOutputIdentity, fmt.Errorf(
 			"execution: reading the outputs of %s: %w", input.Package, err)
 	}
 	var result Result
 	if err := json.Unmarshal(document, &result); err != nil {
-		return nil, ReasonOutputIdentity, fmt.Errorf(
+		return nil, ValidatedOutputs{}, ReasonOutputIdentity, fmt.Errorf(
 			"execution: reading the outputs of %s: %w", input.Package, err)
 	}
 	if result.Outputs == nil {
-		return nil, ReasonBytesMissing, fmt.Errorf(
+		return nil, ValidatedOutputs{}, ReasonBytesMissing, fmt.Errorf(
 			"execution: the result of %s describes no outputs", input.Package)
 	}
-	if _, err := ValidateOutputs(ctx, w.Cache, result.Outputs, OutputExpectation{
+	validated, err := ValidateOutputs(ctx, w.Cache, result.Outputs, OutputExpectation{
 		Run: assignment.Run, PlanDigest: assignment.PlanDigest, Generation: assignment.Generation,
 		Task: input.Task, Roots: result.Outputs.Roots, Platforms: assignment.Platforms,
 		Digest: input.Digest, Limits: assignment.Limits,
-	}); err != nil {
-		return nil, OutputFaultReason(err), fmt.Errorf(
+	})
+	if err != nil {
+		return nil, ValidatedOutputs{}, OutputFaultReason(err), fmt.Errorf(
 			"execution: the outputs of %s cannot be used: %w", input.Package, err)
 	}
-	return result.Outputs, "", nil
+	return result.Outputs, validated, "", nil
 }
 
 // captureTaskOutputs describes what a successful frame produced, and turns a

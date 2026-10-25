@@ -172,7 +172,7 @@ func (c *Coordinator) admitOutputs(ctx context.Context, task string, produced pr
 		return c.refuseOutputSet(task, produced.node, ReasonBytesMissing,
 			fmt.Errorf("no build outputs were reported for a package that declares %d", len(roots)))
 	}
-	totals, err := ValidateOutputs(ctx, produced.store, produced.manifest, OutputExpectation{
+	validated, err := ValidateOutputs(ctx, produced.store, produced.manifest, OutputExpectation{
 		Run: c.Run, PlanDigest: c.PlanDigest, Generation: c.Generation, Task: task, Attempt: produced.attempt,
 		Roots: roots, Platforms: request.Release.Pkg.Space.BuildPlatforms, Limits: c.Limits,
 	})
@@ -181,7 +181,9 @@ func (c *Coordinator) admitOutputs(ctx context.Context, task string, produced pr
 	}
 	took := time.Now()
 	if !produced.isInstalledHere {
-		if err := c.installLocally(ctx, request, produced.store, produced.manifest); err != nil {
+		if err := c.installLocally(ctx, request, InstallRequest{
+			Git: produced.store, Manifest: produced.manifest, Objects: validated.Objects,
+		}); err != nil {
 			return c.refuseOutputSet(task, produced.node, OutputFaultReason(err), err)
 		}
 	}
@@ -190,9 +192,9 @@ func (c *Coordinator) admitOutputs(ctx context.Context, task string, produced pr
 		commit: produced.commit, manifest: newAdmittedManifest(produced.manifest), store: produced.store,
 	})
 	verified := c.Log.Debug().Str("run", c.Run).Str("task", task).
-		Int("files", totals.Files).Int64("bytes", totals.Bytes).Dur("took", time.Since(took))
+		Int("files", validated.Files).Int64("bytes", validated.Bytes).Dur("took", time.Since(took))
 	admitted := c.Log.Info().Str("run", c.Run).Str("task", task).
-		Str("package", request.Release.Pkg.Name).Int("files", totals.Files).Int64("bytes", totals.Bytes)
+		Str("package", request.Release.Pkg.Name).Int("files", validated.Files).Int64("bytes", validated.Bytes)
 	// A set this machine produced names no worker: the writer of the line is
 	// the node it is about, and gate 7b's rule is that `worker` names another
 	// node or nothing at all.
@@ -234,7 +236,7 @@ func (c *Coordinator) refuseOutputSet(task, node string, reason OutputReason, er
 // installStaged). The shared side of the snapshot guard is held while it
 // happens.
 func (c *Coordinator) installLocally(ctx context.Context, request release.StageRequest,
-	store *gitx.LocalGitx, manifest *OutputManifest) error {
+	install InstallRequest) error {
 	owner, err := c.resolveOwnerRepository(request)
 	if err != nil {
 		return err
@@ -245,9 +247,10 @@ func (c *Coordinator) installLocally(ctx context.Context, request release.StageR
 	}
 	c.guard.RLock()
 	defer c.guard.RUnlock()
+	install.Dir, install.Log = request.Dir, c.Log
 	return installStaged(ctx, outputStagingSpec{
-		indexPath: index, ownerDir: owner.Dir, run: c.Run, packageName: manifest.Package,
-	}, InstallRequest{Git: store, Manifest: manifest, Dir: request.Dir, Log: c.Log}, InstallOutputs)
+		indexPath: index, ownerDir: owner.Dir, run: c.Run, packageName: install.Manifest.Package,
+	}, install, InstallOutputs)
 }
 
 // resolveOwnerRepository opens the repository the package being built belongs
