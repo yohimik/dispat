@@ -184,7 +184,13 @@ func (a *App) previewGitHubBody(rel *plan.Release) string {
 	if reason := withheldReason(spec.Enabled, spec.Channels, rel.Channel); reason != "" {
 		return "github release withheld: " + reason + "\n"
 	}
-	return changelog.RenderEntryBody(rel, changelog.SpecFormat(spec.Format).WithRepoEnv(), nil)
+	gh := githubBodyReleaser(spec, a.log)
+	gh.Root = a.root
+	body := gh.RenderBody(rel, nil, "", "")
+	if name := changelog.Expand(gh.Format.ReleaseName, changelog.ReleaseLookup(rel)); name != "" {
+		return "### " + name + "\n\n" + body
+	}
+	return body
 }
 
 // withheldReason says why a record policy would write nothing for a release,

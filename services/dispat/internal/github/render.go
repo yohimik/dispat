@@ -21,8 +21,8 @@ func renderReleaseParts(rel *plan.Release, format changelog.Format, look changel
 	return changelog.RenderBodyParts(rel, format, look, release, note)
 }
 
-// RenderReleaseBody is the body a release would send for its GitHub release,
-// before the size cap Record applies: what preview shows for a release.
-func RenderReleaseBody(rel *plan.Release, format changelog.Format, look changelog.Lookup, commit, note string) string {
-	return renderReleaseParts(rel, format, look, commit, note).String()
+// RenderBody applies the same size bound for publication and preview, so a
+// preview cannot offer a body GitHub would refuse after the tag exists.
+func (r *Releaser) RenderBody(rel *plan.Release, look changelog.Lookup, commit, note string) string {
+	return r.boundBody(rel, renderReleaseParts(rel, r.Format, look, commit, note))
 }

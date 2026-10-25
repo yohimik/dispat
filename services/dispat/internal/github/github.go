@@ -420,7 +420,7 @@ func (r *Releaser) Record(ctx context.Context, rel *plan.Release) error {
 	// interpolate against the same variables.
 	look := changelog.ReleaseLookup(rel)
 	changelog.LogRecordPolicy(r.Log, rel, r.Format)
-	body := r.boundBody(rel, renderReleaseParts(rel, r.Format, look, sha, r.Note))
+	body := r.RenderBody(rel, look, sha, r.Note)
 	// The release is named after its tag unless the format says otherwise. The
 	// tag itself is never renamed: it is what the release hangs off.
 	name := tag

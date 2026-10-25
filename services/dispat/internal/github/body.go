@@ -123,15 +123,16 @@ func runeOffset(text string, characters int) int {
 // name, so the line names the file and the tag without a link there.
 func (r *Releaser) continuationLine(rel *plan.Release, tag string) string {
 	folder, isInRepository := r.packageFolder(rel)
+	canLink := changelog.IsPublicGitHub(r.APIURL) && r.Owner != "" && r.Repo != ""
 	if !isInRepository {
-		if !changelog.IsPublicGitHub(r.APIURL) {
+		if !canLink {
 			return "The release notes continue in the repository at " + tag + "."
 		}
 		return "The release notes continue in the repository at [" + tag + "](" + r.webURL("tree", tag, "") + ")."
 	}
 	if !rel.Pkg.Changelog.IsRecorded(rel.Channel) {
 		label := "the commit history of " + displayFolder(folder)
-		if !changelog.IsPublicGitHub(r.APIURL) {
+		if !canLink {
 			return "The release notes continue in " + label + " at " + tag + "."
 		}
 		return "The release notes continue in [" + label + "](" + r.webURL("commits", tag, folder) + ")."
@@ -141,7 +142,7 @@ func (r *Releaser) continuationLine(rel *plan.Release, tag string) string {
 		file = "CHANGELOG.md"
 	}
 	path := filepath.ToSlash(filepath.Join(folder, file))
-	if !changelog.IsPublicGitHub(r.APIURL) {
+	if !canLink {
 		return "The release notes continue in " + path + " at " + tag + "."
 	}
 	return "The release notes continue in [" + path + "](" + r.webURL("blob", tag, path) + ")."

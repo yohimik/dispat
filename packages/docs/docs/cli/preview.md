@@ -19,6 +19,10 @@ changelog entry body or `--github` to print the GitHub release body. Each output
 Pass both flags to print both bodies under one header per package. dispat labels them `--- changelog ---` and
 `--- github release ---`. If you pass neither flag, dispat prints the changelog entry.
 
+The GitHub body preview uses the publication limit. If the rendered body exceeds 120,000 characters, dispat cuts it
+at a complete entry where possible, adds a line pointing to the remaining notes, and reports `W245`. This applies to
+pending and `--version` previews. The changelog preview remains complete.
+
 Run a preview to check your [channel filters](../configuration/records.md#choosing-which-releases-a-line-reaches)
 before you release anything. The output renders for the specific channel the pending release is on.
 
@@ -55,10 +59,11 @@ and an [alias tag](../configuration/alias-tags.md) is read through the release t
 package and needs no selection. dispat refuses a version or tag that names no release, a tag of a package outside the
 selection, and a version beside a selection of several packages.
 
-dispat renders the release the way the release itself did. It plans again with the tag's commit as HEAD, so the
-changelogs and manifests read as they were released, and leaves out that tag, every later release of the package, and
-every other release tag the same run wrote. The plan depends only on the history, the configuration and the tags, so it
-is the plan the release was cut from. The bodies come from the same renderers the release used. With
+dispat renders the release the way the release itself did, including the GitHub body limit. It plans again with the
+tag's commit as HEAD, so the changelogs and manifests read as they were released, and leaves out that tag, every
+later release of the package, and every other release tag the same run wrote. The plan depends only on the history,
+the configuration and the tags, so it is the plan the release was cut from. The bodies come from the same renderers
+the release used. With
 [release commits](../configuration/records.md#commit) on, the GitHub body carries the `### Release` block naming the
 tag's commit.
 

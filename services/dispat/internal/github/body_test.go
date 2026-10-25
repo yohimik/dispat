@@ -131,6 +131,31 @@ func TestRecordCountsAMultibyteBodyInCharacters(t *testing.T) {
 	assert.Contains(t, got.Body, "The release notes continue in")
 }
 
+func TestRenderBodyMatchesPublishedBodyAtTheLimit(t *testing.T) {
+	for _, sample := range []struct {
+		name string
+		text string
+	}{
+		{name: "ASCII", text: "the walk is cheaper now. "},
+		{name: "Unicode", text: "変更後の処理は速い。"},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			root := t.TempDir()
+			rel := longRelease(root, 80, 2_000, sample.text)
+			srv, got := captureServer(t)
+			r := &Releaser{APIURL: srv.URL, Owner: "acme", Repo: "mono", Token: "tkn", Client: srv.Client(),
+				Root: root, CommitSHA: "abc123", Format: longFormat()}
+			preview := r.RenderBody(rel, changelog.ReleaseLookup(rel), "abc123", "")
+			require.NoError(t, r.Record(context.Background(), rel))
+			assert.Equal(t, got.Body, preview)
+			assert.LessOrEqual(t, utf8.RuneCountInString(preview), releaseBodyBudget)
+			assert.Contains(t, preview, "### Release\n\n- commit: abc123")
+			assert.Contains(t, preview, "Install with the script.")
+			assert.Contains(t, preview, "The release notes continue in")
+		})
+	}
+}
+
 func TestBoundBodyIsDeterministic(t *testing.T) {
 	root := t.TempDir()
 	r := &Releaser{Owner: "acme", Repo: "mono", Root: root}
@@ -173,10 +198,13 @@ func TestContinuationLineNamesWhereTheNotesAre(t *testing.T) {
 	rel := longRelease(root, 1, 10, "x")
 	tag := rel.TagName()
 	public := &Releaser{Owner: "acme", Repo: "mono", Root: root}
+	unknown := &Releaser{Root: root}
 	enterprise := &Releaser{APIURL: "https://ghe.example.com/api/v3", Owner: "acme", Repo: "mono", Root: root}
 
 	assert.Equal(t, "The release notes continue in [libs/core/CHANGELOG.md](https://github.com/acme/mono/blob/"+
 		tag+"/libs/core/CHANGELOG.md).", public.continuationLine(rel, tag))
+	assert.Equal(t, "The release notes continue in libs/core/CHANGELOG.md at "+tag+".",
+		unknown.continuationLine(rel, tag), "a token-free preview may lack repository coordinates")
 	assert.Equal(t, "The release notes continue in libs/core/CHANGELOG.md at "+tag+".",
 		enterprise.continuationLine(rel, tag))
 

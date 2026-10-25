@@ -16,7 +16,6 @@ import (
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
-	"github.com/yohimik/dispat/services/dispat/internal/github"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -521,5 +520,7 @@ func (a *App) previewReleasedGitHubBody(rel *plan.Release, commit string) string
 	if reason := withheldReason(spec.Enabled, spec.Channels, rel.Channel); reason != "" {
 		return "github release withheld: " + reason + "\n"
 	}
-	return github.RenderReleaseBody(rel, changelog.SpecFormat(spec.Format).WithRepoEnv(), nil, commit, "")
+	gh := githubBodyReleaser(spec, a.log)
+	gh.Root = a.root
+	return gh.RenderBody(rel, nil, commit, "")
 }

@@ -849,26 +849,33 @@ func (a *App) githubDispatch(pl *plan.Plan) *ghDispatch {
 // ("owner/repo"), the token from the configured env var (default
 // $GITHUB_TOKEN).
 func githubReleaser(spec model.GitHubSpec, log zerolog.Logger) (*github.Releaser, error) {
-	// The environment completes the pair only when the configuration states
-	// neither half of it, which is the record renderer's rule too: one helper,
-	// so a release and the links inside its body can never be resolved from
-	// different sources. A half-configured pair is left as written and fails
-	// below, rather than crossing a configured owner with the environment's
-	// repo to reach a repository nobody named.
-	owner, repo := spec.Owner, spec.Repo
-	if !spec.Format.RepositoryResolved {
-		owner, repo = changelog.ResolveRepoEnv(owner, repo)
-	}
-	if owner == "" || repo == "" {
+	gh := githubBodyReleaser(spec, log)
+	if gh.Owner == "" || gh.Repo == "" {
 		return nil, errors.New("no repository configured (set github.owner and github.repo, or $GITHUB_REPOSITORY)")
 	}
 	tokenEnv := spec.TokenEnv
 	if tokenEnv == "" {
 		tokenEnv = "GITHUB_TOKEN"
 	}
-	token := os.Getenv(tokenEnv)
-	if token == "" {
+	gh.Token = os.Getenv(tokenEnv)
+	if gh.Token == "" {
 		return nil, fmt.Errorf("no token found in $%s", tokenEnv)
+	}
+	return gh, nil
+}
+
+// githubBodyReleaser resolves body links without requiring credentials or a
+// network client; preview never publishes anything.
+func githubBodyReleaser(spec model.GitHubSpec, log zerolog.Logger) *github.Releaser {
+	// The environment completes the pair only when the configuration states
+	// neither half of it, which is the record renderer's rule too: one helper,
+	// so a release and the links inside its body can never be resolved from
+	// different sources. A half-configured pair is left as written and fails
+	// at publication, rather than crossing a configured owner with the
+	// environment's repo to reach a repository nobody named.
+	owner, repo := spec.Owner, spec.Repo
+	if !spec.Format.RepositoryResolved {
+		owner, repo = changelog.ResolveRepoEnv(owner, repo)
 	}
 	format := changelog.SpecFormat(spec.Format)
 	// The record's "auto" links hang off the repository the release is
@@ -891,10 +898,9 @@ func githubReleaser(spec model.GitHubSpec, log zerolog.Logger) (*github.Releaser
 		Draft:       spec.Draft,
 		Owner:       owner,
 		Repo:        repo,
-		Token:       token,
 		Format:      format,
 		Log:         log,
-	}, nil
+	}
 }
 
 // seq folds a scalar sequence back into text.
