@@ -4360,6 +4360,7 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 92  | The same, but with `+1` instead of `^^`                                  | `theme` was never in the plan and never enters it. Catch-up cannot widen depth (G5).                                                                                                                |
 | 93  | Consumer would be published before its provider in one run               | Impossible: §19.2 orders dependencies first. An implementation that emits this order fails conformance (`E197`).                                                                                    |
 | 94  | Publish succeeded but the tag write failed                               | Next run re-attempts, registry reports the version exists; identity verified → tag adopted, `W196` (§19.4). Unverifiable → `E198`, abort.                                                           |
+| 94a | Run stopped after a publication and its durable receipt reached the store, before the release commit its tag waits for | The next run publishes nothing for that package. On the same planned head it finishes a new record only after reproducing the receipt's artefact identity, or uses the original target if no identity was recorded. A prepared same-checkout finalization may retry its exact atomic update. On a later head it tags the receipt's recorded target and replans (§19.4). |
 | 95  | `cancel(consumer)` after the provider released                           | The pending propagated contribution is discarded (§13.5a); the consumer is not released.                                                                                                            |
 | 96  | `cancel(provider)` after the provider released                           | No-op for the provider (`W170`); the consumer still catches up (§13.4a). Cancel never reaches a published release.                                                                                  |
 | 97  | Consumer held by `Release-As: none` when its provider releases           | Recorded, not released (`W154`). Catches up on the run that lifts the hold, at the then-current `max()`.                                                                                            |
@@ -4870,7 +4871,10 @@ adds per-owner publication serialization, fencing and reconciliation while prese
   package, **whatever its publish target** (§13.10a).
 * Tags MUST be created **after** a successful publish of that package, never before. A tag for an unpublished version
   makes the version unrecoverable, since §13.3 will treat it as released.
-* Tags MUST be created **immediately** after that package publishes, not batched to the end of the run (§19.3).
+* Tags MUST be created **immediately** after that package publishes, not batched to the end of the run (§19.3), and
+  written to the authoritative store immediately as well: a tag that exists only in a checkout the run was about to
+  discard records nothing the next run can read (§13.11). Where the tag can only be written after a later step of the
+  run, a publication receipt takes its place in the store until it can (§19.4).
 * Tags SHOULD be annotated, and MUST NOT be moved or deleted once pushed.
 * A release tag is created, never replaced. Writing it to the authoritative store MUST fail when the store already
   holds that tag name, unless the stored tag names the same commit for the same package and version, which is the retry
@@ -5091,6 +5095,59 @@ competing branch, a compromised token), and tagging it would enrol a foreign art
 this repository had produced it. Verification is what makes step 2 safe; without it, adoption is a supply-chain
 vulnerability rather than a convenience. `publish.adoptPublished: false` disables adoption entirely for repositories
 whose registry cannot support such a check.
+
+Step 1 is also how the engine learns that the version exists. A publish command is commonly an opaque tool that reports
+only that it failed, so the verification states whether the destination holds the version at all. A destination that
+does not hold it leaves the failure an ordinary publish failure (§19.3), and one whose answer cannot be obtained does
+the same: identity is a question about a version the destination holds, and an unanswered question is not an answer.
+After `E198` the run starts no further publication. Packages already published and recorded keep their records, as
+every run-scoped error requires (§16).
+
+**Publication receipts.** The reconciliation above answers a record that was lost. A record that is late is answered
+earlier. To provide durable recovery when a release tag is not yet in the authoritative store, an implementation MUST
+write a **publication receipt** to that store as part of the publication task. It
+MUST complete that write before nonessential recorders run or a consumer of the package starts publication. A failure
+to write it leaves the package published with its record incomplete and blocks those consumers. A configuration that
+does not write records to an authoritative store during the run cannot claim this crash-recovery guarantee. A
+publication receipt:
+
+* is not a release record. It is written under a namespace that no tag inventory reads (§13.2), no baseline is ever
+  derived from it, and it never discharges the release obligation: only the release record it stands in for does;
+* names the commit the release was planned on separately from any exported tag-target commit, and carries the
+  package, the version, the name of the release tag it stands in for, and the artefact identity the publication
+  exported, when it exported one;
+* is written create-only under §19.1's rule: a receipt the store already holds as the same immutable receipt object
+  is the retry of an uncertain write and succeeds; a different object is refused, even if it names the same commit;
+* is removed once the release tag it stands in for is in the authoritative store. If the final tag may target a later
+  release commit, the branch, tag and receipt removal MUST be one atomic remote update, or equivalent durable
+  finalization evidence MUST identify that target before the tag is exposed. An unsupported atomic update fails
+  closed with the receipt retained. A lost response is settled by reading all affected remote refs. A local prepared
+  finalization MAY bind a same-checkout retry to the exact receipt object and tag target, but an unbound local tag
+  MUST NOT be treated as authority to consume the receipt.
+
+A run reads every publication receipt the store holds under its release lock, before any task starts, and settles each
+one against its plan:
+
+1. a receipt whose release tag the input already holds is checked against the remote. In tag-only mode, the peeled
+   targets of both local and remote tags MUST equal the receipt's tag-target commit before the receipt is removed; a
+   matching local-only tag is pushed first. In release-commit mode, a local tag at a later commit without an atomic
+   remote finalization is ambiguous and MUST retain the receipt rather than guess that commit's identity;
+2. a receipt on the run's own head, whose package the plan releases at the receipt's version, is a publication with its
+   record pending: the run MUST NOT publish that package again. It may finish the record in a new release commit only
+   when the retry proves its produced artefact identity matches the receipt. A mismatch or missing identity refuses
+   that finish, preserves the receipt, and starts no further publication. Without an artefact identity in the receipt,
+   the run instead writes the tag at the receipt's original commit and replans as in case 3;
+3. any other receipt whose planned head the current head reaches is recorded at its tag-target commit, either its
+   planned head or its explicitly exported commit: the release tag is pushed create-only, the receipt is removed,
+   and the plan is computed again. The tag does not inherit an unrelated later commit, and the implementation
+   SHOULD say so;
+4. a receipt whose planned head the current head does not reach cannot affect the plan and is left as it is.
+
+The receipt fetch must discard local receipts the store no longer holds; if the authoritative store cannot be read,
+a mutating recovery run MUST fail closed. Receipt settlement itself performs no upload. Its replan may still change
+which later forward publications are eligible under the ordinary rules. A receipt does not close the window between
+a publication and the receipt itself: a run stopped there leaves the publication with neither, and the next run meets
+it through the identity check above.
 
 ### 19.5 Manifest writes
 

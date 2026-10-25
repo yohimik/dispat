@@ -381,13 +381,16 @@ colleague_action() {
 # first push of its own. The trigger reads the git subcommand, so a commit
 # whose message happens to say "push" is not one; the exclude carries the
 # release lock's tag name, because dispat's push of the lock precedes the plan
-# and is not a push of the release.
+# and is not a push of the release, and a receipt-creation refspec, because a
+# publication receipt is pushed beside each publish and the colleague's commit
+# is meant to land before the atomic branch/tag push. An atomic receipt deletion
+# starts with ":refs/dispat/receipts/" and does not match this exclusion.
 with_shim() {
   mkdir -p /shim && ln -sf /exp/lib/git-shim /shim/git
   rm -rf /tmp/shim
   SHIM_LOG=$OUT/git-calls.log \
   SHIM_TRIGGER='^push$' \
-  SHIM_EXCLUDE='dispat-release-lock' \
+  SHIM_EXCLUDE='dispat-release-lock|^refs/dispat/receipts/[^:]+:refs/dispat/receipts/[^:]+$' \
   SHIM_ACTION="$(colleague_action)" \
   SHIM_STATE=/tmp/shim \
   PATH=/shim:$PATH "$@"

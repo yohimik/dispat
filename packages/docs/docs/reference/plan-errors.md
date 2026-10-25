@@ -207,6 +207,18 @@ must align to the run that invoked them. Two codes belong to that alignment.
 | `E219` | The step cannot align to the run. The package is missing from its plan, or the run's version renders a different tag. dispat writes nothing. A failed leg re-runs, but a drifted record does not. |
 | `W229` | A wired `dispat github` ran before the run's tag existed. GitHub would invent the tag at the default branch head. Run the commit step first. |
 
+## A publication and its record
+
+A publication and its release record are two writes, and a run can stop between them. These codes report how a run met
+a publication whose record an earlier run did not finish. See
+[A run stopped between a publication and its record](./releasing/recovery.md#a-run-stopped-between-a-publication-and-its-record).
+
+| Code | Means | What to do |
+|------|-------|------------|
+| `W196` | A publish command failed, and the destination already held the planned version as the artefact this run built. dispat adopted it: the package is published, its tag is written, and nothing was uploaded again. Identity is established by the space's [`publish.adoptPublished`](../configuration/spaces.md#publish) verify script, or for npm by comparing the exported `INTEGRITY` with the registry's `dist.integrity`. | Nothing. Read it as the record of a publication an earlier run made and never recorded. |
+| `E198` | A publish command failed and the destination holds the planned version with another or unverifiable identity; or a retry built an artefact whose identity differs from its pending receipt. An ordinary publish failure leaves the package failed. A receipt mismatch leaves its earlier publication and receipt intact, blocks its dependents, and refuses the new release record. The run starts no further publication and exits `1`. | Investigate the destination and retained receipt before recovery. Do not tag the version by hand or discard the receipt to force a retry. |
+| `W246` | An earlier run published this package and left a publication receipt. This run published nothing for it. If the receipt names the current head and has an identity matching the rebuilt artefact, this run finishes its release commit and tag. If the receipt has no identity, or names an earlier commit, the tag records the receipt's original commit and the run replans. | Check the changelog when a receipt is recorded at its original commit: an entry the stopped run never pushed may need to be written by hand. |
+
 ## A record that renders less than it was asked to
 
 Records are written after the plan is settled and, for a GitHub release, after the package is already published. What a

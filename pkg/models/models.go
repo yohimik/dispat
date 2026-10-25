@@ -186,6 +186,8 @@ type File struct {
 	// StageRelation describes.
 	IsBuildWaitingPublish *StageRelation `json:"isBuildWaitingPublish,omitempty"`
 	RevertOnFail          *bool          `json:"revertOnFail,omitempty"`
+	// Publish is this level's publish policy; see PublishConfig.
+	Publish *PublishConfig `json:"publish,omitempty"`
 	// Versioning is the default versioning mode. It applies under each
 	// space's own implicit group, so `fixed` here means every space versions
 	// its own packages as one, not that all spaces share a version. Joining
@@ -694,7 +696,11 @@ type CommitConfig struct {
 	// MessageFormat supports {tags} and {packages} placeholders (comma-
 	// separated lists). Default: "chore(release): {tags}".
 	MessageFormat string `json:"messageFormat,omitempty"`
-	// Push pushes the release commit and tags.
+	// Push records each completed package remotely. With the commit disabled,
+	// each publication gets a receipt before its tag is created and pushed;
+	// with it enabled, branch, tags and receipt deletions finalize atomically.
+	// A stop before a receipt push completes can still leave an unrecorded
+	// publication, which the next run verifies at its destination.
 	Push   bool   `json:"push,omitempty"`   // default false
 	Remote string `json:"remote,omitempty"` // default "origin"
 	// Branch is the explicit push target used when the repository is detached.
@@ -791,6 +797,11 @@ func (c *CommitConfig) IsEnabled() bool { return c != nil && c.Enabled != nil &&
 // IsPushEnabled reports whether the release commit and tags are pushed; only
 // meaningful with the commit enabled. Nil-safe.
 func (c *CommitConfig) IsPushEnabled() bool { return c.IsEnabled() && c.Push }
+
+// IsTagPushEnabled reports whether a run that makes no release commit pushes
+// each release tag right after it is written: push is on and the commit is
+// off. Nil-safe.
+func (c *CommitConfig) IsTagPushEnabled() bool { return c != nil && c.Push && !c.IsEnabled() }
 
 // IsForceEnabled reports whether tags are written over ones that already exist
 // (default true). Nil-safe.
@@ -919,9 +930,11 @@ type SpaceConfig struct {
 	// The scalar options are pointers for the same reason SpaceFile's and
 	// PackageConfig's are: the root file now states defaults for them, and a
 	// space that cannot say "false" could not override a root "true".
-	IsBuildWaitingPublish *StageRelation   `json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
-	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
+	IsBuildWaitingPublish *StageRelation `json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool          `json:"revertOnFail,omitempty"`
+	// Publish is this level's publish policy; see PublishConfig.
+	Publish *PublishConfig   `json:"publish,omitempty"`
+	Flow    *SpaceFlowConfig `json:"flow,omitempty"`
 	// TagFormat overrides the repository-wide tagFormat for this space.
 	TagFormat string `json:"tagFormat,omitempty"`
 	// AliasTags replaces the inherited alias list for this level; see
@@ -1042,10 +1055,12 @@ type SpaceConfig struct {
 // the scalar options are pointers here where SpaceConfig's are plain: an
 // override must be able to say nothing.
 type SpaceFile struct {
-	IsBuildWaitingPublish *StageRelation   `json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
-	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
-	TagFormat             string           `json:"tagFormat,omitempty"`
+	IsBuildWaitingPublish *StageRelation `json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool          `json:"revertOnFail,omitempty"`
+	// Publish is this level's publish policy; see PublishConfig.
+	Publish   *PublishConfig   `json:"publish,omitempty"`
+	Flow      *SpaceFlowConfig `json:"flow,omitempty"`
+	TagFormat string           `json:"tagFormat,omitempty"`
 	// AliasTags replaces the inherited alias list for this level; see
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.
@@ -1156,11 +1171,13 @@ type PackageConfig struct {
 	// Like `src` it narrows file-derived scope resolution alone: a commit
 	// naming the package by scope still addresses it, the release commit
 	// still stages the whole folder, and manifest discovery is untouched.
-	Ignore                []string         `json:"ignore,omitempty"`
-	IsBuildWaitingPublish *StageRelation   `json:"isBuildWaitingPublish,omitempty"`
-	RevertOnFail          *bool            `json:"revertOnFail,omitempty"`
-	Flow                  *SpaceFlowConfig `json:"flow,omitempty"`
-	TagFormat             string           `json:"tagFormat,omitempty"`
+	Ignore                []string       `json:"ignore,omitempty"`
+	IsBuildWaitingPublish *StageRelation `json:"isBuildWaitingPublish,omitempty"`
+	RevertOnFail          *bool          `json:"revertOnFail,omitempty"`
+	// Publish is this level's publish policy; see PublishConfig.
+	Publish   *PublishConfig   `json:"publish,omitempty"`
+	Flow      *SpaceFlowConfig `json:"flow,omitempty"`
+	TagFormat string           `json:"tagFormat,omitempty"`
 	// AliasTags replaces the inherited alias list for this level; see
 	// AliasTagConfig. An empty list declared here means "no aliases",
 	// which is how a package opts out of its space's.

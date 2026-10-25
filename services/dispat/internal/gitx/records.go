@@ -116,6 +116,9 @@ func (c *LocalGitx) IsReachableFromHead(ctx context.Context, commit string) (boo
 // which of the two a name is cannot push either of them correctly.
 type ReleaseRef struct {
 	Name string
+	// Object pins a required tag push to the object verified by the caller,
+	// so a concurrent local ref move cannot change the pushed record.
+	Object string
 	// IsMoving marks an alias declared `moving: true`. A release record is
 	// never moving, whatever commit.force says: force means "do not fail
 	// because the ref is already there", never "move a published record".
@@ -191,7 +194,11 @@ func (c *LocalGitx) PushReleaseRefs(ctx context.Context, remote string, refs []R
 			continue
 		}
 		args = append(args, "--force-with-lease="+name+":")
-		specs = append(specs, name+":"+name)
+		source := name
+		if ref.Object != "" {
+			source = ref.Object
+		}
+		specs = append(specs, source+":"+name)
 	}
 	args = append(args, "--", remote)
 	out, runErr := c.runStream(ctx, gitStream{}, append(args, specs...)...)

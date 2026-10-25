@@ -117,6 +117,7 @@ and
 | `autoPropagate`    | object                                     | no       | `autoVersion` under the propagate stage's name, with the same options. One object may state only one of the two, and a level stating either replaces both. See [Two names for one block](./autoversion.md#two-names-for-one-block). |
 | `isBuildWaitingPublish` | bool or object                        | no       | Default for every space: what the consumers of a package wait for, and what a failed provider does to them. See [The provider relation](./spaces.md#the-provider-relation). The default is `false`.                                                                              |
 | `revertOnFail`     | bool                                       | no       | Default for every space. See [Space options](./spaces.md#space-options). The default is `false`.                                                                              |
+| `publish`          | object                                     | no       | Default publish policy for every space: what a release does when the destination already holds the version it is publishing. See [`publish`](./spaces.md#publish). |
 | `versioning`       | string                                     | no       | Default versioning mode, applied under each space's **own** group. Writing `fixed` here means every space versions its packages as one, not that all spaces share a version. Joining spaces into one group is what `versionGroups` is for. The default is `independent`.  |
 | `parser`           | object                                     | no       | Commit-message parser options. See [`parser`](./parser.md#parser). Everything unset keeps the specification default.                                                   |
 | `updateCheck`      | bool                                       | no       | Whether dispat looks for a newer release of itself and mentions one on a command's way out. The default is `true`. This never runs under `logFormat: json`, and it delays a command only when `DISPAT_UPDATE_CHECK=1` explicitly asks it to wait. See [Updating dispat](../reference/self-update.md#being-told-there-is-an-update).  |
@@ -169,6 +170,7 @@ is not the same as leaving it out, and only writing `false` overrides a `true` a
 | `autoSign` | yes | yes | yes |
 | `isBuildWaitingPublish` | yes | yes | yes |
 | `revertOnFail` | yes | yes | yes |
+| `publish` | yes | yes | yes |
 | `versioning` | yes | yes | yes |
 | `versionGroup` | no | yes | yes |
 | `dependencies` | yes | yes | yes |
@@ -193,7 +195,9 @@ How a level combines with the one below it depends on the setting:
 - **Replaced whole.** `autoVersion` (or `autoPropagate`), `autoSign`, `aliasTags`, `webhooks`, `buildOutputs`, `buildPlatforms`, `runOnly`, and `manifestNames`. Their empty fields carry meaning against their
   siblings, so a partial overlay cannot express what they mean. Write an empty `aliasTags: []` to make a package opt
   out.
-- **Overlaid field by field.** `changelog` and `github`. A level can flip `enabled` and keep the titles it inherited.
+- **Overlaid field by field.** `changelog`, `github` and `publish`. A level can flip `enabled` and keep the titles it
+  inherited. Inside `publish`, `adoptPublished` replaces whole, because a verify list means nothing beside an
+  `enabled` flag some other level wrote.
   Their nested [`authors`](./records.md#attributing-an-entry-to-its-authors) object overlays the same way, so a level
   can rename the section and inherit the other five keys. Its `include` and `exclude` lists replace whole, because
   adding to an inherited list could never take a pattern away again. A level turns attribution off with an explicit

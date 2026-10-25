@@ -69,6 +69,14 @@ range_asserts() {
     jq -e '[.packages.docs, .packages.theme]
       | all(.manifest.version == "1.0.0" and .manifest.dependencies.ui == "~1.0.0" and .registry == "1.0.0")' \
     "$OUT/last-observation.json"
+  receipts_asserts
+}
+
+# The release that finished pushed its tags and removed every publication
+# receipt that stood in for them.
+receipts_asserts() {
+  assert "no publication receipt is left on origin" \
+    jq -e '.origin.receipts == []' "$OUT/last-observation.json"
 }
 
 run_experiment() {
@@ -314,4 +322,5 @@ run_deferred() {
   fi
   assert "the recovered consumer's range names the provider it shipped with" \
     jq -e '.packages.cli.manifest.dependencies.core == "^1.0.1"' "$OUT/last-observation.json"
+  receipts_asserts
 }

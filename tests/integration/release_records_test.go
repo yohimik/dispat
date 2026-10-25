@@ -523,7 +523,7 @@ func TestReleaseRecordsUnreadableStoreRefusesTheRun(t *testing.T) {
 func TestReleaseRecordsUnwritableStoreKeepsThePublication(t *testing.T) {
 	registry := filepath.Join(t.TempDir(), "registry.log")
 	r, bare := newRecordsOrigin(t, recordsConfig(registry))
-	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*push --porcelain --force-with-lease=refs/tags/*"})
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*atomic*"})
 
 	res := r.CommandEnv(fault.Env())
 	assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -534,42 +534,156 @@ func TestReleaseRecordsUnwritableStoreKeepsThePublication(t *testing.T) {
 	assert.Empty(t, remoteRecord(t, bare, "core@0.1.0"), "the store holds nothing")
 }
 
-// TestReleaseRecordsLostTagPushIsPlannedAgain: the release commit and the
-// release tag reach the remote in two pushes, and a run whose branch push
-// landed and whose tag push failed leaves the remote with the release commit
-// on its branch and no record of the version. The run exits non-zero with the
-// package published. A plain re-run from a fresh checkout of that remote, the
-// way a CI job is retried with no repair in between, reads the records the
-// store holds, finds none, and plans the same version again: it publishes a
-// second time and records it. That is the documented contract of a missing
-// record (a repeat run plans from durable tags), and why a publish script
-// that cannot be repeated has to verify the destination first.
-func TestReleaseRecordsLostTagPushIsPlannedAgain(t *testing.T) {
+// TestReleaseRecordsLostTagPushIsFinishedFromItsReceipt refuses an atomic
+// branch, tag and receipt-deletion push. A fresh clone still sees the receipt
+// and records the publication at its original target without uploading twice.
+func TestReleaseRecordsLostTagPushIsFinishedFromItsReceipt(t *testing.T) {
 	registry := filepath.Join(t.TempDir(), "registry.log")
 	cfg := recordsConfig(registry)
 	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
 	r, bare := newRecordsOrigin(t, cfg)
-	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*push --porcelain --force-with-lease=refs/tags/*"})
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*push --atomic --porcelain*"})
 
 	failed := r.CommandEnv(fault.Env())
 	assert.NotEqual(t, 0, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
-	assert.Equal(t, 1, fault.Matches(), "only the tag push failed")
+	assert.Equal(t, 1, fault.Matches(), "the atomic branch, tag and receipt update failed")
 	assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
 	assert.Contains(t, failed.Stdout, `"status":"published"`, "the package is reported published")
-	assert.Equal(t, "chore(release): core@0.1.0",
+	assert.NotEqual(t, "chore(release): core@0.1.0",
 		strings.TrimSpace(bareGit(t, bare, "log", "-1", "--format=%s", harness.DefaultBranch)),
-		"the release commit reached the branch")
+		"the atomic push left branch and tag unchanged together")
 	assert.Empty(t, remoteRecord(t, bare, "core@0.1.0"), "and its tag did not")
 
 	retry := harness.Clone(t, bare)
 	status := retry.StatusOK()
 	assert.Equal(t, "0.0.0 -> 0.1.0", harness.GraphLine(status.Events, "core").Str("version"),
 		"the fresh checkout plans the same version again: %s", status.Stdout)
-	retry.ReleaseOK()
-	assert.Equal(t, []string{"core@0.1.0", "core@0.1.0"}, publishedVersions(t, registry),
-		"so the plain re-run publishes it a second time")
+	released := retry.ReleaseOK()
+	assert.True(t, harness.IsCodePresentForPackage(released.Events, "W246", "core"), "stdout:\n%s", released.Stdout)
+	assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry),
+		"the receipt keeps the plain re-run from publishing it a second time")
 	assert.Equal(t, strings.TrimSpace(bareGit(t, bare, "rev-parse", harness.DefaultBranch)),
-		remoteRecord(t, bare, "core@0.1.0"), "and records it on its own release commit")
+		remoteRecord(t, bare, "core@0.1.0"), "the record names the commit the release was planned on")
+	assert.Empty(t, strings.TrimSpace(bareGit(t, bare, "for-each-ref", "refs/dispat/")), "and the receipt is gone")
+}
+
+func TestAtomicReleasePushLostResponseIsVerified(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "registry.log")
+	r, bare := newRecordsOrigin(t, recordsConfig(registry))
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*push --atomic --porcelain*", After: true, Code: 1})
+	result := r.CommandEnv(fault.Env())
+	require.Zero(t, result.Code, "stdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
+	assert.Equal(t, 1, fault.Matches(), "the answer was lost after the atomic remote update")
+	assert.NotEmpty(t, remoteRecord(t, bare, "core@0.1.0"))
+	assert.Empty(t, strings.TrimSpace(bareGit(t, bare, "for-each-ref", "refs/dispat/receipts/")))
+	retry := harness.Clone(t, bare).Release()
+	require.Zero(t, retry.Code, "stdout:\n%s\nstderr:\n%s", retry.Stdout, retry.Stderr)
+	assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
+}
+
+func TestPreparedFinalizationRetriesSameCheckout(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "registry.log")
+	cfg := recordsConfig(registry)
+	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
+	r, bare := newRecordsOrigin(t, cfg)
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*push --atomic --porcelain*"})
+	first := r.CommandEnv(fault.Env())
+	require.NotZero(t, first.Code)
+	assert.Equal(t, 1, fault.Matches())
+	assert.Empty(t, remoteRecord(t, bare, "core@0.1.0"))
+	assert.NotEmpty(t, r.Git("for-each-ref", "refs/dispat/prepared/"))
+	retry := r.Release()
+	require.Zero(t, retry.Code, "stdout:\n%s\nstderr:\n%s", retry.Stdout, retry.Stderr)
+	assert.Equal(t, r.Git("rev-parse", "HEAD"), remoteRecord(t, bare, "core@0.1.0"))
+	assert.Empty(t, r.Git("for-each-ref", "refs/dispat/prepared/"))
+	assert.Empty(t, strings.TrimSpace(bareGit(t, bare, "for-each-ref", "refs/dispat/receipts/")))
+	assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
+}
+
+func TestPreparedFinalizationMergesRemoteBeforeRetry(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "registry.log")
+	cfg := recordsConfig(registry)
+	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
+	r, bare := newRecordsOrigin(t, cfg)
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*push --atomic --porcelain*"})
+	require.NotZero(t, r.CommandEnv(fault.Env()).Code)
+	other := harness.Clone(t, bare)
+	other.CommitEmpty("chore: landed during failed finalization")
+	other.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+	retry := r.Release()
+	require.Zero(t, retry.Code, "stdout:\n%s\nstderr:\n%s", retry.Stdout, retry.Stderr)
+	assert.NotEmpty(t, remoteRecord(t, bare, "core@0.1.0"))
+	assert.Empty(t, strings.TrimSpace(bareGit(t, bare, "for-each-ref", "refs/dispat/receipts/")))
+	assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
+}
+
+func TestCrashBeforePreparedMarkerUsesOriginalTarget(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "registry.log")
+	cfg := recordsConfig(registry)
+	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
+	r, bare := newRecordsOrigin(t, cfg)
+	planned := r.Git("rev-parse", "HEAD")
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*update-ref refs/dispat/prepared/*"})
+	first := r.CommandEnv(fault.Env())
+	require.NotZero(t, first.Code)
+	assert.Equal(t, 1, fault.Matches())
+	assert.NotEqual(t, planned, r.Git("rev-parse", "HEAD"), "the release commit exists locally")
+	assert.False(t, r.IsTagged("core@0.1.0"), "no tag is written before the prepared marker")
+	retry := r.Release()
+	require.Zero(t, retry.Code, "stdout:\n%s\nstderr:\n%s", retry.Stdout, retry.Stderr)
+	assert.Equal(t, planned, remoteRecord(t, bare, "core@0.1.0"),
+		"without a prepared marker, the original publication target is the only safe record")
+	assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
+}
+
+func TestCrashAfterPreparedMarkerBeforeTagRetriesSameCheckout(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "registry.log")
+	cfg := recordsConfig(registry)
+	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
+	r, bare := newRecordsOrigin(t, cfg)
+	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*tag -a core@0.1.0*"})
+	first := r.CommandEnv(fault.Env())
+	require.NotZero(t, first.Code)
+	assert.Equal(t, 1, fault.Matches())
+	assert.False(t, r.IsTagged("core@0.1.0"))
+	assert.NotEmpty(t, r.Git("for-each-ref", "refs/dispat/prepared/"))
+	retry := r.Release()
+	require.Zero(t, retry.Code, "stdout:\n%s\nstderr:\n%s", retry.Stdout, retry.Stderr)
+	assert.Equal(t, r.Git("rev-parse", "HEAD"), remoteRecord(t, bare, "core@0.1.0"))
+	assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
+}
+
+func TestBeforePushCannotReplacePreparedReleaseTag(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "registry.log")
+	cfg := recordsConfig(registry)
+	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
+	cfg.Scripts["move-release-tag"] = models.Script{`git tag -f -a core@0.1.0 -m wrong HEAD~1`}
+	cfg.Run = &models.RunConfig{BeforePush: []string{"move-release-tag"}}
+	r, bare := newRecordsOrigin(t, cfg)
+	planned := r.Git("rev-parse", "HEAD")
+	result := r.Release()
+	require.NotZero(t, result.Code)
+	assert.Contains(t, result.Stdout, "prepared target")
+	assert.Equal(t, planned, strings.TrimSpace(bareGit(t, bare, "rev-parse", harness.DefaultBranch)))
+	assert.Empty(t, remoteRecord(t, bare, "core@0.1.0"))
+	assert.NotEmpty(t, strings.TrimSpace(bareGit(t, bare, "for-each-ref", "refs/dispat/receipts/")))
+	assert.Equal(t, []string{"core@0.1.0"}, publishedVersions(t, registry))
+}
+
+func TestAliasRefusalDoesNotRejectRequiredAtomicRecords(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "registry.log")
+	cfg := recordsConfig(registry)
+	cfg.Spaces["libs"] = models.SpaceConfig{Path: models.PathList{"packages"}, Flow: buildPublish(),
+		AliasTags: []models.AliasTagConfig{{Format: "v{version}"}}}
+	r, bare := newRecordsOrigin(t, cfg)
+	hookPath := filepath.Join(bare, "hooks", "update")
+	require.NoError(t, os.WriteFile(hookPath,
+		[]byte("#!/bin/sh\ncase \"$1\" in refs/tags/v*) exit 1 ;; esac\n"), 0o755))
+	result := r.Release()
+	require.Zero(t, result.Code, "stdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
+	assert.NotEmpty(t, remoteRecord(t, bare, "core@0.1.0"))
+	assert.Empty(t, remoteRecord(t, bare, "v0.1.0"))
+	assert.Empty(t, strings.TrimSpace(bareGit(t, bare, "for-each-ref", "refs/dispat/receipts/")))
 }
 
 // TestReleaseRecordsTagRefusedByTheRemoteIsAFailedPush: a server rule that

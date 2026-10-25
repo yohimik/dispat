@@ -120,7 +120,9 @@ func (a *App) finalize(ctx context.Context, fin finalizer, pl *plan.Plan, result
 	// owes, because the alternative is a released package with no tag, no
 	// changelog entry and no GitHub release, none of which the next run knows
 	// to go back for. See critical.go.
-	a.commitAndTag(ctx, fin, rc)
+	if !a.commitAndTag(ctx, fin, rc) {
+		return
+	}
 	// released is the commit the records name. It is HEAD, except after a
 	// recovery: the branch tip is a merge by then, and what the records mean
 	// is the release commit that became its first parent. Empty until a
@@ -160,7 +162,7 @@ func newReleaseCommit(pl *plan.Plan, results map[string]*release.Result) release
 	// spellings of the same placeholder in agreement.
 	var rc releaseCommit
 	for _, name := range pl.Order {
-		if r, ok := results[name]; ok && r.Status == release.StatusPublished {
+		if r, ok := results[name]; ok && r.Status == release.StatusPublished && !r.RecordBlocked {
 			rel := pl.Releases[name]
 			rc.pushTags = append(rc.pushTags, gitx.ReleaseRef{Name: rel.TagName()})
 			for _, alias := range rel.AliasTags() {
@@ -192,7 +194,7 @@ func newReleaseCommit(pl *plan.Plan, results map[string]*release.Result) release
 
 // commitAndTag makes the release commit, bracketed by beforeCommit and
 // afterCommit, then tags every published package and runs postCommit.
-func (a *App) commitAndTag(ctx context.Context, fin finalizer, rc releaseCommit) {
+func (a *App) commitAndTag(ctx context.Context, fin finalizer, rc releaseCommit) bool {
 	msg := renderCommitMessage(a.cfg.Commit.MessageFormat, rc.pkgs, rc.tags)
 	fin.run("beforeCommit", a.cfg.Run.BeforeCommit)
 	committed, err := a.git.CommitDirs(ctx, rc.dirs, msg)
@@ -208,10 +210,16 @@ func (a *App) commitAndTag(ctx context.Context, fin finalizer, rc releaseCommit)
 	default:
 		fin.run("afterCommit", a.cfg.Run.AfterCommit)
 	}
+	if err := a.prepareReleaseTags(ctx, rc.rels); err != nil {
+		fin.crit.record(a.log, plan.CodeTagFailed, err, "release tags could not be prepared", nil)
+		return false
+	}
+	isTagged := true
 	for _, rel := range rc.rels {
 		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
 		// its tag to that commit instead of the release commit.
 		if err := release.CreateReleaseTag(ctx, a.git, rel, a.cfg.Commit.IsForceEnabled(), a.log); err != nil {
+			isTagged = false
 			// One package's tag failing says nothing about the next one's.
 			fin.crit.record(a.log, release.TagFailureCode(err), err, "tagging failed",
 				func(e *zerolog.Event) *zerolog.Event {
@@ -219,7 +227,145 @@ func (a *App) commitAndTag(ctx context.Context, fin finalizer, rc releaseCommit)
 				})
 		}
 	}
+	if isTagged {
+		if err := a.verifyPreparedTags(ctx, rc.rels); err != nil {
+			fin.crit.record(a.log, plan.CodeTagFailed, err, "release tag target differs from prepared target", nil)
+			isTagged = false
+		}
+	}
 	fin.run("postCommit", a.cfg.Run.PostCommit)
+	return isTagged
+}
+
+func (a *App) prepareReleaseTags(ctx context.Context, rels []*plan.Release) error {
+	if !a.cfg.Commit.IsPushEnabled() || a.receipts == nil {
+		return nil
+	}
+	branchHead, err := a.git.HeadSHA(ctx)
+	if err != nil {
+		return err
+	}
+	for _, rel := range rels {
+		receipt, isHeld := a.receipts.findHeld(rel.TagName())
+		if !isHeld {
+			return fmt.Errorf("%s has no durable receipt", rel.TagName())
+		}
+		target := rel.ExportedCommit()
+		if target == "" {
+			target = branchHead
+		}
+		target, err = a.git.ResolveCommit(ctx, target)
+		if err != nil {
+			return fmt.Errorf("resolving %s target: %w", rel.TagName(), err)
+		}
+		if err := a.git.PrepareRelease(ctx, receipt, branchHead, target); err != nil {
+			return err
+		}
+		a.receipts.rememberPrepared(rel.TagName(), gitx.PreparedRelease{
+			ReceiptObject: receipt.Object, BranchHead: branchHead, TagTarget: target})
+	}
+	return nil
+}
+
+func (a *App) verifyPreparedTags(ctx context.Context, rels []*plan.Release) error {
+	if !a.cfg.Commit.IsPushEnabled() || a.receipts == nil {
+		return nil
+	}
+	for _, rel := range rels {
+		prepared, isHeld, err := a.git.ReadPreparedRelease(ctx, rel.TagName())
+		if err != nil || !isHeld {
+			return fmt.Errorf("reading prepared target for %s: %w", rel.TagName(), err)
+		}
+		local, err := a.git.ResolveCommit(ctx, "refs/tags/"+rel.TagName())
+		if err != nil || local != prepared.TagTarget {
+			return fmt.Errorf("%s names %s, expected prepared target %s: %w", rel.TagName(), local,
+				prepared.TagTarget, errors.Join(err, release.ErrTagAtOtherCommit))
+		}
+	}
+	return nil
+}
+
+// pushFinalized keeps optional aliases outside the required atomic update.
+// A conflicting alias cannot prevent the release tag and receipt settlement.
+func (a *App) pushFinalized(ctx context.Context, remote string, rels []*plan.Release,
+	refs []gitx.ReleaseRef) (gitx.PushReport, error) {
+	if a.receipts == nil {
+		return a.git.Push(ctx, remote, refs)
+	}
+	if err := a.verifyPreparedForPush(ctx, rels); err != nil {
+		return gitx.PushReport{}, err
+	}
+	requiredNames := make(map[string]bool, len(rels))
+	for _, rel := range rels {
+		requiredNames[rel.TagName()] = true
+	}
+	var required, aliases []gitx.ReleaseRef
+	for _, ref := range refs {
+		if requiredNames[ref.Name] {
+			required = append(required, ref)
+		} else {
+			aliases = append(aliases, ref)
+		}
+	}
+	report, err := a.git.PushWithReceipts(ctx, remote, required, a.receipts.heldFor(rels))
+	if err != nil {
+		return report, err
+	}
+	if len(aliases) == 0 {
+		return report, nil
+	}
+	outcomes, aliasErr := a.git.PushReleaseRefs(ctx, remote, aliases)
+	for _, outcome := range outcomes {
+		switch outcome.Result {
+		case gitx.RefExisting:
+			report.Skipped = append(report.Skipped, outcome.Name)
+		case gitx.RefMoved:
+			report.Replaced = append(report.Replaced, outcome.Name)
+		case gitx.RefAtOtherCommit:
+			a.log.Warn().Str("code", plan.CodeAliasTagFailed).Str("tag", outcome.Name).
+				Str("remote", gitx.RedactURL(remote)).Str("commit", outcome.Commit).
+				Msg("optional alias is held at another commit and was left there")
+		}
+	}
+	if aliasErr != nil {
+		a.log.Warn().Err(aliasErr).Str("code", plan.CodeAliasTagFailed).
+			Msg("release tags reached the remote, but optional aliases did not")
+	}
+	return report, nil
+}
+
+func (a *App) verifyPreparedForPush(ctx context.Context, rels []*plan.Release) error {
+	if !a.cfg.Commit.IsPushEnabled() || a.receipts == nil {
+		return nil
+	}
+	currentHead, err := a.git.HeadSHA(ctx)
+	if err != nil {
+		return err
+	}
+	for _, rel := range rels {
+		receipt, isHeld := a.receipts.findHeld(rel.TagName())
+		if !isHeld {
+			return fmt.Errorf("release %s has no receipt for atomic finalization", rel.TagName())
+		}
+		prepared, isHeld, err := a.git.ReadPreparedRelease(ctx, rel.TagName())
+		if err != nil || !isHeld {
+			return fmt.Errorf("release %s has no readable prepared finalization: %w", rel.TagName(), err)
+		}
+		original, isHeld := a.receipts.preparedFor(rel.TagName())
+		if !isHeld || prepared != original || prepared.ReceiptObject != receipt.Object {
+			return fmt.Errorf("prepared release %s differs from the recorded receipt and target", rel.TagName())
+		}
+		reachable, err := a.git.IsAncestor(ctx, prepared.BranchHead, currentHead)
+		if err != nil || !reachable {
+			return fmt.Errorf("prepared release %s is not on the branch being pushed: %w", rel.TagName(), err)
+		}
+		target, err := a.git.ResolveCommit(ctx, "refs/tags/"+rel.TagName())
+		if err != nil || target != original.TagTarget {
+			return fmt.Errorf("tag %s differs from its prepared target: %w", rel.TagName(),
+				errors.Join(err, release.ErrTagAtOtherCommit))
+		}
+	}
+	return nil
 }
 
 // pushRelease pushes the release commit and its tags, bracketed by beforePush
@@ -227,7 +373,7 @@ func (a *App) commitAndTag(ctx context.Context, fin finalizer, rc releaseCommit)
 // had to be recovered by a merge (empty otherwise).
 func (a *App) pushRelease(ctx context.Context, fin finalizer, rc releaseCommit) (released string) {
 	fin.run("beforePush", a.cfg.Run.BeforePush)
-	report, err := a.git.Push(ctx, fin.remote, rc.pushTags)
+	report, err := a.pushFinalized(ctx, fin.remote, rc.rels, rc.pushTags)
 	if errors.Is(err, gitx.ErrRejected) {
 		// Somebody pushed to the branch while this run was working. The
 		// release still owes its commit and tags, and the way to deliver
@@ -247,6 +393,7 @@ func (a *App) pushRelease(ctx context.Context, fin finalizer, rc releaseCommit) 
 	} else {
 		a.log.Info().Str("remote", gitx.RedactURL(fin.remote)).
 			Strs("tags", gitx.ReleaseRefNames(rc.pushTags)).Msg("pushed release commit and tags")
+		a.consumeReceipts(ctx, fin.remote, rc.rels, report)
 		fin.run("afterPush", a.cfg.Run.AfterPush)
 	}
 	return released
@@ -348,7 +495,7 @@ func (a *App) mergeAndPush(ctx context.Context, fin finalizer, rels []*plan.Rele
 			Int("attempt", attempt).
 			Msg("pulled the branch during the release to sync changes that landed while it ran; " +
 				"the release tags point at the tree that was planned and the release commit was merged on top")
-		report, err = a.git.Push(ctx, fin.remote, pushTags)
+		report, err = a.pushFinalized(ctx, fin.remote, rels, pushTags)
 		if !errors.Is(err, gitx.ErrRejected) || attempt >= mergeAttempts {
 			return report, release, err
 		}

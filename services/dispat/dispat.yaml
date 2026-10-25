@@ -3,7 +3,17 @@
 # dispat.example.* files beside this one are documentation samples, not
 # configuration; dispat resolves the exact names dispat.{json,yaml,yml,toml}.
 versionGroup: cli
-dependencies: [config, manifest, models, scanner, writer]
+dependencies:
+  - config
+  - manifest
+  - models
+  - scanner
+  - writer
+  # `dispat --help` links the agent skill at this release's own tag, so the
+  # guide a release ships is published first. No manifest states the edge,
+  # which is why it is kept.
+  - provider: agent-guide
+    keep: true
 aliasTags:
   - format: v{version}
   - format: v{major}

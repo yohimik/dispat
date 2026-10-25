@@ -1779,8 +1779,9 @@ func (*errTagger) CreateTag(context.Context, string, string, string) error {
 // release (§17), and losing it is serious — the next run reads the package as
 // never released and would publish the same version again. What it is not is a
 // reason to call the package failed: the publish succeeded, and saying
-// otherwise would revert the folder, fire onFail and skip every consumer,
-// none of which takes the release back off its registry.
+// otherwise would revert the folder or fire onFail, neither of which takes
+// the release back off its registry. A consumer is held until the record is
+// repaired, because the published outcome alone is not durable evidence.
 func TestTaggingFailureIsCriticalNotAFailure(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a", "b"}, Deps: map[string][]string{"b": {"a"}}})
 	e := newExecutor(execSpec{Runner: &fakeRunner{}, Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
@@ -1793,8 +1794,9 @@ func TestTaggingFailureIsCriticalNotAFailure(t *testing.T) {
 	require.Len(t, res["a"].Critical, 1)
 	assert.Contains(t, res["a"].Critical[0].Error(), "tag refused")
 	assert.Contains(t, res["a"].Critical[0].Error(), plan.CodeTagFailed)
-	assert.Equal(t, StatusPublished, res["b"].Status,
-		"the consumer has a published provider to build against and must not be skipped")
+	assert.True(t, res["a"].RecordBlocked)
+	assert.Equal(t, StatusSkipped, res["b"].Status,
+		"a consumer cannot publish until the provider's record is durable")
 }
 
 // inspectingTagger is a Tagger over a repository that already carries preset

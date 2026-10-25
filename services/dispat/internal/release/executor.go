@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -136,6 +137,20 @@ type postPublishRecorder interface {
 	RecordAfterPublish(recordCtx, observerCtx context.Context, rel *plan.Release) error
 }
 
+// DurableRecorderx writes a published package's record to the store the next
+// run reads after the package publishes: a receipt followed by the release
+// tag in tag-only mode, or a receipt until finalization in commit mode
+// (§19.4). It runs on the detached recording context.
+type DurableRecorderx interface {
+	RecordDurably(ctx context.Context, rel *plan.Release) error
+}
+
+// PendingRecord is the durable identity and explicit tag target of a prior publication.
+type PendingRecord struct {
+	Integrity      string
+	ExportedCommit string
+}
+
 // Reverterx rolls back local changes inside a package folder; *gitx.LocalGitx
 // satisfies it. Used for spaces with revertOnFail, and for a skipped package
 // whose folder the run owns (see Executor.IsRunOwnedFolder).
@@ -204,6 +219,14 @@ type Executor struct {
 	// a missing source record or control checkpoint invalidates consumption.
 	BlockOnRecordFailure bool
 	Reverter             Reverterx // rolls back package folders for revertOnFail spaces
+	// Durable writes each published package's required remote record before
+	// optional effects; in tag-only mode it creates the local tag after the
+	// receipt. Nil leaves remote recording to the end of the run or to CI.
+	Durable DurableRecorderx
+	// PendingRecord reports a package an earlier run published and
+	// recorded with a receipt only. Its publish frame does not run; its retry
+	// build must reproduce this artefact identity before a new commit records it.
+	PendingRecord func(*plan.Release) (PendingRecord, bool)
 	// IsRunOwnedFolder reports whether everything in a package's folder at
 	// the end of its stages was written by this run, so that restoring the
 	// folder can discard nothing else. A package skipped after an earlier
@@ -643,6 +666,9 @@ type run struct {
 	// command has since run over them. See recordReconciliation.
 	reconciledProviders map[string][]string
 	builtPackages       map[string]bool
+	// isPublicationRefused (guarded by mu) is set once a publication met an
+	// artefact this run may not adopt (E198): no publication starts after it.
+	isPublicationRefused bool
 }
 
 // addStageChain states the edges between the stages one package's release
@@ -727,6 +753,9 @@ type taskCtx struct {
 	// happens, a panic included (see containPanic). Owned by the task's own
 	// goroutine.
 	isPublished bool
+	// requiredRecordFailed blocks effect-consuming successors even when
+	// optional changelog or GitHub recording failures do not block them.
+	requiredRecordFailed bool
 }
 
 // recordPlacement remembers where one task's frame was executed: on the task,
@@ -837,6 +866,12 @@ func (r *run) settleAdmission(ctx context.Context, tc *taskCtx, res *Result) adm
 	if ctx.Err() != nil {
 		// Interrupted between scheduling and start: no scripts, no hooks.
 		res.Status = StatusCancelled
+		return admission{isCancelled: true}
+	}
+	if t.kind == taskPublish && r.isPublicationRefused {
+		res.Status = StatusCancelled
+		tc.log.Warn().Str("code", plan.CodeAdoptionRefused).
+			Msg("publish not started: this run met an artefact it may not adopt, and starts no further publication")
 		return admission{isCancelled: true}
 	}
 	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results, r.resolveReachedProviders(t.pkg)); skip {
@@ -1110,6 +1145,13 @@ func (r *run) execute(ctx context.Context, t task) {
 		}
 	}
 
+	if t.kind == taskPublish && tc.PendingRecord != nil {
+		if pending, isPending := tc.PendingRecord(rel); isPending {
+			tc.finishPendingRecord(ctx, res, pending)
+			return
+		}
+	}
+
 	frame := tc.stageFor()
 	tc.recordReconciliation(frame)
 
@@ -1148,7 +1190,11 @@ func (r *run) execute(ctx context.Context, t task) {
 		}
 	}
 
-	if what, err := tc.runStage(ctx, frame); err != nil {
+	what, err := tc.runStage(ctx, frame)
+	if err != nil && t.kind == taskPublish && what == tc.stage.Name+" script failed" {
+		what, err = tc.reconcilePublication(ctx, what, err)
+	}
+	if err != nil {
 		tc.failTask(ctx, res, err, what)
 		return
 	}
@@ -1350,22 +1396,22 @@ func (tc *taskCtx) markPublished(res *Result) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 	res.Status = StatusPublished
-	res.RecordBlocked = tc.BlockOnRecordFailure && len(res.Critical) > 0
+	res.RecordBlocked = tc.requiredRecordFailed || (tc.BlockOnRecordFailure && len(res.Critical) > 0)
 	if res.RecordBlocked {
 		tc.isAnyDead = true
 	}
 	res.Duration = time.Since(tc.started[tc.t.pkg])
 }
 
-// RecordTimeout bounds the durable record of one published package, which is
-// written on a context detached from the run's cancellation: the changelog,
-// the tag, a fleet's source commit, push and checkpoint. It is generous on
+// RecordTimeout bounds the record attempt of one published package, which is
+// written on a context detached from the run's cancellation: the tag or
+// receipt, optional recorders, a fleet's source commit and checkpoint. It is generous on
 // purpose, because it exists to end a record whose remote has stopped
 // answering, never to cut short one that is merely slow.
 const RecordTimeout = 5 * time.Minute
 
-// publishTail finishes a successful publish: the release recorders (changelog
-// file, GitHub release, ...), the tag, the status flip, then the warn-only
+// publishTail finishes a successful publish: the required tag or receipt,
+// optional recorders (changelog file, GitHub release, ...), the status flip, then the warn-only
 // postPublish hook and the announce frame.
 //
 // It takes no failure callback, and that is the point: past the publish there
@@ -1388,40 +1434,48 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	// the run, and with it the release lock, for good.
 	recCtx, cancelRecord := context.WithTimeout(context.WithoutCancel(ctx), RecordTimeout)
 	defer cancelRecord()
-	// Neither the recorders nor the tag may fail the package now. The artefact
-	// is on its registry: reporting the package as failed would revert its
-	// folder or run its onFail script, neither of which un-publishes anything.
-	// Required-record mode separately blocks consumers until repair. Each
-	// failure is recorded as a critical instead,
-	// the rest of the tail still runs, and the run exits non-zero at the end.
-	for _, rec := range tc.Recorders {
-		var err error
-		recorder := fmt.Sprintf("%T", rec)
-		if aware, ok := rec.(postPublishRecorder); ok {
-			err = aware.RecordAfterPublish(recCtx, ctx, rel)
-		} else {
-			err = rec.Record(recCtx, rel)
-		}
-		if err == nil {
-			// No tag field: in release-commit mode the tag does not exist
-			// yet, and a record line stating one would say it does.
-			tc.log.Debug().Str("recorder", recorder).Msg("release recorded")
-		}
-		if err != nil {
-			// The next recorder still runs: a changelog that could not be
-			// written is no reason to skip the GitHub release as well.
-			code := plan.CodeRecordFailed
-			if tc.BlockOnRecordFailure {
-				code = "E335"
-			}
-			tc.critical(res, code, err, "release recording failed")
-		}
-	}
-	if tc.Tagger != nil { // nil: tagging deferred to the release-commit phase
+	// The source record must reach the shared store before optional recorders
+	// can make another external effect or a dependent can consume publication.
+	if tc.Tagger != nil && tc.Durable == nil { // nil: tagging deferred to the release-commit phase
 		if err := CreateReleaseTag(recCtx, tc.Tagger, rel, tc.Force, tc.log); err != nil {
+			tc.requiredRecordFailed = true
 			tc.critical(res, TagFailureCode(err), err, "tagging failed")
 		} else {
 			tc.log.Debug().Str("tag", rel.TagName()).Msg("release tag written")
+		}
+	}
+	if tc.Durable != nil {
+		if err := tc.Durable.RecordDurably(recCtx, rel); err != nil {
+			tc.requiredRecordFailed = true
+			tc.critical(res, TagFailureCode(err), err, "recording the release on the remote failed")
+		}
+	}
+	// A failed required record leaves the package published but withholds
+	// optional effects. The next run settles the durable receipt or verifies
+	// the destination before trying to complete the record.
+	if !tc.requiredRecordFailed {
+		for _, rec := range tc.Recorders {
+			var err error
+			recorder := fmt.Sprintf("%T", rec)
+			if aware, ok := rec.(postPublishRecorder); ok {
+				err = aware.RecordAfterPublish(recCtx, ctx, rel)
+			} else {
+				err = rec.Record(recCtx, rel)
+			}
+			if err == nil {
+				// No tag field: in release-commit mode the tag does not exist
+				// yet, and a record line stating one would say it does.
+				tc.log.Debug().Str("recorder", recorder).Msg("release recorded")
+			}
+			if err != nil {
+				// The next recorder still runs: a changelog that could not be
+				// written is no reason to skip the GitHub release as well.
+				code := plan.CodeRecordFailed
+				if tc.BlockOnRecordFailure {
+					code = "E335"
+				}
+				tc.critical(res, code, err, "release recording failed")
+			}
 		}
 	}
 	tc.markPublished(res)
@@ -1431,6 +1485,10 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	// can be traced back to the machine that produced it.
 	ev.Worker = res.Worker
 	tc.notify(ev)
+	if tc.requiredRecordFailed {
+		tc.finishPublishGuard()
+		return
+	}
 	// In release-commit mode the tag does not exist yet — finalize creates it
 	// — so the line names it as planned rather than stating it as a fact.
 	if tc.BlockOnRecordFailure && res.RecordBlocked {
@@ -1476,6 +1534,36 @@ func (tc *taskCtx) publishTail(ctx context.Context, res *Result) {
 	_ = tc.hook(ctx, "postAnnounce", space.PostAnnounceScript, false)
 }
 
+// finishPendingRecord settles the publish task of a package an earlier run
+// published and recorded with a receipt only: nothing of the publish frame
+// runs, and the tail records the release as this run would have.
+func (tc *taskCtx) finishPendingRecord(ctx context.Context, res *Result, pending PendingRecord) {
+	current, isExported := tc.rel.Output(IntegrityOutput)
+	if !isExported || strings.TrimSpace(current) != pending.Integrity {
+		tc.refusePublications()
+		tc.isPublished = true
+		tc.requiredRecordFailed = true
+		tc.critical(res, plan.CodeAdoptionRefused,
+			fmt.Errorf("the retry produced an artefact identity different from the publication receipt"),
+			"pending publication identity could not be verified")
+		tc.markPublished(res)
+		ev := packageEvent(tc.t.pkg, tc.rel, EventPackagePublished)
+		ev.Status, ev.Code = StatusPublished.String(), plan.CodeAdoptionRefused
+		tc.notify(ev)
+		return
+	}
+	if pending.ExportedCommit != "" {
+		MergeOutputs(tc.rel, []plan.Output{{Name: plan.PackageCommitExportPrefix + plan.EnvKey(tc.rel.Pkg.Name),
+			Value: pending.ExportedCommit, Source: tc.rel.Pkg.Name + ":receipt"}})
+	}
+	tc.log.Warn().Str("code", plan.CodeRecordPending).Str("tag", tc.rel.TagName()).
+		Msg("published by an earlier run that recorded a receipt; finishing its record without publishing again")
+	ev := packageEvent(tc.t.pkg, tc.rel, EventStageSucceeded)
+	ev.Stage = tc.stage.Name
+	tc.notify(ev)
+	tc.publishTail(ctx, res)
+}
+
 // ErrTagAtOtherCommit reports a release tag that already exists somewhere
 // other than this release's target commit.
 //
@@ -1491,11 +1579,19 @@ var ErrTagAtOtherCommit = errors.New("tag already exists at another commit")
 // writing a tag can fail, because it is the one an operator resolves by
 // deciding which commit the version really is.
 func TagFailureCode(err error) string {
-	if errors.Is(err, ErrTagAtOtherCommit) {
+	switch {
+	case errors.Is(err, ErrTagAtOtherCommit):
 		return plan.CodeTagAtOtherCommit
+	case errors.Is(err, ErrRecordNotPushed):
+		return plan.CodePushFailed
 	}
 	return plan.CodeTagFailed
 }
+
+// ErrRecordNotPushed reports a release record this run wrote locally and could
+// not write to the remote. The record is in this checkout; the remote copy is
+// what is missing.
+var ErrRecordNotPushed = errors.New("release record not pushed")
 
 // forceTagger is the optional Taggerx extension that can rewrite a tag the
 // repository already carries; *gitx.LocalGitx implements it. A Taggerx without it

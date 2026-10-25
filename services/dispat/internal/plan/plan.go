@@ -281,6 +281,27 @@ const (
 	// louder than W242 in what it asks for: somebody has to reconcile the two
 	// sides, and only a person can.
 	CodePushConflicted = "W243"
+	// CodeRecordPending marks a package an earlier run published and recorded
+	// with a receipt only, because it was stopped before its release commit
+	// and tag (§19.4). This run publishes nothing for it and finishes the
+	// record: the release commit and tag when the receipt names this run's
+	// head, the release tag alone at the receipt's commit otherwise, which then
+	// names that commit rather than a release commit.
+	CodeRecordPending = "W246"
+
+	// --- publish/tag reconciliation (§19.4) ---
+
+	// CodeAdopted marks a publish the destination refused because it already
+	// held the version, where the verification showed the copy it holds is the
+	// artefact this run would have published. The release is recorded as
+	// published, which clears a repository a lost record had wedged.
+	CodeAdopted = "W196"
+	// CodeAdoptionRefused marks a publish the destination refused because it
+	// already held the version, where the copy it holds is not this run's
+	// artefact or its identity could not be established. Tagging it would
+	// enrol a foreign artefact into the release lineage, so the package fails
+	// and the run starts no further publication.
+	CodeAdoptionRefused = "E198"
 
 	// CodeGitHubBodyCut marks a GitHub release body cut to fit the API's
 	// limit on release notes. The body keeps its whole entries up to the last
@@ -403,7 +424,7 @@ const (
 	// --- releasing part of the graph (see narrow.go) ---
 	//
 	// W23x, not the W19x the release outcomes above live in: §16's registry
-	// reserves W195 and W196 for a staleness audit and an adopted tag, and a
+	// reserves W195 for a staleness audit and W196 for an adopted tag, and a
 	// selection is dispat's own idea rather than the specification's.
 
 	// CodeSelectionWithheld marks a selected package the release order cannot

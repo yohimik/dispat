@@ -367,6 +367,16 @@ integration suite itself.
     in its own repository and compares nothing, and `commit.verify: false` keeps the exemption it has from every other
     up-front `ls-remote`.
 
+62. **Records that reach the store when the package publishes** (`release_durability_test.go`): a run killed after a
+    package published leaves that package recorded on the remote, as its pushed tag or a publication receipt, and the
+    next run publishes nothing again: a receipt on its planned head is finished as part of the run (`W246`), one behind
+    its head is tagged at its recorded target and the plan computed again, and one whose
+    tag exists or whose commit the head does not reach is removed or left alone. A publication no record describes,
+    because the run stopped inside the publish command, meets §19.4: the destination's copy is adopted on a matching
+    identity (`W196`) through a verify script or npm's `dist.integrity`, refused on a mismatch (`E198`) with no
+    publication started after it, and left an ordinary failure when the destination does not hold the version or
+    adoption is off.
+
 ### Correcting the record
 
 31. **Corrections and reverted changelogs** (`corrections_test.go`): a release record is written in a commit message,
@@ -574,6 +584,7 @@ tests/integration/
   release_lost_response_test.go goal 29
   lock_test.go              goal 30
   release_records_test.go   goal 59
+  release_durability_test.go goal 62
 
   correcting the record
   corrections_test.go       goal 31
@@ -1905,8 +1916,38 @@ claim is about what the lock does and does not buy.
 | `TestReleaseRecordsUnreadableStoreRefusesTheRun`   | One `ls-remote --tags` per repository, and a failing one refuses the run with `E196` before any script, the way a failed remote verification does.                                                           |
 | `TestReleaseRecordsUnwritableStoreKeepsThePublication` | A store that refuses the create-only push leaves a published package recorded in its own repository, reports the push failure and exits non-zero, with one push carrying every record of the run.        |
 | `TestReleaseRecordsTagRefusedByTheRemoteIsAFailedPush` | A pre-receive hook declines the release tag, as a tag rule on a hosted remote would, after the branch push landed: the package stays `published`, the run exits 1 with `E224` naming the remote's reason, and never `E221`, since the remote holds no record at any commit. |
-| `TestReleaseRecordsLostTagPushIsPlannedAgain` | A stand-in git fails only the tag push, after the branch push landed: the run exits non-zero with the package published, the release commit on the remote branch and no tag on the remote. A plain re-run from a fresh clone of that remote plans the same version again, publishes it a second time and records it on its own release commit, which is the contract of a record the store does not hold. |
+| `TestReleaseRecordsLostTagPushIsFinishedFromItsReceipt` | A stand-in git rejects the atomic branch, tag and receipt-deletion push: all three remote refs remain in the earlier state. A fresh clone reads the receipt, publishes nothing again, records the version at its planned commit (`W246`) and consumes the receipt. |
+| `TestAtomicReleasePushLostResponseIsVerified` | The remote accepts the atomic branch, tag and receipt deletion but the Git command reports failure; dispat reads the remote branch, tag and missing receipt, recognizes the completed write, and a fresh clone publishes nothing again. |
+| `TestPreparedFinalizationRetriesSameCheckout` | A rejected atomic update leaves a local marker written before its tag; retry from the same checkout checks that marker and receipt, then atomically pushes the exact branch, tag and receipt deletion without republishing. |
+| `TestPreparedFinalizationMergesRemoteBeforeRetry` | If the remote branch moves after a rejected atomic update, a prepared same-checkout retry merges it and atomically completes the recorded release without another publication. |
+| `TestCrashBeforePreparedMarkerUsesOriginalTarget` | If local marker creation fails after a release commit exists but before any tag, the same checkout records the prior publication at the receipt's original target rather than guessing the later commit. |
+| `TestCrashAfterPreparedMarkerBeforeTagRetriesSameCheckout` | If local tag creation fails after the marker is written, a same-checkout retry recreates the marker's exact tag and completes the atomic update without republishing. |
+| `TestBeforePushCannotReplacePreparedReleaseTag` | A hook that moves the required local tag after preparation is caught immediately before the atomic push; branch and tag remain off the remote and the receipt is retained. |
+| `TestAliasRefusalDoesNotRejectRequiredAtomicRecords` | A remote hook refusing an optional alias does not reject the atomic branch, required release tag and receipt deletion. |
 | `TestReleaseRecordsInAComposedWorkspace`           | A fleet compares every participating repository: a source repository whose checkout lacks its remote's record refuses the whole run with `E196` naming that repository, before anything publishes anywhere.  |
+
+### Goal 62: records that reach the store when the package publishes (`release_durability_test.go`)
+
+The registry is a file outside every checkout: one line per accepted version with the identity the build exported, and
+an upload of a version it holds is refused as a real registry refuses it. A killed run is a publish script sending
+`SIGKILL` to dispat after its own upload landed, which is the one window no record closes. The retry starts from a fresh
+clone of the remote wherever the claim is about what a CI runner reads, because a killed run's working tree is gone.
+The upload count is the evidence: a version accepted twice is the failure every scenario exists to prevent.
+
+| Test | Claim proven |
+|------|--------------|
+| `TestKilledReleaseLeavesEachPublicationOnTheRemote` | A release-commit run killed during its second package's publish leaves the first package's publication receipt on the remote, naming the planned commit. A fresh clone's retry publishes neither package again: the receipt's record is finished on the same head (`W246`), the second package's upload is adopted on its identity (`W196`), both tags and the release commit reach the remote, the receipt is consumed, and the next plan is empty. |
+| `TestKilledTagOnlyReleasePushedEachTag` | With no release commit and `commit.push` on, the first package's receipt is pushed before its tag and removed after the tag reaches the remote, before the second package publishes. The retry adopts the second package and never touches the first. |
+| `TestRejectedDurableRecordBlocksConsumers` | A rejected required receipt or tag push leaves the provider published with an incomplete record and prevents the dependent package's upload; after removing the rejection, a fresh clone settles the receipt or adopts the publication without uploading it twice. |
+| `TestTagOnlyRejectedPushSettlesFromSameCheckout` | A rejected tag push retains the remote receipt; rerunning the same checkout pushes its matching local tag, removes the receipt, and publishes the waiting consumer without uploading the provider twice. |
+| `TestUnreadableRemoteReceiptRefusesLocalTagRetry` | If the authoritative receipt fetch fails on a checkout with a local-only release tag, the retry exits nonzero before dependent publication instead of treating the hidden package as fully recorded. |
+| `TestReceiptRetryRefusesADifferentArtefact` | A same-head receipt whose retry build produces different bytes is preserved and reported E198; no tag or dependent publication follows. |
+| `TestReceiptRefusesALocalTagAtAnotherCommit`, `TestReceiptRefusesARemoteTagAtAnotherCommit` | A local or remote tag at a target different from the receipt is not treated as proof of its publication; settlement refuses and retains the receipt. |
+| `TestReceiptBehindTheHeadIsRecordedWhereItWasPlanned` | A receipt on a commit behind the retry's head is tagged at that commit (`W246`) and the plan is computed again from that record, so the commit that landed meanwhile releases as the next version and the receipt's version is accepted once. The kill inside a publish command, before any receipt, is adopted on the retry. |
+| `TestAdoptionRefusesAForeignArtefact` | A lost record whose version the registry holds as another artefact fails the package with `E198`, writes no tag, and cancels an independent package still waiting to publish. With `publish.adoptPublished: false` the verify script is never run and the refusal is an ordinary publish failure. |
+| `TestAdoptionThroughTheNpmRegistryIntegrity` | With no verify script, an exported `sha512-…` `INTEGRITY` is compared with `npm view <name>@<version> dist.integrity`, read through an npm stand-in on `PATH`: a match is adopted and tagged, another integrity is `E198`, and an empty answer leaves the publish failure. |
+| `TestTagOnlyPushLeavesARemoteRecordAtAnotherCommit` | The per-package tag push follows the create-only rule: a remote tag at another commit is left where it is and reported `E221`, with the package still `published`. |
+| `TestLeftoverReceiptsAreSettledUnderTheLock` | A receipt whose tag the checkout holds is removed, one on a commit the head does not reach is left with a warning, and the release proceeds as though neither were there. A completed run leaves no receipt behind. |
 
 ### Goal 31: corrections and reverted changelogs (`corrections_test.go`, `final_plan_faults_test.go`)
 
@@ -2890,6 +2931,7 @@ than showing up as a puzzling behaviour change somewhere downstream.
 | **A release tag was force-pushed with the rest of the run's refs.** `commit.force` defaults on and the push forced every tag it carried, so a record the remote already held at another commit was replaced rather than reported, and `CommitConfig.Force` promised the opposite. | `TestReleaseRecordsCreateOnlyPush`, `TestReleaseRecordsAliasTagsStillMove`; `services/dispat/internal/gitx/gitx_test.go::TestPushMovesOnlyTheRefsDeclaredMoving` | `release_records_test.go`; `internal/gitx` |
 | **A fleet change `compute --write` could not make failed the run silently.** Every other refusal in that command reports itself before returning and the dispatcher only turns an error into an exit status, so a link that could not be created, declared or pinned left the operator with exit 1, no diagnostic, and no sentence naming the repository, the peer or the cause. | `TestChoreographyFaultStopsComputeAndConvergesOnASecondRun`, `TestChoreographyFaultStopsComputeDeclaringTheOtherHalf`, `TestChoreographyFaultStopsComputeInitializingADeclaredLink` | `choreography_faults_test.go`; `internal/app` |
 | **A stale worker state lock could admit two serving processes.** Renaming a stale PID file aside created an absent-path window: a second claimant could create its own lock while the first owner kept serving. Every claim now settles for the write grace and is trusted only if the PID file still names its process, and a serving worker reads the file again before each claim and stops when another process's id is there. | `TestExecutionWorkerConcurrentStaleStateClaimHasOneOwner`, `TestExecutionWorkerStopsWhenAnotherProcessClaimsItsFolder`, `TestExecutionWorkerStartRefusals` | `execution_worker_test.go`; `internal/execution` `TestNodeStateClaimSettlesBeforeItIsTrusted`, `TestAStaleLockIsTakenOverWithoutTakingAFreshOne`, `TestWorkerStopsWhenAnotherProcessClaimsItsFolder` |
+| **A single history recorded its publications on the remote once, at the end of the run.** A run killed after a package published and before the final push left the release tag, or in release-commit mode not even that, only in a runner's checkout, and the next run published the version again, which a registry that keeps every version refused on every later run. Each tag is now pushed when it is written, a receipt stands in for a tag that waits for the release commit, and a refused upload is reconciled under §19.4. | `TestKilledReleaseLeavesEachPublicationOnTheRemote`, `TestKilledTagOnlyReleasePushedEachTag`, `TestAdoptionRefusesAForeignArtefact`; `services/dispat/internal/release/adoption_test.go::TestAdoptionVerdicts`, `services/dispat/internal/gitx/receipts_test.go::TestReceiptLifecycle` | `release_durability_test.go`; `internal/release`, `internal/gitx` |
 | **The publication order was taken over the subgraph the plan induces.** A consumer and a provider it reaches only through a package with nothing to release had no edge between them, so the two publishes were mutually unordered and the consumer could publish first, carrying a range reconciled against a version nobody had published. A package with no bump this run is the commonest shape an incremental release has. | `TestPublishOrderHoldsThroughAPackageThatIsNotReleasing`; `TestPublishOrderHoldsThroughAPackageThatIsNotInThePlan`, `TestPublishOrderReachesThroughAPackageThatIsNotInThePlan`, `TestPublishOrderConvergesThroughTwoUnreleasingPackages` | `publish_order_test.go`; `internal/release` |
 | **A mailbox repacked itself while the scenario that made it was being cleaned up.** `git receive-pack` starts a detached repack after a push, and the bare repository standing in for a mailbox lives in a folder the test framework removes when the scenario ends: the repack went on writing objects into it during the removal and failed scenarios for a reason unrelated to what they asserted. Housekeeping is switched off in every mailbox the suite creates. | `TestExecutionCraftedOutputSetsNeverReachAConsumer` (seen failing once in three runs; green in three after) | `execution_authority_test.go` |
 | **One failed read of a coordination branch cost a whole task deadline.** The poll memo is recorded as soon as a branch's objects are fetched, before the caller has made anything of them, so a local git failure while resolving the chain or reading the message counted as having dealt with the branch. A tip that never moved again was never offered a second time, and the run waited out `timeouts.task` for an answer sitting in the mailbox. Both poll loops now reconsider such a branch, while a message the protocol refuses is still not re-read. | `TestExecutionOrchestratorGitFaults` (row "the chain cannot be walked once"); `services/dispat/internal/execution/worker_test.go::TestWorkerReadsABranchAgainWhenReadingItFailed` | `execution_faults_test.go`; `internal/execution` |

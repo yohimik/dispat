@@ -682,7 +682,7 @@ by the version itself and is not configurable. A `1.3.0-beta.0` that gets a rele
 |-----------------|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `enabled`       | `false`                  | Create one release commit at the end of a successful run.                                                                                                                                                                                                                                                                                                                                         |
 | `messageFormat` | `chore(release): {tags}` | Template. `{tags}` and `{packages}` become comma-separated lists.                                                                                                                                                                                                                                                                                                                                 |
-| `push`          | `false`                  | Push the release commit and tags. Only applies when `enabled` is true.                                                                                                                                                                                                                                     |
+| `push`          | `false`                  | Push release records. Each published package gets a remote receipt before optional recorders or dependent publication. With `enabled` on, finalization atomically pushes the branch and release tags while deleting the receipts. With `enabled` off, each tag push consumes its receipt. A stop before the receipt reaches the remote still requires destination identity verification. |
 | `branch`        | unset                    | In polyrepository mode, the target branch for release-commit pushes. Required for a detached checkout only when it will push a branch. |
 | `force`         | `true`                   | Write a tag this repository already carries at the release's own commit, instead of failing on it. The branch is never force pushed, a release tag found at a different commit is left as it is, and a release tag on the remote is never replaced at all. See [Force](#force) below. `dispat commit --no-force` turns it off for one invocation.                                                                     |
 | `remote`        | `origin`                 | Remote to push to.                                                                                                                                                                                                                                                                                                                                                                                |
@@ -693,10 +693,29 @@ by the version itself and is not configurable. A `1.3.0-beta.0` that gets a rele
 **Disabled** (the default), dispat creates no commit at all. Each package's annotated tag is created right after its
 publish succeeds and points at the commit the run released from. This is `HEAD` of the checkout, which stays put for
 the whole run since nothing is committed. Whatever the release changed on disk (changelog files, version-script
-manifest edits) is left in the worktree. Pushing the tags is left to CI (`git push origin --tags`).
+manifest edits) is left in the worktree.
+
+With `push` on, a receipt is pushed before each local release tag is created; each tag and its aliases are then pushed to `remote` before the next
+package publishes. The push is create-only: a tag the remote holds at the same commit is the same record written twice
+and passes, one it holds at another commit is left there and reported `E221`. The run verifies the remote and compares
+its release records before it plans, as a pushing release always does. A checkout on a detached HEAD may push its tags
+this way, because no branch is pushed.
+
+With `push` off, pushing the tags is left to CI (`git push origin --tags`). A run stopped after a package published and
+before that push leaves the tag only in the runner's checkout, and the next run meets the publication at its destination
+instead. See [`publish.adoptPublished`](./spaces.md#publish).
 
 When **enabled**, the run instead finishes with a *finalize phase*. Every published package's folder is staged and
 committed in a single commit. The release tags are created **on that commit** rather than during each publish.
+
+The tags therefore cannot reach the remote the moment each package publishes. With `push` on, a *publication receipt*
+takes their place: a ref `refs/dispat/receipts/<tag>` recording the planned head, any exported tag target, the package,
+the version and the `INTEGRITY` the package exported, pushed right after each publish. Finalize atomically pushes the
+branch and release tags while deleting the receipts; aliases are pushed separately after the required records land.
+A run stopped before finalize leaves the receipt, and the next run publishes nothing for that package and
+finishes its record after verifying a matching artefact identity. If no identity was exported, it records at the
+receipt's original commit and replans. See [A run stopped between a publication and its record](../reference/releasing/recovery.md#a-run-stopped-between-a-publication-and-its-record).
+No tag listing reads the namespace, so a receipt is never a release record.
 
 The commit carries changelog files, version-script manifest changes and any `include` paths that exist. Add build
 outputs to your `.gitignore` or they get committed too. If nothing changed on disk, because changelogs are disabled for

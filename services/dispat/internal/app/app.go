@@ -74,6 +74,10 @@ type App struct {
 	ignoreTags             []string
 	ignoreTagsByRepository map[string][]string
 
+	// receipts are the publication receipts a single history settled under its
+	// lock and writes while it runs; nil when it pushes no records.
+	receipts *receiptLedger
+
 	// releaseLock is the remote release lock this run acquired for a single
 	// history, nil in a composed workspace (where the recorder holds one per
 	// repository) and nil under a bypass. It is kept because ownership is a

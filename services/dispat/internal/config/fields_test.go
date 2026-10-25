@@ -36,6 +36,8 @@ func TestFieldTablesCoverEveryModelField(t *testing.T) {
 		{"VersionGroupConfig", VersionGroupConfig{}, versionGroupFields(&VersionGroupConfig{})},
 		{"SpaceFlowConfig", SpaceFlowConfig{}, spaceFlowFields(&SpaceFlowConfig{})},
 		{"RunConfig", RunConfig{}, runFields(&RunConfig{})},
+		{"PublishConfig", PublishConfig{}, publishFields(&PublishConfig{})},
+		{"AdoptPublishedConfig", AdoptPublishedConfig{}, adoptPublishedFields(&AdoptPublishedConfig{})},
 		{"ChangelogConfig", ChangelogConfig{}, changelogFields(&ChangelogConfig{})},
 		{"GitHubConfig", GitHubConfig{}, gitHubFields(&GitHubConfig{})},
 		{"EntryFormatConfig", EntryFormatConfig{}, entryFormatFields(&EntryFormatConfig{})},

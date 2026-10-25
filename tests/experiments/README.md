@@ -243,14 +243,15 @@ step, the consumer shipped at the version first planned, the provider was publis
 of `core` after the baseline, read from the proxy's own log), and the release converged. dispat's cells add checks on
 the run's structured log (the order of the provider's publication and the consumer's build, the stage that failed, a
 catch-up plan of `cli` alone as `W193` at the version it is owed) and on the manifests (the consumer's range caught up
-to `^1.0.1`, `theme` and `docs` untouched), and the per-cell facts above.
+to `^1.0.1`, `theme` and `docs` untouched), on origin (no publication receipt left behind), and the per-cell facts
+above.
 
 ### The colleague's push
 
 The colleague is a second clone of the origin. A shim placed first on `PATH` for the duration of the tool's release
 command records every git call the tool makes, and fires the colleague's commit and push once, right before the first
 `git push` that is neither the release lock's nor a commit. dispat's push of its release lock precedes the plan and is
-excluded by name; a `git commit` never fires the injection, because the shim reads the git subcommand rather than the
+excluded by name, and so are its pushes of publication receipts, which accompany each publish; a `git commit` never fires the injection, because the shim reads the git subcommand rather than the
 whole command line.
 
 The interleaving is therefore a point in each tool's own sequence rather than a timer, the same every time and the
@@ -260,8 +261,10 @@ same for every tool. Where in the release that point falls differs by tool, and 
 - **nx** pushes before it commits or tags, leaving the version bumps staged in the index when the push is refused.
 - **changesets** makes no push of its own: it versions, commits, publishes and tags, and the push is the operator's,
   so the injection fires on the command the protocol runs rather than on anything the tool does.
-- **dispat** publishes first and pushes last, so the release exists on the registry and in this clone alone when the
-  branch refuses it.
+- **dispat** publishes first and pushes the branch last. Each package's publication receipt reaches origin the moment
+  the package publishes, so when the branch refuses the push the release exists on the registry, in this clone, and as
+  one receipt per package on origin. The dispat cell asserts that order from the recorded git calls, and that no receipt
+  is left once the tags are on origin.
 
 After the tool's run, the experiment performs the recovery an operator is left with, `git pull --rebase` and
 `git push --follow-tags` for the tools that leave a refused push behind (taking the release's side of a conflict), and
@@ -294,6 +297,10 @@ Each package's row also carries the manifest the clone's working tree holds at t
 dependency ranges. The registry says what shipped and the tags say what was recorded; neither says what the checkout
 now claims about its providers, and a reconciled range or a rolled back version rewrite is visible nowhere else. That
 reading is what the propagation cells assert their range claims from.
+
+The origin's row lists dispat's publication receipts, `refs/dispat/receipts/<tag>`, beside its tags. A receipt stands in
+for a release tag that waits for the release commit, and a finished release leaves none, which every dispat cell
+asserts after its last release.
 
 Nothing is written into the repositories under test. The observer builds a scratch bare repository beside the fixture
 at each observation and fetches both sides into it under separate ref namespaces, so the origin's refs and the clone's

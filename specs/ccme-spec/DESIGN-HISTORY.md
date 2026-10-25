@@ -517,3 +517,20 @@ a release commit or a composed workspace the tail writes the release recorders a
 written when the run finalizes, after every package. A provider that failed at any stage, or was skipped, blocks a
 consumer with no cause of its own, and blocks one with a cause of its own too where the provider's space makes its
 relation blocking.
+
+## 2026-10-25: Publication receipts and verified adoption in the current engine
+
+The current single-history release path pushes one per-package publication receipt before optional recorders or
+dependent publication. In tag-only mode it then creates and pushes the tag; in release-commit mode finalization pushes
+the branch and required release tags and deletes their receipts in one atomic remote update, with optional aliases
+following separately. A local prepared marker binds same-checkout retry to the receipt object and exact tag target.
+Before that marker is written, a stopped run with a later local release commit records the receipt's original target
+and replans; it does not infer that the later commit is a publication record. A refused atomic update leaves remote
+receipts in place, and a lost reply is checked against the remote branch, tags and receipt refs. A required record
+failure leaves the package published with an incomplete record and blocks its dependents.
+
+An ambiguous publication without a receipt is adopted only after an explicitly configured verify script or npm
+`dist.integrity` proves that the destination holds the built artefact; a different or unverified identity is refused
+with `E198`. A same-head receipt retry requires the rebuilt pre-publish identity to match and restores an exported
+package commit target from the receipt. These are scoped single-history release capabilities. Arbitrary shell
+publish commands and post-record tasks do not acquire general exactly-once or crash-safe behavior from them.
