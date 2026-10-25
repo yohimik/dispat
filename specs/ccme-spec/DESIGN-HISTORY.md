@@ -248,6 +248,10 @@ one no record closes and the reconciliation of 19.4 as the saga's answer to it. 
 covered the same way: the only execution that keeps the bound joins, recording on the planned commit and merging what
 arrived on top, and a rebase, an overwrite, a refused push, a replan or a rewritten release commit each end in one of
 the anomalies above.
-The build readiness and distributed placement passages now cite the theorem instead of restating it. This is an
+Section 13.11 then states the dispat algorithm: the distributed, saga-style executor of a compiled plan whose
+information is complete before the first task starts, in six steps with the cost of each, and shows it minimal in
+time in the theorem's sense, including that no engine that learns durations by running tasks can guarantee a better
+factor than Graham's, and minimal in memory in the ledger's sense. The build readiness and distributed placement
+passages now cite the theorem instead of restating it. This is an
 informative addition: no grammar, release plan, diagnostic or conformance obligation changes, and the theorem is
 explicitly not one.

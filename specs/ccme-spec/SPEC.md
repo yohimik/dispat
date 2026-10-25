@@ -3373,6 +3373,47 @@ the summed node capacities and the applicable run-wide stage limits. Then:
    execution that keeps the bound across a moving branch therefore joins, which the resumption rule of §17.2 and the
    immutability of records in §19.1 already require.
 
+**The dispat algorithm.** The engine the theorem describes is a distributed, saga-style executor of a compiled plan
+whose information is complete before the first task starts: every task, every dependency and the unrecoverable set
+`R` are known in advance, and only durations are learned by running. It runs in six steps.
+
+1. **Fix the inputs.** Take the release locks (§13.2, §28.3), then fix the history at `HEAD`, the configuration, the
+   record inventory and the receipts. Nothing that follows reads anything else, which is what makes the plan one
+   (§17.2).
+2. **Compile the plan.** Compute the release plan of §13 at the costs of the table above and the ledger below, then
+   its task graph: each package's stages in order, the edges of §19.2, §19.2a and §28.5, indegree counters per task.
+   The graph costs `O(Tk + Dk)` to build and to drain (the task graph row), and no task is added after this step.
+3. **Execute work-conservingly.** A task is ready when its indegree is zero. A ready task takes the first usable slot
+   of its stage budget on a node its placement admits, with the output sets it needs installed from the admitted sets
+   (one transfer per distinct set and node, the output transfer row). Among ready tasks the order is a deterministic
+   function of the plan, never of timing, so the events and the log are reproducible; no usable slot stays idle while
+   a compatible task is ready. Placement is `O(Tk · Wn)` in all, and the state held is the graph, the counters, one
+   lease per in-flight task and the admitted sets a consumer still needs.
+4. **Record as a saga.** When a task in `R` completes, its effect is recorded durably in the shared history before any
+   dependent proceeds and before the run reports it (§19.1, §28.6); a task that fails blocks every dependent that has
+   no cause of its own (§19.3); nothing a completed task did is ever undone. One record per completed task in `R`.
+5. **Resume by recomputation.** A later run repeats steps 1 and 2 against the records and finds the plan minus its
+   completed tasks (§17.2), adopts a version whose record was lost after verifying its identity (§19.4), and runs
+   step 3 on what remains.
+6. **Join a moved branch.** A commit that landed after step 1 is merged on top of the recorded commit, never the other
+   way round (clause 5 of the theorem).
+
+The algorithm is minimal in time in two senses. No execution of the plan beats `max(Lk, Wk / s)` (clause 1), and
+step 3 finishes within `(2 - 1/s)` of it (clause 2) without knowing any duration in advance; no algorithm that
+learns durations by running tasks can guarantee a better factor, because for `s(s - 1)` tasks of length 1 and one of
+length `s`, all independent, an adversary that fixes each duration only when the task starts can make the long task
+the last one started, for `2s - 1` against an optimum of `s`. Under the conditions of clause 3 the bound is met
+exactly. It is minimal in memory in the sense of the ledger: the compile phase retains what the ledger lists and
+nothing per package that an index already answers, the execution phase retains the task graph and its counters,
+one lease per in-flight task, and an output set only while a consumer that needs it has not run, and the records
+are the one per completed unrecoverable task that clause 4 proves necessary. An engine that retained less would
+re-derive a dependency, re-transfer an output or lose a record, each of which clause 4 names as an anomaly.
+
+Two things are outside the algorithm by its premise. A task discovered during execution, such as a dependency a
+build reveals, is not in the compiled plan: the engine does not learn it and the theorem does not bound it; it is
+the next plan's. And a destination whose irreversibility is not declared cannot be placed in `R`, so its record is
+not known to be necessary; declaring the publish target is what puts a task there.
+
 The theorem bounds the fastest execution the one compiled plan admits; it is not a conformance obligation (§17.2),
 and it says nothing about the time taken to compile the plan, which the table above accounts for. Its premises are what an
 implementation has to watch: nodes differ in platform and speed, an output transfer delays the consumer it feeds, and
