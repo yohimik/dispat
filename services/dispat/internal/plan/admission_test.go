@@ -537,3 +537,30 @@ func TestAdmissionAsksOnlyTheSourcesWithinReach(t *testing.T) {
 	assert.Equal(t, "ui", theme.Sources[0].Provider, "owed by ui alone, never by core two edges away")
 	assert.Equal(t, "c2", theme.Sources[0].Commit)
 }
+
+// TestReleaseCommitsMarkEveryProviderInOnePass: the first delivery question
+// registers every provider's released commits with the ancestry index, so a
+// question about the next provider finds its markers indexed instead of
+// walking the union again for them.
+func TestReleaseCommitsMarkEveryProviderInOnePass(t *testing.T) {
+	const commits = 8
+	cp := &computation{byKey: make(map[string]*commitRec), tags: make(map[string]gitx.Tags),
+		edges: map[string][]edge{"core": {{to: "app"}}, "util": {{to: "app"}}}, order: []string{"core", "util", "app"}}
+	for rank := 0; rank < commits; rank++ {
+		key := fmt.Sprintf("c%d", rank)
+		cp.byKey[key] = &commitRec{key: key, rank: rank}
+	}
+	cp.tags["core"] = gitx.Tags{{Name: "core@1.1.0", Parsed: true, Commit: "c2"}, {Name: "core@1.0.0", Parsed: true, Commit: "c9"}}
+	cp.tags["util"] = gitx.Tags{{Name: "util@1.0.0", Parsed: true, Commit: "c5"}}
+	cp.anc = newAncestryIndex(commits, func(rank int) []int32 {
+		if rank+1 == commits {
+			return nil
+		}
+		return []int32{int32(rank + 1)}
+	})
+
+	require.Equal(t, []string{"c2"}, cp.releaseCommits("core"), "a tag outside the union is left out")
+	require.NotNil(t, cp.anc.ancestors(5), "util's release is indexed by core's question")
+	require.Equal(t, []string{"c5"}, cp.releaseCommits("util"))
+	require.Nil(t, cp.releaseCommits("app"), "a package providing for nobody is listed when asked")
+}

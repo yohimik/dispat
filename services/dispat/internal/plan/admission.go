@@ -159,8 +159,10 @@ func (cp *computation) isDelivered(provider, commitKey, baseline string) bool {
 }
 
 // releaseCommits lists, as qualified keys, the commits of the provider's
-// release tags that the union holds, and registers them with the ancestry
-// index in one pass the first time the provider is asked about.
+// release tags that the union holds. The first time any provider is asked
+// about, every provider's are listed and registered with the ancestry index
+// together, in one pass, where a pass per provider asked would cost a walk of
+// the union for a marker or two each.
 //
 // Tags outside the union are left out rather than asked about, for the reason
 // owedSources leaves out a baseline outside it: a commit the union does not
@@ -169,11 +171,37 @@ func (cp *computation) isDelivered(provider, commitKey, baseline string) bool {
 // every question it does ask is a marker-pass bitset lookup (§13.11) rather
 // than an `is-ancestor` fork per pair.
 func (cp *computation) releaseCommits(provider string) []string {
+	if cp.releasedCommits == nil {
+		cp.listProvidersReleasedCommits()
+	}
 	if known, ok := cp.releasedCommits[provider]; ok {
 		return known
 	}
-	var released []string
+	released, markers := cp.listReleasedCommits(provider)
+	cp.markReleasedCommits(markers)
+	cp.releasedCommits[provider] = released
+	return released
+}
+
+// listProvidersReleasedCommits fills releasedCommits for every package that
+// provides for another, marking all their commits at once.
+func (cp *computation) listProvidersReleasedCommits() {
+	cp.releasedCommits = make(map[string][]string, len(cp.pkgs))
 	var markers []int32
+	for _, name := range cp.order {
+		if len(cp.edges[name]) == 0 {
+			continue
+		}
+		released, ranks := cp.listReleasedCommits(name)
+		cp.releasedCommits[name] = released
+		markers = append(markers, ranks...)
+	}
+	cp.markReleasedCommits(markers)
+}
+
+// listReleasedCommits is one package's released commits in the union, with
+// their ranks.
+func (cp *computation) listReleasedCommits(provider string) (released []string, ranks []int32) {
 	seen := make(map[string]bool, len(cp.tags[provider]))
 	for _, tag := range cp.tags[provider] {
 		if !tag.Parsed || tag.Commit == "" {
@@ -189,16 +217,15 @@ func (cp *computation) releaseCommits(provider string) []string {
 		}
 		seen[key] = true
 		released = append(released, key)
-		markers = append(markers, int32(rec.rank))
+		ranks = append(ranks, int32(rec.rank))
 	}
-	if cp.anc != nil && len(markers) > 0 {
-		cp.anc.mark(markers)
+	return released, ranks
+}
+
+func (cp *computation) markReleasedCommits(ranks []int32) {
+	if cp.anc != nil && len(ranks) > 0 {
+		cp.anc.mark(ranks)
 	}
-	if cp.releasedCommits == nil {
-		cp.releasedCommits = make(map[string][]string, len(cp.pkgs))
-	}
-	cp.releasedCommits[provider] = released
-	return released
 }
 
 // tagCommitKey qualifies a tag's raw commit with the repository that owns the
