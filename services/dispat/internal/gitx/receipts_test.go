@@ -106,7 +106,7 @@ func TestReceiptRefusesAnotherCommit(t *testing.T) {
 	other := t.TempDir()
 	out, err = exec.Command("git", "clone", "-q", root, other).CombinedOutput()
 	require.NoError(t, err, "%s", out)
-	theirs := &LocalGitx{Dir: other}
+	theirs := &LocalGitx{Dir: other, Name: "Test", Email: "test@example.com"}
 	out, err = exec.Command("git", "-C", other, "-c", "user.name=x", "-c", "user.email=x@x", "commit", "-q", "--allow-empty", "-m", "chore: theirs").CombinedOutput()
 	require.NoError(t, err, "%s", out)
 	theirHead, err := theirs.HeadSHA(ctx)
@@ -160,7 +160,7 @@ func TestPushReceiptRefusesAnotherIdentityAtTheSameCommit(t *testing.T) {
 	otherDir := filepath.Join(t.TempDir(), "other")
 	out, err := exec.Command("git", "clone", "-q", bare, otherDir).CombinedOutput()
 	require.NoError(t, err, "%s", out)
-	other := &LocalGitx{Dir: otherDir}
+	other := &LocalGitx{Dir: otherDir, Name: "Test", Email: "test@example.com"}
 	second, err := other.WriteReceipt(ctx, Receipt{Tag: "core@0.1.0", Package: "core", Version: "0.1.0",
 		Commit: head, Integrity: "sha512-second"})
 	require.NoError(t, err)
