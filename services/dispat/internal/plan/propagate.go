@@ -797,30 +797,65 @@ func (cp *computation) propagateBumps() {
 	}
 
 	for _, rel := range cp.rel {
-		sort.SliceStable(rel.Sources, func(i, j int) bool {
-			return rel.Sources[i].Provider < rel.Sources[j].Provider
-		})
-		rel.DueTo = dedupeProviders(rel.Sources)
+		rel.Sources, rel.DueTo = orderByProvider(rel.Sources)
 	}
 }
 
-// dedupeProviders lists the distinct origin packages of a set of
-// contributions, in name order.
-func dedupeProviders(src []StaleSource) []string {
-	if len(src) == 0 {
-		return nil
+// orderByProvider is a stable sort of one release's contributions by
+// provider, each provider's in the order they were made, together with the
+// distinct providers in name order. Contributions arrive grouped by unit, not
+// by provider, so they are counted per provider and placed after those of
+// every provider sorting before them: O(Z + k log k) for Z contributions from
+// k providers, where a comparison sort of the contributions is O(Z log Z).
+func orderByProvider(sources []StaleSource) ([]StaleSource, []string) {
+	if len(sources) == 0 {
+		return sources, nil
 	}
-	seen := make(map[string]bool, len(src))
-	out := make([]string, 0, len(src))
-	for _, s := range src {
-		if seen[s.Provider] {
-			continue
+	if isSortedByProvider(sources) {
+		return sources, distinctProviders(sources)
+	}
+	positions := make(map[string]int)
+	for _, source := range sources {
+		positions[source.Provider]++
+	}
+	providers := make([]string, 0, len(positions))
+	for provider := range positions {
+		providers = append(providers, provider)
+	}
+	sort.Strings(providers)
+	start := 0
+	for _, provider := range providers {
+		count := positions[provider]
+		positions[provider] = start
+		start += count
+	}
+	ordered := make([]StaleSource, len(sources))
+	for _, source := range sources {
+		ordered[positions[source.Provider]] = source
+		positions[source.Provider]++
+	}
+	return ordered, providers
+}
+
+func isSortedByProvider(sources []StaleSource) bool {
+	for i := 1; i < len(sources); i++ {
+		if sources[i].Provider < sources[i-1].Provider {
+			return false
 		}
-		seen[s.Provider] = true
-		out = append(out, s.Provider)
 	}
-	sort.Strings(out)
-	return out
+	return true
+}
+
+// distinctProviders lists the providers of contributions already ordered by
+// provider.
+func distinctProviders(sources []StaleSource) []string {
+	providers := []string{sources[0].Provider}
+	for _, source := range sources[1:] {
+		if source.Provider != providers[len(providers)-1] {
+			providers = append(providers, source.Provider)
+		}
+	}
+	return providers
 }
 
 func sortedKeys(m map[string]bool) []string {
