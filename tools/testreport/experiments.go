@@ -42,14 +42,16 @@ const baselineState = "baseline"
 // decode straight into the report's own types, because the harness's field
 // names are where those names came from.
 type verdict struct {
-	Experiment string    `json:"experiment"`
-	Tool       string    `json:"tool"`
-	Scenario   string    `json:"scenario"`
-	Dispat     string    `json:"dispat"`
-	Steps      []Step    `json:"steps"`
-	Checks     []Check   `json:"checks"`
-	Passed     bool      `json:"passed"`
-	Recovery   *Recovery `json:"recovery"`
+	Experiment string       `json:"experiment"`
+	Tool       string       `json:"tool"`
+	Scenario   string       `json:"scenario"`
+	Dispat     string       `json:"dispat"`
+	Steps      []Step       `json:"steps"`
+	Checks     []Check      `json:"checks"`
+	Passed     bool         `json:"passed"`
+	Recovery   *Recovery    `json:"recovery"`
+	Timing     *Timing      `json:"timing"`
+	Plan       *verdictPlan `json:"plan"`
 }
 
 // observation is one line of observations.jsonl, reduced to the part a report
@@ -109,6 +111,7 @@ func readExperiments(dir string) (Experiments, error) {
 	// ReadDir sorts by name already; sorting again states that the order is
 	// the report's rather than the file system's.
 	sort.Slice(out.Cells, func(i, j int) bool { return out.Cells[i].ID < out.Cells[j].ID })
+	comparePlans(out.Cells)
 	out.Version = commonVersion(out.Cells)
 	logf(levelInfo, "experiments: %d cells on dispat %s, %d holding",
 		len(out.Cells), or(out.Version, "(mixed)"), holding(out.Cells))
@@ -135,11 +138,15 @@ func readCell(dir, id string) (*Cell, error) {
 	if err := validateRecovery(v.Recovery); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := validateTiming(v.Timing); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	version, platform := parseDispatVersion(v.Dispat)
 	cell := &Cell{
 		ID: id, Experiment: v.Experiment, Scenario: v.Scenario, Tool: v.Tool,
 		Dispat: version, Platform: platform,
 		Steps: v.Steps, Checks: v.Checks, Passed: v.Passed, Recovery: v.Recovery,
+		Timing: v.Timing, Plan: newPlan(v.Plan),
 	}
 	last, err := readLastObservation(filepath.Join(dir, id, "observations.jsonl"))
 	if err != nil {
@@ -414,7 +421,28 @@ func writeExperimentsMarkdown(w io.Writer, e Experiments) error {
 			escapePipes(stepsOf(cell)), held(cell.Checks), len(cell.Checks),
 			catchUpOf(cell), escapePipes(outcomeOf(cell)), escapePipes(stateOf(cell)))
 	}
+	writeTimingMarkdown(out, e)
 	return out.Flush()
+}
+
+// writeTimingMarkdown renders the timing cells' figures and plans as a second
+// table, when the campaign has any.
+func writeTimingMarkdown(out *bufio.Writer, e Experiments) {
+	cells := timingCells(e.Cells)
+	if len(cells) == 0 {
+		return
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "| cell | planning | makespan | Wk | Lk | s | bound | ratio | plan |")
+	fmt.Fprintln(out, "|---|---|---|---|---|---|---|---|---|")
+	for _, cell := range cells {
+		figures := []string{"", "", "", "", "", "", ""}
+		if t := cell.Timing; t != nil {
+			figures = []string{seconds(t.PlanningSeconds), seconds(t.MakespanSeconds), seconds(t.Work),
+				seconds(t.CriticalPath), fmt.Sprint(t.Parallelism), seconds(t.Bound), fmt.Sprintf("%.2f", t.Ratio)}
+		}
+		fmt.Fprintf(out, "| %s | %s | %s |\n", escapePipes(cell.ID), strings.Join(figures, " | "), escapePipes(planOf(cell)))
+	}
 }
 
 // writeExperimentsPlain renders the campaign for a terminal: the same facts
@@ -429,6 +457,10 @@ func writeExperimentsPlain(w io.Writer, e Experiments) error {
 		fmt.Fprintf(out, "  checks: %d/%d  %s\n", held(cell.Checks), len(cell.Checks), outcomeOf(cell))
 		fmt.Fprintf(out, "  catch-up: %s\n", catchUpOf(cell))
 		fmt.Fprintf(out, "  state: %s\n", stateOf(cell))
+		if cell.Timing != nil || cell.Plan != nil {
+			fmt.Fprintf(out, "  timing: %s\n", timingOf(cell))
+			fmt.Fprintf(out, "  plan: %s\n", planOf(cell))
+		}
 	}
 	return out.Flush()
 }

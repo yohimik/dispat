@@ -195,6 +195,77 @@ type Cell struct {
 	// Nil for a protocol that measures no catch-up, and for every record
 	// written before the harness measured one.
 	Recovery *Recovery `json:"recovery,omitempty"`
+	// Timing and Plan are a timing cell's figures and the plan its tool's own
+	// plan command printed. Nil in every other cell.
+	Timing *Timing `json:"timing,omitempty"`
+	Plan   *Plan   `json:"plan,omitempty"`
+}
+
+// Timing is one release's figures in the vocabulary of the dispat theorem
+// (CCME SPEC.md §13.11), as the harness's lib/timing.py computes them from
+// the fixture's own records of every build and publication.
+type Timing struct {
+	// Relation is what a consumer's build waits for in the plan's precedence,
+	// `build` or `publish` (§19.2a).
+	Relation        string  `json:"relation"`
+	PlanningSeconds float64 `json:"planningSeconds"`
+	MakespanSeconds float64 `json:"makespanSeconds"`
+	// Work is Wk, the summed duration of the release's tasks.
+	Work float64 `json:"work"`
+	// CriticalPath is Lk, the duration of the longest precedence chain.
+	CriticalPath float64 `json:"criticalPath"`
+	// Parallelism is s, the most tasks the release ran at one instant.
+	Parallelism int `json:"parallelism"`
+	// Bound is max(Lk, Wk / s), which no execution of the plan beats.
+	Bound float64 `json:"bound"`
+	// Ratio is the makespan over the bound.
+	Ratio float64 `json:"ratio"`
+	// CriticalChain names the tasks on the longest chain, `core build` first.
+	CriticalChain  []string       `json:"criticalChain"`
+	Tasks          TimedTasks     `json:"tasks"`
+	PublishTimedAt PublishSources `json:"publishTimedAt"`
+}
+
+// TimedTasks counts the release's tasks by kind. A version task is a tool's
+// version command timed as a whole, where the tool has one of its own.
+type TimedTasks struct {
+	Version int `json:"version"`
+	Build   int `json:"build"`
+	Publish int `json:"publish"`
+}
+
+// PublishSources says where each package's publication was timed: around
+// its `npm publish`, or at the registry for a tool that publishes in-process.
+type PublishSources struct {
+	NPM      int `json:"npm"`
+	Registry int `json:"registry"`
+}
+
+// Plan is what a tool's own plan command said it would release, and how that
+// reads beside dispat's plan of the same scenario. The comparison is data:
+// which packages and versions differ, never which tool is right.
+type Plan struct {
+	Packages []PlannedPackage `json:"packages"`
+	// Reference is the dispat cell this plan was compared with. Empty for
+	// dispat's own cell and where no dispat cell recorded a plan.
+	Reference string `json:"reference,omitempty"`
+	// Agrees is nil when there was nothing to compare with.
+	Agrees      *bool            `json:"agrees,omitempty"`
+	Differences []PlanDifference `json:"differences,omitempty"`
+}
+
+// PlannedPackage is one package of a plan at the version planned for it.
+type PlannedPackage struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// PlanDifference is one package two plans disagree about. Either version is
+// empty where that plan releases no version of the package.
+type PlanDifference struct {
+	Package   string `json:"package"`
+	Version   string `json:"version"`
+	Reference string `json:"reference"`
 }
 
 // Step is one step of a protocol and the code it exited with. The field names
