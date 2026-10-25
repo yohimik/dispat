@@ -303,17 +303,19 @@ func (d *discovery) checkBuildOutputRoots() error {
 // node would replace the nested package's checkout with whatever the outer
 // build left there, whether or not the nested package declares anything.
 func (d *discovery) checkBuildOutputRootsHoldNoPackage(roots []declaredOutputRoot) error {
+	folders := newPackageFolderIndex(d.pkgs)
 	for _, root := range roots {
-		for _, nested := range d.pkgs {
-			if nested.Name == root.packageName || !isFolderWithin(lib.Fold(nested.Dir), root.folded) {
-				continue
-			}
-			return WithDiagnostic(DiagnosticExecution, fmt.Errorf(
-				"config: buildOutputs: package %q declares %q (%s), which holds the folder of package %q (%s); "+
-					"a declared build output is installed whole, so it cannot contain another package",
-				root.packageName, root.declared, d.repositoryPath(root.path),
-				nested.Name, d.repositoryPath(nested.Dir)))
+		isOwnPackage := func(i int) bool { return d.pkgs[i].Name == root.packageName }
+		i, isHeld := folders.findFirstWithin(root.folded, isOwnPackage)
+		if !isHeld {
+			continue
 		}
+		nested := d.pkgs[i]
+		return WithDiagnostic(DiagnosticExecution, fmt.Errorf(
+			"config: buildOutputs: package %q declares %q (%s), which holds the folder of package %q (%s); "+
+				"a declared build output is installed whole, so it cannot contain another package",
+			root.packageName, root.declared, d.repositoryPath(root.path),
+			nested.Name, d.repositoryPath(nested.Dir)))
 	}
 	return nil
 }
@@ -322,7 +324,69 @@ func (d *discovery) checkBuildOutputRootsHoldNoPackage(roots []declaredOutputRoo
 // folded absolute paths, compared by component so that `dist-old` is not
 // taken for a folder inside `dist`.
 func isFolderWithin(folder, root string) bool {
-	return folder == root || strings.HasPrefix(folder, root+string(filepath.Separator))
+	return folder == root ||
+		len(folder) > len(root) && folder[len(root)] == filepath.Separator && strings.HasPrefix(folder, root)
+}
+
+// packageFolderIndex is the packages' folders, folded once and sorted, so the
+// packages a folder holds are found by binary search: the folders equal to a
+// root are adjacent in byte order, and so are the folders with one prefix.
+type packageFolderIndex []indexedFolder
+
+type indexedFolder struct {
+	folded   string
+	position int
+}
+
+func newPackageFolderIndex(pkgs []*model.Package) packageFolderIndex {
+	folders := make(packageFolderIndex, len(pkgs))
+	for i, p := range pkgs {
+		folders[i] = indexedFolder{folded: lib.Fold(p.Dir), position: i}
+	}
+	sort.Slice(folders, func(a, b int) bool { return folders[a].folded < folders[b].folded })
+	return folders
+}
+
+// findFirstWithin returns the position, in the order the index was built
+// from, of the first package whose folder is root or lies inside it, leaving
+// out the positions isSkipped names. The answer is the one a scan of the
+// packages in order would give, which is what keeps the refusal naming the
+// same package.
+func (x packageFolderIndex) findFirstWithin(root string, isSkipped func(int) bool) (int, bool) {
+	first := firstPosition(x.equalRun(root), isSkipped, -1)
+	first = firstPosition(x.prefixRun(root+string(filepath.Separator)), isSkipped, first)
+	return first, first >= 0
+}
+
+func (x packageFolderIndex) equalRun(folder string) packageFolderIndex {
+	start := sort.Search(len(x), func(i int) bool { return x[i].folded >= folder })
+	end := start
+	for end < len(x) && x[end].folded == folder {
+		end++
+	}
+	return x[start:end]
+}
+
+func (x packageFolderIndex) prefixRun(prefix string) packageFolderIndex {
+	start := sort.Search(len(x), func(i int) bool { return x[i].folded >= prefix })
+	end := start
+	for end < len(x) && strings.HasPrefix(x[end].folded, prefix) {
+		end++
+	}
+	return x[start:end]
+}
+
+func firstPosition(run packageFolderIndex, isSkipped func(int) bool, first int) int {
+	for _, folder := range run {
+		if first >= 0 && folder.position >= first {
+			continue
+		}
+		if isSkipped != nil && isSkipped(folder.position) {
+			continue
+		}
+		first = folder.position
+	}
+	return first
 }
 
 // collectDeclaredOutputRoots resolves every package's declared outputs

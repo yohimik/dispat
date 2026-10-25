@@ -9,12 +9,16 @@ package config
 // only observable in what a package ended up with.
 
 import (
+	"fmt"
+	"math/rand"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	lib "github.com/yohimik/dispat/pkg/config"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -319,4 +323,49 @@ func TestBuildOutputRootsAreRepositoryLocal(t *testing.T) {
 	err := together.checkBuildOutputRoots()
 	require.Error(t, err, "one folder claimed twice is refused wherever the claims came from")
 	assert.Contains(t, err.Error(), "they name the same folder")
+}
+
+// TestPackageFolderIndexIsEveryPackageAsked checks the sorted index against
+// the scan it replaces: every package asked in order, the first whose folder
+// is the root or lies inside it winning, its own package left out. The
+// folders include a root's lexical neighbours (`dist-old`, `dist.d`), which
+// sort between `dist` and `dist/`, a root's own folder twice, and spellings
+// that differ only by case.
+func TestPackageFolderIndexIsEveryPackageAsked(t *testing.T) {
+	rng := rand.New(rand.NewSource(5))
+	sep := string(filepath.Separator)
+	folders := []string{
+		"/r", "/r/a", "/r/a/dist", "/r/a/dist-old", "/r/a/dist.d", "/r/a/dist/x", "/r/a/dist/x/y",
+		"/r/A/Dist", "/r/b", "/r/b/dist", "/r/a/distx", sep,
+	}
+	isWithinAsWritten := func(folder, root string) bool {
+		return folder == root || strings.HasPrefix(folder, root+sep)
+	}
+	for round := 0; round < 200; round++ {
+		pkgs := make([]*model.Package, 1+rng.Intn(10))
+		for i := range pkgs {
+			pkgs[i] = &model.Package{Name: fmt.Sprintf("p%d", rng.Intn(4)), Dir: filepath.FromSlash(folders[rng.Intn(len(folders))])}
+		}
+		index := newPackageFolderIndex(pkgs)
+		for _, root := range folders {
+			folded := lib.Fold(filepath.FromSlash(root))
+			owner := fmt.Sprintf("p%d", rng.Intn(4))
+			want := -1
+			for i, p := range pkgs {
+				if p.Name != owner && isWithinAsWritten(lib.Fold(p.Dir), folded) {
+					want = i
+					break
+				}
+			}
+			got, ok := index.findFirstWithin(folded, func(i int) bool { return pkgs[i].Name == owner })
+			require.Equal(t, want >= 0, ok, "root %q", root)
+			if ok {
+				require.Equal(t, want, got, "root %q", root)
+			}
+			for _, p := range pkgs {
+				folder := lib.Fold(p.Dir)
+				require.Equal(t, isWithinAsWritten(folder, folded), isFolderWithin(folder, folded), "%q in %q", folder, folded)
+			}
+		}
+	}
 }

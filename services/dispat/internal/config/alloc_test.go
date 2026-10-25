@@ -20,6 +20,8 @@ func TestDiscoveryCheckAllocationBudget(t *testing.T) {
 	aliased := benchWorkspacePackages(packages, &model.Space{
 		AliasTags: []model.AliasTag{{Format: "{name}-v{major}", Moving: true}},
 	})
+	building := &discovery{pkgs: benchWorkspacePackages(packages, &model.Space{BuildOutputs: []string{"dist"}})}
+	sweeps := map[string][]string{"test": {"coverage", "reports/junit"}}
 	cases := []struct {
 		name   string
 		budget float64
@@ -29,6 +31,18 @@ func TestDiscoveryCheckAllocationBudget(t *testing.T) {
 			name:   "checkAliasTagsAreWriteOnly",
 			budget: 7000, // measured 6526: the renders, the index and the seen map, linear in packages
 			run:    func() error { return checkAliasTagsAreWriteOnly(aliased) },
+		},
+		{
+			name:   "checkBuildOutputRoots",
+			budget: 3200, // measured 2922: the roots, the overlap sort and one fold per package
+			run:    building.checkBuildOutputRoots,
+		},
+		{
+			name:   "checkRunOutputRoots",
+			budget: 2700, // measured 2420: the build roots and one fold per package, shared by every sweep root
+			run: func() error {
+				return checkRunOutputRoots(sweeps, building.pkgs, "/Users/Bench/Repo")
+			},
 		},
 	}
 	for _, tc := range cases {

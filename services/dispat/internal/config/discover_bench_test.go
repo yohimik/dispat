@@ -59,6 +59,22 @@ func BenchmarkCheckBuildOutputRoots(b *testing.B) {
 	}
 }
 
+func BenchmarkCheckRunOutputRoots(b *testing.B) {
+	space := &model.Space{BuildOutputs: []string{"dist"}}
+	runOutputs := map[string][]string{"test": {"coverage", "reports/junit"}}
+	for _, count := range benchPackageCounts {
+		b.Run(fmt.Sprintf("packages=%d", count), func(b *testing.B) {
+			pkgs := benchWorkspacePackages(count, space)
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := checkRunOutputRoots(runOutputs, pkgs, "/Users/Bench/Repo"); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkPackageLayers spreads the packages' entries over the root map, the
 // space's map and the space folder's own file, a quarter in each and a quarter
 // with none, so that every package misses most of the maps it is looked up in.

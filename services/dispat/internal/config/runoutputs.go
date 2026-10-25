@@ -120,13 +120,15 @@ func checkRunOutputRoots(runOutputs map[string][]string, pkgs []*model.Package, 
 	if len(runOutputs) == 0 {
 		return nil
 	}
-	builds := collectDeclaredOutputRoots(pkgs)
+	checks := sweepRootChecks{
+		pkgs: pkgs, folders: newPackageFolderIndex(pkgs), builds: collectDeclaredOutputRoots(pkgs),
+	}
 	for _, repositoryRoot := range collectRepositoryRoots(pkgs, fallbackRoot) {
 		for _, script := range sortedKeys(runOutputs) {
 			for _, declared := range runOutputs[script] {
-				if err := checkRunOutputRoot(runOutputRoot{
+				if err := checks.check(runOutputRoot{
 					script: script, declared: declared, repositoryRoot: repositoryRoot,
-				}, pkgs, builds); err != nil {
+				}); err != nil {
 					return WithDiagnostic(DiagnosticExecution, err)
 				}
 			}
@@ -144,21 +146,28 @@ type runOutputRoot struct {
 	repositoryRoot string
 }
 
-// checkRunOutputRoot is the one root's three questions, in the order a reader
-// is best told about them.
-func checkRunOutputRoot(root runOutputRoot, pkgs []*model.Package, builds []declaredOutputRoot) error {
+// sweepRootChecks is what every declared sweep root is held against: the
+// packages, their folders indexed once for all the roots, and their declared
+// build output roots.
+type sweepRootChecks struct {
+	pkgs    []*model.Package
+	folders packageFolderIndex
+	builds  []declaredOutputRoot
+}
+
+// check asks the one root's three questions, in the order a reader is best
+// told about them.
+func (c sweepRootChecks) check(root runOutputRoot) error {
 	folder := filepath.Join(root.repositoryRoot, filepath.FromSlash(root.declared))
 	folded := lib.Fold(folder)
 	named := func(path string) string { return formatRepositoryPath(root.repositoryRoot, path) }
-	for _, p := range pkgs {
-		if !isFolderWithin(lib.Fold(p.Dir), folded) {
-			continue
-		}
+	if i, isHeld := c.folders.findFirstWithin(folded, nil); isHeld {
+		p := c.pkgs[i]
 		return fmt.Errorf("config: runOutputs[%q]: %q (%s) is or holds the folder of package %q (%s); "+
 			"what a sweep carries back is merged into the checkout, so its roots must not reach a package's sources",
 			root.script, root.declared, named(folder), p.Name, named(p.Dir))
 	}
-	for _, build := range builds {
+	for _, build := range c.builds {
 		if !isFolderWithin(build.folded, folded) && !isFolderWithin(folded, build.folded) {
 			continue
 		}
