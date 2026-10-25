@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -46,8 +47,11 @@ type discovery struct {
 	folderInputs folderInputPolicy
 
 	// rootEntries indexes the top-level packages map for the per-package
-	// lookups, which would otherwise scan it for every package it misses.
-	rootEntries packageEntries
+	// lookups, which would otherwise scan it for every package it misses. It
+	// is built on the first lookup, because settling the spaces' own
+	// configuration alone asks it about no package.
+	rootEntries   packageEntries
+	isRootIndexed bool
 
 	// spaceConfigs and onlyChecks feed the autoVersion.only check, which needs
 	// every package discovered before it can say a name is unknown.
@@ -137,7 +141,6 @@ func newDiscoveryMode(c *File, root string, folderInputs folderInputPolicy) (*di
 		owner:        make(map[string]string),
 		ownerFold:    make(map[string]string),
 		consumed:     make(map[string][]string),
-		rootEntries:  newPackageEntries(c.Packages),
 		baseIgnore:   appendLayer(nil, rootIgnore),
 		folderInputs: folderInputs,
 		spaceConfigs: make(map[string]SpaceConfig, len(c.Spaces)),
@@ -251,13 +254,9 @@ func (d *discovery) resolveSpace(sn string) (*spaceScan, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
-	fileEntries := make([]packageEntries, len(files))
-	for i, f := range files {
-		fileEntries[i] = newPackageEntries(f.Packages)
-	}
 	return &spaceScan{
 		name: sn, dirs: dirs, sc: sc, files: files, srcs: srcs,
-		spaceEntries: newPackageEntries(sc.Packages), fileEntries: fileEntries,
+		spaceEntries: newPackageEntries(sc.Packages), fileEntries: newFileEntries(files),
 		base: base, baseScope: baseScope,
 		chains:        chains,
 		changelog:     changelogSpec(sc.Changelog, sc.GitHub),
@@ -457,11 +456,11 @@ func (d *discovery) spacePackage(s *spaceScan, pi int, name string) (*model.Pack
 // `packages` entry, the space file's, and the file in the package folder.
 func (d *discovery) packageLayers(s *spaceScan, name, dir, label string) ([]overrideLayer, error) {
 	var layers []overrideLayer
-	folded := globx.Fold(name)
+	asked := &packageName{exact: name}
 	// Each layer is recorded, and written back to, under the key its own file
 	// wrote: an entry spelled `MyLib` is consumed as `MyLib`, named that way in
 	// its errors, and edited there by `dispat compute --write`.
-	if key, entryPO, ok := d.rootEntries.find(name, folded); ok {
+	if key, entryPO, ok := d.indexRootEntries().find(asked); ok {
 		if entryPO.Path != "" {
 			return nil, fmt.Errorf(
 				"config: packages[%q]: package %q belongs to space %q, its location is the space folder, so path cannot be set",
@@ -471,13 +470,13 @@ func (d *discovery) packageLayers(s *spaceScan, name, dir, label string) ([]over
 		layers = append(layers, overrideLayer{entryPO, label,
 			DepSource{KeyPath: []string{"packages", key, "dependencies"}}})
 	}
-	if key, spacePO, ok := s.spaceEntries.find(name, folded); ok {
+	if key, spacePO, ok := s.spaceEntries.find(asked); ok {
 		s.spaceConsumed[key] = append(s.spaceConsumed[key], name)
 		layers = append(layers, overrideLayer{spacePO, label + ": the space's packages entry",
 			DepSource{KeyPath: []string{"spaces", s.name, "packages", key, "dependencies"}}})
 	}
 	for i, entries := range s.fileEntries {
-		key, filePO, ok := entries.find(name, folded)
+		key, filePO, ok := entries.find(asked)
 		if !ok {
 			continue
 		}
@@ -508,6 +507,9 @@ type packageEntries struct {
 }
 
 func newPackageEntries(entries map[string]PackageConfig) packageEntries {
+	if len(entries) == 0 {
+		return packageEntries{}
+	}
 	keyByFold := make(map[string]string, len(entries))
 	for key := range entries {
 		folded := globx.Fold(key)
@@ -521,17 +523,57 @@ func newPackageEntries(entries map[string]PackageConfig) packageEntries {
 	return packageEntries{entries: entries, keyByFold: keyByFold}
 }
 
+// newFileEntries indexes each space file's packages map, in the order of
+// files, and is nil when no file holds an entry, since a lookup in an empty
+// map finds nothing.
+func newFileEntries(files []SpaceFile) []packageEntries {
+	if !slices.ContainsFunc(files, func(f SpaceFile) bool { return len(f.Packages) > 0 }) {
+		return nil
+	}
+	entries := make([]packageEntries, len(files))
+	for i, f := range files {
+		entries[i] = newPackageEntries(f.Packages)
+	}
+	return entries
+}
+
+func (d *discovery) indexRootEntries() packageEntries {
+	if !d.isRootIndexed {
+		d.rootEntries, d.isRootIndexed = newPackageEntries(d.c.Packages), true
+	}
+	return d.rootEntries
+}
+
 // find is models.FoldLookup answered from the index: the exact key first,
 // then the one key that folds like the name.
-func (e packageEntries) find(name, folded string) (string, PackageConfig, bool) {
-	if po, ok := e.entries[name]; ok {
-		return name, po, true
+func (e packageEntries) find(name *packageName) (string, PackageConfig, bool) {
+	if po, ok := e.entries[name.exact]; ok {
+		return name.exact, po, true
 	}
-	key, ok := e.keyByFold[folded]
+	if len(e.keyByFold) == 0 {
+		return "", PackageConfig{}, false
+	}
+	key, ok := e.keyByFold[name.fold()]
 	if !ok {
 		return "", PackageConfig{}, false
 	}
 	return key, e.entries[key], true
+}
+
+// packageName is a package's name as every packages map is asked about it.
+// It is folded once, and only when a map with entries misses the exact
+// spelling: most maps are empty, and most entries are spelled as the folder.
+type packageName struct {
+	exact    string
+	folded   string
+	isFolded bool
+}
+
+func (n *packageName) fold() string {
+	if !n.isFolded {
+		n.folded, n.isFolded = globx.Fold(n.exact), true
+	}
+	return n.folded
 }
 
 // scanStandalone builds the packages declared by a top-level `packages` entry
