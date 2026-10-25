@@ -1,11 +1,15 @@
 package config
 
 import (
+	"math/rand"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/yohimik/dispat/pkg/models"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 )
 
 // TestResolvedSpaceConfigs proves the config-only space resolution the run
@@ -52,4 +56,34 @@ func TestResolvedSpaceConfigsRefusesABadSpaceFile(t *testing.T) {
 	_, err = ResolvedSpaceConfigs(loaded, root)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "path cannot be set")
+}
+
+// TestPackageEntriesFindIsFoldLookup checks the folded index against the
+// lookup it replaces, over maps that hold no two keys folding together, as
+// loading guarantees: names spelled exactly, in other capitals, with letters
+// whose fold classes lowercasing alone would split, and with no entry at all.
+func TestPackageEntriesFindIsFoldLookup(t *testing.T) {
+	rng := rand.New(rand.NewSource(3))
+	spellings := [][]string{
+		{"core", "Core", "CORE"}, {"web-ui", "Web-UI"}, {"σοφία", "ΣΟΦΊΑ", "σοφίας"}, {"ς", "σ", "Σ"},
+		{"kelvin", "Kelvin", "KELVIN"}, {"İzmir", "izmir"}, {"straße", "STRASSE"}, {"µ", "μ", "Μ"},
+	}
+	for round := 0; round < 200; round++ {
+		entries := map[string]PackageConfig{}
+		for _, class := range spellings {
+			if rng.Intn(2) == 0 {
+				entries[class[rng.Intn(len(class))]] = PackageConfig{Src: class[0]}
+			}
+		}
+		index := newPackageEntries(entries)
+		for _, class := range spellings {
+			for _, name := range class {
+				wantKey, wantPO, wantOK := models.FoldLookup(entries, name)
+				key, po, ok := index.find(name, globx.Fold(name))
+				require.Equal(t, wantOK, ok, "name %q in %v", name, entries)
+				require.Equal(t, wantKey, key, "name %q in %v", name, entries)
+				require.Equal(t, wantPO, po, "name %q in %v", name, entries)
+			}
+		}
+	}
 }
