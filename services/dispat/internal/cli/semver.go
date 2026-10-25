@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/dispat/internal/semver"
 )
 
 type semverOutput struct {
@@ -30,7 +30,7 @@ func (r *runner) runSemver() int {
 			buildSet: r.fs.Changed("build-metadata"), build: *r.o.semverBuildMetadata,
 		})
 	}
-	parts, err := ccme.ParseVersionParts(raw)
+	parts, err := semver.ParseVersionParts(raw)
 	if err != nil {
 		fmt.Fprintf(r.stderr, "dispat semver: %v\n", err)
 		return 2

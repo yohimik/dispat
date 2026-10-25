@@ -1,13 +1,15 @@
-package ccme
+package semver
 
 import (
 	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/yohimik/dispat/pkg/ccme"
 )
 
-var benchmarkVersion Version
+var benchmarkVersion ccme.Version
 var benchmarkVersionParts VersionParts
 
 // The official SemVer 2.0.0 regex is a realistic validating alternative to
@@ -57,7 +59,7 @@ func BenchmarkParseVersion(b *testing.B) {
 	for _, raw := range []string{"1.2.3", "12.34.56-rc.7+sha.0123456789abcdef"} {
 		b.Run(raw, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				version, err := ParseVersion(raw)
+				version, err := ccme.ParseVersion(raw)
 				if err != nil {
 					b.Fatal(err)
 				}

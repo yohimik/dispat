@@ -1,10 +1,12 @@
-package ccme
+package semver
 
 import (
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/yohimik/dispat/pkg/ccme"
 )
 
 func TestParseVersionPartsKeepsUnboundedCoreAndBuild(t *testing.T) {
@@ -21,7 +23,7 @@ func TestParseVersionPartsKeepsUnboundedCoreAndBuild(t *testing.T) {
 		!reflect.DeepEqual(parts.Build, []string{"001", "sha-ABC"}) {
 		t.Fatalf("identifiers changed: %+v", parts)
 	}
-	if _, err := ParseVersion(raw); !errors.Is(err, ErrInvalidVersion) {
+	if _, err := ccme.ParseVersion(raw); !errors.Is(err, ccme.ErrInvalidVersion) {
 		t.Fatalf("bounded release parser accepted an overflowing core: %v", err)
 	}
 }

@@ -9,10 +9,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/dispat/internal/semver"
 )
 
-var benchmarkBuiltParts ccme.VersionParts
+var benchmarkBuiltParts semver.VersionParts
 
 func TestSemverParseKeepsFullVersionAndUnboundedCore(t *testing.T) {
 	big := strings.Repeat("9", 80)
@@ -81,7 +81,7 @@ func BenchmarkBuildSemverScanner(b *testing.B) {
 	input := semverSpelling{core: []string{"12", "34", "56"}, preSet: true, pre: "rc.7",
 		buildSet: true, build: "sha.0123456789abcdef"}
 	for i := 0; i < b.N; i++ {
-		parts, err := ccme.ParseVersionParts(buildSemverSpelling(input))
+		parts, err := semver.ParseVersionParts(buildSemverSpelling(input))
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -91,7 +91,7 @@ func BenchmarkBuildSemverScanner(b *testing.B) {
 
 func BenchmarkBuildSemverFmt(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		parts, err := ccme.ParseVersionParts(fmt.Sprintf("%s.%s.%s-%s+%s", "12", "34", "56", "rc.7", "sha.0123456789abcdef"))
+		parts, err := semver.ParseVersionParts(fmt.Sprintf("%s.%s.%s-%s+%s", "12", "34", "56", "rc.7", "sha.0123456789abcdef"))
 		if err != nil {
 			b.Fatal(err)
 		}

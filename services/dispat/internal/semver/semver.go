@@ -1,10 +1,15 @@
-package ccme
+package semver
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
-// VersionParts is the lexical shape of a SemVer 2.0.0 version. Decimal core
-// components remain strings because the SemVer grammar sets no integer limit.
-// The release engine's Version separately uses uint64 core values.
+// ErrInvalidVersion reports a malformed SemVer 2.0.0 spelling.
+var ErrInvalidVersion = errors.New("semver: invalid semantic version")
+
+// VersionParts retains decimal core strings because SemVer sets no integer
+// limit, while the release engine uses uint64 core values.
 type VersionParts struct {
 	Major      string
 	Minor      string
@@ -14,9 +19,8 @@ type VersionParts struct {
 	Raw        string
 }
 
-// ParseVersionParts validates the full SemVer 2.0.0 spelling while retaining
-// arbitrarily long core numbers and build metadata. It does not change the
-// release engine's bounded ParseVersion or its build-dropping Version.String.
+// ParseVersionParts validates SemVer 2.0.0 without imposing the release
+// engine's uint64 limit or dropping build metadata.
 func ParseVersionParts(raw string) (VersionParts, error) {
 	parts := VersionParts{Raw: raw}
 	sc := &scanner{s: raw}
