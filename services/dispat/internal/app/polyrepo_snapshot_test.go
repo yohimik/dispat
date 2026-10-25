@@ -57,8 +57,37 @@ func TestSnapshotPlanAcceptsEmptyRepositoryInputs(t *testing.T) {
 		RepositoryInputs: map[string][]uint64{"lib": nil},
 	}
 	require.NotPanics(t, func() { w.setSnapshotPlan(pl) })
-	require.Contains(t, w.snapshot.byRelease, rel)
-	assert.Empty(t, w.snapshot.byRelease[rel].words)
+	require.Contains(t, w.snapshot.byPackage, rel.Pkg.Name)
+	assert.Empty(t, w.snapshot.byPackage[rel.Pkg.Name].words)
+}
+
+func TestSnapshotVisibleReleaseChecksOnlyItsRepositoryInputs(t *testing.T) {
+	w, rel := recordFixture(t, false, false)
+	disabled := false
+	otherConfig := &config.File{Commit: &config.CommitConfig{Enabled: &disabled}}
+	otherRoot, _ := guardRepo(t, otherConfig)
+	w.app.workspace.Repositories = append(w.app.workspace.Repositories, config.Repository{
+		Name: "other", Root: otherRoot, Config: otherConfig, Commit: otherConfig.Commit,
+	})
+	w = w.app.newWorkspaceRecorder()
+	other := closureRelease("gamma", "other")
+	require.NoError(t, w.captureSnapshot(t.Context(), []*model.Package{rel.Pkg, other.Pkg}))
+	pl := snapshotPlan(t, w, rel, other)
+	w.setSnapshotPlan(pl)
+	require.NoError(t, w.verifyPlannedHeads(pl))
+
+	// The executor copies a release to attach stage-visible exports. Its
+	// package identity still selects the original, narrow history closure.
+	visible := *rel
+	recordGit(t, otherRoot, "commit", "--allow-empty", "-qm", "fix(gamma): concurrent owner record")
+	recordGit(t, otherRoot, "tag", other.TagName())
+	require.NoError(t, w.verifySnapshot(t.Context(), &visible),
+		"an unrelated owner's head and tag do not invalidate this package")
+
+	recordGit(t, rel.Pkg.RepoRoot, "commit", "--allow-empty", "-qm", "fix(lib): external drift")
+	err := w.verifySnapshot(t.Context(), &visible)
+	require.ErrorContains(t, err, "E330")
+	assert.ErrorContains(t, err, "repository source changed after planning")
 }
 
 func TestWorkspaceSnapshotReadFailureRetainsRepositoryDiagnostic(t *testing.T) {
@@ -258,7 +287,7 @@ func snapshotClosureFixture(repositoryNames ...string) *workspaceRecorder {
 		w.ordered = append(w.ordered, record)
 	}
 	w.snapshot = &workspaceSnapshotGuard{
-		records: w.ordered, repoIndex: make(map[string]int), byRelease: make(map[*plan.Release]*repositorySet),
+		records: w.ordered, repoIndex: make(map[string]int), byPackage: make(map[string]*repositorySet),
 	}
 	for index, record := range w.ordered {
 		w.snapshot.repoIndex[record.repo.Name] = index
@@ -285,9 +314,9 @@ func TestSnapshotRepositoryClosureIncludesPlannerGroupInputs(t *testing.T) {
 
 	w.setSnapshotPlan(pl)
 
-	assert.True(t, w.snapshot.byRelease[b].contains(w.snapshot.repoIndex["source-a"]))
-	assert.True(t, w.snapshot.byRelease[b].contains(w.snapshot.repoIndex["source-b"]))
-	assert.Same(t, w.snapshot.byRelease[a], w.snapshot.byRelease[b])
+	assert.True(t, w.snapshot.byPackage[b.Pkg.Name].contains(w.snapshot.repoIndex["source-a"]))
+	assert.True(t, w.snapshot.byPackage[b.Pkg.Name].contains(w.snapshot.repoIndex["source-b"]))
+	assert.Same(t, w.snapshot.byPackage[a.Pkg.Name], w.snapshot.byPackage[b.Pkg.Name])
 }
 
 func TestSnapshotCheckpointDoesNotMutatePlannerInputBits(t *testing.T) {
@@ -308,10 +337,10 @@ func TestSnapshotCheckpointDoesNotMutatePlannerInputBits(t *testing.T) {
 	w.setSnapshotPlan(pl)
 
 	assert.Equal(t, []uint64{0b10}, inputWords, "the checkpoint bit is added to a private copy")
-	set := w.snapshot.byRelease[rel]
+	set := w.snapshot.byPackage[rel.Pkg.Name]
 	assert.True(t, set.contains(w.snapshot.repoIndex[config.ControlRepository]))
 	assert.True(t, set.contains(w.snapshot.repoIndex["source"]))
-	assert.Same(t, set, w.snapshot.byRelease[sibling], "one checkpoint-augmented copy is shared by equal planner inputs")
+	assert.Same(t, set, w.snapshot.byPackage[sibling.Pkg.Name], "one checkpoint-augmented copy is shared by equal planner inputs")
 }
 
 func TestSnapshotRepositoryClosureTransfersMultipleWords(t *testing.T) {
@@ -334,7 +363,7 @@ func TestSnapshotRepositoryClosureTransfersMultipleWords(t *testing.T) {
 
 	w.setSnapshotPlan(pl)
 
-	set := w.snapshot.byRelease[rel]
+	set := w.snapshot.byPackage[rel.Pkg.Name]
 	assert.True(t, set.contains(w.snapshot.repoIndex[config.ControlRepository]))
 	assert.True(t, set.contains(w.snapshot.repoIndex["source-64"]))
 	assert.False(t, set.contains(w.snapshot.repoIndex["source-00"]))
@@ -360,9 +389,9 @@ func TestSnapshotRepositoryClosuresShareLargeConsumerFanout(t *testing.T) {
 
 	w.setSnapshotPlan(pl)
 
-	want := w.snapshot.byRelease[base]
+	want := w.snapshot.byPackage[base.Pkg.Name]
 	for _, name := range pl.Order[1:] {
-		assert.Same(t, want, w.snapshot.byRelease[pl.Releases[name]])
+		assert.Same(t, want, w.snapshot.byPackage[name])
 	}
 }
 

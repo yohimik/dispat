@@ -25,7 +25,7 @@ type workspaceSnapshotGuard struct {
 	mu        sync.Mutex
 	records   []*repositoryRecord
 	repoIndex map[string]int
-	byRelease map[*plan.Release]*repositorySet
+	byPackage map[string]*repositorySet
 }
 
 type repositorySet struct{ words []uint64 }
@@ -67,7 +67,7 @@ func tagNamespaces(packages []*model.Package) map[string][]gitx.TagNamespace {
 func (w *workspaceRecorder) captureSnapshot(ctx context.Context, packages []*model.Package) error {
 	guard := &workspaceSnapshotGuard{
 		records: w.ordered, repoIndex: make(map[string]int, len(w.ordered)),
-		byRelease: make(map[*plan.Release]*repositorySet),
+		byPackage: make(map[string]*repositorySet),
 	}
 	for index, record := range w.ordered {
 		guard.repoIndex[record.repo.Name] = index
@@ -112,7 +112,7 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 		return
 	}
 	guard := w.snapshot
-	guard.byRelease = make(map[*plan.Release]*repositorySet)
+	guard.byPackage = make(map[string]*repositorySet)
 	wordCount := (len(guard.records) + 63) / 64
 	interned := make(map[string]*repositorySet)
 	type plannerSetKey struct {
@@ -150,7 +150,7 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 			plannerKey = plannerSetKey{first: &inputWords[0], addControl: addControl}
 			if closure := plannerSets[plannerKey]; closure != nil {
 				if rel.IsReleasing() {
-					guard.byRelease[rel] = closure
+					guard.byPackage[name] = closure
 				}
 				continue
 			}
@@ -182,7 +182,7 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 			plannerSets[plannerKey] = closure
 		}
 		if rel.IsReleasing() {
-			guard.byRelease[rel] = closure
+			guard.byPackage[name] = closure
 		}
 	}
 }
@@ -290,7 +290,13 @@ func (g *workspaceSnapshotGuard) verify(ctx context.Context, rel *plan.Release) 
 	defer g.mu.Unlock()
 	var selected *repositorySet
 	if rel != nil {
-		selected = g.byRelease[rel]
+		if rel.Pkg == nil {
+			return snapshotError("", "release has no package identity for repository input validation")
+		}
+		selected = g.byPackage[rel.Pkg.Name]
+		if selected == nil {
+			return snapshotError(rel.Pkg.Repository, "release "+rel.Pkg.Name+" has no repository input closure")
+		}
 	}
 	for index, record := range g.records {
 		if selected != nil && !selected.contains(index) {

@@ -38,14 +38,14 @@ func TestSnapshotRemapsRepositoryInputsAcrossWordBoundaries(t *testing.T) {
 
 			w.setSnapshotPlan(pl)
 
-			set := w.snapshot.byRelease[rel]
+			set := w.snapshot.byPackage[rel.Pkg.Name]
 			require.NotNil(t, set)
 			for index, name := range names {
 				want := name == "source-00" || name == "source-64" || (checkpoint && name == config.ControlRepository)
 				assert.Equal(t, want, set.contains(index), "repository %s", name)
 			}
 			assert.Equal(t, []uint64{1, 1}, input, "remapping must not rewrite shared planner input")
-			assert.Same(t, set, w.snapshot.byRelease[sibling], "equal remapped closures remain interned")
+			assert.Same(t, set, w.snapshot.byPackage[sibling.Pkg.Name], "equal remapped closures remain interned")
 		})
 	}
 }

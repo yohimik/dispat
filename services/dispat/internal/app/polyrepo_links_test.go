@@ -136,6 +136,9 @@ func TestSettleLinksRecordsTheRevisionTheReleaseIncorporates(t *testing.T) {
 func TestSettleLinksIsAdmittedByThePrePublishGuard(t *testing.T) {
 	f := newSettleFleet(t, true, true)
 	require.NoError(t, f.recorder.captureSnapshot(t.Context(), []*model.Package{f.rel.Pkg}))
+	pl := snapshotPlan(t, f.recorder, f.rel)
+	pl.RepositoryInputs[f.rel.Pkg.Name] = repositoryInputs(pl.RepositoryInputOrder, "api", "sdk")
+	f.recorder.setSnapshotPlan(pl)
 	planned := settleGit(t, f.api, "rev-parse", "HEAD")
 	for _, record := range f.recorder.ordered {
 		record.expectedHead = settleGit(t, record.repo.Root, "rev-parse", "HEAD")
