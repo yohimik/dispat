@@ -587,13 +587,14 @@ func (p *Parser) parseUnit(u *Unit, src unitSource, messageLines []string) {
 	u.Raw = src.raw
 	u.Valid = true
 
-	header, warns, failure := p.parseHeader(lines[0], u.Start)
+	var failure Diagnostic
+	header, warns, isParsed := p.parseHeader(lines[0], u.Start, &failure)
 	u.Header = header
 	for _, w := range warns {
 		w.UnitIndex = index
 		u.Diagnostics = append(u.Diagnostics, w)
 	}
-	if failure.Code != "" {
+	if !isParsed {
 		u.addError(failure)
 		return
 	}

@@ -154,7 +154,8 @@ func (o *optional[T]) pointer() *T {
 func (p *Parser) applySemantics(u *Unit) {
 	b := &unitBuilder{p: p, u: u}
 
-	fd := p.readFooters(b)
+	var fd footerDirectives
+	p.readFooters(b, &fd)
 
 	u.Directives.Reverts = fd.reverts
 	if fd.breaking.isSet {
@@ -196,10 +197,11 @@ func (p *Parser) applySemantics(u *Unit) {
 	p.applyBumps(b)
 }
 
-// readFooters validates every footer value against its key (§8.1) and returns
-// the directive state they carry.
-func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
-	var fd footerDirectives
+// readFooters validates every footer value against its key (§8.1) and records
+// the directive state they carry in fd, which the caller zeroes. It fills fd in
+// place because the values are held in it: returned, its 352 bytes would be
+// copied out for every unit, a subject with no footers included.
+func (p *Parser) readFooters(b *unitBuilder, fd *footerDirectives) {
 	for _, f := range b.u.Footers {
 		if f.MessageLevel {
 			// Authorship trailers are ignored wherever they appear (§4.5).
@@ -327,7 +329,6 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 			fd.deletes = append(fd.deletes, t)
 		}
 	}
-	return fd
 }
 
 // reconcile merges inline directives with footers. Inline and footer forms are
