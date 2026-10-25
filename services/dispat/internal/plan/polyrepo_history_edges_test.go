@@ -230,11 +230,11 @@ func TestControlCommitWindowIncludesMergedWorkOutsideBoundaryAncestry(t *testing
 		{SHA: "c1", Message: "feat(app): initial"},
 	}}
 
-	window := cp.controlCommitsAfter("c2")
+	window := controlCommitsAfter(cp, "c2")
 	require.Len(t, window, 3)
 	assert.Equal(t, []string{"c4", "c3", "b2"}, []string{window[0].SHA, window[1].SHA, window[2].SHA})
 	assert.Equal(t, "feat(app): branch work", window[2].Message)
-	assert.Len(t, cp.controlCommitsAfter(""), 5, "an empty boundary retains the complete reachable control history")
+	assert.Len(t, controlCommitsAfter(cp, ""), 5, "an empty boundary retains the complete reachable control history")
 }
 
 func TestPropagatedControlIntentIsAConsumerHistoryInput(t *testing.T) {

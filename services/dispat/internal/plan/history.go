@@ -441,7 +441,8 @@ func (cp *computation) readWindowListing(idx *windowIndex, history RepositoryHis
 	[]gitx.Commit, *commitSet, error) {
 
 	if history.Control && cp.controlIndexed {
-		return cp.controlCommitsAfter(rawBoundary), nil, nil
+		listing, excluded := cp.controlWindow(rawBoundary)
+		return listing, excluded, nil
 	}
 	cacheKey := historyKey(history.Name, rawBoundary)
 	if window, isRead := idx.unions[cacheKey]; isRead {
@@ -643,7 +644,7 @@ func (cp *computation) loadRepositoryWindows() error {
 	// interned by this point. Drop the bulk records so substring-backed fields
 	// cannot keep several overlapping git-log buffers live for the whole plan.
 	cp.controlHistory = nil
-	cp.controlParents, cp.controlPosition = nil, nil
+	cp.controlParents, cp.controlPosition, cp.controlListing = nil, nil, nil
 	return nil
 }
 
@@ -1231,11 +1232,17 @@ func IsControlUnitAffectingRelease(unit *ccme.Unit) bool {
 }
 
 // indexControlParents indexes the control inventory's parent graph by
-// position, once for every control window read from it.
+// position, and lists it as commits, once for every control window read
+// from it.
 func (cp *computation) indexControlParents() {
 	cp.controlPosition = make(map[string]int32, len(cp.controlHistory))
+	cp.controlListing = make([]gitx.Commit, len(cp.controlHistory))
 	for i, commit := range cp.controlHistory {
 		cp.controlPosition[commit.SHA] = int32(i)
+		cp.controlListing[i] = gitx.Commit{
+			SHA: commit.SHA, Parents: commit.Parents, AuthorName: commit.AuthorName,
+			AuthorEmail: commit.AuthorEmail, Message: commit.Message, Files: commit.Files,
+		}
 	}
 	cp.controlParents = make([][]int32, len(cp.controlHistory))
 	for i, commit := range cp.controlHistory {
@@ -1248,14 +1255,15 @@ func (cp *computation) indexControlParents() {
 	}
 }
 
-// controlCommitsAfter reuses the single bulk control inventory. The excluded
-// set is the boundary's native ancestor closure, so branches merged after the
-// boundary remain in the window exactly as they do in boundary..HEAD.
-func (cp *computation) controlCommitsAfter(boundary string) []gitx.Commit {
+// controlWindow is the control window after a boundary as the bulk
+// inventory's listing and the commits of it the window leaves out, so that
+// no window copies the listing. The excluded set is the boundary's native
+// ancestor closure, so branches merged after the boundary remain in the
+// window exactly as they do in boundary..HEAD.
+func (cp *computation) controlWindow(boundary string) (listing []gitx.Commit, excluded *commitSet) {
 	if cp.controlPosition == nil {
 		cp.indexControlParents() // a computation assembled by hand
 	}
-	var excluded *commitSet
 	if at, ok := cp.controlPosition[boundary]; ok && boundary != "" {
 		excluded = &commitSet{bits: make([]uint64, (len(cp.controlHistory)+63)/64)}
 		stack := []int32{at}
@@ -1270,17 +1278,7 @@ func (cp *computation) controlCommitsAfter(boundary string) []gitx.Commit {
 			stack = append(stack, cp.controlParents[i]...)
 		}
 	}
-	out := make([]gitx.Commit, 0, len(cp.controlHistory)-excluded.len())
-	for i, commit := range cp.controlHistory {
-		if excluded.has(i) {
-			continue
-		}
-		out = append(out, gitx.Commit{
-			SHA: commit.SHA, Parents: commit.Parents, AuthorName: commit.AuthorName,
-			AuthorEmail: commit.AuthorEmail, Message: commit.Message, Files: commit.Files,
-		})
-	}
-	return out
+	return cp.controlListing, excluded
 }
 
 func (cp *computation) buildRepositoryUnion(lists [][]string, canonical map[string]historyCommit) {

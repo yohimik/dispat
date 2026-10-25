@@ -1230,11 +1230,13 @@ type computation struct {
 	parsers                 map[string]*ccme.Parser
 	repositoryHeads         map[string]string
 	controlHistory          []gitx.ControlHistoryCommit
-	// controlParents is controlHistory's parent graph by position, built
-	// once with the history so that every control window is a walk over it
-	// rather than a rebuilt map (controlCommitsAfter).
+	// controlParents is controlHistory's parent graph by position, and
+	// controlListing the history as commits, built once with the history so
+	// that every control window is a walk over them rather than a rebuilt map
+	// and a copy (controlWindow).
 	controlParents   [][]int32
 	controlPosition  map[string]int32
+	controlListing   []gitx.Commit
 	controlIndexed   bool
 	controlStates    map[string]*controlGitlinkState
 	controlPathIndex map[string]int

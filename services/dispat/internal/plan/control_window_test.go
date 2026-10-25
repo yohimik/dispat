@@ -56,10 +56,23 @@ func TestControlCommitsAfterIsBoundaryDotDotHead(t *testing.T) {
 				}
 			}
 			var got []string
-			for _, c := range cp.controlCommitsAfter(boundary) {
+			for _, c := range controlCommitsAfter(cp, boundary) {
 				got = append(got, c.SHA)
 			}
 			require.Equalf(t, want, got, "round %d boundary %q", round, boundary)
 		}
 	}
+}
+
+// controlCommitsAfter is the control window after a boundary as the commits
+// it holds, in listing order.
+func controlCommitsAfter(cp *computation, boundary string) []gitx.Commit {
+	listing, excluded := cp.controlWindow(boundary)
+	var window []gitx.Commit
+	for pos, commit := range listing {
+		if !excluded.has(pos) {
+			window = append(window, commit)
+		}
+	}
+	return window
 }

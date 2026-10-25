@@ -46,7 +46,7 @@ func BenchmarkControlWindows(b *testing.B) {
 			// Boundaries spread over the newest tenth of the history, where
 			// a fleet's recent releases sit.
 			boundary := history[(k+1)*controlCommits/10/boundaries].SHA
-			if len(cp.controlCommitsAfter(boundary)) == 0 {
+			if listing, excluded := cp.controlWindow(boundary); len(listing) == excluded.len() {
 				b.Fatal("an empty control window")
 			}
 			windows++
