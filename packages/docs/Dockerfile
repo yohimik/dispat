@@ -97,6 +97,10 @@ RUN pnpm --filter dispat-docs typecheck \
 # without figures, which is fine for them and would not be fine for the site
 # people read.
 FROM source AS build
+# The full versioned site can exceed Node's default heap during the client
+# bundle. Keep the build bounded and let constrained builders choose a limit.
+ARG DOCS_NODE_HEAP_MB=4096
+ENV NODE_OPTIONS=--max-old-space-size=${DOCS_NODE_HEAP_MB}
 # Page timestamps and historical module links need Git only during the site
 # build. Keep history out of source/typecheck so commits do not invalidate
 # otherwise unchanged test inputs.
