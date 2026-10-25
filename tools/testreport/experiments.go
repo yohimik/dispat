@@ -319,13 +319,7 @@ func stepsOf(cell Cell) string {
 }
 
 // stateOf renders a cell's final state: `core=1.1.0/consistent cli=1.0.1/consistent`.
-func stateOf(cell Cell) string {
-	parts := make([]string, 0, len(cell.Final.Packages))
-	for _, p := range cell.Final.Packages {
-		parts = append(parts, fmt.Sprintf("%s=%s/%s", p.Name, p.Registry, p.State))
-	}
-	return strings.Join(parts, " ")
-}
+func stateOf(cell Cell) string { return strings.Join(stateEntries(cell.Final.Packages), " ") }
 
 // catchUpOf renders what finishing the release took once the fault was gone,
 // the way the site's Catch-up column shows it (packages/docs's catchup.ts
@@ -425,23 +419,39 @@ func writeExperimentsMarkdown(w io.Writer, e Experiments) error {
 	return out.Flush()
 }
 
-// writeTimingMarkdown renders the timing cells' figures and plans as a second
-// table, when the campaign has any.
+// writeTimingMarkdown renders the timing cells' figures, tasks and plans as
+// further tables, when the campaign has any.
 func writeTimingMarkdown(out *bufio.Writer, e Experiments) {
 	cells := timingCells(e.Cells)
 	if len(cells) == 0 {
 		return
 	}
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "| cell | planning | makespan | Wk | Lk | s | bound | ratio | plan |")
-	fmt.Fprintln(out, "|---|---|---|---|---|---|---|---|---|")
+	fmt.Fprintln(out, "| cell | planning | makespan | Wk | Lk | s | bound | ratio | idle | relation | not honoured |")
+	fmt.Fprintln(out, "|---|---|---|---|---|---|---|---|---|---|---|")
 	for _, cell := range cells {
-		figures := []string{"", "", "", "", "", "", ""}
 		if t := cell.Timing; t != nil {
-			figures = []string{seconds(t.PlanningSeconds), seconds(t.MakespanSeconds), seconds(t.Work),
-				seconds(t.CriticalPath), fmt.Sprint(t.Parallelism), seconds(t.Bound), fmt.Sprintf("%.2f", t.Ratio)}
+			fmt.Fprintf(out, "| %s | %s | %s | %s | %s | %d | %s | %.2f | %s | %s | %s |\n", escapePipes(cell.ID),
+				seconds(t.PlanningSeconds), seconds(t.MakespanSeconds), seconds(t.Work), seconds(t.CriticalPath),
+				t.Parallelism, seconds(t.Bound), t.Ratio, seconds(t.IdleSeconds), relationOf(t), escapePipes(violationsOf(t)))
 		}
-		fmt.Fprintf(out, "| %s | %s | %s |\n", escapePipes(cell.ID), strings.Join(figures, " | "), escapePipes(planOf(cell)))
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "| cell | builds | publications | npm publish | builds while planning |")
+	fmt.Fprintln(out, "|---|---|---|---|---|")
+	for _, cell := range cells {
+		if t := cell.Timing; t != nil {
+			fmt.Fprintf(out, "| %s | %s | %s | %s | %d |\n", escapePipes(cell.ID), statsOf(t.Tasks.Build),
+				statsOf(t.Tasks.Publish), statsOf(t.Tasks.NPMPublish), t.PlanBuilds.Count)
+		}
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "| cell | told | plan |")
+	fmt.Fprintln(out, "|---|---|---|")
+	for _, cell := range cells {
+		if cell.Plan != nil {
+			fmt.Fprintf(out, "| %s | %s | %s |\n", escapePipes(cell.ID), escapePipes(cell.Plan.Told), escapePipes(planOf(cell)))
+		}
 	}
 }
 
@@ -459,6 +469,7 @@ func writeExperimentsPlain(w io.Writer, e Experiments) error {
 		fmt.Fprintf(out, "  state: %s\n", stateOf(cell))
 		if cell.Timing != nil || cell.Plan != nil {
 			fmt.Fprintf(out, "  timing: %s\n", timingOf(cell))
+			fmt.Fprintf(out, "  tasks: %s\n", tasksOf(cell))
 			fmt.Fprintf(out, "  plan: %s\n", planOf(cell))
 		}
 	}

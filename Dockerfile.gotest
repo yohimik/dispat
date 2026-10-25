@@ -83,6 +83,9 @@ FROM runner AS src-tools
 COPY --chown=gopher:gopher tools ./tools
 COPY --chown=gopher:gopher pkg/manifest ./pkg/manifest
 COPY --chown=gopher:gopher pkg/scanner ./pkg/scanner
+# The strings testreport and the site both write about one record, which the
+# site's tests read from the same file.
+COPY --chown=gopher:gopher packages/docs/plugins/test-report/testdata ./packages/docs/plugins/test-report/testdata
 
 # One source stage per package: its own folder plus the workspace providers
 # its go.mod requires, and nothing else. What a stage copies is what busts

@@ -203,42 +203,95 @@ type Cell struct {
 
 // Timing is one release's figures in the vocabulary of the dispat theorem
 // (CCME SPEC.md §13.11), as the harness's lib/timing.py computes them from
-// the fixture's own records of every build and publication.
+// the fixture's own records of every build and upload.
 type Timing struct {
-	// Relation is what a consumer's build waits for in the plan's precedence,
-	// `build` or `publish` (§19.2a).
-	Relation        string  `json:"relation"`
-	PlanningSeconds float64 `json:"planningSeconds"`
-	MakespanSeconds float64 `json:"makespanSeconds"`
-	// Work is Wk, the summed duration of the release's tasks.
+	// Relation is what a consumer's build waits for in the precedence the
+	// release is measured under, as the tool's configuration declares it:
+	// `publish`, `build` or `none` (§19.2a).
+	Relation string `json:"relation"`
+	// ObservedRelation is the strongest relation every consumer build in the
+	// records honoured. Empty where no consumer built.
+	ObservedRelation string         `json:"observedRelation,omitempty"`
+	ConsumerBuilds   ConsumerBuilds `json:"consumerBuilds"`
+	// Violations is every edge of the declared precedence the records
+	// contradict: a task that started before one it follows had ended.
+	Violations      []Edge     `json:"violations"`
+	PlanningSeconds float64    `json:"planningSeconds"`
+	PlanBuilds      PlanBuilds `json:"planBuilds"`
+	MakespanSeconds float64    `json:"makespanSeconds"`
+	// IdleSeconds is the part of the makespan no task was running in.
+	IdleSeconds float64 `json:"idleSeconds"`
+	// Work is Wk, the summed duration of the release's builds and uploads.
 	Work float64 `json:"work"`
 	// CriticalPath is Lk, the duration of the longest precedence chain.
 	CriticalPath float64 `json:"criticalPath"`
-	// Parallelism is s, the most tasks the release ran at one instant.
+	// Parallelism is s as the release was seen to use it: the most tasks
+	// running at one instant, not the theorem's count of slots.
 	Parallelism int `json:"parallelism"`
-	// Bound is max(Lk, Wk / s), which no execution of the plan beats.
+	// Bound is max(Lk, Wk / s).
 	Bound float64 `json:"bound"`
 	// Ratio is the makespan over the bound.
 	Ratio float64 `json:"ratio"`
-	// CriticalChain names the tasks on the longest chain, `core build` first.
-	CriticalChain  []string       `json:"criticalChain"`
-	Tasks          TimedTasks     `json:"tasks"`
-	PublishTimedAt PublishSources `json:"publishTimedAt"`
+	// CriticalChain names the tasks on the longest chain, the first first.
+	CriticalChain []string   `json:"criticalChain"`
+	Tasks         TaskKinds  `json:"tasks"`
+	TaskTimes     []TaskTime `json:"taskTimes"`
+	// Untimed, Unknown and Straddling are what the records failed to cover:
+	// shipped packages without a build or an accepted upload, packages
+	// outside the graph, and records crossing the release's edge. A record
+	// with any of them is refused.
+	Untimed    []string `json:"untimed"`
+	Unknown    []string `json:"unknown"`
+	Straddling int      `json:"straddling"`
 }
 
-// TimedTasks counts the release's tasks by kind. A version task is a tool's
-// version command timed as a whole, where the tool has one of its own.
-type TimedTasks struct {
-	Version int `json:"version"`
-	Build   int `json:"build"`
-	Publish int `json:"publish"`
+// ConsumerBuilds counts the provider-to-consumer pairs that both built, and
+// how many of the consumer builds started after the provider's build and
+// after its publication.
+type ConsumerBuilds struct {
+	Edges        int `json:"edges"`
+	AfterBuild   int `json:"afterBuild"`
+	AfterPublish int `json:"afterPublish"`
 }
 
-// PublishSources says where each package's publication was timed: around
-// its `npm publish`, or at the registry for a tool that publishes in-process.
-type PublishSources struct {
-	NPM      int `json:"npm"`
-	Registry int `json:"registry"`
+// Edge is one precedence edge, `core build` before `ui build`.
+type Edge struct {
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+
+// PlanBuilds is the builds the plan command ran, inside its own duration.
+type PlanBuilds struct {
+	Count   int     `json:"count"`
+	Seconds float64 `json:"seconds"`
+}
+
+// TaskKinds is the release's tasks by kind: the builds and the uploads that
+// Wk is made of, and beside them the `npm publish` processes where the tool
+// ran them, which are no part of Wk.
+type TaskKinds struct {
+	Build      TaskStats `json:"build"`
+	Publish    TaskStats `json:"publish"`
+	NPMPublish TaskStats `json:"npmPublish"`
+}
+
+// TaskStats is one kind's tasks: how many, their summed, median and longest
+// durations, and how many were refused or exited non-zero.
+type TaskStats struct {
+	Count   int     `json:"count"`
+	Seconds float64 `json:"seconds"`
+	Median  float64 `json:"median"`
+	Max     float64 `json:"max"`
+	Failed  int     `json:"failed"`
+}
+
+// TaskTime is one task: its package, its kind, when it started after the
+// release did, and how long it ran.
+type TaskTime struct {
+	Package string  `json:"package"`
+	Task    string  `json:"task"`
+	Start   float64 `json:"start"`
+	Seconds float64 `json:"seconds"`
 }
 
 // Plan is what a tool's own plan command said it would release, and how that
@@ -246,6 +299,9 @@ type PublishSources struct {
 // which packages and versions differ, never which tool is right.
 type Plan struct {
 	Packages []PlannedPackage `json:"packages"`
+	// Told is what the tool read of the pending change: the commit subject,
+	// or the pending changesets for changesets.
+	Told string `json:"told"`
 	// Reference is the dispat cell this plan was compared with. Empty for
 	// dispat's own cell and where no dispat cell recorded a plan.
 	Reference string `json:"reference,omitempty"`

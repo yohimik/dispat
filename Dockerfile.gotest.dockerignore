@@ -46,6 +46,12 @@ packages/docs/*
 !packages/docs/dispat.yaml
 !packages/docs/docs
 !packages/docs/demo
+# The texts testreport's tests hold to the site's (tools/testreport/timing_test.go).
+!packages/docs/plugins
+packages/docs/plugins/*
+!packages/docs/plugins/test-report
+packages/docs/plugins/test-report/*
+!packages/docs/plugins/test-report/testdata
 packages/docs/demo/illustration/node_modules
 packages/docs/demo/illustration/out
 
