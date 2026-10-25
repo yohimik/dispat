@@ -16,7 +16,7 @@ import "strings"
 func parseGemfile(rel string, data []byte) (Manifest, error) {
 	m := Manifest{Path: rel, Ecosystem: EcosystemRubyGems, Root: isRoot(rel)}
 	kind := KindDependencies
-	for _, raw := range strings.Split(string(data), "\n") {
+	for raw := range strings.SplitSeq(string(data), "\n") {
 		line := rubyStripComment(raw)
 		if dev, ok := gemfileGroup(line); ok {
 			kind = KindDependencies

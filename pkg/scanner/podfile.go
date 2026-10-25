@@ -15,7 +15,7 @@ import "strings"
 func parsePodfile(rel string, data []byte) (Manifest, error) {
 	m := Manifest{Path: rel, Ecosystem: EcosystemCocoaPods, Root: isRoot(rel)}
 	kind := KindDependencies
-	for _, raw := range strings.Split(string(data), "\n") {
+	for raw := range strings.SplitSeq(string(data), "\n") {
 		line := rubyStripComment(raw)
 		if name, ok := podfileTarget(line); ok {
 			kind = KindDependencies

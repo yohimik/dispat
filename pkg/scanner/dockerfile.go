@@ -25,7 +25,7 @@ func parseDockerfile(rel string, data []byte) (Manifest, error) {
 		Root:      isRoot(rel),
 	}
 	for _, ref := range manifest.DockerfileRefs(strings.Split(string(data), "\n")) {
-		parsed := manifest.ParseImageRef(ref.Text)
+		parsed := manifest.ParseImageRef(strings.Clone(ref.Text))
 		m.Deps = append(m.Deps, DeclaredDep{
 			Name:  parsed.Repository,
 			Range: parsed.Tag,

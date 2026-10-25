@@ -50,13 +50,13 @@ func pbxSettings(data []byte, wanted ...string) map[string]string {
 		want[key] = true
 	}
 	found := make(map[string]string, len(wanted))
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		key, value, _, ok := pbxSetting(line)
 		if !ok || !want[key] || value == "" {
 			continue
 		}
 		if _, seen := found[key]; !seen {
-			found[key] = value
+			found[key] = strings.Clone(value)
 		}
 	}
 	return found

@@ -28,7 +28,7 @@ var gemspecDependencyMethods = []struct {
 // evaluate.
 func parseGemspec(rel string, data []byte) (Manifest, error) {
 	m := Manifest{Path: rel, Ecosystem: EcosystemRubyGems, Root: isRoot(rel)}
-	for _, raw := range strings.Split(string(data), "\n") {
+	for raw := range strings.SplitSeq(string(data), "\n") {
 		line := rubyStripComment(raw)
 		if attr, valueStart, ok := rubyAttrAssignment(line); ok {
 			start, end, quoted := rubyQuoted(line, valueStart)
@@ -42,11 +42,11 @@ func parseGemspec(rel string, data []byte) (Manifest, error) {
 			switch attr {
 			case "name":
 				if m.Name == "" {
-					m.Name = value
+					m.Name = strings.Clone(value)
 				}
 			case "version":
 				if m.Version == "" {
-					m.Version = value
+					m.Version = strings.Clone(value)
 				}
 			}
 			continue

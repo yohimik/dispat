@@ -194,15 +194,18 @@ func rubyDeclaration(line string, args int, kind Kind) (DeclaredDep, bool) {
 	if !ok {
 		return DeclaredDep{}, false
 	}
-	dep := DeclaredDep{Name: line[start:end], Kind: kind}
-	if dep.Name == "" {
+	if start == end {
 		return DeclaredDep{}, false
 	}
+	dep := DeclaredDep{Name: strings.Clone(line[start:end]), Kind: kind}
 
 	// Any number of requirements may follow the name, each its own argument:
 	// `gem 'pg', '>= 0.18', '< 2.0'`. They are one constraint, so they are
 	// reported as one range.
-	var requirements []string
+	var (
+		requirements strings.Builder
+		count        int
+	)
 	for i := end + 1; i < len(line); {
 		for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
 			i++
@@ -214,10 +217,14 @@ func rubyDeclaration(line string, args int, kind Kind) (DeclaredDep, bool) {
 		if !ok {
 			break // an option hash, not another requirement
 		}
-		requirements = append(requirements, line[start:end])
+		if count > 0 {
+			requirements.WriteString(", ")
+		}
+		requirements.WriteString(line[start:end])
+		count++
 		i = end + 1
 	}
-	if text := strings.Join(requirements, ", "); isRubyLiteral(text) {
+	if text := requirements.String(); isRubyLiteral(text) {
 		dep.Range = text
 	}
 
@@ -225,7 +232,7 @@ func rubyDeclaration(line string, args int, kind Kind) (DeclaredDep, bool) {
 	// workspace signal either format carries.
 	if start, end, ok := rubyOption(line, "path"); ok {
 		if path := line[start:end]; isRubyLiteral(path) {
-			dep.LocalPath = path
+			dep.LocalPath = strings.Clone(path)
 		}
 	}
 	return dep, true

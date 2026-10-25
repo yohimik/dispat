@@ -38,9 +38,12 @@ func parseRequirements(rel string, data []byte) (Manifest, error) {
 	m := Manifest{Path: rel, Ecosystem: EcosystemPython, Root: isRoot(rel)}
 	reqs, editables := requirementLines(string(data))
 	for _, line := range reqs {
-		m.Deps = append(m.Deps, pep508Dep(line, kind))
+		dep := pep508Dep(line, kind)
+		dep.Range, dep.LocalPath = strings.Clone(dep.Range), strings.Clone(dep.LocalPath)
+		m.Deps = append(m.Deps, dep)
 	}
 	for _, p := range editables {
+		p = strings.Clone(p)
 		base := filepath.Base(strings.TrimRight(p, "/"))
 		m.Deps = append(m.Deps, DeclaredDep{Name: base, Kind: kind, LocalPath: p})
 	}

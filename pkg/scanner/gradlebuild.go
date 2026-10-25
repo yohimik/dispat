@@ -36,7 +36,7 @@ func parseGradleBuild(rel string, data []byte) (Manifest, error) {
 		inComment    bool
 		masked, line string
 	)
-	for _, raw := range strings.Split(string(data), "\n") {
+	for raw := range strings.SplitSeq(string(data), "\n") {
 		line = raw
 		masked, inComment = gradleMask(raw, inComment)
 
@@ -47,17 +47,17 @@ func parseGradleBuild(rel string, data []byte) (Manifest, error) {
 		switch {
 		case gradleScopeHas(scope, "defaultConfig"):
 			if v, ok := gradleProperty(line, masked, "applicationId"); ok && m.Name == "" {
-				m.Name = v
+				m.Name = strings.Clone(v)
 			}
 			if v, ok := gradleProperty(line, masked, "versionName"); ok && m.Version == "" {
-				m.Version = v
+				m.Version = strings.Clone(v)
 			}
 			if v, ok := gradleProperty(line, masked, "versionCode"); ok && m.BuildNumber == "" {
-				m.BuildNumber = v
+				m.BuildNumber = strings.Clone(v)
 			}
 		case gradleScopeTop(scope) == "android":
 			if v, ok := gradleProperty(line, masked, "namespace"); ok && namespace == "" {
-				namespace = v
+				namespace = strings.Clone(v)
 			}
 		case gradleScopeHas(scope, "dependencies") && !gradleScopeHas(scope, "buildscript"):
 			if dep, ok := gradleDependency(line, masked); ok {
@@ -260,7 +260,7 @@ func gradleDependency(line, masked string) (DeclaredDep, bool) {
 		if name == "" {
 			return DeclaredDep{}, false
 		}
-		return DeclaredDep{Name: name, Kind: kind}, true
+		return DeclaredDep{Name: strings.Clone(name), Kind: kind}, true
 	}
 
 	// Anything that is not a string literal here is a version-catalog
@@ -273,7 +273,7 @@ func gradleDependency(line, masked string) (DeclaredDep, bool) {
 	if !isGradleLiteral(coordinate) {
 		return DeclaredDep{}, false
 	}
-	return gradleCoordinateDep(coordinate, kind)
+	return gradleCoordinateDep(strings.Clone(coordinate), kind)
 }
 
 // gradleProjectPath reads the argument of a project(…) reference in both the

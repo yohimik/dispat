@@ -247,6 +247,11 @@ type Scannerx interface {
 
 // parseFunc parses one manifest file's bytes. rel is the file's path
 // relative to the scanned folder (slash-separated).
+//
+// The returned manifest outlives the bytes, held for a whole run, so a parser
+// that slices its values out of the file's text clones each one it keeps: a
+// substring keeps all of the text it was cut from alive, and a project file
+// runs to megabytes.
 type parseFunc func(rel string, data []byte) (Manifest, error)
 
 // parsers maps each format pkg/manifest recognises onto its reader. The file
