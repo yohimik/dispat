@@ -133,7 +133,7 @@ read it back as a release tag.
     publish while another did, a single history first re-synchronizes the `commit.include` paths: the unpublished
     packages' tracked files and those paths go back to HEAD, leaving published folders and changelogs alone, and the
     published packages' `syncLock` scripts run again with an environment naming only what published
-    (`release.SettledEnv`). A re-synchronization that does not finish restores the paths again and leaves them out of
+    (`release.SettledEnvs`). A re-synchronization that does not finish restores the paths again and leaves them out of
     the commit, with `E223`. dispat then makes one release commit staging all published packages, then places tags on
     that commit or on a package's exported `PACKAGE_<KEY>` commit. The push follows when `commit.push` is enabled. It
     pushes the branch first, then the run's tags, skipping and warning about any tag already on the remote. GitHub
