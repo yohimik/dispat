@@ -66,6 +66,11 @@ type snapshots struct {
 	// artefact was built from, and "the working tree as it was then" has no
 	// other name once the tree has moved on.
 	consumed map[string]string
+	// indexPaths is where each repository keeps its index, by folder. Git is
+	// asked once per repository because the answer does not move during a
+	// run, and every capture runs under the exclusive guard, where one
+	// process fewer is one wait fewer for every frame.
+	indexPaths map[string]string
 }
 
 // capturedState is one repository's last capture: what its working state
@@ -77,7 +82,8 @@ type capturedState struct {
 
 // newSnapshots opens an empty memory of captures.
 func newSnapshots() *snapshots {
-	return &snapshots{captured: map[string]capturedState{}, consumed: map[string]string{}}
+	return &snapshots{captured: map[string]capturedState{}, consumed: map[string]string{},
+		indexPaths: map[string]string{}}
 }
 
 // rememberConsumedSnapshot records the prepared state one package's build was
@@ -124,7 +130,11 @@ func (c *Coordinator) PreparedSnapshot(packageName string) string {
 // every path, including the ones that fail, because an index left behind in a
 // temporary folder is a copy of somebody's working state.
 func (s *snapshots) capture(ctx context.Context, git *gitx.LocalGitx, source Source, log zerolog.Logger) (string, error) {
-	index, done, err := copyRepositoryIndex(ctx, git)
+	real, err := s.resolveIndexPath(ctx, git)
+	if err != nil {
+		return "", err
+	}
+	index, done, err := copyRepositoryIndex(git, real)
 	if err != nil {
 		return "", err
 	}
@@ -208,6 +218,24 @@ func (s *snapshots) remember(dir, tree, commit string) {
 	s.captured[dir] = capturedState{tree: tree, commit: commit}
 }
 
+// resolveIndexPath is where one repository keeps its real index.
+func (s *snapshots) resolveIndexPath(ctx context.Context, git *gitx.LocalGitx) (string, error) {
+	s.mu.Lock()
+	path, isKnown := s.indexPaths[git.Dir]
+	s.mu.Unlock()
+	if isKnown {
+		return path, nil
+	}
+	path, err := git.IndexPath(ctx)
+	if err != nil {
+		return "", fmt.Errorf("execution: locating the index of %s: %w", git.Dir, err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.indexPaths[git.Dir] = path
+	return path, nil
+}
+
 // copyRepositoryIndex copies a repository's real index to a temporary file and
 // answers its path together with the removal of it.
 //
@@ -217,11 +245,7 @@ func (s *snapshots) remember(dir, tree, commit string) {
 // now ignored. Planning refuses a repository with no commits before any
 // snapshot is taken. The removal is answered rather than deferred here so the
 // caller holds it exactly as long as it uses the copy.
-func copyRepositoryIndex(ctx context.Context, git *gitx.LocalGitx) (string, func(), error) {
-	real, err := git.IndexPath(ctx)
-	if err != nil {
-		return "", nil, fmt.Errorf("execution: locating the index of %s: %w", git.Dir, err)
-	}
+func copyRepositoryIndex(git *gitx.LocalGitx, real string) (string, func(), error) {
 	folder, err := os.MkdirTemp("", "dispat-snapshot-index-")
 	if err != nil {
 		return "", nil, fmt.Errorf("execution: preparing a temporary index: %w", err)

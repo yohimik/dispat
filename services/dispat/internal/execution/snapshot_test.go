@@ -35,7 +35,7 @@ type snapshotFixture struct {
 	head string
 }
 
-func newSnapshotFixture(t *testing.T) *snapshotFixture {
+func newSnapshotFixture(t testing.TB) *snapshotFixture {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -54,14 +54,14 @@ func newSnapshotFixture(t *testing.T) *snapshotFixture {
 	return fixture
 }
 
-func (f *snapshotFixture) run(t *testing.T, args ...string) string {
+func (f *snapshotFixture) run(t testing.TB, args ...string) string {
 	t.Helper()
 	out, err := exec.Command("git", append([]string{"-C", f.dir}, args...)...).CombinedOutput()
 	require.NoError(t, err, "git %v: %s", args, out)
 	return string(out)
 }
 
-func (f *snapshotFixture) write(t *testing.T, name, body string) {
+func (f *snapshotFixture) write(t testing.TB, name, body string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(filepath.Join(f.dir, name), []byte(body), 0o644))
 }
@@ -295,4 +295,41 @@ func TestACapturedStateSurvivesOneRacingWriter(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, tree, 40)
+}
+
+// TestSnapshotAsksForTheIndexOncePerRepository: where a repository keeps its
+// index does not move during a run, so a capture after the first costs the
+// staging and the tree and nothing else. It is all under the exclusive guard,
+// where every process is a wait for every frame.
+func TestSnapshotAsksForTheIndexOncePerRepository(t *testing.T) {
+	fixture := newSnapshotFixture(t)
+	captures := newSnapshots()
+	first, err := captures.capture(t.Context(), fixture.git, fixture.source(), zerolog.Nop())
+	require.NoError(t, err)
+	before := gitx.GitInvocations()
+
+	again, err := captures.capture(t.Context(), fixture.git, fixture.source(), zerolog.Nop())
+
+	require.NoError(t, err)
+	assert.Equal(t, first, again)
+	assert.Equal(t, uint64(2), gitx.GitInvocations()-before, "git add and git write-tree")
+}
+
+// BenchmarkSnapshotCaptureUnchanged captures one repository whose working
+// tree does not move, which is what every dispatch after the first does in a
+// run of many packages. git-invocations/op counts the processes one capture
+// starts.
+func BenchmarkSnapshotCaptureUnchanged(b *testing.B) {
+	fixture := newSnapshotFixture(b)
+	captures := newSnapshots()
+	_, err := captures.capture(context.Background(), fixture.git, fixture.source(), zerolog.Nop())
+	require.NoError(b, err)
+	before := gitx.GitInvocations()
+	captured := 0
+	for b.Loop() {
+		_, err := captures.capture(context.Background(), fixture.git, fixture.source(), zerolog.Nop())
+		require.NoError(b, err)
+		captured++
+	}
+	b.ReportMetric(float64(gitx.GitInvocations()-before)/float64(captured), "git-invocations/op")
 }
