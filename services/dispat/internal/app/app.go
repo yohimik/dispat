@@ -160,6 +160,7 @@ func (a *App) discovery() workspaceDiscovery {
 // now are, the way alignDeclaredList keeps a.cfg in step with disk.
 func (a *App) forgetDiscovery() {
 	a.discoveryOnce, a.discovered = sync.Once{}, workspaceDiscovery{}
+	a.pkgsOnce, a.pkgs, a.pkgsErr = sync.Once{}, nil, nil
 }
 
 // packages is the discovered workspace. A single history answers with every
