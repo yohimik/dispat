@@ -3352,7 +3352,11 @@ durable recovery evidence. This does not identify a unique schedule, representat
 (§28.10) also compiles to a graph. Write `Wk = sum(d_i)` for its task work and `Lk` for the greatest sum of
 nonnegative durations on a precedence chain. A modeled record task's duration is included in `d_i`; extra
 protocol latency not represented by a task is outside the graph. The following bounds concern failure-free task
-makespan. Graph construction, scheduler decisions, transfers and task payload memory have their own costs.
+makespan. For arbitrary finite DAGs, the exact global task-time minimum `T = Lk` compares schedules of one
+already compiled graph with fixed durations, zero overhead and enough compatible capacity to start every
+ready task immediately. A finite one-pool capacity yields the factor and asymptotic bound of clause 2,
+not a general exact optimum. Semantic planning, graph compilation, scheduler bookkeeping memory and recovery
+have separate costs and no global minimum claim here.
 
 1. **Lower bounds.** Suppose every positive-duration task consumes one of `s` identical slots throughout its
    execution, where `s` is a positive integer. Every schedule has makespan at least
@@ -3546,8 +3550,9 @@ durations beforehand: by induction, each final predecessor completion makes its 
 Conversely, induction in that same order shows that every feasible schedule starts `i` no earlier than `E_i`:
 each predecessor starts no earlier than its own `E_j` and finishes no earlier than `E_j + d_j`. Thus `E` is the
 unique componentwise earliest-start vector, and starting
-every ready task immediately realizes it. Its makespan is `max_i(E_i + d_i) = Lk`, the minimum possible for this
-graph. For an empty graph, define the maximum over tasks and its makespan as zero. This characterizes the
+every ready task immediately realizes it. Its makespan is `max_i(E_i + d_i) = Lk`, the global minimum among
+precedence-feasible schedules of this fixed graph. For an empty graph, define the maximum over tasks and its
+makespan as zero. This characterizes the
 maximal-parallel policy for arbitrary finite task counts, without a configured
 task-count cap. It does not make the makespan-optimal schedule unique: independent tasks of durations 3 and 1
 finish by time 3 if both start at zero, and also if the shorter task starts at time 1. It does not select a

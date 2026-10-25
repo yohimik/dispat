@@ -233,6 +233,10 @@ the lock back before every publication of a release that delegates nothing as we
 ## 2026-10-25: The dispat theorem
 
 Section 13.11 now gives a scoped theorem for the failure-free task makespan of a compiled directed acyclic graph.
+Its exact general minimum `T = Lk` compares schedules of one compiled DAG with fixed durations, zero overhead
+and enough compatible capacity to start every ready task immediately.
+Finite one-pool capacity has a factor and asymptotic bound, not a general exact optimum. Full planning,
+compilation, scheduler bookkeeping memory and recovery have no global minimum claim from this theorem.
 A fixed history, configuration, inventory and execution policy determine one semantic plan, but not one schedule
 or implementation. With identical interchangeable slots and zero scheduling and transfer time, the span `Lk` and
 slot work `Wk / s` lower-bound every schedule. A work-conserving list schedule finishes within
