@@ -13,6 +13,16 @@ export DENY_DIR=/deny
 export EXPERIMENT_PACKAGES="core cli ui api theme docs"
 export EXPERIMENT_BASELINE=1.0.0
 
+# The timing experiment's records, one JSON line per build, per `npm publish`
+# and per accepted upload, appended by the fixture's build script, the npm
+# shim and the proxy. The wide scenario's packages are the fixture's to name.
+if [ "${EXPERIMENT:-}" = timing ]; then
+  export EXPERIMENT_TIMING=$OUT/timing.jsonl
+  if [ "${SCENARIO:-}" = wide ]; then
+    EXPERIMENT_PACKAGES=$(python3 /exp/lib/fixture.py --packages wide)
+  fi
+fi
+
 mkdir -p "$DENY_DIR" /registry
 
 # A deliberate registry refusal is one fault. npm retries a 502 three times
@@ -35,9 +45,9 @@ say() { printf '\n== %s\n' "$*"; }
 PHASE=initial
 
 # step <kind>:<name> <command...>: run one step of the protocol, recording its
-# exit code, kind, phase and duration in steps.jsonl beside the observation
-# taken right after it. The command's output goes to the transcript and to its
-# own file.
+# exit code, kind, phase, duration and wall-clock start and end in
+# steps.jsonl beside the observation taken right after it. The command's
+# output goes to the transcript and to its own file.
 #
 # The kind is what the catch-up count is made of, so it is stated for every
 # step rather than guessed from the command:
@@ -75,7 +85,8 @@ step() {
   STEP_RC[$name]=$rc
   jq -nc --arg s "$name" --argjson e "$rc" --arg k "$kind" --arg p "$PHASE" \
     --argjson t0 "$started" --argjson t1 "$ended" \
-    '{step: $s, exit: $e, kind: $k, phase: $p, seconds: ((($t1 - $t0) * 100 | round) / 100)}' \
+    '{step: $s, exit: $e, kind: $k, phase: $p, seconds: ((($t1 - $t0) * 100 | round) / 100),
+      started: $t0, ended: $t1}' \
     >> "$OUT/steps.jsonl" || {
       echo "step $name could not be recorded; the run is not a record"
       exit 1
@@ -264,7 +275,16 @@ fixture() { # <flavour> [--feature] [--colleague]
   [ -e node_modules ] || ln -s /opt/tools/node_modules node_modules
 }
 
-# baseline_publish: all six at the baseline, straight to the registry.
+# timing_fixture <flavour>: the scenario's shape with its pending minor to core.
+timing_fixture() {
+  if [ "$SCENARIO" = wide ]; then
+    fixture "$1" --feature --wide
+  else
+    fixture "$1" --feature
+  fi
+}
+
+# baseline_publish: every package at the baseline, straight to the registry.
 #
 # A package whose manifest a later fixture commit changed, such as a hold that
 # marks it private, publishes the manifest its baseline tag recorded: npm
@@ -375,6 +395,68 @@ with_shim() {
 
 colleague_sha() { cat "$OUT/colleague.sha" 2>/dev/null || echo ""; }
 
+# ---- the timing records ---------------------------------------------------
+
+# with_npm_shim <command...>: run a release command with the npm shim first on
+# PATH, so every `npm publish` the tool makes is timed into EXPERIMENT_TIMING.
+#
+# The shim stands in /work/node_modules/.bin rather than a folder of its own:
+# nx runs npm under npm-run-path, which puts every node_modules/.bin above the
+# working directory and then node's own folder, where the real npm is, ahead
+# of PATH. The fixtures sit in /work, so that folder is one nx reaches before
+# node's. It exists only for the command.
+with_npm_shim() {
+  local shim=/work/node_modules/.bin rc=0
+  mkdir -p "$shim" && ln -sf /exp/lib/npm-shim "$shim/npm"
+  PATH=$shim:$PATH "$@" || rc=$?
+  rm -rf /work/node_modules
+  return "$rc"
+}
+
+# record_plan <query step>: the tool's plan, read from that step's output into
+# plan.json as {package: next version}.
+record_plan() {
+  python3 /exp/lib/plan.py "$TOOL" "$OUT/step-$1.log" > "$OUT/plan.json" || {
+    echo "the plan could not be read from step $1; the run is not a record"
+    exit 1
+  }
+  echo "   plan: $(jq -r 'to_entries | map(.key + "=" + .value) | join(" ")' "$OUT/plan.json")"
+}
+
+# measure_timing <relation> <observation>: the release's figures into
+# timing.json, from the steps, the timing records and the clone's manifests.
+# The relation is what a consumer's build waits for in this tool: its
+# providers' builds or their publications.
+measure_timing() {
+  python3 /exp/lib/timing.py --steps "$OUT/steps.jsonl" --records "$EXPERIMENT_TIMING" \
+    --repo "$REPO" --observation "$OUT/observe-$2.json" --relation "$1" > "$OUT/timing.json" || {
+      echo "the timing records could not be measured; the run is not a record"
+      exit 1
+    }
+  jq -r '"   timing: planning \(.planningSeconds)s, makespan \(.makespanSeconds)s, Wk \(.work)s, Lk \(.criticalPath)s, s \(.parallelism), bound \(.bound)s, ratio \(.ratio)"' \
+    "$OUT/timing.json"
+  jq -r '"   critical chain: " + (.criticalChain | join(" -> "))' "$OUT/timing.json"
+}
+
+# timing_asserts <observation>: one set of sentences for every tool, about the
+# release the plan described. The steps of the release are `run` and
+# `run-<part>`.
+# shellcheck disable=SC2016 # $o, $plan and $base are jq's own variables
+timing_asserts() {
+  local observation=$OUT/observe-$1.json
+  assert "the plan named the packages it would release" jq -e 'length > 0' "$OUT/plan.json"
+  assert "the release exited 0" jq -e -s \
+    '[.[] | select(.step == "run" or (.step | startswith("run-")))] | length > 0 and all(.exit == 0)' "$OUT/steps.jsonl"
+  assert "the release shipped every package its plan named, at the version it named" \
+    jq -e --slurpfile plan "$OUT/plan.json" '. as $o | $plan[0] | to_entries | all($o.packages[.key].registry == .value)' "$observation"
+  assert "the release shipped nothing its plan did not name" \
+    jq -e --slurpfile plan "$OUT/plan.json" --arg base "$EXPERIMENT_BASELINE" \
+      '.packages | to_entries | all(.key as $p | ($plan[0] | has($p)) or .value.registry == $base)' "$observation"
+  assert "every package that shipped is consistent" \
+    jq -e --arg base "$EXPERIMENT_BASELINE" '.packages | to_entries | all(.value.registry == $base or .value.state == "consistent")' "$observation"
+  assert "every package that shipped was timed building and publishing" jq -e '.untimed == []' "$OUT/timing.json"
+}
+
 # release_sha <tag>: the commit a tag the run wrote names, or empty when the
 # run wrote none. Empty is a real answer here (a tool that never tagged), so
 # every assertion about it guards rather than interpolating an empty string
@@ -411,11 +493,11 @@ lerna_listed() { grep -v '^lerna' "$1" | awk 'NF { print $1 }'; }
 # The packages a changesets status step would bump, one per line, from the
 # `  - <package> -> <version>` rows its verbose listing prints under each bump
 # type.
-changesets_listed() { sed -nE 's/^[[:space:]]+- ([a-z]+) -> [0-9].*$/\1/p' "$1"; }
+changesets_listed() { sed -nE 's/^[[:space:]]+- ([a-z][a-z0-9-]*) -> [0-9].*$/\1/p' "$1"; }
 
 # The packages an nx step would version, one per line, from the line nx prints
 # for every manifest it writes (or would write, under --dry-run).
-nx_listed() { sed -nE 's/^([a-z]+) .*New version [0-9]+\.[0-9]+\.[0-9]+.*$/\1/p' "$1" | sort -u; }
+nx_listed() { sed -nE 's/^([a-z][a-z0-9-]*) .*New version [0-9]+\.[0-9]+\.[0-9]+.*$/\1/p' "$1" | sort -u; }
 
 # plan_is_empty <query step>: the tool's own answer, read from that step,
 # that it would release nothing next. Each tool says it its own way: dispat
@@ -619,6 +701,18 @@ keep_registry_logs() {
   cp /registry/verdaccio.log /registry/failproxy.log "$OUT/registry/" 2>/dev/null || true
 }
 
+# validate_timing: a timing cell measured a release, or the run failed. A
+# cell whose release left no build or no publication in the records measured
+# the harness rather than the tool, and its row would read as a tool that did
+# no work.
+validate_timing() {
+  [ "$EXPERIMENT" = timing ] || return 0
+  jq -e '.tasks.build > 0 and .tasks.publish > 0' "$OUT/timing.json" > /dev/null 2>&1 || {
+    echo "the timing records hold no build or no publication of the release; the run is not a record"
+    exit 1
+  }
+}
+
 # validate_fault: the fault this run armed happened, or the run failed.
 #
 # A check on the harness rather than on the tool, for the reason
@@ -637,6 +731,7 @@ verdict() {
   keep_registry_logs
   validate_records
   validate_fault
+  validate_timing
   local checks recovery
   if [ "${#CHECKS[@]}" -eq 0 ]; then
     # A protocol that recorded nothing has not passed. The empty array read as
@@ -649,19 +744,26 @@ verdict() {
   # Present only when a catch-up phase ran, so a protocol that measures none
   # writes the verdict every earlier record has.
   recovery=$(recovery_summary)
+  # The plan and the figures, present only in the cells that measure them.
+  local plan=null timing=null
+  [ -s "$OUT/plan.json" ] && plan=$(jq -c '{packages: .}' "$OUT/plan.json")
+  [ -s "$OUT/timing.json" ] && timing=$(jq -c 'del(.untimed)' "$OUT/timing.json")
   jq -n --arg experiment "$EXPERIMENT" --arg tool "$TOOL" --arg scenario "$SCENARIO" \
         --arg dispat "$(dispat_version)" \
         --arg binaryId "${EXPERIMENTS_DISPAT_BINARY_ID:-unknown}" \
         --arg binarySha256 "$(cat /etc/dispat-experiments-binary.sha256 2>/dev/null || echo unknown)" \
         --argjson checks "$checks" \
         --argjson recovery "${recovery:-null}" \
+        --argjson plan "$plan" --argjson timing "$timing" \
         --slurpfile steps "$OUT/steps.jsonl" \
         '{experiment: $experiment, tool: $tool, scenario: $scenario, dispat: $dispat,
           binaryId: $binaryId,
           binarySha256: $binarySha256,
           steps: $steps, checks: $checks,
           passed: ([$checks[] | select(.ok == false)] | length == 0)}
-         + (if $recovery == null then {} else {recovery: $recovery} end)' > "$OUT/verdict.json"
+         + (if $recovery == null then {} else {recovery: $recovery} end)
+         + (if $plan == null then {} else {plan: $plan} end)
+         + (if $timing == null then {} else {timing: $timing} end)' > "$OUT/verdict.json"
   if [ -n "$recovery" ]; then
     jq -r '.recovery | "CATCH-UP: \(.runs) run(s), \(.releaseCommands) release and \(.manualCommands) manual command(s), " +
            (if .converged then "converged" else "did not converge" end)' "$OUT/verdict.json"

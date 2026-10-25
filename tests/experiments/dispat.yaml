@@ -40,7 +40,7 @@ scripts:
   # says what happened, and the caller only needs to know whether it held.
   cell: |
     set -eu
-    : "${EXPERIMENT:?EXPERIMENT is required (orphan, midrelease, propagation)}"
+    : "${EXPERIMENT:?EXPERIMENT is required (orphan, midrelease, propagation, timing)}"
     : "${TOOL:?TOOL is required (lerna, nx, changesets, dispat)}"
     ROOT=$(git rev-parse --show-toplevel)
     RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
@@ -79,6 +79,11 @@ scripts:
     for scenario in build publish build-distributed deselected held deferred deferred-build; do
       for tool in dispat lerna nx changesets; do
         echo "propagation $tool $scenario"
+      done
+    done
+    for scenario in six wide; do
+      for tool in dispat lerna nx changesets; do
+        echo "timing $tool $scenario"
       done
     done
   # Every cell of the campaign, four at a time. A completed campaign can be

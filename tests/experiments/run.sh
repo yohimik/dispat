@@ -3,11 +3,11 @@
 #
 #   run.sh <experiment> <tool> [scenario]
 #
-# experiments: orphan, midrelease, propagation
+# experiments: orphan, midrelease, propagation, timing
 # scenarios: midrelease takes clean (default) or conflict; propagation takes
 # build (default), publish, build-distributed, deselected, held, deferred or
-# deferred-build; orphan records no scenario. Every scenario runs under every
-# tool.
+# deferred-build; timing takes six (default) or wide; orphan records no
+# scenario. Every scenario runs under every tool.
 #
 # Everything the run leaves behind goes under /results/<experiment>[-<scenario>]-<tool>/:
 # the transcript, every step's output, one observation per step, the git
@@ -29,8 +29,8 @@ TOOL=${2:?tool}
 # environment, and an experiment that interpolated them unchecked would run
 # whatever it was handed.
 case "$EXPERIMENT" in
-  orphan|midrelease|propagation) ;;
-  *) echo "no such experiment: $EXPERIMENT (orphan, midrelease, propagation)" >&2; exit 2 ;;
+  orphan|midrelease|propagation|timing) ;;
+  *) echo "no such experiment: $EXPERIMENT (orphan, midrelease, propagation, timing)" >&2; exit 2 ;;
 esac
 case "$TOOL" in
   lerna|nx|changesets|dispat) ;;
@@ -46,6 +46,13 @@ elif [ "$EXPERIMENT" = midrelease ]; then
   case "$SCENARIO" in
     clean|conflict) ;;
     *) echo "no such scenario: $SCENARIO (clean, conflict)" >&2; exit 2 ;;
+  esac
+  OUT=/results/$EXPERIMENT-$SCENARIO-$TOOL
+elif [ "$EXPERIMENT" = timing ]; then
+  SCENARIO=${3:-six}
+  case "$SCENARIO" in
+    six|wide) ;;
+    *) echo "no such scenario: $SCENARIO (six, wide)" >&2; exit 2 ;;
   esac
   OUT=/results/$EXPERIMENT-$SCENARIO-$TOOL
 else
