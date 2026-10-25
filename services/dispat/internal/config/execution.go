@@ -51,7 +51,7 @@ type (
 // refusing it for being exactly what it is. Everything else about the load is
 // the same, the `execution` object's own validation included.
 func LoadNode(path string, flags *pflag.FlagSet) (*File, error) {
-	return load(path, flags, true)
+	return load(ResolvedFile{Path: path}, flags, true)
 }
 
 // DiagnosticExecution reports a configuration no distributed run could be

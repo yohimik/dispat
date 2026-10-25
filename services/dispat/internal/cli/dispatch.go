@@ -976,7 +976,7 @@ func (r *runner) runConfigured() int {
 	// while the configuration is still being found: the configured logger is
 	// built from the file about to be read.
 	config.UseLogger(r.boot)
-	cfgPath, resolvedRoot, err := config.ResolveFile(*r.o.root, *r.o.cfgName, r.fs.Changed("config"))
+	found, err := config.ResolveConfigFile(*r.o.root, *r.o.cfgName, r.fs.Changed("config"))
 	if err != nil {
 		if r.gitAuthoring && !r.fs.Changed("config") && errors.Is(err, configlib.ErrNoConfig) {
 			return r.authorCommitWithoutConfig()
@@ -984,6 +984,7 @@ func (r *runner) runConfigured() int {
 		r.boot.Error().Err(err).Msg("config file not found")
 		return 1
 	}
+	cfgPath, resolvedRoot := found.Path, found.Root
 	if r.inv.cmd == cmdWorker {
 		// A serving node reads the node-startup settings of this file and
 		// nothing else: it plans nothing, so it composes no workspace, needs
@@ -991,7 +992,7 @@ func (r *runner) runConfigured() int {
 		// for that reason and not as an optimisation.
 		return r.runWorker(cfgPath, resolvedRoot)
 	}
-	cfg, err := config.LoadControl(cfgPath, r.fs, len(*r.o.configs) > 0)
+	cfg, err := config.LoadResolvedControl(found, r.fs, len(*r.o.configs) > 0)
 	if err != nil {
 		logConfigError(r.boot, err).Msg("invalid configuration")
 		return 1

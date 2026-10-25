@@ -341,10 +341,36 @@ func ExplicitFile(root, name string) string {
 	return filepath.Join(root, name)
 }
 
-// ResolveFile returns the path of the configuration file to load and the
-// monorepo root it establishes. An explicitly named file is used as-is,
-// relative to root — a typo there must fail loudly, not fall back to a
-// different file — while the default resolves to the first of
+// ResolveFile is ResolveConfigFile without the parsed tree, for a caller that
+// only needs to know which file and which root.
+func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, err error) {
+	found, err := ResolveConfigFile(root, name, explicit)
+	return found.Path, found.Root, err
+}
+
+// ResolvedFile is the configuration file a command loads, the monorepo root
+// it establishes, and the tree the ascent already parsed it into, which
+// LoadResolvedControl reads instead of the file.
+type ResolvedFile struct {
+	Path string
+	Root string
+	tree *tree
+}
+
+// readTree is the parsed file, read now when the ascent did not parse it: an
+// explicit file, or one that could not be read, whose error is the one to
+// report.
+func (f ResolvedFile) readTree() (*tree, error) {
+	if f.tree != nil {
+		return f.tree, nil
+	}
+	return readTree(f.Path)
+}
+
+// ResolveConfigFile returns the configuration file to load and the monorepo
+// root it establishes. An explicitly named file is used as-is, relative to
+// root — a typo there must fail loudly, not fall back to a different file —
+// while the default resolves to the first of
 // defaultFileNames that exists in root or, failing that, in any parent
 // directory up to the filesystem root: the ascent is what lets the CLI run
 // from inside a package folder, with the config's own directory becoming the
@@ -369,20 +395,20 @@ func ExplicitFile(root, name string) string {
 // key, the nearest file found is returned anyway: the "at least one space or
 // package" error it produces names the real mistake. When nothing is found,
 // the error says so and names every candidate tried.
-func ResolveFile(root, name string, explicit bool) (path, resolvedRoot string, err error) {
+func ResolveConfigFile(root, name string, explicit bool) (ResolvedFile, error) {
 	if explicit {
-		return ExplicitFile(root, name), root, nil
+		return ResolvedFile{Path: ExplicitFile(root, name), Root: root}, nil
 	}
-	p, r, err := loader.Resolve(context.Background(), root, dispatResolver())
+	found, err := loader.ResolveTree(context.Background(), root, dispatResolver())
 	if errors.Is(err, lib.ErrNoConfig) {
 		// The library names the directory and the candidates; dispat names
 		// itself and says what to do about it.
-		return "", "", noConfigError{root: root}
+		return ResolvedFile{}, noConfigError{root: root}
 	}
 	if err != nil {
-		return "", "", err
+		return ResolvedFile{}, err
 	}
-	return p, r, nil
+	return ResolvedFile{Path: found.Path, Root: found.Root, tree: found.Tree}, nil
 }
 
 // dispatResolver is what the ascent is asked about a dispat repository: the
@@ -439,18 +465,26 @@ func withSchemaHint(err error) error {
 }
 
 func Load(path string, flags *pflag.FlagSet) (*File, error) {
-	return load(path, flags, false)
+	return load(ResolvedFile{Path: path}, flags, false)
 }
 
 // LoadControl is Load for the CLI's control file. cliImports permits an
 // otherwise empty control config because repeatable --configs supplies all
 // package declarations after this file has been decoded.
 func LoadControl(path string, flags *pflag.FlagSet, cliImports bool) (*File, error) {
-	return load(path, flags, cliImports)
+	return load(ResolvedFile{Path: path}, flags, cliImports)
 }
 
-func load(path string, flags *pflag.FlagSet, cliImports bool) (*File, error) {
-	t, err := readTree(path)
+// LoadResolvedControl is LoadControl for the file ResolveConfigFile found,
+// decoding the tree the ascent parsed rather than reading the file and its
+// references again.
+func LoadResolvedControl(found ResolvedFile, flags *pflag.FlagSet, cliImports bool) (*File, error) {
+	return load(found, flags, cliImports)
+}
+
+func load(found ResolvedFile, flags *pflag.FlagSet, cliImports bool) (*File, error) {
+	path := found.Path
+	t, err := found.readTree()
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}

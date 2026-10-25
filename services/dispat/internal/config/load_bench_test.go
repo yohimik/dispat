@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -74,11 +75,53 @@ func writeComposedRepo(tb testing.TB) string {
 // resolveAndLoadControl is what the CLI does with --root and no --config:
 // find the configuration file, then load it as the control file.
 func resolveAndLoadControl(root string) (*File, error) {
-	path, _, err := ResolveFile(root, defaultFileNames[0], false)
+	found, err := ResolveConfigFile(root, defaultFileNames[0], false)
 	if err != nil {
 		return nil, err
 	}
-	return LoadControl(path, nil, false)
+	return LoadResolvedControl(found, nil, false)
+}
+
+// TestResolveAndLoadControlReadsEachFileOnce: the ascent parses the file it
+// settles on, references included, and loading decodes that tree rather than
+// reading the files again.
+func TestResolveAndLoadControlReadsEachFileOnce(t *testing.T) {
+	root := writeComposedRepo(t)
+	var loaded *File
+	reads := countFileReads(t, func() error {
+		var err error
+		loaded, err = resolveAndLoadControl(root)
+		return err
+	})
+	if reads != 2 {
+		t.Errorf("resolve and load read %d files; want 2, the root configuration and its fragment", reads)
+	}
+	direct, err := Load(filepath.Join(root, "dispat.json"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(loaded, direct) {
+		t.Errorf("the resolved load decoded %#v; reading the file decodes %#v", loaded, direct)
+	}
+}
+
+// TestLoadResolvedControlReportsAnUnreadableFile: a file the ascent could not
+// parse comes with no tree, so loading reads it and fails with its own error.
+func TestLoadResolvedControlReportsAnUnreadableFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "dispat.json")
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	found, err := ResolveConfigFile(root, defaultFileNames[0], false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, resolvedErr := LoadResolvedControl(found, nil, false)
+	_, directErr := LoadControl(path, nil, false)
+	if resolvedErr == nil || directErr == nil || resolvedErr.Error() != directErr.Error() {
+		t.Errorf("resolved load error %v; direct load error %v", resolvedErr, directErr)
+	}
 }
 
 // BenchmarkResolveAndLoadControl reports, beside the cost, how many files one
