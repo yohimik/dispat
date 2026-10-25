@@ -913,11 +913,19 @@ func DiscoverWorkspacePlan(c *File, controlRoot string, workspace *Workspace) ([
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	active, inactive, err := validateDependenciesForPlan(pkgs, declared, workspace.unknownPackageRemedy)
+	active, inactive, err := ValidatePlanDependencies(pkgs, declared, workspace)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	return pkgs, active, inactive, excluded, nil
+}
+
+// ValidatePlanDependencies is the dependency half of DiscoverWorkspacePlan,
+// for a caller that already holds DiscoverWorkspacePackages' answer: the
+// active edges, the declared external edges whose provider is absent, or the
+// error that refuses the declarations.
+func ValidatePlanDependencies(pkgs []*model.Package, declared []DeclaredDependency, workspace *Workspace) ([]model.Dependency, []model.Dependency, error) {
+	return validateDependenciesForPlan(pkgs, declared, workspace.unknownPackageRemedy)
 }
 
 // DiscoverWorkspacePackages is the composed equivalent of DiscoverPackages:

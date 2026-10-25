@@ -52,12 +52,14 @@ type App struct {
 	sender release.Sender
 
 	// The discovered workspace, remembered for the run. Discovery walks the
-	// filesystem and is repeatable rather than cheap, and one exec invocation
-	// can now ask for it three times over — a cwd subject, a cwd script-from
-	// and an --in naming a package. See packages.
-	pkgsOnce sync.Once
-	pkgs     []*model.Package
-	pkgsErr  error
+	// filesystem and is repeatable rather than cheap, and one invocation asks
+	// for it several times over: exec's subjects, a step's tag mask, and the
+	// plan itself. See discovery and packages.
+	discoveryOnce sync.Once
+	discovered    workspaceDiscovery
+	pkgsOnce      sync.Once
+	pkgs          []*model.Package
+	pkgsErr       error
 
 	// The spaces as they effectively are — the root file's entries with each
 	// space folder's own config file merged over them — remembered for the
@@ -131,19 +133,40 @@ type App struct {
 	plannedOptions plan.Options
 }
 
-// packages is the discovered workspace, walked once per App.
-//
-// Discovery is deterministic and side-effect free, so remembering its answer
-// changes nothing about what a caller sees; it only stops the same walk being
-// paid for two and three times in one invocation. Callers that need the
-// declared dependencies alongside it still call config.DiscoverPackages
-// themselves, since that is a different question.
+// workspaceDiscovery is the workspace as it lies on disk, before any
+// dependency declaration is judged.
+type workspaceDiscovery struct {
+	packages []*model.Package
+	declared []config.DeclaredDependency
+	excluded []config.ExcludedDir
+	err      error
+}
+
+// discovery walks the workspace once per App. Discovery is deterministic and
+// side-effect free, so remembering its answer changes nothing about what a
+// caller sees; it only stops the same walk being paid for two and three
+// times in one invocation.
+func (a *App) discovery() workspaceDiscovery {
+	a.discoveryOnce.Do(func() {
+		d := &a.discovered
+		d.packages, d.declared, d.excluded, d.err = config.DiscoverWorkspacePackages(a.cfg, a.root, a.workspace)
+	})
+	return a.discovered
+}
+
+// packages is the discovered workspace. A single history answers with every
+// package on disk whatever its dependency declarations say; a composed
+// workspace also refuses invalid declarations, as config.DiscoverWorkspace
+// does.
 func (a *App) packages() ([]*model.Package, error) {
 	a.pkgsOnce.Do(func() {
-		if a.workspace == nil {
-			a.pkgs, _, _, a.pkgsErr = config.DiscoverPackages(a.cfg, a.root)
-		} else {
-			a.pkgs, _, _, a.pkgsErr = config.DiscoverWorkspace(a.cfg, a.root, a.workspace)
+		found := a.discovery()
+		a.pkgs, a.pkgsErr = found.packages, found.err
+		if a.workspace == nil || found.err != nil {
+			return
+		}
+		if _, _, err := config.ValidatePlanDependencies(found.packages, found.declared, a.workspace); err != nil {
+			a.pkgs, a.pkgsErr = nil, err
 		}
 	})
 	return a.pkgs, a.pkgsErr
@@ -286,12 +309,21 @@ func (a *App) planOptions(ctx context.Context) (plan.Options, error) {
 	if err := ctx.Err(); err != nil {
 		return plan.Options{}, err
 	}
-	pkgs, deps, inactiveExternal, excluded, err := config.DiscoverWorkspacePlan(a.cfg, a.root, a.workspace)
+	found := a.discovery()
+	err := found.err
+	var deps, inactiveExternal []model.Dependency
+	if err == nil {
+		deps, inactiveExternal, err = config.ValidatePlanDependencies(found.packages, found.declared, a.workspace)
+	}
 	if err != nil {
 		a.logError(err).Msg("package discovery failed")
 		return plan.Options{}, err
 	}
+	pkgs, excluded := found.packages, found.excluded
 	if a.workspace != nil {
+		// Resolving record targets writes into the packages, and packages()
+		// hands out the discovered ones unresolved.
+		pkgs = clonePackages(pkgs)
 		if err := a.resolveRepositoryRecords(ctx, pkgs); err != nil {
 			a.log.Error().Err(err).Msg("repository record targets could not be resolved")
 			return plan.Options{}, err
@@ -329,6 +361,17 @@ func (a *App) planOptions(ctx context.Context) (plan.Options, error) {
 		}
 	}
 	return opts, nil
+}
+
+// clonePackages copies each package so that writes into a copy leave the
+// original as discovery returned it.
+func clonePackages(pkgs []*model.Package) []*model.Package {
+	clones := make([]*model.Package, len(pkgs))
+	for i, p := range pkgs {
+		clone := *p
+		clones[i] = &clone
+	}
+	return clones
 }
 
 // logWorkspace records what discovery resolved, for the questions a layered
