@@ -129,6 +129,31 @@ func TestInputsNameEveryProviderWhetherOrNotTheRunReleasesIt(t *testing.T) {
 	}, inputs, "types declares no outputs and supplies nothing")
 }
 
+// TestInputsFollowThePlanOrderWhateverTheNames: a task's inputs travel in the
+// plan's dependency order. The plan order here runs against the names'
+// lexical order and the closure is reached through several hops, so neither
+// the names nor the closure's map can supply the order on their own.
+func TestInputsFollowThePlanOrderWhateverTheNames(t *testing.T) {
+	app := &App{root: filepath.FromSlash("/work"), log: zerolog.Nop()}
+	order := []string{"zeta", "yak", "mid", "beta", "alpha", "app"}
+	outputs := map[string][]string{}
+	for _, name := range order {
+		outputs[name] = []string{"dist"}
+	}
+	pl := outputPlan(order,
+		map[string][]string{"app": {"alpha", "zeta"}, "alpha": {"beta", "yak"}, "beta": {"mid"}},
+		map[string]bool{"zeta": true, "yak": true, "mid": true, "beta": true, "alpha": true},
+		outputs,
+	)
+
+	var got []string
+	for _, input := range app.resolveOutputProviders(pl)("app") {
+		got = append(got, input.Package)
+	}
+
+	assert.Equal(t, []string{"zeta", "yak", "mid", "beta", "alpha"}, got)
+}
+
 // TestAPreparedFrameIsTheProvidersOwnBuildFrame: what the run executes for a
 // provider it does not release is that package's build stage under the
 // environment `dispat run` would give it, with the configuration's own pairs
