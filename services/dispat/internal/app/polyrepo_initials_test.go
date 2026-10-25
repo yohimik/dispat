@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -77,6 +78,40 @@ func BenchmarkPolyrepoInitialVersionIndexes(b *testing.B) {
 					b.Fatal("incorrect indexed baseline selection")
 				}
 			}
+		})
+	}
+}
+
+// TestUnmatchedInitialsWarnInKeyOrder: an initials entry naming no package is
+// reported once per entry, in key order rather than in the order the map
+// happens to be walked, for a single history and for a composed workspace.
+func TestUnmatchedInitialsWarnInKeyOrder(t *testing.T) {
+	keys := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"}
+	cfg := &config.File{InitialVersions: map[string]ccme.Version{"core": {Major: 1}}}
+	for _, key := range keys {
+		cfg.InitialVersions[key] = ccme.Version{Major: 1}
+	}
+	pkgs := []*model.Package{{Name: "core", Repository: "central"}}
+	for name, workspace := range map[string]*config.Workspace{
+		"single history": nil,
+		"composed workspace": {Repositories: []config.Repository{
+			{Name: config.ControlRepository, Control: true, Config: cfg},
+			{Name: "central", Config: cfg},
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			a := NewWorkspace(t.TempDir(), cfg, workspace, zerolog.New(&logs))
+
+			assert.Equal(t, map[string]ccme.Version{"core": {Major: 1}}, a.initialVersions(pkgs))
+
+			var warned []string
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				var e struct{ Package string }
+				require.NoError(t, json.Unmarshal([]byte(line), &e))
+				warned = append(warned, e.Package)
+			}
+			assert.Equal(t, keys, warned)
 		})
 	}
 }

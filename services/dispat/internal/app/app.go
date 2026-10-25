@@ -561,13 +561,18 @@ func (a *App) initialVersions(pkgs []*model.Package) map[string]ccme.Version {
 		byLower[globx.Fold(p.Name)] = p.Name
 	}
 	out := make(map[string]ccme.Version, len(a.cfg.InitialVersions))
+	var unmatched []string
 	for key, v := range a.cfg.InitialVersions {
-		low := globx.Fold(key)
-		if real, ok := byLower[low]; ok {
+		if real, ok := byLower[globx.Fold(key)]; ok {
 			out[real] = v
 		} else {
-			a.log.Warn().Str("package", key).Msg("initials entry matches no discovered package, ignoring")
+			unmatched = append(unmatched, key)
 		}
+	}
+	// Sorted, so the warnings do not follow the map's iteration order.
+	sort.Strings(unmatched)
+	for _, key := range unmatched {
+		a.log.Warn().Str("package", key).Msg("initials entry matches no discovered package, ignoring")
 	}
 	return out
 }

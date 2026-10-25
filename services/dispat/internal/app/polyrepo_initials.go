@@ -4,6 +4,8 @@
 package app
 
 import (
+	"sort"
+
 	"github.com/yohimik/dispat/pkg/ccme"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
@@ -49,13 +51,19 @@ func (a *App) workspaceInitialVersions(pkgs []*model.Package) map[string]ccme.Ve
 		if (!repo.Control && !repo.Imported) || repo.Config == nil {
 			continue
 		}
+		var unmatched []string
 		for key, version := range repo.Config.InitialVersions {
 			if name, exists := names[repo.Config][globx.Fold(key)]; exists {
 				out[name] = version
 			} else {
-				a.log.Warn().Str("package", key).Str("repository", repo.Name).
-					Msg("initials entry matches no discovered package owned by this config, ignoring")
+				unmatched = append(unmatched, key)
 			}
+		}
+		// Sorted, so the warnings do not follow the map's iteration order.
+		sort.Strings(unmatched)
+		for _, key := range unmatched {
+			a.log.Warn().Str("package", key).Str("repository", repo.Name).
+				Msg("initials entry matches no discovered package owned by this config, ignoring")
 		}
 	}
 	if len(out) == 0 {
