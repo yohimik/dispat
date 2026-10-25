@@ -367,6 +367,7 @@ func TestEveryDocumentedFlagIsAccepted(t *testing.T) {
 		cmdInit:         {"init"},
 		cmdPreview:      {"preview"},
 		cmdDiagnostics:  {"diagnostics", "feat: accepted"},
+		cmdSemver:       {"semver", "build", "1", "2", "3"},
 		cmdChangelog:    {"changelog"},
 		cmdAutoversion:  {"autoversion"},
 		cmdAutowriter:   {"autowriter", "--set-version", "1.0.0"},
@@ -406,8 +407,10 @@ func TestEveryDocumentedFlagIsAccepted(t *testing.T) {
 		"link":        "core=../core",
 		"replace":     "a=>b",
 		// Seconds, and a folder the invocation never gets far enough to use.
-		"idle-timeout": "1",
-		"state-dir":    root,
+		"idle-timeout":   "1",
+		"state-dir":      root,
+		"pre-release":    "rc.1",
+		"build-metadata": "sha.001",
 	}
 
 	master := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
