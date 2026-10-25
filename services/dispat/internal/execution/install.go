@@ -66,8 +66,9 @@ type InstallRequest struct {
 	// one function both readers use.
 	Manifest *OutputManifest
 	// Objects is the object of each manifest entry, aligned with its Entries,
-	// as ValidateOutputs read them off the manifest's tree. Nil, or of another
-	// length, has the tree listed again here.
+	// as ValidateOutputs read them off the manifest's tree. It is optional
+	// because a caller that installs without validating first, the sweep
+	// merge, has no such list to give.
 	Objects []string
 	// Dir is the folder the declared roots are installed into, absolute. It is
 	// the consuming package's folder in a task checkout, or the orchestrator's
