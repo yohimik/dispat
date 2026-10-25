@@ -45,6 +45,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
@@ -281,8 +282,9 @@ func (c *LocalGitx) DeleteRemoteBranchesLease(ctx context.Context, remote string
 	args = append(args, "--", remote)
 	out, runErr := c.runStream(ctx, gitStream{}, append(args, refspecs...)...)
 	outcomes := make([]BranchOutcome, 0, len(leases))
+	report := readPushReport(out)
 	for i, ref := range refs {
-		status, isReported := findPushStatus(out, ref)
+		status, isReported := report[ref]
 		if !isReported {
 			c.Log.Debug().Err(transportError(runErr, remote, "deleting %s", ref)).
 				Msg("the remote reported nothing about a leased delete")
@@ -700,23 +702,51 @@ func (s pushStatus) formatReason() string {
 // findPushStatus reads the status line of one ref out of `git push
 // --porcelain` output, and reports whether the ref was mentioned at all.
 //
-// A line is "<flag>\t<from>:<to>\t<summary>"; a deletion writes an empty or
-// "(delete)" source half. A ref with no line of its own means git never got as
-// far as deciding about it, which says nothing about whether the remote took
-// the update.
+// A ref with no line of its own means git never got as far as deciding about
+// it, which says nothing about whether the remote took the update.
 func findPushStatus(out, ref string) (pushStatus, bool) {
 	for line := range strings.Lines(out) {
-		line = strings.TrimRight(line, "\n")
-		flag, rest, isStatus := strings.Cut(line, "\t")
-		if !isStatus || len([]rune(flag)) != 1 {
-			continue
-		}
-		refspec, summary, _ := strings.Cut(rest, "\t")
-		if _, destination, isPair := strings.Cut(refspec, ":"); isPair && destination == ref {
-			return pushStatus{flag: []rune(flag)[0], summary: summary}, true
+		if destination, status, isStatus := parsePushStatusLine(line); isStatus && destination == ref {
+			return status, true
 		}
 	}
 	return pushStatus{}, false
+}
+
+// pushReport is the status line of every ref one `git push --porcelain`
+// answer mentions, by destination ref, for a push of many refs: reading the
+// answer once rather than once per ref keeps a release push of R refs linear
+// in R. A ref mentioned twice keeps its first line, as findPushStatus does.
+type pushReport map[string]pushStatus
+
+func readPushReport(out string) pushReport {
+	report := make(pushReport, strings.Count(out, "\n"))
+	for line := range strings.Lines(out) {
+		destination, status, isStatus := parsePushStatusLine(line)
+		if !isStatus {
+			continue
+		}
+		if _, isKnown := report[destination]; !isKnown {
+			report[destination] = status
+		}
+	}
+	return report
+}
+
+// parsePushStatusLine reads one porcelain line, "<flag>\t<from>:<to>\t<summary>",
+// where a deletion writes an empty or "(delete)" source half.
+func parsePushStatusLine(line string) (string, pushStatus, bool) {
+	flag, rest, isStatus := strings.Cut(strings.TrimRight(line, "\n"), "\t")
+	if !isStatus || utf8.RuneCountInString(flag) != 1 {
+		return "", pushStatus{}, false
+	}
+	refspec, summary, _ := strings.Cut(rest, "\t")
+	_, destination, isPair := strings.Cut(refspec, ":")
+	if !isPair {
+		return "", pushStatus{}, false
+	}
+	flagRune, _ := utf8.DecodeRuneInString(flag)
+	return destination, pushStatus{flag: flagRune, summary: summary}, true
 }
 
 // transportError names the operation and the remote, redacted, around

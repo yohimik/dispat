@@ -197,9 +197,10 @@ func (c *LocalGitx) PushReleaseRefs(ctx context.Context, remote string, refs []R
 	out, runErr := c.runStream(ctx, gitStream{}, append(args, specs...)...)
 	outcomes := make([]RefOutcome, 0, len(refs))
 	var declined []error
+	report := readPushReport(out)
 	for _, ref := range refs {
 		name := "refs/tags/" + ref.Name
-		status, isReported := findPushStatus(out, name)
+		status, isReported := report[name]
 		if !isReported {
 			return nil, transportError(runErr, remote, "pushing %s", name)
 		}

@@ -39,8 +39,9 @@ func BenchmarkPushStatusLookup(b *testing.B) {
 
 func lookupPushStatuses(out string, refs []string) int {
 	reported := 0
+	report := readPushReport(out)
 	for _, ref := range refs {
-		if _, isReported := findPushStatus(out, ref); isReported {
+		if _, isReported := report[ref]; isReported {
 			reported++
 		}
 	}

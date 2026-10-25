@@ -195,6 +195,31 @@ func TestPushStatusTellsTheThreeOutcomesApart(t *testing.T) {
 	assert.Contains(t, status.formatReason(), "[remote rejected] (denied for https://")
 }
 
+// TestPushReportReadsEveryRefAsFindPushStatusDoes: the report a push of many
+// refs is read through answers each ref with the line findPushStatus finds
+// for it, the first one when a ref is mentioned twice, and leaves out a ref
+// with no line of its own.
+func TestPushReportReadsEveryRefAsFindPushStatusDoes(t *testing.T) {
+	out := "To https://git.example/acme.git\n" +
+		"*\trefs/tags/a:refs/tags/a\t[new tag]\n" +
+		"!\trefs/tags/b:refs/tags/b\t[rejected] (stale info)\n" +
+		"=\trefs/tags/b:refs/tags/b\t[up to date]\n" +
+		"\u00e9\trefs/tags/c:refs/tags/c\t[strange]\n" +
+		"!x\trefs/tags/d:refs/tags/d\t[two-rune flag]\n" +
+		"-\t:refs/heads/gone\t[deleted]\n" +
+		"Done\n"
+	report := readPushReport(out)
+	for _, ref := range []string{"refs/tags/a", "refs/tags/b", "refs/tags/c", "refs/tags/d", "refs/heads/gone", "refs/tags/none"} {
+		want, isWanted := findPushStatus(out, ref)
+		got, isReported := report[ref]
+		assert.Equal(t, isWanted, isReported, ref)
+		assert.Equal(t, want, got, ref)
+	}
+	assert.Equal(t, pushStatus{flag: pushRejected, summary: "[rejected] (stale info)"}, report["refs/tags/b"],
+		"the first line about a ref is its answer")
+	assert.Len(t, report, 4, "a two-rune flag is no status line")
+}
+
 // TestTransportPushOutcomesAgainstARealRemote: what git itself answers for the
 // shapes the protocol relies on. A lease over a ref that is already gone is a
 // stale lease and nothing is sent; re-pushing the object a ref already holds

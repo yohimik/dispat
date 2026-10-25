@@ -17,6 +17,8 @@ func TestAllocationBudget(t *testing.T) {
 	const controlCommits = 1_000
 	controlHistory := syntheticControlHistory(controlCommits)
 
+	pushPorcelain, pushRefs := syntheticPushPorcelain(1_000)
+
 	cases := []struct {
 		name   string
 		budget float64
@@ -31,6 +33,16 @@ func TestAllocationBudget(t *testing.T) {
 			run: func() {
 				if _, err := parseControlGitlinkHistory(controlHistory); err != nil {
 					t.Fatal(err)
+				}
+			},
+		},
+		{
+			// Measured 6: the report map, sized once from the line count.
+			name:   "readPushReport/1000",
+			budget: 8,
+			run: func() {
+				if reported := lookupPushStatuses(pushPorcelain, pushRefs); reported != len(pushRefs) {
+					t.Fatalf("reported %d of %d refs", reported, len(pushRefs))
 				}
 			},
 		},
