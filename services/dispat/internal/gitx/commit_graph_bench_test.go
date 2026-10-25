@@ -57,9 +57,16 @@ func BenchmarkLoadCommitGraph(b *testing.B) {
 }
 
 func loadCommitGraph(r io.Reader) *commitGraph {
-	var out bytes.Buffer
-	if _, err := out.ReadFrom(r); err != nil {
+	builder := newCommitGraphBuilder()
+	if _, err := io.Copy(builder, r); err != nil {
 		panic(err)
 	}
-	return newCommitGraph(out.String())
+	return builder.graph()
+}
+
+// newCommitGraph is the graph of one whole rev-list answer.
+func newCommitGraph(revList string) *commitGraph {
+	builder := newCommitGraphBuilder()
+	_, _ = builder.Write([]byte(revList))
+	return builder.graph()
 }

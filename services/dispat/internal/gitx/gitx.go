@@ -1250,8 +1250,11 @@ func (c *LocalGitx) commitDAG(ctx context.Context) (*commitGraph, error) {
 	if c.dag != nil || c.dagErr != nil {
 		return c.dag, c.dagErr
 	}
-	out, err := c.run(ctx, "rev-list", "--parents", "HEAD")
-	if err != nil {
+	builder := newCommitGraphBuilder()
+	// Streamed rather than buffered: the graph keeps a fraction of the
+	// listing's bytes, and a buffered listing would be held twice over while
+	// the buffer grows and is copied into a string.
+	if _, err := c.runStream(ctx, gitStream{stdout: builder}, "rev-list", "--parents", "HEAD"); err != nil {
 		// A cancelled or expired context says nothing about the repository,
 		// so that answer is not remembered: a later caller with a live
 		// context asks git again instead of inheriting the interruption.
@@ -1260,7 +1263,7 @@ func (c *LocalGitx) commitDAG(ctx context.Context) (*commitGraph, error) {
 		}
 		return nil, err
 	}
-	c.dag = newCommitGraph(out)
+	c.dag = builder.graph()
 	return c.dag, nil
 }
 
@@ -1275,13 +1278,18 @@ func (c *LocalGitx) commitDAG(ctx context.Context) (*commitGraph, error) {
 // every fresh commit. The first question about b walks its ancestry once and
 // keeps it; every later one is a bit test.
 type commitGraph struct {
-	index   map[string]int32
-	parents [][]int32
+	index map[string]int32
+	// The parents of commit i are parents[parentSpans[i].start:parentSpans[i].end]:
+	// one array for every edge rather than a slice per commit.
+	parentSpans []parentSpan
+	parents     []int32
 
 	mu    sync.Mutex
 	reach map[int32][]uint64 // descendant -> its ancestors-or-self
 	order []int32            // insertion order, oldest first, for eviction
 }
+
+type parentSpan struct{ start, end int32 }
 
 // reachBudget bounds the retained ancestor sets. One set is a bit per
 // reachable commit, 12 KiB for a history of 100,000, so the budget holds
@@ -1289,42 +1297,109 @@ type commitGraph struct {
 // if it is asked about again, which changes no answer.
 const reachBudget = 64 << 20
 
-// newCommitGraph reads `git rev-list --parents` output. rev-list does not
-// promise that a parent's own line precedes its mention, so indices are
-// assigned in one pass and parents resolved in a second.
-func newCommitGraph(revList string) *commitGraph {
-	g := &commitGraph{index: make(map[string]int32), reach: make(map[int32][]uint64)}
-	for line := range strings.Lines(revList) {
-		if id, _, _ := strings.Cut(strings.TrimSpace(line), " "); id != "" {
-			if _, dup := g.index[id]; !dup {
-				// The ids are sub-slices of one rev-list buffer. Cloning them
-				// keeps the whole listing from staying live for as long as
-				// this repository handle does.
-				g.index[strings.Clone(id)] = int32(len(g.index))
-			}
-		}
-	}
-	g.parents = make([][]int32, len(g.index))
-	for line := range strings.Lines(revList) {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		child := g.index[fields[0]]
-		if g.parents[child] != nil {
-			continue
-		}
-		parents := make([]int32, 0, len(fields)-1)
-		for _, parent := range fields[1:] {
-			// A shallow clone names parents it does not hold.
-			if i, ok := g.index[parent]; ok {
-				parents = append(parents, i)
-			}
-		}
-		g.parents[child] = parents
-	}
-	return g
+// commitGraphBuilder reads `git rev-list --parents` output as git writes it.
+//
+// rev-list does not promise that a parent's own line precedes its mention, so
+// an id is indexed when it is first named, as a commit or as a parent, and
+// the ids that never had a line of their own are dropped from the index at
+// the end: a shallow clone names parents it does not hold, and those are
+// git's to answer.
+type commitGraphBuilder struct {
+	g       *commitGraph
+	hasLine []uint64
+	carry   []byte
 }
+
+func newCommitGraphBuilder() *commitGraphBuilder {
+	return &commitGraphBuilder{g: &commitGraph{index: make(map[string]int32), reach: make(map[int32][]uint64)}}
+}
+
+func (b *commitGraphBuilder) Write(chunk []byte) (int, error) {
+	written := len(chunk)
+	if len(b.carry) > 0 {
+		newline := bytes.IndexByte(chunk, '\n')
+		if newline < 0 {
+			b.carry = append(b.carry, chunk...)
+			return written, nil
+		}
+		b.carry = append(b.carry, chunk[:newline]...)
+		b.addLine(b.carry)
+		b.carry = b.carry[:0]
+		chunk = chunk[newline+1:]
+	}
+	for {
+		newline := bytes.IndexByte(chunk, '\n')
+		if newline < 0 {
+			b.carry = append(b.carry, chunk...)
+			return written, nil
+		}
+		b.addLine(chunk[:newline])
+		chunk = chunk[newline+1:]
+	}
+}
+
+// graph reads the listing's last line and returns the graph. It is called
+// once, after the last Write.
+func (b *commitGraphBuilder) graph() *commitGraph {
+	b.addLine(b.carry)
+	for id, i := range b.g.index {
+		if !isBitSet(b.hasLine, i) {
+			delete(b.g.index, id)
+		}
+	}
+	return b.g
+}
+
+// addLine reads "<commit> <parent>...". The first line naming a commit with
+// parents is the one kept, as git never names a commit twice.
+func (b *commitGraphBuilder) addLine(line []byte) {
+	id, rest := cutASCIIField(line)
+	if len(id) == 0 {
+		return
+	}
+	child := b.indexOf(id)
+	setBit(b.hasLine, child)
+	parent, rest := cutASCIIField(rest)
+	if span := b.g.parentSpans[child]; span.end > span.start || len(parent) == 0 {
+		return
+	}
+	start := int32(len(b.g.parents))
+	for ; len(parent) > 0; parent, rest = cutASCIIField(rest) {
+		b.g.parents = append(b.g.parents, b.indexOf(parent))
+	}
+	b.g.parentSpans[child] = parentSpan{start: start, end: int32(len(b.g.parents))}
+}
+
+func (b *commitGraphBuilder) indexOf(id []byte) int32 {
+	if i, isKnown := b.g.index[string(id)]; isKnown {
+		return i
+	}
+	i := int32(len(b.g.parentSpans))
+	b.g.index[string(id)] = i
+	b.g.parentSpans = append(b.g.parentSpans, parentSpan{})
+	if int(i)>>6 >= len(b.hasLine) {
+		b.hasLine = append(b.hasLine, 0)
+	}
+	return i
+}
+
+// cutASCIIField returns the first whitespace-separated field of line and what
+// follows it.
+func cutASCIIField(line []byte) ([]byte, []byte) {
+	start := 0
+	for start < len(line) && isASCIISpace(line[start]) {
+		start++
+	}
+	end := start
+	for end < len(line) && !isASCIISpace(line[end]) {
+		end++
+	}
+	return line[start:end], line[end:]
+}
+
+func isBitSet(set []uint64, i int32) bool { return set[i>>6]&(1<<(uint(i)&63)) != 0 }
+
+func setBit(set []uint64, i int32) { set[i>>6] |= 1 << (uint(i) & 63) }
 
 // isAncestor reports whether a is an ancestor-or-self of b. known is false
 // when either commit lies outside the loaded history, and the caller asks git.
@@ -1334,8 +1409,7 @@ func (g *commitGraph) isAncestor(a, b string) (yes, known bool) {
 	if !okA || !okB {
 		return false, false
 	}
-	set := g.ancestors(ib)
-	return set[ia>>6]&(1<<(uint(ia)&63)) != 0, true
+	return isBitSet(g.ancestors(ib), ia), true
 }
 
 // ancestors returns the ancestor-or-self set of b, walking it on first use.
@@ -1346,16 +1420,17 @@ func (g *commitGraph) ancestors(b int32) []uint64 {
 	if set, ok := g.reach[b]; ok {
 		return set
 	}
-	set := make([]uint64, (len(g.parents)+63)/64)
+	set := make([]uint64, (len(g.parentSpans)+63)/64)
 	stack := []int32{b}
 	for len(stack) > 0 {
 		cur := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		if set[cur>>6]&(1<<(uint(cur)&63)) != 0 {
+		if isBitSet(set, cur) {
 			continue
 		}
-		set[cur>>6] |= 1 << (uint(cur) & 63)
-		stack = append(stack, g.parents[cur]...)
+		setBit(set, cur)
+		span := g.parentSpans[cur]
+		stack = append(stack, g.parents[span.start:span.end]...)
 	}
 	size := len(set) * 8
 	for len(g.order) > 0 && (len(g.order)+1)*size > reachBudget {

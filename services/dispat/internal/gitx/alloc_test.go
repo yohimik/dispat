@@ -18,6 +18,8 @@ func TestAllocationBudget(t *testing.T) {
 	controlHistory := syntheticControlHistory(controlCommits)
 
 	pushPorcelain, pushRefs := syntheticPushPorcelain(1_000)
+	const graphCommits = 10_000
+	revList := syntheticRevList(graphCommits)
 
 	cases := []struct {
 		name   string
@@ -43,6 +45,17 @@ func TestAllocationBudget(t *testing.T) {
 			run: func() {
 				if reported := lookupPushStatuses(pushPorcelain, pushRefs); reported != len(pushRefs) {
 					t.Fatalf("reported %d of %d refs", reported, len(pushRefs))
+				}
+			},
+		},
+		{
+			// Measured 10,134: one copied id per commit as its index key, the
+			// rest the index, the edge array, the span array and the copy buffer.
+			name:   "loadCommitGraph/10000",
+			budget: graphCommits + 160,
+			run: func() {
+				if graph := loadCommitGraph(&pipeReader{rest: revList}); len(graph.index) != graphCommits {
+					t.Fatalf("graph holds %d commits", len(graph.index))
 				}
 			},
 		},
