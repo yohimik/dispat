@@ -235,9 +235,11 @@ that breaks any of them is a release-safety regression:
    remote does not have, a fleet link settlement is not created or pushed for a revision its target's remote does not
    have, and a tag sitting at a foreign commit is reported and left alone rather than force-moved.
 
-Retry is the supported recovery. It needs no new intent: the same command runs again, reads the tags and records that
-already exist, and converges. Destructive recovery, including removing generated state a failed run retained, is the
-operator's explicit act and is never something a run does on its own.
+Retry is the supported recovery when authoritative records settle earlier work and an uncertain external publication
+can be verified or safely repeated. The same command reads existing tags and records rather than republishing a
+verified success. An opaque publisher without a destination identity check or a safe retry cannot guarantee automatic
+recovery. Destructive recovery, including removing generated state a failed run retained, is the operator's explicit
+act and is never something a run does on its own.
 
 The lock is on by default. `unsafeDisableLock` in the configuration and `DISPAT_UNSAFE_DISABLE_LOCK=true` in the
 environment are the only ways to switch it off, they warn when they do, and they exist for a repository with no remote
@@ -249,18 +251,20 @@ A run that delegates work to worker nodes holds itself to four further rules, an
 a release-safety regression:
 
 1. **The complete lock set precedes dispatch.** Every participating repository's lock is acquired before the plan is
-   fixed, and ownership is re-verified against the remote before every new assignment and every publication
-   authorization. A lock that is gone halts every attempt in flight and starts no new effect.
+   fixed, and ownership is re-verified against the remote before every new assignment and immediately after
+   `beforePublish`, before the orchestrator's publication command. A lock that is gone halts attempts in flight and
+   starts no new publication.
 2. **A lock bypass and worker links are refused together.** `unsafeDisableLock`, a per-repository bypass and
    `DISPAT_UNSAFE_DISABLE_LOCK` each refuse a run that configures workers. The bypass exists for a repository with no
    remote to coordinate through, which is not a run that reaches other machines.
-3. **A publication is authorized once.** The node reports itself ready, the run revalidates ownership and inputs, and
-   the single-use authorization names the exact state of the branch it authorizes and the instant it expires. The node
-   re-reads that branch immediately before the irreversible command. No second authorization is written for an attempt
-   in the same run.
-4. **An unknown outcome retains its lock.** An authorized publication that never reported back is reported as such,
-   never as a failure or a success, and the release lock of the repository it was publishing into is retained when the
-   publisher never acknowledged. The run fails, names the order of recovery, and never reports clean cleanup.
+3. **The orchestrator publishes and records.** Workers execute eligible build, test and custom stages under signed
+   assignments bound to the fixed plan and exact inputs; they do not replan. They write Git mailbox coordination state
+   but do not run the engine-managed publish stage or create release tags and records. The worker publication Ready/Go
+   exchange is legacy protocol vocabulary, not an active authorization path.
+4. **An uncertain publication needs destination evidence.** A local publish-command error or missing tag does not prove
+   that the destination lacks the artifact. Before retrying a potentially completed effect, verify the exact package,
+   version and artifact identity or use a publisher whose retry is demonstrably safe for that identity. The error alone
+   does not retain the release lock; the lock serializes active orchestrators, not external destination outcomes.
 
 Publication happens in CI. The release workflow is the only place that pushes tags, publishes packages or creates
 releases. Use `dispat status` to inspect the plan locally. Bare `dispat` and `dispat release` execute release stages;
