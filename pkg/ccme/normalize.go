@@ -127,10 +127,13 @@ func normalizeSlow(m string) string {
 	return b.String()
 }
 
-// splitLines splits a normalised message on LF. Every returned line is a
-// substring of s, so no line content is copied.
-func splitLines(s string) []string {
-	lines := make([]string, 0, strings.Count(s, "\n")+1)
+// splitLines splits a normalised message on LF into lines, whose spare
+// capacity is used when it suffices. Every returned line is a substring of s,
+// so no line content is copied.
+func splitLines(s string, lines []string) []string {
+	if n := strings.Count(s, "\n") + 1; n > cap(lines) {
+		lines = make([]string, 0, n)
+	}
 	for {
 		i := strings.IndexByte(s, '\n')
 		if i < 0 {
@@ -141,22 +144,20 @@ func splitLines(s string) []string {
 	}
 }
 
-// splitUnits implements §20.2. A separator line is compared for byte equality
-// against the configured string; no pattern matching happens, so "----" is not a
-// separator and a Markdown rule in a body does not truncate a unit.
+// splitUnits implements §20.2, appending each unit's source to sources. A
+// separator line is compared for byte equality against the configured string;
+// no pattern matching happens, so "----" is not a separator and a Markdown rule
+// in a body does not truncate a unit.
 //
 // A line consisting of a backslash followed by the separator is escaped: it
 // becomes body text with the backslash removed. This is the only escape in the
 // grammar (§4.2).
 //
-// The returned unit sources share both the line slice and the message string;
-// nothing is copied unless a unit contains an escaped separator, which is the
-// one case where a unit's text is not a contiguous substring of the message.
-// escapedSep is the separator with its backslash escape prefix, precomputed on
-// the Parser so the hot path does not rebuild the string on every message.
-func splitUnits(msg string, lines []string, separator, escapedSep string) ([]unitSource, []Diagnostic) {
+// A unit's text is a substring of msg; nothing is copied unless the unit
+// contains an escaped separator, which is the one case where its text is not
+// a contiguous substring of the message.
+func (p *Parser) splitUnits(msg string, lines []string, sources []unitSource) ([]unitSource, []Diagnostic) {
 	var (
-		out       []unitSource
 		diags     []Diagnostic
 		start     int // index of the current unit's first line
 		startOff  int // byte offset of lines[start] within msg
@@ -186,33 +187,38 @@ func splitUnits(msg string, lines []string, separator, escapedSep string) ([]uni
 				Position{Line: line, Column: 1}, "empty unit discarded"))
 			return
 		}
-		src := unitSource{msg: msg, lines: lines[a:b], offset: aOff, startLine: a + 1}
+		src := unitSource{index: len(sources), raw: msg[aOff : aOff+lineSpan(lines[a:b])], first: a, end: b}
 		if hasEscape {
-			unescaped := make([]string, b-a)
-			copy(unescaped, lines[a:b])
-			for i, l := range unescaped {
-				if l == escapedSep {
-					unescaped[i] = l[1:]
-				}
-			}
-			src.lines = unescaped
-			src.offset = offsetDetached
+			src.unescaped = unescapeSeparators(lines[a:b], p.escapedSep)
+			src.raw = strings.Join(src.unescaped, "\n")
 		}
-		out = append(out, src)
+		sources = append(sources, src)
 	}
 
 	for i, l := range lines {
-		if l == separator {
+		if l == p.cfg.Separator {
 			flush(i)
 			start = i + 1
 			startOff = off + len(l) + 1
 			hasEscape = false
-		} else if l == escapedSep {
+		} else if l == p.escapedSep {
 			hasEscape = true
 		}
 		off += len(l) + 1
 	}
 	flush(len(lines))
 
-	return out, diags
+	return sources, diags
+}
+
+// unescapeSeparators copies lines with every escaped separator line unescaped.
+func unescapeSeparators(lines []string, escapedSep string) []string {
+	unescaped := make([]string, len(lines))
+	copy(unescaped, lines)
+	for i, l := range unescaped {
+		if l == escapedSep {
+			unescaped[i] = l[1:]
+		}
+	}
+	return unescaped
 }

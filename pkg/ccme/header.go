@@ -104,6 +104,9 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 					return h, warns, fail(CodeE158, at(ci),
 						"scope-set has more than %d terms", n)
 				}
+				if h.Scopes == nil {
+					h.Scopes = newScopeStorage(line[termStart:], p.cfg.Limits.ScopeTermsPerUnit)
+				}
 				h.Scopes = append(h.Scopes, newScopeTerm(line[termStart:ci], at(termStart)))
 				break scopeLoop
 			case ',':
@@ -113,6 +116,9 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 				if n := p.cfg.Limits.ScopeTermsPerUnit; n > 0 && len(h.Scopes) >= n {
 					return h, warns, fail(CodeE158, at(ci),
 						"scope-set has more than %d terms", n)
+				}
+				if h.Scopes == nil {
+					h.Scopes = newScopeStorage(line[termStart:], p.cfg.Limits.ScopeTermsPerUnit)
 				}
 				h.Scopes = append(h.Scopes, newScopeTerm(line[termStart:ci], at(termStart)))
 				// Whitespace immediately after a comma is permitted (§5.2).
@@ -373,6 +379,22 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, e
 		}
 	}
 	return h, warns, nil
+}
+
+// newScopeStorage returns empty storage for the terms of the scope-set whose
+// first term starts rest, so that k terms cost one allocation rather than one
+// per doubling. The comma count bounds the terms from above and is clamped to
+// the term limit, past which the scan stops with E158; the scan itself still
+// decides what is a term.
+func newScopeStorage(rest string, limit int) ScopeSet {
+	if end := strings.IndexByte(rest, ')'); end >= 0 {
+		rest = rest[:end]
+	}
+	n := strings.Count(rest, ",") + 1
+	if limit > 0 && n > limit {
+		n = limit
+	}
+	return make(ScopeSet, 0, n)
 }
 
 // parsePropagateValue matches a Propagate value byte-for-byte; abbreviations

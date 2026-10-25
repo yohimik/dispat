@@ -58,8 +58,9 @@
 // message length with no backtracking, and the hot path is allocation-lean:
 // Header.Raw, Unit.Raw, Unit.Body, Header.Description and every scope term are
 // substrings of the input rather than copies, and a message that is already
-// normalised is not rewritten at all. A clean single-unit message costs a
-// handful of small allocations, none of them proportional to the body size.
+// normalised is not rewritten at all. A clean single-unit message of ordinary
+// length costs one allocation, and one more for its scope terms; none is
+// proportional to the body size.
 //
 // Two consequences are worth knowing. Result and its Units retain a reference
 // to the message string, so holding a Result alive holds the message alive.
@@ -288,8 +289,12 @@ func (p *Parser) Parse(message string) (*Result, error) {
 		return fatalResult(normalised, CodeE002, "message is empty")
 	}
 
-	lines := splitLines(normalised)
-	sources, dropped := splitUnits(normalised, lines, p.cfg.Separator, p.escapedSep)
+	// Lines and unit sources are scratch that no Result refers to, so the
+	// spaces for them stay on the stack, sized for nearly every real message.
+	var lineSpace [scratchLines]string
+	var sourceSpace [scratchUnits]unitSource
+	lines := splitLines(normalised, lineSpace[:0])
+	sources, dropped := p.splitUnits(normalised, lines, sourceSpace[:0])
 
 	if n := p.cfg.Limits.UnitsPerMessage; n > 0 && len(sources) > n {
 		return fatalResult(normalised, CodeE158,
@@ -301,13 +306,12 @@ func (p *Parser) Parse(message string) (*Result, error) {
 	if len(sources) == 1 {
 		// The overwhelmingly common shape: Result, Unit and the pointer slice
 		// come out of one allocation.
-		buf := new(parseBuf)
-		buf.ptrs[0] = &buf.unit
+		buf := newParseBuf()
 		res = &buf.res
 		res.Message = normalised
 		res.Units = buf.ptrs[:]
 		res.Diagnostics = dropped
-		p.parseUnit(&buf.unit, 0, sources[0])
+		p.parseUnit(&buf.unit, sources[0], lines)
 		res.Diagnostics = append(res.Diagnostics, buf.unit.Diagnostics...)
 		p.checkMultiUnitScoping(res) // a no-op below two units, kept for symmetry
 		res.propagateMessageScopedErrors()
@@ -321,7 +325,7 @@ func (p *Parser) Parse(message string) (*Result, error) {
 		res.Units = make([]*Unit, n)
 		for i := range sources {
 			u := &backing[i]
-			p.parseUnit(u, i, sources[i])
+			p.parseUnit(u, sources[i], lines)
 			res.Units[i] = u
 			res.Diagnostics = append(res.Diagnostics, u.Diagnostics...)
 		}
@@ -355,12 +359,31 @@ func (r *Result) propagateMessageScopedErrors() {
 // parseBuf packs the objects a single-unit parse needs into one allocation.
 // Its fields are only ever reached through the returned Result, which keeps
 // the whole buffer alive for exactly as long as the caller needs it.
+//
+// It holds nothing else, the scope terms included: with the 8-byte header the
+// allocator adds to a pointerful object over 512 bytes, it sits in the 768-byte
+// size class with 48 bytes to spare, and one ScopeTerm more would move every
+// parse, scoped or not, to the 896-byte class.
 type parseBuf struct {
-	res   Result
-	unit  Unit
-	ptrs  [1]*Unit
-	lines [1]string
+	res  Result
+	unit Unit
+	ptrs [1]*Unit
 }
+
+// newParseBuf returns a buffer whose Result already points at its unit.
+func newParseBuf() *parseBuf {
+	buf := new(parseBuf)
+	buf.ptrs[0] = &buf.unit
+	return buf
+}
+
+// scratchLines and scratchUnits size the stack space Parse splits a message
+// into; a larger message spills to the heap. 32 lines cover 99% of the
+// messages in this repository's history.
+const (
+	scratchLines = 32
+	scratchUnits = 4
+)
 
 // fatalResult builds the Result for a message that cannot be parsed at all.
 func fatalResult(message, code, text string) (*Result, error) {
@@ -410,17 +433,12 @@ func (p *Parser) ParseSubject(subject string) (*Result, error) {
 	}
 
 	// A subject is one unit of one line, so everything fits in one allocation.
-	buf := new(parseBuf)
-	buf.ptrs[0] = &buf.unit
-	buf.lines[0] = normalised
+	buf := newParseBuf()
+	lines := [1]string{normalised}
 	res := &buf.res
 	res.Message = normalised
 	res.Units = buf.ptrs[:]
-	p.parseUnit(&buf.unit, 0, unitSource{
-		msg:       normalised,
-		lines:     buf.lines[:],
-		startLine: 1,
-	})
+	p.parseUnit(&buf.unit, unitSource{raw: normalised, end: 1}, lines[:])
 	res.Diagnostics = buf.unit.Diagnostics
 	res.propagateMessageScopedErrors()
 	return res, res.err()
@@ -446,43 +464,47 @@ func (p *Parser) checkMultiUnitScoping(res *Result) {
 		unscoped, len(res.Units)))
 }
 
-// offsetDetached marks a unit whose text is not a contiguous substring of the
-// message, which happens only when it contains an escaped separator (§4.2).
-const offsetDetached = -1
-
-// unitSource is a unit's lines together with where they sit in the message,
-// which is what keeps diagnostic positions accurate and lets the unit's text
-// be sliced rather than rebuilt.
+// unitSource is where one unit sits in the message: its text and the range of
+// the message's lines it spans, which is what keeps diagnostic positions
+// accurate and lets the unit's body be sliced rather than rebuilt.
+//
+// It holds line indices rather than the lines: escape analysis does not tell
+// one field of a struct from another, so a struct holding both the unit's
+// text, which the Unit keeps, and the lines would move the lines to the heap.
 type unitSource struct {
-	msg       string   // the normalised message
-	lines     []string // the unit's lines, blank edges already trimmed
-	offset    int      // byte offset of lines[0] in msg, or offsetDetached
-	startLine int      // 1-based line number of lines[0]
+	index      int      // the unit's position in the message
+	raw        string   // the unit's lines joined with LF
+	first, end int      // the unit's lines are lines[first:end], blank edges already trimmed
+	unescaped  []string // the unit's lines when it contains an escaped separator, else nil
 }
 
-// text returns lines[a:b] joined with LF. When the unit is contiguous in the
-// message, which it always is unless it contains an escaped separator, the
-// result is a substring and costs nothing.
-func (src unitSource) text(a, b int) string {
+// unitLines returns the unit's lines out of the message's.
+func (src unitSource) unitLines(messageLines []string) []string {
+	if src.unescaped != nil {
+		return src.unescaped
+	}
+	return messageLines[src.first:src.end]
+}
+
+// linesText returns lines[a:b] of the unit joined with LF. Raw is the whole
+// of the unit's lines joined, so the result is a substring of it.
+func (u *Unit) linesText(lines []string, a, b int) string {
 	if a >= b {
 		return ""
 	}
-	if src.offset == offsetDetached {
-		return strings.Join(src.lines[a:b], "\n")
-	}
-	start := src.offset + lineOffset(src.lines, a)
-	return src.msg[start : start+lineSpan(src.lines[a:b])]
+	start := lineOffset(lines, a)
+	return u.Raw[start : start+lineSpan(lines[a:b])]
 }
 
-// trimmedText is text with blank lines dropped from both ends.
-func (src unitSource) trimmedText(a, b int) string {
-	for a < b && src.lines[a] == "" {
+// trimmedLinesText is linesText with blank lines dropped from both ends.
+func (u *Unit) trimmedLinesText(lines []string, a, b int) string {
+	for a < b && lines[a] == "" {
 		a++
 	}
-	for b > a && src.lines[b-1] == "" {
+	for b > a && lines[b-1] == "" {
 		b--
 	}
-	return src.text(a, b)
+	return u.linesText(lines, a, b)
 }
 
 // lineOffset returns the byte offset of lines[k] relative to lines[0].
@@ -510,11 +532,13 @@ func lineSpan(lines []string) int {
 // paragraph that is a footer block only if every one of its lines is a footer
 // start or continuation. Only the last paragraph is ever examined, so the body
 // is never split up.
-func (p *Parser) parseUnit(u *Unit, index int, src unitSource) {
-	lines := src.lines
+func (p *Parser) parseUnit(u *Unit, src unitSource, messageLines []string) {
+	lines := src.unitLines(messageLines)
+	index := src.index
+	startLine := src.first + 1
 	u.Index = index
-	u.Start = Position{Line: src.startLine, Column: 1}
-	u.Raw = src.text(0, len(lines))
+	u.Start = Position{Line: startLine, Column: 1}
+	u.Raw = src.raw
 	u.Valid = true
 
 	header, warns, err := p.parseHeader(lines[0], u.Start)
@@ -533,7 +557,7 @@ func (p *Parser) parseUnit(u *Unit, index int, src unitSource) {
 	if len(lines) > 1 {
 		if lines[1] != "" {
 			u.addError(asDiagnostic(fail(CodeE100,
-				Position{Line: src.startLine + 1, Column: 1},
+				Position{Line: startLine + 1, Column: 1},
 				"a blank line is required between the header and the body")))
 			return
 		}
@@ -550,19 +574,19 @@ func (p *Parser) parseUnit(u *Unit, index int, src unitSource) {
 		bodyEnd := end
 		if isFooterBlock(last) {
 			bodyEnd = para
-			u.Body = src.trimmedText(restStart, para)
-			u.Footers = p.parseFooters(last, Position{Line: src.startLine + para, Column: 1})
+			u.Body = u.trimmedLinesText(lines, restStart, para)
+			u.Footers = p.parseFooters(last, Position{Line: startLine + para, Column: 1})
 		} else {
 			if nearlyFooterBlock(last) {
-				d := warn(CodeW151, Position{Line: src.startLine + para, Column: 1},
+				d := warn(CodeW151, Position{Line: startLine + para, Column: 1},
 					"the final paragraph starts like a footer block but is treated as body text")
 				d.UnitIndex = index
 				u.Diagnostics = append(u.Diagnostics, d)
 			}
-			u.Body = src.trimmedText(restStart, end)
+			u.Body = u.trimmedLinesText(lines, restStart, end)
 		}
-		u.checkStrandedBreakingChange(lines, restStart, bodyEnd, src.startLine)
-		u.checkMiscasedBreakingChange(last, src.startLine+para)
+		u.checkStrandedBreakingChange(lines, restStart, bodyEnd, startLine)
+		u.checkMiscasedBreakingChange(last, startLine+para)
 	}
 
 	p.applySemantics(u)

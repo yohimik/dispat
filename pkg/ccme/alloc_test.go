@@ -36,17 +36,22 @@ func TestAllocationBudget(t *testing.T) {
 		},
 		{
 			name:   "Parse/simple",
-			budget: 5, // measured 4: lines, sources, scopes, buffer
+			budget: 3, // measured 2: the packed buffer and the scope slice
 			run:    func() { allocSink, _ = p.Parse(benchSimple) },
 		},
 		{
+			name:   "Parse/threeScopeTerms",
+			budget: 3, // measured 2: the packed buffer and one pre-sized scope slice
+			run:    func() { allocSink, _ = p.Parse("fix(a,b,c): x") },
+		},
+		{
 			name:   "Parse/directives",
-			budget: 16, // measured 15 (go1.26, two-axis grammar with a footer)
+			budget: 13, // measured 12 (go1.26, two-axis grammar with a footer)
 			run:    func() { allocSink, _ = p.Parse(benchDirectives) },
 		},
 		{
 			name:   "Parse/multiUnit",
-			budget: 12, // measured 11
+			budget: 8, // measured 7
 			run:    func() { allocSink, _ = p.Parse(benchMultiUnit) },
 		},
 	}
@@ -71,10 +76,10 @@ func TestAllocationByteBudget(t *testing.T) {
 		budget int64 // bytes/op
 		run    func()
 	}{
-		{"ParseSubject", 1000, func() { allocSink, _ = p.ParseSubject(benchSubject) }}, // measured 774
-		{"Parse/simple", 1300, func() { allocSink, _ = p.Parse(benchSimple) }},         // measured 976
-		{"Parse/directives", 2800, func() { allocSink, _ = p.Parse(benchDirectives) }}, // measured 2128
-		{"Parse/multiUnit", 4800, func() { allocSink, _ = p.Parse(benchMultiUnit) }},   // measured 3648
+		{"ParseSubject", 1000, func() { allocSink, _ = p.ParseSubject(benchSubject) }}, // measured 832
+		{"Parse/simple", 1100, func() { allocSink, _ = p.Parse(benchSimple) }},         // measured 832
+		{"Parse/directives", 2400, func() { allocSink, _ = p.Parse(benchDirectives) }}, // measured 1840
+		{"Parse/multiUnit", 4000, func() { allocSink, _ = p.Parse(benchMultiUnit) }},   // measured 3040
 	}
 
 	for _, tc := range cases {
