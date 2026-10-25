@@ -70,6 +70,8 @@ type listEdit struct {
 	remove map[int]bool   // entry positions to drop
 	kind   map[int]string // entry positions whose kind changes, and to what
 	add    []config.DependencyConfig
+	// kept are the list's declared entries that survive, in declared order.
+	kept []config.DependencyConfig
 }
 
 // listEdits collects the edits by the list they are aimed at.
@@ -87,6 +89,23 @@ func (l *listEdits) at(src config.DepSource) *listEdit {
 		l.byKey[k] = &listEdit{src: src, remove: map[int]bool{}, kind: map[int]string{}}
 	}
 	return l.byKey[k]
+}
+
+// keepDeclared reconstructs each touched list's surviving entries from the
+// merged declaration list, which holds every entry of every source in order,
+// in one pass over it.
+func (l *listEdits) keepDeclared(declared []config.DeclaredDependency) {
+	for _, d := range declared {
+		edit := l.byKey[listKey(d.Source)]
+		if edit == nil || edit.remove[d.Source.Index] {
+			continue
+		}
+		entry := d.DependencyConfig
+		if kind, ok := edit.kind[d.Source.Index]; ok {
+			entry.Kind = kind
+		}
+		edit.kept = append(edit.kept, entry)
+	}
 }
 
 // keys returns the touched lists in a fixed order, so one config always
@@ -374,24 +393,12 @@ func (a *App) collectDepEdits(edits *fileEdits, cfgPath string, apply []suggesti
 		}
 	}
 
-	// One edit per touched list, in deterministic order. The surviving entries
-	// are reconstructed from the merged declaration list, which holds every
-	// entry of every source in order.
+	lists.keepDeclared(declared)
+	// One edit per touched list, in deterministic order.
 	for _, k := range lists.keys() {
 		edit := lists.byKey[k]
 		src := edit.src
-		var kept []config.DependencyConfig
-		for _, d := range declared {
-			if listKey(d.Source) != k || edit.remove[d.Source.Index] {
-				continue
-			}
-			entry := d.DependencyConfig
-			if kind, ok := edit.kind[d.Source.Index]; ok {
-				entry.Kind = kind
-			}
-			kept = append(kept, entry)
-		}
-		kept = append(kept, edit.add...)
+		kept := append(edit.kept, edit.add...)
 
 		target := a.dependencyConfigPath(cfgPath, src)
 		if err := edits.add(target, config.Edit{KeyPath: src.KeyPath, Value: listValue(src, kept)}); err != nil {
