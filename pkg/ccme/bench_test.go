@@ -90,6 +90,39 @@ func BenchmarkParseCRLF(b *testing.B) {
 	}
 }
 
+// productionShapes are messages as the planner hands them to Parse: git's
+// trailing LF already trimmed, which the LF-tailed fixtures above never are.
+// The diagnosed shapes are the ones a history without the convention is full
+// of: merge commits, prose subjects and unknown types or footer keys.
+var productionShapes = []struct{ name, message string }{
+	{"subject/scoped", "fix(core): typo"},
+	{"subject/threeTerms", "fix(a,b,c): x"},
+	{"simple/trimmed", strings.TrimRight(benchSimple, "\n")},
+	{"simple/rawLF", benchSimple},
+	{"directives/trimmed", strings.TrimRight(benchDirectives, "\n")},
+	{"multiUnit/trimmed", strings.TrimRight(benchMultiUnit, "\n")},
+	{"diagnosed/mergeE101", "Merge branch main into feature/x"},
+	{"diagnosed/proseE101", "fix typo in readme"},
+	{"diagnosed/unknownTypeW140", "wip(core): half done"},
+	{"diagnosed/unknownFooterW150", "fix(core): typo\n\nTested-on: staging"},
+}
+
+// shapeSink keeps each parse live; allocSink is not available under -race.
+var shapeSink *Result
+
+func BenchmarkParseShapes(b *testing.B) {
+	p := DefaultParser()
+	for _, shape := range productionShapes {
+		b.Run(shape.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(shape.message)))
+			for i := 0; i < b.N; i++ {
+				shapeSink, _ = p.Parse(shape.message)
+			}
+		})
+	}
+}
+
 // BenchmarkParseInvalid measures the error path, which allocates a diagnostic
 // and an aggregate error.
 func BenchmarkParseInvalid(b *testing.B) {
@@ -120,6 +153,16 @@ func BenchmarkNormalizeRewrite(b *testing.B) {
 	b.SetBytes(int64(len(benchCRLF)))
 	for i := 0; i < b.N; i++ {
 		_ = Normalize(benchCRLF)
+	}
+}
+
+// BenchmarkNormalizeTrailingNewline is the raw `git log --format=%B` and
+// COMMIT_EDITMSG shape: clean lines with a trailing LF.
+func BenchmarkNormalizeTrailingNewline(b *testing.B) {
+	b.ReportAllocs()
+	b.SetBytes(int64(len(benchSimple)))
+	for i := 0; i < b.N; i++ {
+		_ = Normalize(benchSimple)
 	}
 }
 
