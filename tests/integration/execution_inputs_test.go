@@ -6,9 +6,9 @@ package integration
 // Goal 57: what a serving node does with the provider outputs its assignment
 // tells it to install.
 //
-// A reference is not a transfer (§28.5). The assignment names a branch, an
-// object and the digest of the manifest the run admitted, and every one of
-// those has to turn into bytes this node fetched, read and verified before a
+// A reference is not a transfer (§28.5). The assignment carries an exact
+// result commit and the digest of the manifest the run admitted, and both
+// have to turn into bytes this node fetched, read and verified before a
 // single command of the frame starts. So the claims here are all the same
 // claim in different words: the frame did not run, the node said which rule
 // the prerequisite broke, and the run heard it as a failed prerequisite rather
@@ -19,12 +19,16 @@ package integration
 // an assignment that names an object of their choosing.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/pkg/models"
 
@@ -32,10 +36,8 @@ import (
 )
 
 // executionProvidedOutputs is one provider's answer written into a mailbox by
-// hand: the branch it is fetchable from, the exact object it is read at, and
-// the digest of the manifest it carries.
+// hand: the exact object carried by a consumer assignment and its digest.
 type executionProvidedOutputs struct {
-	branch string
 	commit string
 	digest string
 }
@@ -43,16 +45,13 @@ type executionProvidedOutputs struct {
 // executionProvidedBody is what the crafted provider's one file holds.
 const executionProvidedBody = "provided\n"
 
-// offerOutputs writes one provider result onto a branch of the mailbox, with
-// the bytes it describes travelling in the same commit.
-//
-// The branch is labelled as a relayed result, which is what a real
-// cross-endpoint input travels as: a node skips such a name without reading it
-// and fetches it only because an assignment points at it.
+// offerOutputs writes one detached provider result commit with its declared
+// output bytes. The consumer assignment carries this exact commit as a direct
+// parent; v2 creates no runtime relay ref.
 func (o *executionFakeOrchestrator) offerOutputs(label, task, pkg string,
 	craft func(*executionCraftedOutputs), changes ...func(*executionMessageOptions)) executionProvidedOutputs {
 	o.t.Helper()
-	branch := executionCraftedBranchName("relay", label)
+	branch := o.inputTaskBranch("provider:" + label)
 	crafted := &executionCraftedOutputs{
 		entries: map[string]executionTreeFile{
 			"dist/lib.js": {mode: "100644", content: executionProvidedBody}},
@@ -107,9 +106,61 @@ func (o *executionFakeOrchestrator) offerOutputs(label, task, pkg string,
 		change(&options)
 	}
 	commit := o.carryOutputs(options, executionMustMarshal(o.t, result), outputs)
-	bareGit(o.t, o.mailbox, "update-ref", "refs/heads/"+branch, commit)
-	return executionProvidedOutputs{branch: branch, commit: commit,
+	return executionProvidedOutputs{commit: commit,
 		digest: executionDigestOfBytes(executionMustMarshal(o.t, crafted.manifest.set("manifestDigest", "")))}
+}
+
+// inputTaskBranch gives crafted v2 attempts the same node-neutral branch
+// shape as an orchestrator reservation, without changing shared fixtures.
+func (o *executionFakeOrchestrator) inputTaskBranch(task string) string {
+	sum := sha256.Sum256([]byte(task))
+	return "dispat-task-" + o.run + "-" + hex.EncodeToString(sum[:16]) + "-1"
+}
+
+// prepareCarriedInputState writes a detached source snapshot. Its object is
+// transported by the assignment parent list rather than a snapshot ref.
+func (o *executionFakeOrchestrator) prepareCarriedInputState() executionInputState {
+	o.t.Helper()
+	tree := gitIn(o.t, o.mailbox, fmt.Sprintf("100644 blob %s\tREADME.md\x00",
+		o.hashObject("a package a crafted assignment reads\n")), "mktree", "-z")
+	commit := strings.TrimSpace(bareGit(o.t, o.mailbox, "commit-tree", tree, "-m", "input state"))
+	return executionInputState{commit: commit}
+}
+
+// offerCarriedInput builds the signed Reservation -> Assignment first-parent
+// chain and adds every distinct declared source/result as a direct carrier
+// parent. Omitting a result lets one test prove that an object merely present
+// in the mailbox cannot become a task input.
+func (o *executionFakeOrchestrator) offerCarriedInput(branch string, message map[string]any,
+	state executionInputState, inputs []any, omitResult bool) string {
+	o.t.Helper()
+	reservation := make(map[string]any, len(message))
+	for field, value := range message {
+		reservation[field] = value
+	}
+	reservation["node"] = ""
+	document, err := json.Marshal(reservation)
+	require.NoError(o.t, err)
+	reserved := o.commit(executionMessageOptions{secret: o.secret, kind: "reservation", isSigned: true}, document)
+	parents := []string{reserved, state.commit}
+	seen := map[string]bool{state.commit: true}
+	if !omitResult {
+		for _, raw := range inputs {
+			input := raw.(map[string]any)
+			commit, _ := input["commit"].(string)
+			if commit != "" && !seen[commit] {
+				parents = append(parents, commit)
+				seen[commit] = true
+			}
+		}
+	}
+	document, err = json.Marshal(message)
+	require.NoError(o.t, err)
+	assigned := o.commit(executionMessageOptions{secret: o.secret, kind: "assignment", isSigned: true},
+		document, parents...)
+	bareGit(o.t, o.mailbox, "update-ref", "refs/heads/"+branch, assigned)
+	o.offerSlot(branch, assigned, message)
+	return assigned
 }
 
 // carryOutputs builds one transport commit carrying both a message and the
@@ -150,7 +201,7 @@ func (o *executionFakeOrchestrator) consuming(branch, task string, state executi
 func executionProvidedInput(provided executionProvidedOutputs, pkg, path string,
 	changes ...func(map[string]any)) map[string]any {
 	input := map[string]any{
-		"task": pkg + ":build", "package": pkg, "branch": provided.branch,
+		"task": pkg + ":build", "package": pkg, "branch": "",
 		"commit": provided.commit, "manifestDigest": provided.digest, "path": path,
 	}
 	for _, change := range changes {
@@ -168,7 +219,7 @@ func executionProvidedInput(provided executionProvidedOutputs, pkg, path string,
 func TestExecutionCraftedInputsFailThePrerequisite(t *testing.T) {
 	rig := newExecutionRig(t)
 	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	state := orchestrator.prepareInputState("inputs")
+	state := orchestrator.prepareCarriedInputState()
 	sound := orchestrator.offerOutputs("sound", "provider:build", "provider", nil)
 
 	rows := map[string]struct {
@@ -186,13 +237,7 @@ func TestExecutionCraftedInputsFailThePrerequisite(t *testing.T) {
 				return executionProvidedInput(sound, "provider", "providers/lib",
 					func(m map[string]any) { m["commit"] = state.commit })
 			},
-			reason: "bytes-missing"},
-		"an input naming no branch at all": {
-			input: func() map[string]any {
-				return executionProvidedInput(sound, "provider", "providers/lib",
-					func(m map[string]any) { m["branch"] = "" })
-			},
-			reason: "bytes-missing"},
+			reason: "output-identity"},
 		"an input whose result describes no outputs": {
 			input: func() map[string]any {
 				empty := orchestrator.offerOutputs("nooutputs", "provider:build", "provider",
@@ -201,15 +246,14 @@ func TestExecutionCraftedInputsFailThePrerequisite(t *testing.T) {
 			},
 			reason: "bytes-missing"},
 		"an input whose result has no signature beside it": {
-			// A tree holding a document and nothing else carries no message of
-			// this protocol at all, so the object named as the outputs is not a
-			// result rather than a result that fails to verify.
+			// A direct carrier parent without a signed result fails input
+			// identity before the worker reads any output manifest.
 			input: func() map[string]any {
 				unsigned := orchestrator.offerOutputs("unsigned", "provider:build", "provider", nil,
 					func(o *executionMessageOptions) { o.isSigned = false })
 				return executionProvidedInput(unsigned, "provider", "providers/lib")
 			},
-			reason: "bytes-missing"},
+			reason: "output-identity"},
 		"an input whose result was signed with another secret": {
 			input: func() map[string]any {
 				forged := orchestrator.offerOutputs("forged", "provider:build", "provider", nil,
@@ -258,9 +302,11 @@ func TestExecutionCraftedInputsFailThePrerequisite(t *testing.T) {
 	branches := map[string]string{}
 	for name, row := range rows {
 		task := executionLabel(name)
-		branch := executionCraftedBranchName("build", task)
+		branch := orchestrator.inputTaskBranch(task)
 		branches[name] = branch
-		orchestrator.offer(branch, orchestrator.consuming(branch, task, state, []any{row.input()}))
+		inputs := []any{row.input()}
+		orchestrator.offerCarriedInput(branch, orchestrator.consuming(branch, task, state, inputs),
+			state, inputs, false)
 	}
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
 		func(settings *models.ExecutionConfig) {
@@ -286,6 +332,29 @@ func TestExecutionCraftedInputsFailThePrerequisite(t *testing.T) {
 	}
 }
 
+// An exact object present in the mailbox is not enough to authorize an input:
+// it must be a direct secondary parent of the signed assignment. The worker
+// rejects this malformed envelope before claiming or running its frame.
+func TestExecutionCraftedInputMissingCarrierIsNotClaimed(t *testing.T) {
+	rig := newExecutionRig(t)
+	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+	state := orchestrator.prepareCarriedInputState()
+	provided := orchestrator.offerOutputs("unattached", "provider:build", "provider", nil)
+	branch := orchestrator.inputTaskBranch("missing-carrier")
+	inputs := []any{executionProvidedInput(provided, "provider", "providers/lib")}
+	orchestrator.offerCarriedInput(branch,
+		orchestrator.consuming(branch, "missing-carrier", state, inputs), state, inputs, true)
+
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 2)
+	reply := worker.proc.Wait()
+	require.Equal(t, 0, reply.Code, "worker exits after refusing malformed task\nstdout:\n%s", reply.Stdout)
+	assert.Equal(t, []string{"reservation", "assignment"}, executionChain(t, rig.mailbox, branch),
+		"the worker must not claim an assignment missing its declared result carrier")
+	assert.Empty(t, executionRecordedTasks(rig, "published"), "no command ran")
+	assert.Contains(t, reply.Stdout+reply.Stderr, "rejected (chain)",
+		"the direct-parent integrity gate, rather than another refusal, stopped the worker")
+}
+
 // executionRefusedPrerequisites are the rules a node reported an input set
 // breaking.
 func executionRefusedPrerequisites(res harness.RunResult) []string {
@@ -299,25 +368,27 @@ func executionRefusedPrerequisites(res harness.RunResult) []string {
 }
 
 // TestExecutionCraftedInputsInstallOnce: the control. Two inputs naming one
-// branch are fetched once and installed into the two folders the assignment
-// names, the frame runs afterwards in a checkout that holds both, and the
-// attempt reports success.
+// exact result are carried once and installed into the two folders the
+// assignment names; the frame runs after both are present.
 func TestExecutionCraftedInputsInstallOnce(t *testing.T) {
 	rig := newExecutionRig(t)
 	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	state := orchestrator.prepareInputState("installed")
+	state := orchestrator.prepareCarriedInputState()
 	provided := orchestrator.offerOutputs("shared", "provider:build", "provider", nil)
-	branch := executionCraftedBranchName("build", "installed")
-	// The same object named twice: one fetch, two installations, because two
-	// consumers of one provider are the ordinary case.
-	orchestrator.offer(branch, orchestrator.consuming(branch, "installed", state, []any{
+	branch := orchestrator.inputTaskBranch("installed")
+	// The same object named twice: one carrier parent, two installations.
+	inputs := []any{
 		executionProvidedInput(provided, "provider", "providers/first"),
 		executionProvidedInput(provided, "provider", "providers/second"),
-	}, func(message map[string]any) {
+	}
+	message := orchestrator.consuming(branch, "installed", state, inputs, func(message map[string]any) {
 		message["frame"] = map[string]any{"commands": []any{
 			`test -f providers/first/dist/lib.js && test -f providers/second/dist/lib.js && ` +
 				executionCraftedPublishScript}}
-	}))
+	})
+	assigned := orchestrator.offerCarriedInput(branch, message, state, inputs, false)
+	parents := strings.Fields(bareGit(t, rig.mailbox, "rev-list", "--parents", "--max-count=1", assigned))
+	assert.Equal(t, 4, len(parents), "assignment, reservation, source and one deduplicated provider result")
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
 
 	result := executionAwaitMessage(t, rig.mailbox, branch, "result")

@@ -17,10 +17,13 @@ package integration
 // release is recorded in.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -606,13 +609,21 @@ func TestExecutionTaskTimeoutLeaksTheSlot(t *testing.T) {
 // mailbox while a run is going on, because the run deletes them all at the end
 // and the names are the claim.
 type executionBranchWatch struct {
+	t     *testing.T
 	done  chan struct{}
-	found chan []string
+	once  sync.Once
+	found chan executionBranchObservation
+}
+
+type executionBranchObservation struct {
+	names []string
+	err   error
 }
 
 func newExecutionBranchWatch(t *testing.T, rig *executionRig) *executionBranchWatch {
 	t.Helper()
-	watch := &executionBranchWatch{done: make(chan struct{}), found: make(chan []string, 1)}
+	watch := &executionBranchWatch{t: t, done: make(chan struct{}), found: make(chan executionBranchObservation, 1)}
+	t.Cleanup(func() { watch.once.Do(func() { close(watch.done) }) })
 	go func() {
 		seen := map[string]bool{}
 		ticker := time.NewTicker(50 * time.Millisecond)
@@ -624,14 +635,16 @@ func newExecutionBranchWatch(t *testing.T, rig *executionRig) *executionBranchWa
 				for name := range seen {
 					names = append(names, name)
 				}
-				watch.found <- names
+				watch.found <- executionBranchObservation{names: names}
 				return
 			case <-ticker.C:
-				for _, ref := range executionMailboxBranches(t, rig.mailbox) {
-					name := strings.TrimPrefix(ref, "refs/heads/")
-					if executionAssignedTaskKind(t, rig.mailbox, name) == "build" {
-						seen[name] = true
-					}
+				observed, err := observedBuildBranches(rig.mailbox)
+				if err != nil {
+					watch.found <- executionBranchObservation{err: err}
+					return
+				}
+				for _, name := range observed {
+					seen[name] = true
 				}
 			}
 		}
@@ -652,8 +665,59 @@ func executionBranchKind(branch string) string {
 
 // seen stops the watch and answers the branch names it saw, each once.
 func (w *executionBranchWatch) seen() []string {
-	close(w.done)
-	return <-w.found
+	w.t.Helper()
+	w.once.Do(func() { close(w.done) })
+	observation := <-w.found
+	require.NoError(w.t, observation.err)
+	return observation.names
+}
+
+// observedBuildBranches reads the listed object IDs, so cleanup may delete a
+// ref without invalidating the commit that the watcher already observed.
+func observedBuildBranches(mailbox string) ([]string, error) {
+	git := func(args ...string) (string, error) {
+		out, err := exec.Command("git", append([]string{"-C", mailbox}, args...)...).CombinedOutput()
+		if err != nil {
+			return "", fmt.Errorf("git %v: %w: %s", args, err, out)
+		}
+		return string(out), nil
+	}
+	listed, err := git("for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads/dispat-task-*")
+	if err != nil {
+		return nil, err
+	}
+	var observed []string
+	for _, line := range strings.Split(strings.TrimSpace(listed), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			return nil, fmt.Errorf("malformed task ref observation %q", line)
+		}
+		commits, err := git("rev-list", "--first-parent", "--reverse", fields[1])
+		if err != nil {
+			return nil, err
+		}
+		chain := strings.Fields(commits)
+		if len(chain) < 2 {
+			continue // The reservation has not been activated.
+		}
+		encoded, err := git("cat-file", "blob", chain[1]+":dispat/assignment.json")
+		if err != nil {
+			return nil, err
+		}
+		var assignment struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.Unmarshal([]byte(encoded), &assignment); err != nil {
+			return nil, fmt.Errorf("decode assignment on %s: %w", fields[0], err)
+		}
+		if assignment.Kind == "build" {
+			observed = append(observed, fields[0])
+		}
+	}
+	return observed, nil
 }
 
 // TestExecutionSnapshotGitFaults: the orchestrator's own git failing while

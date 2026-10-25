@@ -223,19 +223,22 @@ func TestExecutionRefusedResultFailsTheTaskPromptly(t *testing.T) {
 	assert.Empty(t, rig.branches())
 }
 
-// The node's second push onto a task ref is its result, after its claim.
-// The task-ref prefix excludes the separate preflight probe branch.
+// The node's second update of a task ref is its result, after its claim.
+// A nonempty expected-old lease selects updates and excludes the upfront
+// create-only reservation batch, which also names task refs.
 // This shim answers it the way a server rule refuses an update, with a
 // porcelain `[remote rejected]` line for the ref and exit code 1, and never
-// runs it. Every other invocation is the real git. Only the worker receives
-// this shim.
+// runs it. Every other invocation is the real git. The worker receives this
+// shim in the result and claim cases; the orchestrator receives it in the
+// assignment-refusal case.
 const executionRefusedResultScript = `#!/bin/sh
 set -eu
 case "$*" in
-*push*dispat-task-*)
+*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*)
  ordinal=1
  while ! mkdir "$DISPAT_IT_REFUSED_DIR/pushes/$ordinal" 2>/dev/null; do ordinal=$((ordinal + 1)); done
  if [ "$ordinal" -eq "${DISPAT_IT_REFUSED_ORDINAL:-2}" ]; then
+  printf '%s\n' "$*" > "$DISPAT_IT_REFUSED_DIR/refused"
   for refspec in "$@"; do :; done
   printf '!\t%s\t[remote rejected] (pre-receive hook declined)\n' "$refspec"
   exit 1
@@ -248,9 +251,8 @@ exec "$DISPAT_IT_REFUSED_GIT" "$@"
 // TestExecutionRefusedAssignmentIsOfferedAgain: the mailbox refuses the run's
 // first assignment push outright, the way a server rule does, with a porcelain
 // `[remote rejected]` line. The assignment provably never landed, so it is
-// no attempt anybody can be working on: the run says the mailbox did not take
-// it and offers the task again, and the package is built once and released
-// with no branch left behind.
+// no attempt anybody can be working on: the run revokes the queued attempt,
+// offers the task again, and builds and releases the package once.
 func TestExecutionRefusedAssignmentIsOfferedAgain(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the refusing fixture uses a POSIX shell")
@@ -268,9 +270,16 @@ func TestExecutionRefusedAssignmentIsOfferedAgain(t *testing.T) {
 	stopAll(t, []*executionWorker{worker})
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	refused, isRefused := executionLine(res, "the mailbox did not take the assignment")
-	require.True(t, isRefused, "the run said so\nstdout:\n%s", res.Stdout)
-	assert.Contains(t, refused.Str("error"), "hook declined", "with the server's reason")
+	refused, err := os.ReadFile(filepath.Join(shim, "refused"))
+	require.NoError(t, err, "the shim refused an activation update")
+	assert.Contains(t, string(refused), "push --atomic")
+	assert.Contains(t, string(refused), "--force-with-lease=refs/heads/dispat-task-")
+	revoked, isRevoked := executionLine(res, "the queued assignment was revoked and the task is placed again")
+	require.True(t, isRevoked, "the refused attempt was not placed before retry\nstdout:\n%s", res.Stdout)
+	assert.Equal(t, float64(1), revoked["attempt"])
+	assigned, isAssigned := executionLine(res, "task assigned")
+	require.True(t, isAssigned, "the task was assigned on its next attempt\nstdout:\n%s", res.Stdout)
+	assert.Equal(t, float64(2), assigned["attempt"])
 	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the package was built once: %v", rig.runs())
 	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
 	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")

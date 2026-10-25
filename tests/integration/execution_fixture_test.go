@@ -418,6 +418,11 @@ func (o *executionFakeOrchestrator) offerSlot(branch, assigned string, assignmen
 	require.NoError(o.t, err)
 	root := o.commit(executionMessageOptions{secret: o.secret, kind: "slot", isSigned: true}, initial)
 	header["sequence"] = 1
+	// The idle root has no task. Activation binds the notice to the exact
+	// assignment rather than inheriting the root's empty Task/Attempt.
+	header["task"] = assignment["task"]
+	header["attempt"] = assignment["attempt"]
+	header["generation"] = assignment["generation"]
 	header["taskBranch"] = branch
 	header["assignment"] = assigned
 	active, err := json.Marshal(header)
