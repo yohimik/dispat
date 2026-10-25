@@ -1,7 +1,9 @@
 package writer
 
 import (
+	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -586,6 +588,70 @@ func FuzzRewriteUPlugin(f *testing.F) {
 		data, ok := fuzzRewrite(t, "AcmeNet.uplugin", content, version, []Edit{{Name: name, Range: "9.9.9"}})
 		if ok && json.Valid([]byte(content)) && !json.Valid(data) {
 			t.Fatalf("rewrite corrupted valid JSON:\n in: %q\nout: %q", content, data)
+		}
+	})
+}
+
+// literalReplace is the reading Replace's contract states: each replacement
+// in order, counted and replaced over what the ones before it left.
+func literalReplace(data []byte, reps []Replacement) ([]byte, []int, ReplaceResult) {
+	counts := make([]int, len(reps))
+	var res ReplaceResult
+	for i, s := range reps {
+		if s.Find == "" {
+			continue
+		}
+		counts[i] = bytes.Count(data, []byte(s.Find))
+		switch {
+		case counts[i] == 0:
+			res.Missing = append(res.Missing, s)
+		case s.Find == s.Write:
+			res.Skipped = append(res.Skipped, s)
+		default:
+			res.Applied = append(res.Applied, s)
+			res.Count += counts[i]
+			data = bytes.ReplaceAll(data, []byte(s.Find), []byte(s.Write))
+		}
+	}
+	return data, counts, res
+}
+
+// FuzzReplaceMatchesTheLiteralReading holds ReplaceBytes and Replace's own
+// pass to the literal reading over the list the release Replacer builds: each
+// replacement followed by its probe, plus a probe that does not directly
+// follow the replacement that wrote its text.
+func FuzzReplaceMatchesTheLiteralReading(f *testing.F) {
+	for _, seed := range []struct{ data, find1, write1, find2, write2 string }{
+		{"acme:1.2.3 core:1.2.3", "acme:1.2.3", "acme:1.3.0", "core:1.2.3", "core:2.0.0"},
+		{"core:1.2.3", "1.2.3", "1.3.0", "core:1.2", "core:2"},
+		{"aaa", "a", "aa", "aa", "a"},
+		{"already 1.3.0", "1.2.3", "1.3.0", "1.3.0", "1.4.0"},
+		{"drop me twice me", " me", "", "twice", "once"},
+		{"same same", "same", "same", "x", "y"},
+		{"abab", "ab", "ba", "ba", "ab"},
+	} {
+		f.Add(seed.data, seed.find1, seed.write1, seed.find2, seed.write2)
+	}
+	f.Fuzz(func(t *testing.T, data, find1, write1, find2, write2 string) {
+		var reps []Replacement
+		for _, s := range []Replacement{
+			{find1, write1}, {write1, write1},
+			{find2, write2}, {write2, write2},
+			{write1, write1},
+		} {
+			if s.Find != "" {
+				reps = append(reps, s)
+			}
+		}
+		wantOut, wantCounts, wantRes := literalReplace([]byte(data), reps)
+
+		out, counts := ReplaceBytes([]byte(data), reps)
+		if !bytes.Equal(out, wantOut) || !reflect.DeepEqual(counts, wantCounts) {
+			t.Fatalf("ReplaceBytes = %q %v, the literal reading %q %v", out, counts, wantOut, wantCounts)
+		}
+		out, res := applyReplacements([]byte(data), reps)
+		if !bytes.Equal(out, wantOut) || !reflect.DeepEqual(res, wantRes) {
+			t.Fatalf("applyReplacements = %q %+v, the literal reading %q %+v", out, res, wantOut, wantRes)
 		}
 	})
 }

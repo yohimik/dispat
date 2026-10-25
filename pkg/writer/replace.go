@@ -90,21 +90,46 @@ func Replace(path string, reps []Replacement) (ReplaceResult, error) {
 		return ReplaceResult{}, fmt.Errorf("%s: %w", path, ErrBinaryFile)
 	}
 
-	out, counts := ReplaceBytes(sp.bytes(), reps)
-	res := ReplaceResult{Path: path}
-	for i, s := range reps {
-		switch {
-		case counts[i] == 0:
-			res.Missing = append(res.Missing, s)
-		case s.Find == s.Write:
-			res.Skipped = append(res.Skipped, s)
-		default:
-			res.Applied = append(res.Applied, s)
-			res.Count += counts[i]
-		}
-	}
+	out, res := applyReplacements(sp.bytes(), reps)
+	res.Path = path
 	sp.setWhole(out)
 	return res, sp.commit(nil)
+}
+
+// applyReplacements is ReplaceBytes for a caller that needs only the result's
+// three-way split, every Find already known to be non-empty. A Find equal to
+// its Write is only ever asked whether it occurs, so its scan stops at the
+// first occurrence, and it is not scanned at all straight after a replacement
+// that just wrote that text: the release Replacer follows every replacement
+// with exactly that probe.
+func applyReplacements(data []byte, reps []Replacement) ([]byte, ReplaceResult) {
+	var (
+		res         ReplaceResult
+		text        = replacingText{data: data}
+		justWritten string
+	)
+	for _, s := range reps {
+		if s.Find == s.Write {
+			if justWritten == s.Find || bytes.Contains(text.data, []byte(s.Find)) {
+				res.Skipped = append(res.Skipped, s)
+			} else {
+				res.Missing = append(res.Missing, s)
+			}
+			justWritten = ""
+			continue
+		}
+		count := bytes.Count(text.data, []byte(s.Find))
+		if count == 0 {
+			res.Missing = append(res.Missing, s)
+			justWritten = ""
+			continue
+		}
+		text.replace(s, count)
+		res.Applied = append(res.Applied, s)
+		res.Count += count
+		justWritten = s.Write
+	}
+	return text.data, res
 }
 
 // ReplaceBytes applies the replacements in memory, returning the result
@@ -116,18 +141,52 @@ func Replace(path string, reps []Replacement) (ReplaceResult, error) {
 // and one that does not returns what it was given.
 func ReplaceBytes(data []byte, reps []Replacement) ([]byte, []int) {
 	counts := make([]int, len(reps))
+	text := replacingText{data: data}
 	for i, s := range reps {
 		if s.Find == "" {
 			continue // an empty pattern matches at every position and means nothing
 		}
-		find := []byte(s.Find)
-		counts[i] = bytes.Count(data, find)
+		counts[i] = bytes.Count(text.data, []byte(s.Find))
 		if counts[i] == 0 || s.Find == s.Write {
 			continue
 		}
-		data = bytes.ReplaceAll(data, find, []byte(s.Write))
+		text.replace(s, counts[i])
 	}
-	return data, counts
+	return text.data, counts
+}
+
+// replacingText is the text a run of replacements has reached. Only the
+// latest version is ever read again, so the one before it becomes the buffer
+// the next replacement writes into, and a run allocates only when the text
+// outgrows that buffer rather than once per replacement. The caller's input is
+// never reused.
+type replacingText struct {
+	data  []byte
+	spare []byte
+	owned bool
+}
+
+// replace substitutes s.Write for each of the count occurrences of s.Find.
+// count is what bytes.Count reported, which sizes the result exactly and
+// saves the second counting pass bytes.ReplaceAll would make.
+func (t *replacingText) replace(s Replacement, count int) {
+	size := len(t.data) + count*(len(s.Write)-len(s.Find))
+	out := t.spare[:0]
+	if cap(out) < size {
+		out = make([]byte, 0, size)
+	}
+	find, rest := []byte(s.Find), t.data
+	for range count {
+		at := bytes.Index(rest, find)
+		out = append(out, rest[:at]...)
+		out = append(out, s.Write...)
+		rest = rest[at+len(find):]
+	}
+	out = append(out, rest...)
+	if t.owned {
+		t.spare = t.data
+	}
+	t.data, t.owned = out, true
 }
 
 // looksBinary reports a NUL byte in the file's first few kilobytes.
