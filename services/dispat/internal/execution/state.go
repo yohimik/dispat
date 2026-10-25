@@ -25,6 +25,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -408,9 +409,53 @@ func writeNodeLockClaim(file *os.File, path string) error {
 // dropped. A message issued one replay window in the future can be accepted
 // now and remain valid for another window; retaining only one window would
 // let the same attempt run again after a restart or ref rewind.
+//
+// The file is one JSON object from triple to acceptance time, and a record is
+// appended to it in place rather than the whole object rewritten: a busy node
+// holds thousands of triples, and rewriting all of them made every claim cost
+// the whole record. A reader of the object keeps the last value of a repeated
+// name, so a triple accepted again is appended again, and a triple dropped
+// from memory is appended once more with the zero time, which every horizon
+// drops on reading; without that, a wall clock stepped back before a restart
+// would bring back a triple this process had already forgotten. The file is
+// rewritten whole once it holds twice the records still live, so it stays
+// within a constant factor of the acceptance horizon.
 type SeenSet struct {
 	path    string
-	entries map[string]time.Time
+	entries map[string]seenEntry
+	// Expiry waits in two queues because a time with a monotonic clock
+	// reading is compared by that reading and a time without one by the wall
+	// clock, and the two orders part once the wall clock is stepped.
+	wallExpiry      seenQueue
+	monotonicExpiry seenQueue
+	recorded        uint64
+	// forgotten are the triples dropped from memory since the file last
+	// caught up with it.
+	forgotten []string
+	// stored is how many records the file holds, live or expired, and size
+	// is its length; its last byte is the closing brace.
+	stored int
+	size   int64
+	// isRewriteDue says the file is not known to hold every live entry in
+	// that layout: it was read rather than written by this process, or a
+	// write failed.
+	isRewriteDue bool
+}
+
+// seenEntry is one remembered triple: when it was accepted, and which
+// recording of it that was, so that the expiry of an earlier recording of the
+// same triple does not forget a later one.
+type seenEntry struct {
+	at      time.Time
+	version uint64
+}
+
+// seenExpiry is one recording waiting for its acceptance time to leave the
+// horizon.
+type seenExpiry struct {
+	triple  string
+	at      time.Time
+	version uint64
 }
 
 // seenRetentionWindow is measured from acceptance, not issuance. CheckHeader
@@ -421,7 +466,7 @@ const seenRetentionWindow = 2 * replayWindow
 // LoadSeenSet reads one node's record, pruned to the acceptance horizon, and
 // answers an empty one for a node that has answered nothing yet.
 func LoadSeenSet(path string, now time.Time) (*SeenSet, error) {
-	set := &SeenSet{path: path, entries: map[string]time.Time{}}
+	set := &SeenSet{path: path, entries: map[string]seenEntry{}, isRewriteDue: true}
 	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return set, nil
@@ -434,13 +479,28 @@ func LoadSeenSet(path string, now time.Time) (*SeenSet, error) {
 		return nil, fmt.Errorf("execution: reading the answered-work record %s: %w", path, err)
 	}
 	cutoff := now.Add(-seenRetentionWindow)
+	loaded := make([]seenExpiry, 0, len(stored))
 	for triple, at := range stored {
 		if at.Before(cutoff) {
 			continue
 		}
-		set.entries[triple] = at
+		loaded = append(loaded, seenExpiry{triple: triple, at: at})
+	}
+	// Sorted, the recordings enter their queue without moving, and the order
+	// the file is next rewritten in does not depend on the map's.
+	slices.SortFunc(loaded, compareSeenExpiry)
+	for _, recording := range loaded {
+		set.remember(recording.triple, recording.at)
 	}
 	return set, nil
+}
+
+// compareSeenExpiry orders recordings by acceptance time, then by triple.
+func compareSeenExpiry(first, second seenExpiry) int {
+	if order := first.at.Compare(second.at); order != 0 {
+		return order
+	}
+	return strings.Compare(first.triple, second.triple)
 }
 
 // IsSeen reports whether this node has already answered one attempt.
@@ -454,24 +514,146 @@ func (s *SeenSet) IsSeen(run, task string, attempt int) bool {
 // It is written before the work is reported rather than after, because the
 // question the record answers is "did this node already take this on", and a
 // node that crashed between claiming and reporting must not take the same
-// attempt on again. The file is replaced through a temporary file and a
-// rename, so a record that is being written is never a record that is half
-// there.
+// attempt on again. A record is appended by one positioned write, and a write
+// that fails puts the closing brace back and falls back to replacing the file
+// through a temporary file and a rename, so a record that is being written is
+// never a record that is half there.
 func (s *SeenSet) Record(run, task string, attempt int, now time.Time) error {
 	// A worker may serve for days without reloading this file. Prune at each
-	// write so both its memory and the durable record stay within the full
-	// acceptance horizon, while retaining newer knowledge of a repeated tuple.
-	cutoff := now.Add(-seenRetentionWindow)
-	for triple, at := range s.entries {
-		if at.Before(cutoff) {
-			delete(s.entries, triple)
-		}
-	}
+	// write so its memory stays within the full acceptance horizon, while
+	// retaining newer knowledge of a repeated tuple.
+	s.prune(now.Add(-seenRetentionWindow))
 	triple := formatTriple(run, task, attempt)
-	if at, ok := s.entries[triple]; !ok || now.After(at) {
-		s.entries[triple] = now
+	if entry, isKnown := s.entries[triple]; isKnown && !now.After(entry.at) {
+		return s.store(nil)
 	}
-	content, err := json.Marshal(s.entries)
+	s.remember(triple, now)
+	return s.store(&seenExpiry{triple: triple, at: now})
+}
+
+// remember holds one recording of a triple in memory and queues its expiry.
+func (s *SeenSet) remember(triple string, at time.Time) {
+	s.recorded++
+	s.entries[triple] = seenEntry{at: at, version: s.recorded}
+	queue := &s.wallExpiry
+	if isMonotonic(at) {
+		queue = &s.monotonicExpiry
+	}
+	queue.push(seenExpiry{triple: triple, at: at, version: s.recorded})
+}
+
+// isMonotonic reports whether a time carries a monotonic clock reading, which
+// Round(0) is documented to strip.
+func isMonotonic(at time.Time) bool {
+	return at != at.Round(0)
+}
+
+// prune forgets every entry accepted before the cutoff.
+func (s *SeenSet) prune(cutoff time.Time) {
+	s.wallExpiry.popBefore(cutoff, s.forget)
+	if isMonotonic(cutoff) {
+		s.monotonicExpiry.popBefore(cutoff, s.forget)
+		return
+	}
+	// A cutoff without a monotonic reading compares even the monotonic
+	// recordings by wall clock, which is an order their queue does not keep.
+	s.monotonicExpiry.removeBefore(cutoff, s.forget)
+}
+
+// forget drops the entry one expired recording made, unless the triple has
+// been recorded again since.
+func (s *SeenSet) forget(expired seenExpiry) {
+	if s.entries[expired.triple].version == expired.version {
+		delete(s.entries, expired.triple)
+		s.forgotten = append(s.forgotten, expired.triple)
+	}
+}
+
+// store brings the file up to memory: the triples forgotten since it last did
+// and the recording just made, if any. It rewrites the file instead when that
+// is due.
+func (s *SeenSet) store(recorded *seenExpiry) error {
+	if s.isRewriteDue {
+		return s.rewrite()
+	}
+	if len(s.forgotten) == 0 && recorded == nil {
+		return nil
+	}
+	if s.stored >= 2*len(s.entries) {
+		return s.rewrite()
+	}
+	if err := s.append(recorded); err != nil {
+		// The rewrite is the write this record always had, so a file that
+		// cannot be written in place fails no claim the rewrite would not.
+		return s.rewrite()
+	}
+	return nil
+}
+
+// append writes the pending records over the file's closing brace, in one
+// positioned write: the forgotten triples first, so that a triple forgotten
+// and recorded again in one call reads as recorded.
+func (s *SeenSet) append(recorded *seenExpiry) error {
+	pending := make([]seenExpiry, 0, len(s.forgotten)+1)
+	for _, triple := range s.forgotten {
+		pending = append(pending, seenExpiry{triple: triple})
+	}
+	if recorded != nil {
+		pending = append(pending, *recorded)
+	}
+	records, err := formatSeenRecords(pending, s.stored > 0)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(s.path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	written, err := file.WriteAt(records, s.size-1)
+	if err == nil && written != len(records) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		// The rewrite that follows replaces the file whatever this leaves; it
+		// only keeps the file readable should the process die before that.
+		_ = file.Truncate(s.size)
+		_, _ = file.WriteAt([]byte{'}'}, s.size-1)
+	}
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	s.stored += len(pending)
+	s.size += int64(len(records)) - 1
+	s.forgotten = s.forgotten[:0]
+	return nil
+}
+
+// formatSeenRecords is the members of the file's object that follow its last
+// one, and the closing brace.
+func formatSeenRecords(pending []seenExpiry, isAfterAMember bool) ([]byte, error) {
+	var records []byte
+	for _, recording := range pending {
+		record, err := formatSeenRecord(recording.triple, recording.at)
+		if err != nil {
+			return nil, err
+		}
+		if isAfterAMember {
+			records = append(records, ',')
+		}
+		records = append(records, record...)
+		isAfterAMember = true
+	}
+	return append(records, '}'), nil
+}
+
+// rewrite replaces the file with every live entry, through a temporary file
+// and a rename.
+func (s *SeenSet) rewrite() error {
+	s.isRewriteDue = true
+	content, err := s.formatRecord()
 	if err != nil {
 		return fmt.Errorf("execution: writing the answered-work record: %w", err)
 	}
@@ -483,7 +665,120 @@ func (s *SeenSet) Record(run, task string, attempt int, now time.Time) error {
 	if err := os.Rename(temporary, s.path); err != nil {
 		return fmt.Errorf("execution: replacing the answered-work record %s: %w", s.path, err)
 	}
+	s.stored, s.size, s.isRewriteDue = len(s.entries), int64(len(content)), false
+	s.forgotten = s.forgotten[:0]
 	return nil
+}
+
+// formatRecord is the whole file: one JSON object of every live entry, in the
+// order their recordings wait to expire.
+func (s *SeenSet) formatRecord() ([]byte, error) {
+	content := []byte{'{'}
+	for _, queue := range []seenQueue{s.wallExpiry, s.monotonicExpiry} {
+		for _, recording := range queue {
+			if s.entries[recording.triple].version != recording.version {
+				continue
+			}
+			record, err := formatSeenRecord(recording.triple, recording.at)
+			if err != nil {
+				return nil, err
+			}
+			if len(content) > 1 {
+				content = append(content, ',')
+			}
+			content = append(content, record...)
+		}
+	}
+	return append(content, '}'), nil
+}
+
+// formatSeenRecord is one member of the file's object, encoded exactly as
+// encoding/json encodes one entry of a map from triple to time.
+func formatSeenRecord(triple string, at time.Time) ([]byte, error) {
+	name, err := json.Marshal(triple)
+	if err != nil {
+		return nil, err
+	}
+	value, err := at.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	return append(append(name, ':'), value...), nil
+}
+
+// seenQueue is a binary min-heap of recordings by acceptance time.
+type seenQueue []seenExpiry
+
+// push queues one recording.
+func (q *seenQueue) push(recording seenExpiry) {
+	*q = append(*q, recording)
+	queue := *q
+	for child := len(queue) - 1; child > 0; {
+		parent := (child - 1) / 2
+		if !queue[child].at.Before(queue[parent].at) {
+			return
+		}
+		queue[child], queue[parent] = queue[parent], queue[child]
+		child = parent
+	}
+}
+
+// popBefore hands every recording accepted before the cutoff to expire,
+// earliest first.
+func (q *seenQueue) popBefore(cutoff time.Time, expire func(seenExpiry)) {
+	for len(*q) > 0 && (*q)[0].at.Before(cutoff) {
+		expire(q.popEarliest())
+	}
+}
+
+// popEarliest takes the earliest recording out of the queue.
+func (q *seenQueue) popEarliest() seenExpiry {
+	queue := *q
+	earliest := queue[0]
+	last := len(queue) - 1
+	queue[0] = queue[last]
+	queue[last] = seenExpiry{}
+	*q = queue[:last]
+	q.siftDown(0)
+	return earliest
+}
+
+// removeBefore hands every recording accepted before the cutoff to expire,
+// whatever order the queue keeps, and rebuilds the queue from the rest.
+func (q *seenQueue) removeBefore(cutoff time.Time, expire func(seenExpiry)) {
+	queue := *q
+	kept := queue[:0]
+	for _, recording := range queue {
+		if recording.at.Before(cutoff) {
+			expire(recording)
+			continue
+		}
+		kept = append(kept, recording)
+	}
+	clear(queue[len(kept):])
+	*q = kept
+	for parent := len(kept)/2 - 1; parent >= 0; parent-- {
+		q.siftDown(parent)
+	}
+}
+
+// siftDown moves one recording down until neither of its children is earlier.
+func (q *seenQueue) siftDown(parent int) {
+	queue := *q
+	for {
+		child := 2*parent + 1
+		if child >= len(queue) {
+			return
+		}
+		if child+1 < len(queue) && queue[child+1].at.Before(queue[child].at) {
+			child++
+		}
+		if !queue[child].at.Before(queue[parent].at) {
+			return
+		}
+		queue[child], queue[parent] = queue[parent], queue[child]
+		parent = child
+	}
 }
 
 // formatTriple is the key one attempt is remembered under. The separator is a

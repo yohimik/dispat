@@ -52,7 +52,13 @@ func TestExecutionClaimWithoutDurableReplayRecordCannotPublish(t *testing.T) {
 	})
 	require.Eventually(t, func() bool { _, err := os.Stat(built); return err == nil },
 		20*time.Second, 20*time.Millisecond, "preflight succeeded and the local build started")
-	obstruction := filepath.Join(worker.stateDir, executionNode, "seen.json.tmp")
+	// A claim appends to the record in place and replaces it through a
+	// temporary file when it cannot, so both paths are blocked.
+	record := filepath.Join(worker.stateDir, executionNode, "seen.json")
+	saved := record + ".saved"
+	require.NoError(t, os.Rename(record, saved))
+	require.NoError(t, os.Mkdir(record, 0o755))
+	obstruction := record + ".tmp"
 	require.NoError(t, os.Mkdir(obstruction, 0o755), "block only the next durable replay write")
 	require.NoError(t, os.WriteFile(continueBuild, nil, 0o600))
 
@@ -68,6 +74,8 @@ func TestExecutionClaimWithoutDurableReplayRecordCannotPublish(t *testing.T) {
 	if err := os.Remove(obstruction); err != nil && !os.IsNotExist(err) {
 		require.NoError(t, err)
 	}
+	require.NoError(t, os.Remove(record))
+	require.NoError(t, os.Rename(saved, record))
 	retried := rig.release()
 	require.Equal(t, 0, retried.Code, "stdout:\n%s\nstderr:\n%s", retried.Stdout, retried.Stderr)
 	assert.Len(t, executionAuthorizations(retried), 1)

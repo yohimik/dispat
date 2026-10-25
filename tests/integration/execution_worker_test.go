@@ -270,8 +270,9 @@ func TestExecutionWorkerRejectsAssignments(t *testing.T) {
 
 // TestExecutionWorkerPrunesAnsweredWorkWhileServing: a node can stay up past
 // the full acceptance horizon. An old answer still blocks a replay while live,
-// then a later answer removes it from the durable record without restarting
-// the node.
+// then a later answer forgets it in the durable record without restarting the
+// node: the record is appended to, so the forgotten triple's last value there
+// is the zero time, which every reader's horizon drops.
 //
 // The old answer is seeded to expire a margin after the attempt starts, and
 // the replay has to be answered inside that margin. The test controls the
@@ -352,7 +353,8 @@ func pruneAnsweredWorkWithin(t *testing.T, margin time.Duration) bool {
 	require.NoError(t, err)
 	stored = map[string]time.Time{}
 	require.NoError(t, json.Unmarshal(content, &stored))
-	assert.NotContains(t, stored, oldKey, "the fresh answer must prune the expired one from disk")
+	forgottenAt, isHeld := stored[oldKey]
+	assert.True(t, !isHeld || forgottenAt.IsZero(), "the fresh answer must forget the expired one on disk")
 	assert.Contains(t, stored, orchestrator.run+" fresh 1")
 	return true
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -200,8 +201,10 @@ func TestSeenSetRemembersAcrossProcesses(t *testing.T) {
 }
 
 // TestSeenSetRecordPrunesWithoutRestart: a serving worker can remain alive
-// longer than the full acceptance horizon, so each new answer must bound both its
-// in-memory record and the file without losing a tuple still on the boundary.
+// longer than the full acceptance horizon, so each new answer must bound its
+// in-memory record without losing a tuple still on the boundary, and the file
+// read back must answer the same. The file itself is bounded by its rewrite,
+// which TestSeenSetFileStaysWithinTwiceItsLiveRecords asserts.
 func TestSeenSetRecordPrunesWithoutRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "seen.json")
 	first := time.Now().UTC().Truncate(time.Second)
@@ -221,9 +224,82 @@ func TestSeenSetRecordPrunesWithoutRestart(t *testing.T) {
 	require.NoError(t, err)
 	stored := map[string]time.Time{}
 	require.NoError(t, json.Unmarshal(content, &stored))
-	assert.NotContains(t, stored, formatTriple("run-old", "probe", 1))
 	assert.Equal(t, first.Add(time.Second), stored[formatTriple("run-boundary", "probe", 1)])
 	assert.Equal(t, latest, stored[formatTriple("run-new", "probe", 1)])
+	reopened, err := LoadSeenSet(path, latest)
+	require.NoError(t, err)
+	assert.False(t, reopened.IsSeen("run-old", "probe", 1))
+	assert.True(t, reopened.IsSeen("run-boundary", "probe", 1))
+}
+
+// TestSeenSetRecordAppendsInPlace: a claim adds its own record to the file
+// instead of rewriting every record the node holds, which made each claim
+// cost the whole record. The file stays one JSON object that a plain decode
+// reads, the newest time of a repeated triple last.
+func TestSeenSetRecordAppendsInPlace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "seen.json")
+	now := time.Now()
+	set, err := LoadSeenSet(path, now)
+	require.NoError(t, err)
+	for attempt := 1; attempt <= 3; attempt++ {
+		require.NoError(t, set.Record("run-1", "core", attempt, now))
+	}
+	written, err := os.Stat(path)
+	require.NoError(t, err)
+
+	require.NoError(t, set.Record("run-1", "core", 4, now))
+	require.NoError(t, set.Record("run-1", "core", 1, now.Add(time.Minute)))
+
+	appended, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(written, appended), "the record was written in place, not replaced")
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	stored := map[string]time.Time{}
+	require.NoError(t, json.Unmarshal(content, &stored))
+	assert.Len(t, stored, 4)
+	assert.True(t, now.Add(time.Minute).Equal(stored[formatTriple("run-1", "core", 1)]))
+	reopened, err := LoadSeenSet(path, now)
+	require.NoError(t, err)
+	assert.True(t, reopened.IsSeen("run-1", "core", 4))
+
+	t.Run("a record that cannot be written in place replaces the file", func(t *testing.T) {
+		if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+			t.Skip("needs a file this process cannot open for writing")
+		}
+		require.NoError(t, os.Chmod(path, 0o444))
+
+		require.NoError(t, set.Record("run-1", "core", 5, now))
+
+		reopened, err := LoadSeenSet(path, now)
+		require.NoError(t, err)
+		assert.True(t, reopened.IsSeen("run-1", "core", 5))
+		assert.True(t, reopened.IsSeen("run-1", "core", 4))
+	})
+}
+
+// TestSeenSetFileStaysWithinTwiceItsLiveRecords: appending never removes an
+// expired record from the file, so the file is rewritten once it holds twice
+// the records still live. A node serving one attempt a minute for a week
+// keeps a file of about one horizon's records, not a week's.
+func TestSeenSetFileStaysWithinTwiceItsLiveRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "seen.json")
+	start := parseTestTime(t, "2026-09-21T12:00:00Z")
+	set, err := LoadSeenSet(path, start)
+	require.NoError(t, err)
+	largest := 0
+	for minute := range 7 * 24 * 60 {
+		require.NoError(t, set.Record("run-1", "core", minute+1, start.Add(time.Duration(minute)*time.Minute)))
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		largest = max(largest, int(info.Size()))
+	}
+
+	live := int(seenRetentionWindow/time.Minute) + 1
+	record, err := formatSeenRecord(formatTriple("run-1", "core", 10000), start)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, largest, 2*live*(len(record)+1)+2, "at most twice the live records")
+	assert.Len(t, set.entries, live)
 }
 
 // TestAStaleLockIsTakenOverWithoutTakingAFreshOne: the race the takeover used
@@ -378,4 +454,28 @@ func TestNodeStateAnswersForItsOwnerOnly(t *testing.T) {
 	held, err := os.ReadFile(lock)
 	require.NoError(t, err, "and it is left for its owner")
 	assert.Equal(t, other, string(held))
+}
+
+// BenchmarkSeenSetRecord records one new attempt per iteration into a record
+// that already holds 10000 answered attempts, which is a busy node's 48 hours.
+// The record is seeded through its file so that seeding costs one write.
+func BenchmarkSeenSetRecord(b *testing.B) {
+	path := filepath.Join(b.TempDir(), "seen.json")
+	now := time.Now()
+	seeded := make(map[string]time.Time, 10000)
+	for i := range 10000 {
+		seeded[formatTriple(strings.Repeat("a", 64), "package-"+strconv.Itoa(i)+":build", 1)] =
+			now.Add(-time.Duration(i) * time.Second)
+	}
+	content, err := json.Marshal(seeded)
+	require.NoError(b, err)
+	require.NoError(b, os.WriteFile(path, content, 0o644))
+	set, err := LoadSeenSet(path, now)
+	require.NoError(b, err)
+	recorded := 0
+	for b.Loop() {
+		require.NoError(b, set.Record(strings.Repeat("b", 64), "package-"+strconv.Itoa(recorded)+":build", 1,
+			time.Now()))
+		recorded++
+	}
 }
