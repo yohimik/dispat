@@ -244,16 +244,25 @@ func canonicalProviders(providers map[string][]string) []digestProviderEdges {
 // is not a different plan, and a digest that changed with the prose would
 // make every message edit a coordination failure.
 func canonicalDiagnostics(diagnostics []Diagnostic) []digestDiagnostic {
-	out := make([]digestDiagnostic, 0, len(diagnostics))
-	for _, diagnostic := range diagnostics {
-		out = append(out, digestDiagnostic{
+	type keyedDiagnostic struct {
+		key        string
+		diagnostic digestDiagnostic
+	}
+	keyed := make([]keyedDiagnostic, len(diagnostics))
+	for i, diagnostic := range diagnostics {
+		d := digestDiagnostic{
 			Code:       diagnostic.Code,
 			Package:    diagnostic.Pkg,
 			Repository: diagnostic.Repository,
 			Commit:     diagnostic.Commit,
-		})
+		}
+		keyed[i] = keyedDiagnostic{key: digestDiagnosticKey(d), diagnostic: d}
 	}
-	sort.Slice(out, func(i, j int) bool { return digestDiagnosticKey(out[i]) < digestDiagnosticKey(out[j]) })
+	sort.Slice(keyed, func(i, j int) bool { return keyed[i].key < keyed[j].key })
+	out := make([]digestDiagnostic, len(keyed))
+	for i, k := range keyed {
+		out[i] = k.diagnostic
+	}
 	return out
 }
 

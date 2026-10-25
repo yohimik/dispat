@@ -13,6 +13,8 @@ package plan
 
 import (
 	"context"
+	"math/rand"
+	"sort"
 	"strings"
 	"testing"
 
@@ -260,4 +262,33 @@ func TestPlanDigestReadsTheHeadsPlanningRecorded(t *testing.T) {
 	supplied, err := empty.CalculateDigest(DigestInput{Heads: map[string]string{"": "cccc"}})
 	require.NoError(t, err)
 	assert.NotEqual(t, planned, supplied)
+}
+
+// TestCanonicalDiagnosticsSortByTheJoinedKey checks the canonical order
+// against the comparison it is defined by, the joined key of both operands,
+// over duplicates and fields that carry the separator, and pins the sort at
+// one key per diagnostic.
+func TestCanonicalDiagnosticsSortByTheJoinedKey(t *testing.T) {
+	rng := rand.New(rand.NewSource(11))
+	pieces := []string{"", "a", "b", "a\x00b", "W134", "core"}
+	for round := 0; round < 300; round++ {
+		diagnostics := make([]Diagnostic, rng.Intn(40))
+		for i := range diagnostics {
+			diagnostics[i] = Diagnostic{Code: pieces[rng.Intn(len(pieces))], Pkg: pieces[rng.Intn(len(pieces))],
+				Repository: pieces[rng.Intn(len(pieces))], Commit: pieces[rng.Intn(len(pieces))]}
+		}
+		want := make([]digestDiagnostic, 0, len(diagnostics))
+		for _, d := range diagnostics {
+			want = append(want, digestDiagnostic{Code: d.Code, Package: d.Pkg, Repository: d.Repository, Commit: d.Commit})
+		}
+		sort.Slice(want, func(i, j int) bool { return digestDiagnosticKey(want[i]) < digestDiagnosticKey(want[j]) })
+		require.Equalf(t, want, canonicalDiagnostics(diagnostics), "round %d", round)
+	}
+	diagnostics := make([]Diagnostic, 64)
+	for i := range diagnostics {
+		diagnostics[i] = Diagnostic{Code: "W134", Pkg: pieces[i%len(pieces)], Commit: strings.Repeat("c", i%7)}
+	}
+	allocations := testing.AllocsPerRun(20, func() { canonicalDiagnostics(diagnostics) })
+	assert.LessOrEqual(t, allocations, float64(len(diagnostics)+8),
+		"one key per diagnostic and a few for the slices and the sort (measured 69 for 64)")
 }
