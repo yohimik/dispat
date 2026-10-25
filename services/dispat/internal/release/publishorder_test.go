@@ -348,3 +348,17 @@ func TestPublishOrderCascadeAnswersAsTheFullClosure(t *testing.T) {
 func isDeadOutcome(res *Result) bool {
 	return res.RecordBlocked || res.Status == StatusFailed || res.Status == StatusSkipped
 }
+
+// TestPublishOrderAdmitsWithoutAllocatingWhileEveryProviderLives pins what
+// nearly every admission of every run costs: a consumer whose declared and
+// reached providers all published is admitted without allocating.
+func TestPublishOrderAdmitsWithoutAllocatingWhileEveryProviderLives(t *testing.T) {
+	p, changed := mkOverlappingGapsPlan(3, 50)
+	r := newAdmissionRun(p, changed)
+	reached := r.publishReach.Indirect("app")
+	p.Providers["app"] = append(p.Providers["app"], reached[:5]...)
+
+	allocs := testing.AllocsPerRun(100, func() { shouldSkip("app", p, r.results, reached) })
+
+	assert.Zero(t, allocs)
+}

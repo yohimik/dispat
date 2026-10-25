@@ -1670,22 +1670,29 @@ func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []
 	rel := p.Releases[pkg]
 	badProvider := ""
 	blockingProvider := ""
-	bad := make(map[string]bool, len(reached))
-	for _, prov := range slices.Concat(p.Providers[pkg], reached) {
-		r, ok := results[prov]
-		if !ok { // unchanged provider
-			continue
-		}
-		if r.RecordBlocked {
-			return true, prov
-		}
-		if r.Status != StatusFailed && r.Status != StatusSkipped {
-			continue
-		}
-		bad[prov] = true
-		badProvider = prov
-		if pr := p.Releases[prov]; pr != nil && pr.Pkg.Space.ProviderRelation.IsBlocking {
-			blockingProvider = prov
+	// Made on the first dead provider: an admission with none, which is
+	// nearly every admission, then allocates nothing.
+	var bad map[string]bool
+	for _, providers := range [...][]string{p.Providers[pkg], reached} {
+		for _, prov := range providers {
+			r, ok := results[prov]
+			if !ok { // unchanged provider
+				continue
+			}
+			if r.RecordBlocked {
+				return true, prov
+			}
+			if r.Status != StatusFailed && r.Status != StatusSkipped {
+				continue
+			}
+			if bad == nil {
+				bad = make(map[string]bool)
+			}
+			bad[prov] = true
+			badProvider = prov
+			if pr := p.Releases[prov]; pr != nil && pr.Pkg.Space.ProviderRelation.IsBlocking {
+				blockingProvider = prov
+			}
 		}
 	}
 	if badProvider == "" {
