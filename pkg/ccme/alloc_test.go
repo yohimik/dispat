@@ -56,7 +56,7 @@ func TestAllocationBudget(t *testing.T) {
 		},
 		{
 			name:   "Parse/directives",
-			budget: 13, // measured 12 (go1.26, two-axis grammar with a footer)
+			budget: 9, // measured 8 (go1.26, two-axis grammar with a footer)
 			run:    func() { allocSink, _ = p.Parse(benchDirectives) },
 		},
 		{
@@ -88,7 +88,7 @@ func TestAllocationByteBudget(t *testing.T) {
 	}{
 		{"ParseSubject", 1000, func() { allocSink, _ = p.ParseSubject(benchSubject) }}, // measured 832
 		{"Parse/simple", 1100, func() { allocSink, _ = p.Parse(benchSimple) }},         // measured 832
-		{"Parse/directives", 2400, func() { allocSink, _ = p.Parse(benchDirectives) }}, // measured 1840
+		{"Parse/directives", 2200, func() { allocSink, _ = p.Parse(benchDirectives) }}, // measured 1704
 		{"Parse/multiUnit", 4000, func() { allocSink, _ = p.Parse(benchMultiUnit) }},   // measured 3040
 	}
 

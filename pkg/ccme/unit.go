@@ -109,26 +109,44 @@ func (b *unitBuilder) warnf(code string, pos Position, format string, args ...an
 // footerDirectives is the directive state extracted from a unit's footers,
 // before reconciliation with the header's inline directives.
 type footerDirectives struct {
-	propagate    *Propagate
-	depth        *Depth
+	propagate    optional[Propagate]
+	depth        optional[Depth]
 	scope        ScopeSet
 	scopeSet     bool
-	channel      *ChannelValue
-	pchannel     *ChannelValue
-	channelDepth *Depth
+	channel      optional[ChannelValue]
+	pchannel     optional[ChannelValue]
+	channelDepth optional[Depth]
 	cscope       ScopeSet
 	cscopeSet    bool
 	releaseAs    *ReleaseAs
 	reverts      []string
 	edits        []CorrectionTarget
 	deletes      []CorrectionTarget
-	breaking     *string
+	breaking     optional[string]
 	// registryKeys counts footers from the §8.1 registry, which is what makes
 	// a cancel unit E171 and a release unit non-inert.
 	registryKeys int
 	// correctionKeys counts Edits and Deletes footers, which are E173 on a
 	// release unit (§7.4.1).
 	correctionKeys int
+}
+
+// optional holds a footer's value in place. Pointing at a local instead, the
+// shape the inline side has, moves every recorded value to the heap.
+type optional[T any] struct {
+	value T
+	isSet bool
+}
+
+func (o *optional[T]) set(value T) { o.value, o.isSet = value, true }
+
+// pointer returns the value's address, or nil when it is unset, which is how
+// the inline side represents an absent directive.
+func (o *optional[T]) pointer() *T {
+	if !o.isSet {
+		return nil
+	}
+	return &o.value
 }
 
 // applySemantics runs everything that follows a successful header parse:
@@ -139,10 +157,10 @@ func (p *Parser) applySemantics(u *Unit) {
 	fd := p.readFooters(b)
 
 	u.Directives.Reverts = fd.reverts
-	if fd.breaking != nil {
-		u.Directives.BreakingChange = *fd.breaking
+	if fd.breaking.isSet {
+		u.Directives.BreakingChange = fd.breaking.value
 	}
-	u.Breaking = u.Header.Breaking || fd.breaking != nil
+	u.Breaking = u.Header.Breaking || fd.breaking.isSet
 
 	switch u.Header.Type {
 	case TypeCancel:
@@ -170,7 +188,7 @@ func (p *Parser) applySemantics(u *Unit) {
 		}
 	}
 
-	p.reconcile(b, fd)
+	p.reconcile(b, &fd)
 	p.applyDefaults(u)
 	p.checkPropagationRedundancy(b)
 	p.checkScopeOverlap(b)
@@ -203,9 +221,8 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 		fd.registryKeys++
 		switch f.CanonicalKey {
 		case FooterBreakingChange:
-			value := f.Value
-			fd.breaking = &value
-			if value == "" {
+			fd.breaking.set(f.Value)
+			if f.Value == "" {
 				b.warnf(CodeW157, f.Position,
 					"%s carries no explanation", FooterBreakingChange)
 			}
@@ -216,7 +233,7 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 				b.errf(CodeE151, f.Position, "invalid %s value %q", f.CanonicalKey, f.Value)
 				continue
 			}
-			fd.propagate = &v
+			fd.propagate.set(v)
 
 		case FooterPropagateDepth:
 			d, err := parseDepthValue(f.Value, f.Position)
@@ -224,7 +241,7 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 				b.errf(CodeE151, f.Position, "invalid %s value %q", f.CanonicalKey, f.Value)
 				continue
 			}
-			fd.depth = &d
+			fd.depth.set(d)
 
 		case FooterPropagateScope:
 			scope, err := parseScopeSetValue(f.Value, f.Position, p.cfg.Limits.ScopeTermsPerUnit)
@@ -241,7 +258,7 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 				b.errf(d.Code, d.Position, "%s: %s", f.CanonicalKey, d.Message)
 				continue
 			}
-			fd.pchannel = &v
+			fd.pchannel.set(v)
 
 		case FooterPropagateChannelDepth:
 			d, err := parseDepthValue(f.Value, f.Position)
@@ -249,7 +266,7 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 				b.errf(CodeE151, f.Position, "invalid %s value %q", f.CanonicalKey, f.Value)
 				continue
 			}
-			fd.channelDepth = &d
+			fd.channelDepth.set(d)
 
 		case FooterPropagateChannelScope:
 			scope, err := parseScopeSetValue(f.Value, f.Position, p.cfg.Limits.ScopeTermsPerUnit)
@@ -266,7 +283,7 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 				b.errf(d.Code, d.Position, "%s: %s", f.CanonicalKey, d.Message)
 				continue
 			}
-			fd.channel = &v
+			fd.channel.set(v)
 
 		case FooterReleaseAs:
 			ra, err := parseReleaseAs(f.Value)
@@ -316,25 +333,25 @@ func (p *Parser) readFooters(b *unitBuilder) footerDirectives {
 // reconcile merges inline directives with footers. Inline and footer forms are
 // exactly equivalent; stating both is redundant, contradicting is an error
 // (§5.3).
-func (p *Parser) reconcile(b *unitBuilder, fd footerDirectives) {
+func (p *Parser) reconcile(b *unitBuilder, fd *footerDirectives) {
 	u := b.u
 	pos := u.Header.Position
 	in := u.Header.Inline
 
-	if v := reconcileDirective(b, FooterPropagate, in.Propagate, fd.propagate, pos); v != nil {
+	if v := reconcileDirective(b, FooterPropagate, in.Propagate, fd.propagate.pointer(), pos); v != nil {
 		u.Directives.Propagate, u.Directives.PropagateSet = *v, true
 	}
-	if v := p.reconcileDepth(b, FooterPropagateDepth, in.Depth, fd.depth, pos,
+	if v := p.reconcileDepth(b, FooterPropagateDepth, in.Depth, fd.depth.pointer(), pos,
 		in.depthWasImplied(), in.depthFromDoubleCaretSigil()); v != nil {
 		u.Directives.Depth, u.Directives.DepthSet = *v, true
 	}
-	if v := reconcileDirective(b, FooterChannel, in.Channel, fd.channel, pos); v != nil {
+	if v := reconcileDirective(b, FooterChannel, in.Channel, fd.channel.pointer(), pos); v != nil {
 		u.Directives.Channel, u.Directives.ChannelSet = *v, true
 	}
-	if v := reconcileDirective(b, FooterPropagateChannel, in.PropagateChannel, fd.pchannel, pos); v != nil {
+	if v := reconcileDirective(b, FooterPropagateChannel, in.PropagateChannel, fd.pchannel.pointer(), pos); v != nil {
 		u.Directives.PropagateChannel, u.Directives.PropagateChannelSet = *v, true
 	}
-	if v := p.reconcileDepth(b, FooterPropagateChannelDepth, in.ChannelDepth, fd.channelDepth, pos,
+	if v := p.reconcileDepth(b, FooterPropagateChannelDepth, in.ChannelDepth, fd.channelDepth.pointer(), pos,
 		in.channelDepthWasImplied(), false); v != nil {
 		u.Directives.ChannelDepth, u.Directives.ChannelDepthSet = *v, true
 	}
@@ -578,7 +595,7 @@ func parseScopeSetValue(v string, pos Position, limit int) (ScopeSet, error) {
 	if v == "" {
 		return nil, errEmptyScopeSet
 	}
-	var out ScopeSet
+	out := newScopeStorage(v, limit)
 	start := 0
 	for i := 0; i <= len(v); i++ {
 		if i < len(v) && v[i] != ',' {

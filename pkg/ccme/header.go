@@ -384,10 +384,11 @@ func (p *Parser) parseHeader(line string, pos Position) (Header, []Diagnostic, D
 }
 
 // newScopeStorage returns empty storage for the terms of the scope-set whose
-// first term starts rest, so that k terms cost one allocation rather than one
-// per doubling. The comma count bounds the terms from above and is clamped to
-// the term limit, past which the scan stops with E158; the scan itself still
-// decides what is a term.
+// first term starts rest, a header's ending at its ')' and a footer value's at
+// the end, so that k terms cost one allocation rather than one per doubling.
+// The comma count bounds the terms from above and is clamped to the term
+// limit, past which the parse stops with E158; the parse itself still decides
+// what is a term.
 func newScopeStorage(rest string, limit int) ScopeSet {
 	if end := strings.IndexByte(rest, ')'); end >= 0 {
 		rest = rest[:end]
