@@ -2952,7 +2952,8 @@ Otherwise comparisons, decoding, sorting, allocation, adapter calls, record matc
 ordinary input/output costs. The symbols make those costs visible where they dominate; the table is not an
 unqualified end-to-end upper bound. Hash-table operations have expected constant cost under the chosen hashing
 assumptions; a deterministic worst-case claim needs a suitable index and must include its construction. A faster
-representation is not automatically optimal in either time or memory, and this section makes no global optimality claim.
+representation is not automatically optimal in either time or memory. This section claims no global minimum for
+end-to-end planning, compilation, recovery or auxiliary memory.
 
 Notation: `P` packages, `E` workspace dependency edges, `H` commits and `A` parent edges in the history reachable from
 the fixed `HEAD`, `C` commits in the union of all pending windows, `U` units in those commits, `N` total bytes of their
@@ -3116,14 +3117,17 @@ intersection of `mask(c)` with the cancel markers whose scope contains `X`, and 
 one set bit together with `c ≠ x`. Under §27 the pass runs once per repository over that repository's own markers,
 and repository identity stays in every key.
 
-The pass need not leave the union of the pending windows. A window is closed under descendants, so every commit on a
-path from a marker down to a commit of the union is itself in the union: no path leaves the union and returns to it.
-A pass over the union's commits and the parent edges between them therefore sets exactly the bits the full pass sets
-for those commits, at `O((C + Ac) · ceil(m / wordSize))` with `Ac` the parent edges inside the union, and a marker
-the union does not hold is an ancestor of none of its commits, provided it is reachable from `HEAD`, which a release
-tag is (§12.2). What remains in `H + A` is finding the union in the first place. A backend that can name it in one
-query, as Git can (`HEAD` with the best common ancestors of the boundaries excluded), reads messages and changed
-paths once for the union where a read per boundary repeats every commit two windows share; each window is then the
+For mask rows of commits in the pending union, the pass need not leave that union. A window is closed under
+descendants. For a marker inside the union, every path from it down to another union commit stays inside it.
+For a reachable marker outside the union, no union commit is its ancestor, so its bit is clear on every union commit.
+With indexed induced parent adjacency, a pass over the union sets exactly the full-pass bits for its commits in
+`O((C + Ac) · bw(m))`, where `Ac` counts parent edges inside the union. Building that adjacency from raw parent
+lists adds `O(C + Au)` work with constant-time indexed union membership; `Au` counts all parent entries of union
+commits, including edges leaving the union. Index construction is charged separately. Correction and revert checks
+can query a target outside the union; their ancestry queries or a full-history pass have separate costs.
+What remains in `H + A` is finding the union in the first place. A backend that can name it in one query,
+as Git can (`HEAD` with the best common ancestors of the boundaries excluded), reads messages and changed paths
+once for the union where a read per boundary repeats every commit two windows share; each window is then the
 union minus one marker's bits, in the union's order.
 
 Two refinements bound the pass further, and neither changes its worst case. Equal masks SHOULD be interned: on a
@@ -3391,6 +3395,11 @@ have separate costs and no global minimum claim here.
    `sT = Wk + idle slot-time`, the inequality follows. This proves asymptotically optimal task makespan,
    `T = Theta(Wk / s + Lk)` for positive total work, under these premises. With all durations zero, task makespan
    is zero while graph processing still costs `Theta(Tk + Dk)` in the explicit scan model.
+   The factor is sharp over arbitrary work-conserving list priorities. For `s >= 2`, let `s(s - 1)` independent
+   unit jobs precede one independent duration-`s` job in the priority. The list finishes at `2s - 1`; an offline
+   schedule runs the long job on one slot and `s` units on each other slot, finishing at `s`. Here
+   `Wk / s = Lk = s`, so the ratio is `2 - 1/s`. This does not rule out better algorithms or priorities.
+   Also, three independent unit jobs on two slots have `B = 3/2` but optimum 2: the lower bound need not be met.
 3. **Disjoint stage budgets.** Suppose every positive-duration task draws on exactly one of `q` disjoint,
    interchangeable stage pools, pool `j` has a positive integer `m_j` of slots, these are the only binding
    capacities, and transfers, scheduling and unmodeled record overhead take no time. A schedule that never idles
@@ -3486,10 +3495,13 @@ The latter two follow from irreversibility and the specified dependency semantic
 uses destination-side deduplication, receipts,
 an outbox, or a different scheduler can satisfy the same observable invariants. Thus saga-style forward recovery
 is necessary as a semantic class under these assumptions, while no particular saga algorithm is unique. Given
-a fixed finite graph, stable inputs, fair dispatch and retry, an eventual crash-free interval long enough for
-effect and record writes to succeed, and settlement of every uncertain attempt, topological induction lets the
-remaining tasks finish and be recorded. Section 13.7c states the extra retry conditions for release convergence.
-Arbitrary crashes or unverifiable outcomes supply no completion-time or retry-work bound, and this argument
+a fixed finite graph, stable inputs, fair dispatch and retry, settlement of uncertain attempts, and a crash-free
+interval in which every required pre-record stage, tracked effect and canonical record succeeds, topological
+induction completes the remaining release obligations through their records in that invocation. Across invocations,
+§13.7c G6 governs convergence of recomputed residual plans and permits extra catch-up releases. Post-record
+stages in `A_p` are not resumed by the next release plan. Their effects need an independent durable replay
+contract if completion after a crash is required. Arbitrary crashes or unverifiable outcomes supply no
+completion-time or retry-work bound, and this argument
 establishes no minimum auxiliary memory.
 
 **Idempotent replay under stable inputs.** Fix the source revision, resolved configuration, toolchain, environment,
@@ -3519,10 +3531,13 @@ occurs before an effect attempt starts, rebuild and request the same `K, J`. If 
 settle or fence it, or rely on destination deduplication. After publication but before its record, verify the
 same effect and write the tag; skip the put if the destination already holds verified `J`. After a durable
 tag, the next plan skips that completed package. Induction over any finite sequence of crashes preserves each
-verified effect and tag identity. With fair retries, stable inputs, settled attempts and eventual successful
-effect and record writes, the final state equals the crash-free intended state under the retry invariant of
-§13.7c. After partial success, new valid records change the inventory and discharge completed units, so the
-next run derives a residual plan; it does not replay an unchanged full plan. Repeated builds and identical
+verified effect and tag identity for a fixed attempted `(K, J)`. With fair retries, stable inputs, settled attempts
+and eventual successful effect and record writes, replay of that identity is safe. Under §13.7c's retry invariant,
+G6 gives an empty non-held forward plan after bounded successful-progress runs. The sequence can include catch-up
+releases, so its records need not equal those of an all-successful first run. Replay-protected pre-record obligations
+complete before their tags; completion of post-record or untracked side effects does not follow. After partial
+success, new valid records change the inventory and discharge completed units. The next run derives a residual
+plan; it does not replay an unchanged full plan. Repeated builds and identical
 effect requests are safe under these premises, but arbitrarily many crashes can add unbounded work and time.
 This is an informative replay contract, not a claim that arbitrary external commands already satisfy it.
 
@@ -3534,9 +3549,11 @@ completed record describes an effect allowed by that plan. Induct on task preced
 its required predecessors, and a recorded irreversible task has a verified effect with the planned identity.
 After a crash, a later invocation reads the updated record inventory. If other inputs remain fixed and the
 retry invariant of §13.7c holds, immutable records discharge completed units and §17.2 derives the residual
-plan from verified state. Under the stated fairness and eventual-success premises, this reaches the intended
-final state. This is a correctness composition, not a minimum-cost theorem. Planner work, graph
-construction, failure-free task time and retry work have separate accounts; optimality of one phase would not
+plan from verified state. Under the stated fairness and eventual-success premises and the retry invariant,
+§13.7c G6 gives an empty non-held forward plan, possibly after catch-up records. This composition establishes
+record soundness and discharge of eligible obligations, not equality with an all-successful first-run record set.
+Post-record effects require their own durable replay contract for a completion claim. Planner work, graph
+construction, failure-free task time and retry work have separate accounts. Optimality of one phase would not
 make their sum or auxiliary memory jointly minimal.
 
 **Earliest starts with unlimited compatible capacity.** For any finite compiled DAG, take time zero as the origin

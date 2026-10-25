@@ -246,6 +246,10 @@ stated model. For disjoint stage pools the analogous chain argument gives `Lk + 
 within-three-times build and publication case. The count of pools matters in that factor. Distributed execution
 also has node compatibility, transfers, record-unit reservations and owner lanes; the theorem gives valid
 resource-load lower bounds but no general matching factor for that full model.
+The one-pool factor is sharp for arbitrary work-conserving list priorities: put `s(s - 1)` independent unit jobs
+before one independent duration-`s` job. That list takes `2s - 1`; placing the long job on one slot and `s`
+units on each other slot finishes in `s`, with `Wk / s = Lk = s`. A different priority can do better.
+Three independent unit jobs on two slots also show `B = 3/2` while the exact optimum is 2.
 
 For sufficient compatible capacity to run every ready task through completion, the earliest-start recurrence
 `E_i = max(E_j + d_j)` over predecessors has one solution on any finite DAG. A topological induction proves
@@ -302,6 +306,8 @@ an unsorted independent workspace makes the least-name order a sort, giving `Ome
 a heap with one adjacency pass matches `O(P + E + P log P)` for that subproblem. These premises do not
 make the full planner jointly optimal. Propagation traversals, ancestry markers, correction probes and
 cache state have input-dependent costs with no matching universal auxiliary-memory lower bound.
+An ancestry pass restricted to the pending union computes only rows for its commits; correction or revert targets
+outside that union require separately charged ancestry work.
 
 A concrete family shows why the implementation at commit `74a7fdcd` is not fastest on every input. In a
 linear history `c_0, ..., c_P`, give each independent package `p_i` a distinct baseline at `c_{i-1}` and
@@ -361,8 +367,11 @@ before work that requires them or success reporting, and §19.3 applies its bloc
 next plan is recomputed from immutable records under §17.2. These are necessary observable invariants of a
 saga-style forward-recovery class under the stated crash model, not a unique implementation or a minimum
 auxiliary memory footprint. Conditional completion needs fair dispatch, settled attempts, stable inputs and an
-eventual crash-free interval long enough for effects and records to succeed. Arbitrary failures have no elapsed
-time or retry-work bound. This addition is informative; it changes no grammar, plan or conformance obligation.
+eventual crash-free interval in which required pre-record stages, effects and records succeed. Arbitrary failures
+have no elapsed-time or retry-work bound. This addition is informative; it changes no conformance obligation.
+Within one invocation, induction covers release obligations through canonical records. Across invocations,
+§13.7c G6 governs recomputed residual plans and can require extra catch-up releases. Post-record stages are not
+resumed after a tagged package is skipped. They need their own durable replay contract for completion after a crash.
 
 An idempotent replay result now states separate premises. Fixed source, configuration, task inputs, toolchain and
 environment identities plus deterministic tasks give the same artifact bytes and digest on rebuild; plan
@@ -375,15 +384,20 @@ request cannot be retried from an absence snapshot alone. The create-only canoni
 matching existing identity and never rewrites a different one. Crash cases before effect, between effect and
 record, and after record therefore replay the same request, verify/adopt it, or skip it, respectively. New valid
 records discharge completed work into a residual plan; they do not leave the whole plan unchanged. Repeated
-builds and safe requests may cost extra work without changing the intended final state, while arbitrarily many
-failures give no total-work bound. Other external effects need their own idempotency contracts.
+builds and safe requests preserve each fixed verified publication and immutable tag identity, while arbitrarily
+many failures give no total-work bound. Other external effects need their own idempotency contracts.
+The record set need not equal that of an all-successful first run, and post-record or untracked side effects have
+no completion guarantee from this replay proof.
 
 The plan, task graph and durable-effect arguments compose within one fixed input snapshot: the semantic plan
 determines allowed work, graph edges enforce its predecessors, and verified immutable records let a later
 invocation discharge completed effects from an updated record inventory. Other inputs stay fixed and the
-retry invariant of §13.7c applies when claiming the same intended final state. Fair retries and eventual
-successful settlement give that state under the stated premises. Planning, compilation, scheduling and recovery retain
-separate time and memory accounts; this composition proves no joint asymptotic minimum.
+retry invariant of §13.7c applies to convergence claims. Fair retries and eventual success of required tasks,
+effects and records let G6 discharge the eligible non-held forward plan, possibly after catch-up records.
+This proves record soundness and conditional discharge, not equality to a crash-free record set. Post-record
+effects need their own replay contract.
+Planning, compilation, scheduling and recovery retain separate time and memory accounts; this composition proves
+no joint asymptotic minimum.
 
 ## 2026-10-25: Configured stages in the compiled plan
 
