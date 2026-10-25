@@ -41,7 +41,8 @@ func (g *mergedGit) listAfter(boundaries []int) []gitx.Commit {
 		for j, p := range g.parents[i] {
 			parents[j] = g.history[p].sha
 		}
-		out = append(out, gitx.Commit{SHA: c.sha, Message: c.message, Files: c.files, Parents: parents})
+		out = append(out, gitx.Commit{SHA: c.sha, Message: c.message, Files: c.files, Parents: parents,
+			AuthorName: c.author, AuthorEmail: c.email})
 	}
 	return out
 }

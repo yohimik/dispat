@@ -4,6 +4,7 @@
 package plan
 
 import (
+	"math/bits"
 	"slices"
 	"strings"
 
@@ -236,19 +237,18 @@ func (cp *computation) collectWindowAuthors(name string) (window, fresh []Author
 		set.each(func(rank int) { attribute(cp.commits[rank]) })
 	} else {
 		reachable := cp.windowRepositories(name)
+		candidates := cp.windowCandidates(name)
 		if cp.stats != nil {
-			cp.stats.AuthorScans.Add(int64(len(cp.commits)))
+			cp.stats.AuthorScans.Add(int64(candidates.len()))
 		}
-		for _, rec := range cp.commits {
+		candidates.each(func(rank int) {
 			// A commit from a repository the package's window cannot reach
-			// is not pending for it, whatever its key says. Deciding that
-			// from the repository alone saves consulting every shared window
-			// view for every commit of every other repository in the fleet.
-			if !reachable[globx.Fold(rec.repository)] || !cp.inWindow(name, rec.key) {
-				continue
+			// is not pending for it, whatever its key says.
+			rec := cp.commits[rank]
+			if reachable[globx.Fold(rec.repository)] && cp.inWindow(name, rec.key) {
+				attribute(rec)
 			}
-			attribute(rec)
-		}
+		})
 	}
 	// Clipped, so a consumer that appends to a shared list reallocates rather
 	// than writing into another release's attribution.
@@ -306,6 +306,74 @@ func (m *authorMarks) isFirst(listed *[]uint32, id int) bool {
 	}
 	(*listed)[id] = m.generation
 	return true
+}
+
+// windowCandidates is every commit inWindow can admit for a composed
+// package, as ranks: the commits of the shared windows its window was
+// attached from, and, for a package outside the control repository, every
+// control commit of the union, which inWindow admits by the control rule
+// rather than by any window. Reading these in rank order and asking inWindow
+// of each visits what a pass over the whole union visits, in the same order,
+// at the cost of the package's windows rather than of the union.
+func (cp *computation) windowCandidates(name string) *commitSet {
+	candidates := &cp.authorCandidates
+	if words := (len(cp.commits) + 63) / 64; len(candidates.bits) != words {
+		candidates.bits = make([]uint64, words)
+	} else {
+		clear(candidates.bits)
+	}
+	for i, key := range cp.windowKeys[name] {
+		addCommits(candidates.bits, cp.sharedWindowCommits(key, cp.windowRefs[name][i]))
+	}
+	if p := cp.byName[name]; p != nil && !strings.EqualFold(p.Repository, cp.controlRepo) {
+		addCommits(candidates.bits, cp.controlRepositoryCommits())
+	}
+	candidates.size = 0
+	for _, word := range candidates.bits {
+		candidates.size += bits.OnesCount64(word)
+	}
+	return candidates
+}
+
+func addCommits(into []uint64, set *commitSet) {
+	for w := range into {
+		into[w] |= set.word(w)
+	}
+}
+
+// sharedWindowCommits is one shared window's commits as ranks, built once per
+// window: packages released at the same boundaries share the view.
+func (cp *computation) sharedWindowCommits(key string, window map[string]bool) *commitSet {
+	if set, ok := cp.windowCommits[key]; ok {
+		return set
+	}
+	set := commitSetOf(len(cp.commits), func(yield func(int)) {
+		for commit := range window {
+			if rec := cp.byKey[commit]; rec != nil {
+				yield(rec.rank)
+			}
+		}
+	})
+	if cp.windowCommits == nil {
+		cp.windowCommits = make(map[string]*commitSet)
+	}
+	cp.windowCommits[key] = set
+	return set
+}
+
+// controlRepositoryCommits is the union's commits whose key names the control
+// repository, the ones inWindow decides by the control rule.
+func (cp *computation) controlRepositoryCommits() *commitSet {
+	if cp.controlCommits == nil {
+		cp.controlCommits = commitSetOf(len(cp.commits), func(yield func(int)) {
+			for _, rec := range cp.commits {
+				if repository, _ := splitHistoryKey(rec.key); strings.EqualFold(repository, cp.controlRepo) {
+					yield(rec.rank)
+				}
+			}
+		})
+	}
+	return cp.controlCommits
 }
 
 // windowAuthorSharingMinimum is the union length from which one window's

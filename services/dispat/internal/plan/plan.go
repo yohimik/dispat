@@ -1290,8 +1290,15 @@ type computation struct {
 	authorIDs       map[string]int32 // Author.key -> plan-wide id (authorOf)
 	commitAuthors   []int32          // by commit rank: one more than its author's id, 0 until asked
 	authorMarks     authorMarks
-	globs           *globIndex                   // §6.1 glob terms, resolved once each
-	windowRefs      map[string][]map[string]bool // composed package -> shared repository windows
+	// windowCommits, controlCommits and authorCandidates are the composed
+	// window attribution's sets of ranks (windowCandidates): each shared
+	// window's commits by its key, the control repository's commits, and the
+	// scratch one attribution merges them into.
+	windowCommits    map[string]*commitSet
+	controlCommits   *commitSet
+	authorCandidates commitSet
+	globs            *globIndex                   // §6.1 glob terms, resolved once each
+	windowRefs       map[string][]map[string]bool // composed package -> shared repository windows
 	// windowKeys names the history views a composed package's window was
 	// assembled from, in the order they were attached; windowKey is the
 	// single-history equivalent. Both are the cache keys the loaders already

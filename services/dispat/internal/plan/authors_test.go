@@ -13,6 +13,7 @@ import (
 
 	"github.com/yohimik/dispat/pkg/ccme"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
@@ -393,4 +394,104 @@ func TestWindowAttributionFoldsEachCommitsAuthorOnce(t *testing.T) {
 	assert.True(t, marks.isFirst(&marks.fresh, id), "the fresh list is listed apart")
 	marks.generation++
 	assert.True(t, marks.isFirst(&marks.window, id), "a new attribution starts with nobody listed")
+}
+
+// assertAttributionIsTheUnionScan plans a workspace and checks every
+// package's window attribution against its definition: a pass over every
+// commit of the union, asking inWindow and containedInBaseline of each. It
+// answers the commits the attributions examined and the commits a pass over
+// the union per package would have.
+func assertAttributionIsTheUnionScan(t *testing.T, git TagInventoryGitx, opts Options) (examined, union int64) {
+	t.Helper()
+	opts.HistoryStats = &HistoryStats{}
+	cp := newComputation(context.Background(), git, opts)
+	require.NoError(t, cp.prepare(opts))
+	require.NoError(t, cp.resolveDirectBumps())
+	require.NoError(t, cp.propagateAndVersion())
+	require.NotEmpty(t, cp.histories, "the scan under test is the composed one")
+	before := cp.stats.AuthorScans.Load()
+	scanned := 0
+	for _, name := range cp.order {
+		var window, fresh []Author
+		windowSeen, freshSeen := map[string]bool{}, map[string]bool{}
+		reachable := cp.windowRepositories(name)
+		for _, rec := range cp.commits {
+			if !reachable[globx.Fold(rec.repository)] || !cp.inWindow(name, rec.key) {
+				continue
+			}
+			a := Author{Name: rec.commit.AuthorName, Email: rec.commit.AuthorEmail}
+			if a.empty() {
+				continue
+			}
+			window = appendUniqueAuthor(window, windowSeen, a)
+			if !cp.containedInBaseline(name, rec.key) {
+				fresh = appendUniqueAuthor(fresh, freshSeen, a)
+			}
+		}
+		cp.windowAuthors = map[windowIdentity]windowAuthorSet{}
+		gotWindow, gotFresh := cp.collectWindowAuthors(name)
+		assert.Equal(t, window, gotWindow, "%s: window", name)
+		assert.Equal(t, fresh, gotFresh, "%s: fresh", name)
+		scanned += len(window)
+	}
+	require.NotZero(t, scanned, "the workspace attributes somebody")
+	return cp.stats.AuthorScans.Load() - before, int64(len(cp.commits) * len(cp.order))
+}
+
+// TestComposedAttributionVisitsTheWindowsNotTheUnion: a composed package's
+// attribution reads the shared windows it was attached from, and the control
+// commits the control rule decides, rather than every commit of the union,
+// and attributes exactly what the union scan does: on a merged history with
+// packages released at their own boundaries, and on a source package whose
+// provider lives in the control repository with a published control boundary
+// older than its stable one, where the fresh control window holds commits the
+// control rule rejects.
+func TestComposedAttributionVisitsTheWindowsNotTheUnion(t *testing.T) {
+	t.Run("merged history", func(t *testing.T) {
+		pkgs, deps, git := mergedHistoryWorkspace(1_200, 12)
+		people := []string{"Ada", "ADA", "Grace", "Linus", "Barbara"}
+		for i := range git.history {
+			person := people[i%len(people)]
+			git.history[i].author, git.history[i].email = person, person+"@example.com"
+		}
+		for _, p := range pkgs {
+			p.Repository, p.RepoRoot = "source", "/r"
+		}
+		examined, union := assertAttributionIsTheUnionScan(t, git, Options{Packages: pkgs, Dependencies: deps,
+			Root: "/r", Repositories: map[string]RepositoryHistory{"source": {Name: "source", Root: "/r", Git: git}}})
+		assert.Less(t, examined, union/2, "the windows, not the union, for every package")
+	})
+	t.Run("control provider", func(t *testing.T) {
+		const (
+			c0, c1, c2, c3 = "c000000000000000000000000000000000000000", "c100000000000000000000000000000000000000",
+				"c200000000000000000000000000000000000000", "c300000000000000000000000000000000000000"
+		)
+		control := &composedControlGit{fakeGit: newFakeGit(), control: []gitx.ControlHistoryCommit{
+			{SHA: c3, Parents: []string{c2}, Message: "fix(tool): newest", AuthorName: "Linus", AuthorEmail: "linus@example.com"},
+			{SHA: c2, Parents: []string{c1}, Message: "fix(tool): behind the stable boundary", AuthorName: "Grace", AuthorEmail: "grace@example.com"},
+			{SHA: c1, Parents: []string{c0}, Message: "fix(tool): behind both", AuthorName: "Ada", AuthorEmail: "ada@example.com"},
+			{SHA: c0, Message: "chore: configure workspace", AuthorName: "Ada", AuthorEmail: "ada@example.com"},
+		}}
+		source := newFakeGit(
+			commit{sha: "s1", message: "feat(app): stable", author: "Barbara", email: "barbara@example.com"},
+			commit{sha: "s2", message: "feat(app)%beta: beta", author: "Barbara", email: "barbara@example.com"},
+			commit{sha: "s3", message: "fix(app): pending", author: "Edsger", email: "edsger@example.com"},
+		).tag("app", "1.0.0", "s1").tag("app", "1.1.0-beta.0", "s2")
+		assertAttributionIsTheUnionScan(t, control, Options{
+			Packages: []*model.Package{
+				{Name: "tool", Dir: "/w/tool", RepoRoot: "/w", Repository: "control", Space: &model.Space{Name: "tools"}},
+				{Name: "app", Dir: "/w/source/app", RepoRoot: "/w/source", Repository: "source", Space: &model.Space{Name: "apps"}},
+			},
+			Dependencies: []model.Dependency{{Consumer: "app", Provider: "tool"}},
+			Initials:     map[string]ccme.Version{"tool": v(1, 0, 0)},
+			Repositories: map[string]RepositoryHistory{
+				"control": {Name: "control", Root: "/w", Git: control, Control: true},
+				"source":  {Name: "source", Root: "/w/source", Path: "source", Git: source},
+			},
+			RepositoryBaselines: []RepositoryBaseline{
+				{Consumer: "app", ReleaseTag: "app@1.0.0", Repository: "control", Revision: c2},
+				{Consumer: "app", ReleaseTag: "app@1.1.0-beta.0", Repository: "control", Revision: c1},
+			},
+		})
+	})
 }
