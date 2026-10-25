@@ -1235,17 +1235,11 @@ func IsControlUnitAffectingRelease(unit *ccme.Unit) bool {
 }
 
 // indexControlParents indexes the control inventory's parent graph by
-// position, and lists it as commits, once for every control window read
-// from it.
+// position.
 func (cp *computation) indexControlParents() {
 	cp.controlPosition = make(map[string]int32, len(cp.controlHistory))
-	cp.controlListing = make([]gitx.Commit, len(cp.controlHistory))
 	for i, commit := range cp.controlHistory {
 		cp.controlPosition[commit.SHA] = int32(i)
-		cp.controlListing[i] = gitx.Commit{
-			SHA: commit.SHA, Parents: commit.Parents, AuthorName: commit.AuthorName,
-			AuthorEmail: commit.AuthorEmail, Message: commit.Message, Files: commit.Files,
-		}
 	}
 	cp.controlParents = make([][]int32, len(cp.controlHistory))
 	for i, commit := range cp.controlHistory {
@@ -1263,6 +1257,23 @@ func (cp *computation) indexControlParents() {
 // no window copies the listing. The excluded set is the boundary's native
 // ancestor closure, so branches merged after the boundary remain in the
 // window exactly as they do in boundary..HEAD.
+// listControlCommits is the control inventory as commits, listed on the first
+// window read and shared by every window after it: a run that reads no
+// control window never pays for the listing.
+func (cp *computation) listControlCommits() []gitx.Commit {
+	if cp.controlListing != nil || len(cp.controlHistory) == 0 {
+		return cp.controlListing
+	}
+	cp.controlListing = make([]gitx.Commit, len(cp.controlHistory))
+	for i, commit := range cp.controlHistory {
+		cp.controlListing[i] = gitx.Commit{
+			SHA: commit.SHA, Parents: commit.Parents, AuthorName: commit.AuthorName,
+			AuthorEmail: commit.AuthorEmail, Message: commit.Message, Files: commit.Files,
+		}
+	}
+	return cp.controlListing
+}
+
 func (cp *computation) controlWindow(boundary string) (listing []gitx.Commit, excluded *commitSet) {
 	if cp.controlPosition == nil {
 		cp.indexControlParents() // a computation assembled by hand
@@ -1281,7 +1292,7 @@ func (cp *computation) controlWindow(boundary string) (listing []gitx.Commit, ex
 			stack = append(stack, cp.controlParents[i]...)
 		}
 	}
-	return cp.controlListing, excluded
+	return cp.listControlCommits(), excluded
 }
 
 func (cp *computation) buildRepositoryUnion(lists [][]string, canonical map[string]historyCommit) {
