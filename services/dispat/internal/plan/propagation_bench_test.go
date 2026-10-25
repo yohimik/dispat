@@ -46,6 +46,51 @@ func BenchmarkComputeShallowChain(b *testing.B) {
 	}
 }
 
+// BenchmarkComputeMixedDepthChain is BenchmarkComputeShallowChain with two
+// units per package, one written "^^" and one "^", and no release yet. Both
+// ask a bounded walk of the same source, and walkTargets/op is how many
+// targets the planner computed to answer the two.
+func BenchmarkComputeMixedDepthChain(b *testing.B) {
+	for _, packages := range []int{1024, 4096} {
+		b.Run(fmt.Sprintf("packages=%d", packages), func(b *testing.B) {
+			pkgs, deps, git := mixedDepthChainWorkspace(packages)
+			stats := &HistoryStats{}
+			opts := Options{Packages: pkgs, Dependencies: deps, Root: "/r", HistoryStats: stats}
+			iterations := 0
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := Compute(context.Background(), git, opts); err != nil {
+					b.Fatal(err)
+				}
+				iterations++
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(stats.WalkTargets.Load())/float64(iterations), "walkTargets/op")
+		})
+	}
+}
+
+// mixedDepthChainWorkspace is a chain whose every package has a "^" unit
+// and, newer, a "^patch+2" one, and no release tag.
+func mixedDepthChainWorkspace(packages int) ([]*model.Package, []model.Dependency, *fakeGit) {
+	history := []commit{{sha: "base", message: "chore: base"}}
+	space := &model.Space{Name: "workspace"}
+	pkgs := make([]*model.Package, packages)
+	deps := make([]model.Dependency, 0, packages)
+	for i := range pkgs {
+		name := fmt.Sprintf("pkg-%04d", i)
+		pkgs[i] = &model.Package{Name: name, Dir: "/r/pkgs/" + name, Space: space}
+		files := []string{"pkgs/" + name + "/main.go"}
+		history = append(history,
+			commit{sha: fmt.Sprintf("c%06d", 2*i), message: fmt.Sprintf("fix(%s)^: one level", name), files: files},
+			commit{sha: fmt.Sprintf("c%06d", 2*i+1), message: fmt.Sprintf("fix(%s)^patch+2: two levels", name), files: files})
+		if i > 0 {
+			deps = append(deps, model.Dependency{Consumer: name, Provider: fmt.Sprintf("pkg-%04d", i-1)})
+		}
+	}
+	return pkgs, deps, newFakeGit(history...)
+}
+
 // BenchmarkCanonicalDiagnostics sorts a plan's diagnostics into the digest's
 // canonical order, at the size a lenient parse of a long window reaches.
 func BenchmarkCanonicalDiagnostics(b *testing.B) {
