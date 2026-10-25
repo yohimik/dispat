@@ -139,6 +139,9 @@ func readControlHistoryHeader(fields *nulFields) (ControlHistoryCommit, error) {
 	}
 	// One copy holds every header string of the commit: they are kept and
 	// dropped together, so separate copies would only cost an allocation each.
+	// The strings therefore share one lifetime: a caller keeping one of them
+	// past the commit (a SHA as a map key, say) keeps the message alive too
+	// unless it clones it.
 	kept := copyJoined(sha, parents, authorName, authorEmail, message)
 	commit := ControlHistoryCommit{SHA: kept[:len(sha)]}
 	kept = kept[len(sha):]
