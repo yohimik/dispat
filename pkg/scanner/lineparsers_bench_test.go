@@ -2,6 +2,8 @@ package scanner
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -133,6 +135,24 @@ func BenchmarkLineScannedParsers(b *testing.B) {
 				b.Fatal(err)
 			}
 			b.ReportMetric(float64(retained), "retained-B")
+		})
+	}
+}
+
+func BenchmarkReadManifest(b *testing.B) {
+	for _, size := range []int{4 << 10, 1 << 20} {
+		b.Run(fmt.Sprintf("%dKiB", size>>10), func(b *testing.B) {
+			path := filepath.Join(b.TempDir(), "project.pbxproj")
+			if err := os.WriteFile(path, lineScannedCases[0].build(size), 0o644); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.SetBytes(int64(size))
+			for i := 0; i < b.N; i++ {
+				if _, err := readManifest(path); err != nil {
+					b.Fatal(err)
+				}
+			}
 		})
 	}
 }
