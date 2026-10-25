@@ -111,6 +111,7 @@ func TestExecuteContainsAPanicWhileAdmitHoldsTheLock(t *testing.T) {
 			"ghost": {Name: "ghost", Status: StatusFailed},
 		},
 		started:             map[string]time.Time{},
+		publishReach:        newPublishReach(newStageEdges(p, map[string]bool{"a": true})),
 		reachedProviders:    map[string][]string{},
 		avChanged:           map[string]bool{},
 		reconciledProviders: map[string][]string{},

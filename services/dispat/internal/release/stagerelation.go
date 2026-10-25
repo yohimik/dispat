@@ -299,6 +299,36 @@ func (s *stageReach) Indirect(consumer string) []string {
 	return reached
 }
 
+// resolveCarriers walks every package the consumer reaches its providers
+// through, so a later Indirect or isAnyReachedDead only reads the memo.
+func (s *stageReach) resolveCarriers(consumer string) {
+	for _, provider := range s.providers[consumer] {
+		if !s.changed[provider] && s.isCarriedThrough(s.relations[provider]) {
+			s.resolve(provider)
+		}
+	}
+}
+
+// isAnyReachedDead reports whether a changed provider the consumer reaches
+// through packages this run does not release failed, was skipped or had its
+// records blocked.
+func (s *stageReach) isAnyReachedDead(consumer string, results map[string]*Result) bool {
+	for _, provider := range s.providers[consumer] {
+		if s.changed[provider] || !s.isCarriedThrough(s.relations[provider]) {
+			continue
+		}
+		if slices.ContainsFunc(s.resolve(provider), func(behind string) bool { return isDead(results[behind]) }) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDead reports whether a provider's result is one the skip cascade acts on.
+func isDead(res *Result) bool {
+	return res != nil && (res.RecordBlocked || res.Status == StatusFailed || res.Status == StatusSkipped)
+}
+
 // resolve is the memoised walk: the changed packages one package reaches
 // through hops that carry this index's ordering.
 func (s *stageReach) resolve(name string) []string {

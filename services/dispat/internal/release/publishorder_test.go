@@ -5,6 +5,9 @@ package release
 
 import (
 	"context"
+	"maps"
+	"math/rand/v2"
+	"slices"
 	"testing"
 	"time"
 
@@ -258,4 +261,53 @@ func TestPublishOrderSkipsAConsumerItReachesOnlyThroughAnUnreleasingPackage(t *t
 	assert.Equal(t, "core", res["app"].BlockedBy,
 		"the consumer is blocked by the package that failed, not by the one it names")
 	assert.Equal(t, -1, r.indexOf("publish app"), "nothing published behind the failure")
+}
+
+// TestPublishOrderListsTheReachedClosureOnlyOnceAProviderDied: the closure
+// the cascade reads is listed for a consumer only once a provider in it is
+// dead, because a live provider changes nothing the cascade answers, and
+// listing it for every consumer of every run is what costs consumers times
+// providers behind one shared unreleased package.
+func TestPublishOrderListsTheReachedClosureOnlyOnceAProviderDied(t *testing.T) {
+	p := mkPublishOrderPlan(models.StageWaitBuild, models.StageWaitBuild)
+	changed := releasingNames(p)
+	r := &run{plan: p, publishReach: newCascadeReach(newStageEdges(p, changed), []string{"app", "core"}),
+		reachedProviders: map[string][]string{},
+		results:          map[string]*Result{"app": {Name: "app"}, "core": {Name: "core", Status: StatusPublished}}}
+
+	assert.Nil(t, r.resolveReachedProviders("app"), "every provider it reaches lives")
+	assert.Empty(t, r.reachedProviders, "so nothing was listed")
+
+	r.results["core"].Status = StatusFailed
+	assert.Equal(t, []string{"core"}, r.resolveReachedProviders("app"))
+	assert.Equal(t, map[string][]string{"app": {"core"}}, r.reachedProviders, "listed once, then read")
+}
+
+// TestPublishOrderCascadeAnswersAsTheFullClosure: on drawn workspaces whose
+// releasing packages failed, were skipped, published, published with blocked
+// records or are still pending, the cascade over the closure listed on demand
+// names the same blocker as the cascade over the closure listed up front.
+func TestPublishOrderCascadeAnswersAsTheFullClosure(t *testing.T) {
+	outcomes := []Result{{Status: StatusPending}, {Status: StatusPublished}, {Status: StatusFailed},
+		{Status: StatusSkipped}, {Status: StatusPublished, RecordBlocked: true}}
+	for seed := range uint64(60) {
+		random := rand.New(rand.NewPCG(seed, 11))
+		p, changed, _ := mkRandomWorkspace(random, 24)
+		names := slices.Sorted(maps.Keys(changed))
+		results := map[string]*Result{}
+		for _, name := range names {
+			outcome := outcomes[random.IntN(len(outcomes))]
+			results[name] = &outcome
+		}
+		edges := newStageEdges(p, changed)
+		upFront := newPublishReach(edges)
+		r := &run{plan: p, publishReach: newCascadeReach(edges, names),
+			reachedProviders: map[string][]string{}, results: results}
+		for _, name := range names {
+			wantSkip, wantBlocker := shouldSkip(name, p, results, upFront.Indirect(name))
+			skip, blocker := shouldSkip(name, p, results, r.resolveReachedProviders(name))
+			require.Equal(t, wantSkip, skip, "seed %d, %s", seed, name)
+			require.Equal(t, wantBlocker, blocker, "seed %d, %s", seed, name)
+		}
+	}
 }

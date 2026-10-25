@@ -364,7 +364,7 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	// environment.
 	wsVars := WorkspaceEnv(p, e.Log)
 	logins := newSpaceLogins(p)
-	sched, reachedProviders := e.buildTaskGraph(p, changed)
+	sched, publishReach := e.buildTaskGraph(p, changed)
 
 	// The tasks run under a context of their own, so that a task that
 	// panicked can stop the rest of the graph without cancelling the run that
@@ -373,7 +373,8 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	tasks, stop := context.WithCancelCause(ctx)
 	defer stop(nil)
 	r := &run{Executor: e, plan: p, wsVars: wsVars, logins: logins, stop: stop,
-		reachedProviders: reachedProviders,
+		publishReach:     publishReach,
+		reachedProviders: make(map[string][]string),
 		results:          results, started: make(map[string]time.Time), scan: e.Scanner,
 		avChanged:           make(map[string]bool),
 		reconciledProviders: make(map[string][]string, len(changed)),
@@ -429,8 +430,8 @@ func newSpaceLogins(p *plan.Plan) map[spaceLoginKey]*spaceLogin {
 }
 
 // buildTaskGraph states the releasing packages' task graph and returns it with
-// what each consumer reaches over the publication order.
-func (e *Executor) buildTaskGraph(p *plan.Plan, changed map[string]bool) (*graph.Scheduler[task], map[string][]string) {
+// the index of what each consumer reaches over the publication order.
+func (e *Executor) buildTaskGraph(p *plan.Plan, changed map[string]bool) (*graph.Scheduler[task], *stageReach) {
 	// Sorted iteration: the scheduler hands nodes out in insertion order, so
 	// building the edges in name order is what makes launch order — not just
 	// completion semantics — deterministic run to run (§17.2).
@@ -469,7 +470,7 @@ func (e *Executor) buildTaskGraph(p *plan.Plan, changed map[string]bool) (*graph
 	if e.PublishGroup != nil {
 		e.addPublishGroupEdges(sched, p, changed)
 	}
-	return sched, indexReachedProviders(edges, names)
+	return sched, newCascadeReach(edges, names)
 }
 
 // addPublishGroupEdges chains the publishes of each publish group in plan
@@ -491,18 +492,17 @@ func (e *Executor) addPublishGroupEdges(sched *graph.Scheduler[task], p *plan.Pl
 	}
 }
 
-// indexReachedProviders is what each consumer reaches over the publication
-// order, kept for the skip cascade: §19.3 computes its closure over the full
+// newCascadeReach indexes what each consumer reaches over the publication
+// order, for the skip cascade: §19.3 computes its closure over the full
 // workspace graph, so the providers that can block a package are the same set
-// that orders it. It is filled before any task runs and only read afterwards,
-// so every task goroutine reads one finished index.
-func indexReachedProviders(edges stageEdges, names []string) map[string][]string {
-	publishOrder := newPublishReach(edges)
-	reachedProviders := make(map[string][]string, len(names))
+// that orders it. Every walk is taken before any task runs, so the tasks only
+// read the index.
+func newCascadeReach(edges stageEdges, names []string) *stageReach {
+	reach := newPublishReach(edges)
 	for _, name := range names {
-		reachedProviders[name] = publishOrder.Indirect(name)
+		reach.resolveCarriers(name)
 	}
-	return reachedProviders
+	return reach
 }
 
 // drain runs the task graph under the stage budgets until every task ran or
@@ -622,10 +622,12 @@ type run struct {
 	// that panicked ends every task in flight and lets Drain start nothing
 	// new, while the run's own context stays live for its closing phase.
 	stop context.CancelCauseFunc
-	// reachedProviders lists, per changed consumer, the changed providers it
+	// publishReach indexes, per changed consumer, the changed providers it
 	// reaches only through packages this run does not release (§19.2, §19.3).
-	// Built with the task graph and never written again, so the task
-	// goroutines share it without the mutex.
+	// Built with the task graph and only read afterwards.
+	publishReach *stageReach
+	// reachedProviders (guarded by mu) lists them per consumer once the skip
+	// cascade needs them; see resolveReachedProviders.
 	reachedProviders map[string][]string
 	results          map[string]*Result
 	mu               sync.Mutex
@@ -843,7 +845,7 @@ func (r *run) settleAdmission(ctx context.Context, tc *taskCtx, res *Result) adm
 		res.Status = StatusCancelled
 		return admission{isCancelled: true}
 	}
-	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results, r.reachedProviders[t.pkg]); skip {
+	if skip, blocker := shouldSkip(t.pkg, r.plan, r.results, r.resolveReachedProviders(t.pkg)); skip {
 		reason := formatSkipReason(blocker,
 			r.plan.Releases[blocker].Pkg.Space.ProviderRelation,
 			r.results[blocker].RecordBlocked)
@@ -876,6 +878,25 @@ func (r *run) settleAdmission(ctx context.Context, tc *taskCtx, res *Result) adm
 	// and its publish, and each stage must see the truth of its own moment.
 	tc.updates = liveProviderUpdates(t.pkg, r.plan, r.results)
 	return admission{isAdmitted: true}
+}
+
+// resolveReachedProviders answers, with mu held, the providers shouldSkip
+// reads beyond the package's own: the changed providers it reaches through
+// packages this run does not release, once one of them is dead, and none
+// while every one of them lives, because shouldSkip passes over a live
+// provider. Listed for every consumer up front, they cost consumers times
+// providers behind one shared unreleased package on every run, when only a
+// run with a failure reads them.
+func (r *run) resolveReachedProviders(pkg string) []string {
+	if reached, isListed := r.reachedProviders[pkg]; isListed {
+		return reached
+	}
+	if !r.publishReach.isAnyReachedDead(pkg, r.results) {
+		return nil
+	}
+	reached := r.publishReach.Indirect(pkg)
+	r.reachedProviders[pkg] = reached
+	return reached
 }
 
 // markBlocked records, with mu held, a package the run planned and will not
