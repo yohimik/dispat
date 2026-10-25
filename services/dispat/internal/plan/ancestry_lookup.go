@@ -62,7 +62,8 @@ func (cp *computation) markedAncestor(a, b string) (yes, known bool) {
 	}
 	rb := cp.byKey[b]
 	if rb == nil {
-		return false, cp.behindUnion[b]
+		repository, _ := splitHistoryKey(b)
+		return false, strings.EqualFold(ra.repository, repository) && cp.behindUnion[b]
 	}
 	if !strings.EqualFold(ra.repository, rb.repository) {
 		return false, false
@@ -147,9 +148,11 @@ func (cp *computation) indexAncestry() {
 
 // indexRepositoryAncestry is indexAncestry over a composed workspace. The
 // index is per repository without saying so: parents never leave the
-// repository that owns them, so no set ever crosses one. A boundary the union
-// does not hold stays unknown here, because a fleet's boundaries are pins and
-// tuples as well as tags, and only a tag is promised to be behind HEAD.
+// repository that owns them, so no set ever crosses one. Of the boundaries
+// the union does not hold, only a package's own release tags are recorded as
+// behind it, because a fleet's boundaries in other repositories are pins and
+// tuples, and only a tag is promised to be behind HEAD; the others stay
+// unknown here.
 func (cp *computation) indexRepositoryAncestry() {
 	isTrusted := false
 	for _, history := range cp.histories {
@@ -161,6 +164,7 @@ func (cp *computation) indexRepositoryAncestry() {
 	if cp.anc = cp.newUnionAncestry(); cp.anc == nil {
 		return
 	}
+	cp.behindUnion = make(map[string]bool)
 	var markers []int32
 	for _, boundaries := range []map[string]map[string]string{cp.stableBoundaries, cp.publishedBoundaries} {
 		for _, p := range cp.pkgs {
@@ -168,6 +172,10 @@ func (cp *computation) indexRepositoryAncestry() {
 			for _, boundary := range boundaries[p.Name] {
 				if rec := cp.byKey[boundary]; rec != nil {
 					markers = append(markers, int32(rec.rank))
+					continue
+				}
+				if repository, raw := splitHistoryKey(boundary); raw != "" && strings.EqualFold(repository, p.Repository) {
+					cp.behindUnion[boundary] = true
 				}
 			}
 		}
