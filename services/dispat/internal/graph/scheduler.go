@@ -97,6 +97,10 @@ func (s *Scheduler[N]) AddEdge(before, after N) {
 // Len is the total number of nodes, pass-through nodes not counted.
 func (s *Scheduler[N]) Len() int { return len(s.nodes) }
 
+// EdgeLen is the number of edges stated, pass-through nodes' own included,
+// which is what the graph costs to hold and to drain.
+func (s *Scheduler[N]) EdgeLen() int { return s.edgeCount }
+
 // Ready returns the nodes with no pending dependencies that have not been
 // handed out yet, in insertion order. The initial frontier, on a fresh
 // scheduler. Pass-through nodes with nothing to wait for complete first, so

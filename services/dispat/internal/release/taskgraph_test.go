@@ -271,3 +271,18 @@ func TestTaskGraphHandOutsAreNotVacuous(t *testing.T) {
 		nil,
 	}, got)
 }
+
+// TestTaskGraphStatesOneEdgePerDependencyEdge pins the size of the graph
+// behind one unreleased hub: n consumers over n providers cost the
+// providers' and consumers' build-to-publish edges, one build and one
+// publish edge from each provider into the hub's nodes, and one of each from
+// the hub's nodes into each consumer, 6n in all. Stated per consumer and
+// reached provider, as the literal reading does, they cost 2n * n more.
+func TestTaskGraphStatesOneEdgePerDependencyEdge(t *testing.T) {
+	for _, n := range []int{1, 50, 200} {
+		p, changed := mkHubPlan(n)
+		sched, _ := (&Executor{}).buildTaskGraph(p, changed)
+		assert.Equal(t, 6*n, sched.EdgeLen(), "hub over %d", n)
+		assert.Equal(t, 2*n*n+2*n, buildLiteralTaskGraph(p, changed, nil).EdgeLen(), "literal hub over %d", n)
+	}
+}
