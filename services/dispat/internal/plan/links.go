@@ -157,24 +157,32 @@ func newLinkEvidence(cp *computation) *linkEvidence {
 // repository. The first thing every boundary asks is whether the tag sits on
 // an ordinary release commit, and asking that per consumer per provider would
 // be one Git process each.
+//
+// Every tag's commit is read, although a boundary is asked only for a
+// package's stable and newest tag: the read refuses a commit the repository
+// cannot log, and that refusal stops the plan whichever tag the commit is
+// behind. Only the subjects a boundary looks up are kept for the plan.
 func (e *linkEvidence) index() error {
 	cp := e.cp
 	byRepository := map[string]map[string]bool{}
+	asked := map[string]map[string]bool{}
 	for _, p := range cp.pkgs {
 		if p.Repository == "" {
 			continue
 		}
+		key := globx.Fold(p.Repository)
 		for _, tag := range cp.tags[p.Name] {
-			if tag.Name == "" || tag.Commit == "" {
-				continue
+			if tag.Name != "" && tag.Commit != "" {
+				addRevision(byRepository, key, tag.Commit)
 			}
-			key := globx.Fold(p.Repository)
-			if byRepository[key] == nil {
-				byRepository[key] = map[string]bool{}
+		}
+		for _, tag := range [2]gitx.Tag{cp.stableTags[p.Name], cp.latestTags[p.Name]} {
+			if tag.Name != "" && tag.Commit != "" {
+				addRevision(asked, key, tag.Commit)
 			}
-			byRepository[key][tag.Commit] = true
 		}
 	}
+	read := 0
 	for _, key := range sortedNames(byRepository) {
 		history, ok := cp.histories[key]
 		if !ok {
@@ -196,13 +204,23 @@ func (e *linkEvidence) index() error {
 		if cp.stats != nil {
 			cp.stats.LinkReads.Add(1)
 		}
+		read += len(subjects)
 		for revision, subject := range subjects {
-			e.subjects[historyKey(history.Name, revision)] = strings.Clone(subject)
+			if asked[key][revision] {
+				e.subjects[historyKey(history.Name, revision)] = strings.Clone(subject)
+			}
 		}
 	}
-	cp.log.Debug().Int("repositories", len(byRepository)).Int("revisions", len(e.subjects)).
+	cp.log.Debug().Int("repositories", len(byRepository)).Int("revisions", read).
 		Msg("plan: fleet release subjects indexed")
 	return nil
+}
+
+func addRevision(sets map[string]map[string]bool, key, revision string) {
+	if sets[key] == nil {
+		sets[key] = map[string]bool{}
+	}
+	sets[key][revision] = true
 }
 
 func (e *linkEvidence) resolve(q boundaryQuery) (string, string) {

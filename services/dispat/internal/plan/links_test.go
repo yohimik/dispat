@@ -5,7 +5,9 @@ package plan
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -520,4 +522,66 @@ func TestLinkPeersAreTheScanOfEveryHistory(t *testing.T) {
 			require.Equalf(t, scan(histories, name), cp.linkNeighbours(name), "round %d, %q in %v", round, name, histories)
 		}
 	}
+}
+
+// unloggableGit is a repository whose subject read refuses one commit, as
+// `git log --no-walk` does for a pruned object or a tag that peels to a
+// non-commit: the whole read fails, whichever revision it was.
+type unloggableGit struct {
+	*linkedGit
+	broken string
+}
+
+func (g *unloggableGit) CommitSubjects(ctx context.Context, revisions []string) (map[string]string, error) {
+	if slices.Contains(revisions, g.broken) {
+		return nil, fmt.Errorf("fatal: bad object %s", g.broken)
+	}
+	return g.linkedGit.CommitSubjects(ctx, revisions)
+}
+
+// releaseLine is one package's four releases, newest first, each recorded by
+// an ordinary release commit, in a computation whose boundaries are the
+// newest tag and the newest stable one.
+func releaseLine(t *testing.T, git TagInventoryGitx, recorded *linkedGit) *computation {
+	tags := gitx.Tags{
+		{Name: "app@1.1.0-beta.0", Commit: "r4", Parsed: true},
+		{Name: "app@1.0.0", Commit: "r3", Parsed: true},
+		{Name: "app@0.9.0", Commit: "r2", Parsed: true},
+		{Name: "app@0.8.0", Commit: "r1", Parsed: true},
+	}
+	for _, tag := range tags {
+		recorded.records(tag.Commit, "chore(release): "+tag.Name)
+	}
+	cp := &computation{ctx: t.Context(), stats: &HistoryStats{},
+		pkgs:       []*model.Package{{Name: "app", Repository: "api"}, {Name: "lib", Repository: "api"}},
+		tags:       map[string]gitx.Tags{"app": tags},
+		stableTags: map[string]gitx.Tag{"app": tags[1]}, latestTags: map[string]gitx.Tag{"app": tags[0]},
+		histories: map[string]RepositoryHistory{"api": {Name: "api", Git: git}}}
+	return cp
+}
+
+// TestLinkEvidenceRefusesAnUnloggableOlderRelease: an older release no
+// boundary asks about still has its commit read, so a commit the repository
+// cannot log stops the plan as it does behind a boundary tag.
+func TestLinkEvidenceRefusesAnUnloggableOlderRelease(t *testing.T) {
+	recorded := newLinkedGit("r4")
+	cp := releaseLine(t, &unloggableGit{linkedGit: recorded, broken: "r1"}, recorded)
+	assert.ErrorContains(t, newLinkEvidence(cp).index(), "plan: reading repository api release subjects: fatal: bad object r1")
+}
+
+// TestLinkEvidenceKeepsOnlyTheBoundarySubjects: every release's commit is
+// read, in one call per repository, and the plan keeps the subjects of the
+// stable and the newest tag, the only ones a boundary looks up.
+func TestLinkEvidenceKeepsOnlyTheBoundarySubjects(t *testing.T) {
+	git := newLinkedGit("r4")
+	cp := releaseLine(t, git, git)
+	evidence := newLinkEvidence(cp)
+	require.NoError(t, evidence.index())
+	assert.Equal(t, 4, git.revisions, "every release's commit is read")
+	assert.Equal(t, 1, git.subject)
+	assert.EqualValues(t, 1, cp.stats.LinkReads.Load())
+	assert.Equal(t, map[string]string{
+		historyKey("api", "r3"): "chore(release): app@1.0.0",
+		historyKey("api", "r4"): "chore(release): app@1.1.0-beta.0",
+	}, evidence.subjects)
 }
