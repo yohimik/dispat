@@ -1,5 +1,2033 @@
 # Changelog
 
+## services/dispat/v1.11.0-rc.8 (2026-10-25)
+
+### Fixes
+
+- forget the packages memo with the discovery it was read from ([079f03f](https://github.com/yohimik/dispat/commit/079f03f1311b89f0f27a5e8bfbeac3366f5379e3)) (by yohimik, Claude Fable 5.1)
+  forgetDiscovery reset the remembered workspace walk after compute
+  rewrote the files it was read from, but not the packages memo built from
+  the same walk, so the two answers of one App could disagree after a
+  compute that wrote. Both are forgotten together now.
+
+- list the control history as commits only once a window reads it ([298f31e](https://github.com/yohimik/dispat/commit/298f31e5cecfb4d4e230fe119f98fbc16b8a8afa)) (by yohimik, Claude Fable 5.1)
+  615f9882 listed the control inventory as commits whenever its parent
+  graph was indexed, so a run that reads checkpoints and no control window
+  paid for a listing nothing read. The listing is now built on the first
+  window read and shared by every window after it.
+
+  BenchmarkControlCheckpointPersistentSnapshots and BenchmarkControlWindows,
+  -benchmem -benchtime 20x -cpu 1, same machine:
+
+                                       B/op      allocs/op
+    169cf108 (before 615f9882)         463280    8032      checkpoints
+    615f9882                           709040    8033      checkpoints
+    this commit                        463280    8032      checkpoints
+    169cf108 (before 615f9882)             64    12356637  windows
+    615f9882                               64    6725402   windows
+    this commit                            64    6725404   windows
+
+- repair an answered-work record changed outside or cut by a crash ([f771956](https://github.com/yohimik/dispat/commit/f77195625efb0460b14da0ab582ffac811950abc)) (by yohimik, Claude Opus 5.5)
+  Review blocker on dda1be5f. Appending over the closing brace trusted that
+  seen.json was still the file this process last wrote, and a process killed
+  mid-append left an object without its closing brace. Either way the next
+  `dispat worker` refused to start until someone deleted the record, which
+  gives up replay protection; the old whole-file rewrite healed both.
+
+  An append now checks the opened file first: the same file (identity),
+  the same size and modification time this process last left it at, and a
+  closing brace where the append starts. Anything else is a change from
+  outside and the claim rewrites the file whole through a temporary file
+  and a rename, as every claim did before the append. LoadSeenSet reads a
+  file that ends inside its object, with nothing before the end that a
+  reader would refuse, as the members before the cut: the member being
+  written belonged to a Record that never returned, so its attempt never
+  ran, and dropping it is safe. A file broken anywhere else, or one that
+  ends at its opening brace (no append can leave that), is still refused.
+  The next claim rewrites the file whole. A release older than the append
+  cannot read a cut file; the docs say so.
+
+  Record's comment no longer claims a record is never half there, and the
+  no-op for an already-known triple says why it is correct.
+
+  Failure behaviour that differs from the base on purpose: a claim succeeds
+  where only the temporary file or the folder is unwritable and seen.json
+  itself is writable, because an append needs neither (dda1be5f).
+
+  Tests: TestSeenSetRecordRepairsAFileChangedOutside (emptied in place,
+  replaced by a file of its size, edited in place to its size, cut short)
+  fails on dda1be5f..80227e39 in three of its four cases.
+  TestSeenSetLoadReadsARecordCutByACrash cuts an append at every byte and
+  fails there too. TestExecutionWorkerReadsAnAnsweredWorkRecordACrashCut
+  (integration, EXE-52) fails with the binaries of 1bfc3967 and c7b14d32.
+
+  testreport bench, ./internal/execution, -bench '^BenchmarkSeenSetRecord'
+  -benchmem -benchtime=10000x, darwin/arm64 Apple M5, shared machine:
+  allocs/op and B/op are stable, ns/op indicative. The after column is this
+  commit (tree a77c7ff9); the cost is the two fstat calls and the one-byte
+  read that make the append safe.
+
+  | benchmark     | revision  | allocs/op | B/op    | ns/op   |
+  |---------------|-----------|-----------|---------|---------|
+  | Record        | 80227e39  | 19        | 2370    | 17500   |
+  | Record        | this      | 21        | 2787    | 27659   |
+  | RecordPruning | c7b14d32  | 5022      | 1279911 | 1236039 |
+  | RecordPruning | 80227e39  | 30        | 3707    | 17878   |
+  | RecordPruning | this      | 32        | 4123    | 27917   |
+
+- ask git for a repository's index path once per run ([11e01c7](https://github.com/yohimik/dispat/commit/11e01c7719ead344b0f152b1b2d9a5bd2be0c6a7)) (by yohimik, Claude Opus 5.5)
+  Every snapshot capture ran `git rev-parse --git-path index` before
+  copying the index, under the exclusive snapshot guard. Where a
+  repository keeps its index does not move during a run (the folder, the
+  git directory and the process environment are fixed), so the capture
+  memory now keeps the answer per repository folder. A failed lookup is
+  not kept and is asked again, and the index is still copied fresh on
+  every capture: the copy is the input the snapshot is taken from, which
+  is why the rest of the finding stays declined.
+
+  Finding: "Every snapshot capture re-asks the index path and copies the
+  whole index inside the exclusive guard" (snapshot.go:127), refuted 0/3
+  on size and, for reusing the index, on equivalence; all three votes name
+  the index-path cache as the part that changes no output.
+
+  BenchmarkSnapshotCaptureUnchanged, a small repository, -benchtime=200x,
+  darwin/arm64 (Apple M5), shared machine: git invocations and allocations
+  are the stable figures, ns/op is indicative only. snapshot.go is
+  unchanged from c7b14d32 at the before revision.
+
+  | metric             | before (dda1be5f) | after (this commit) |
+  |--------------------|-------------------|---------------------|
+  | git-invocations/op | 3                 | 2                   |
+  | allocs/op          | 304               | 213                 |
+  | B/op               | 96624             | 75231               |
+  | ns/op              | 81328612          | 37833511            |
+
+  TestSnapshotAsksForTheIndexOncePerRepository pins the two processes of
+  a repeated capture and fails on the previous code with three.
+
+- append to the answered-work record instead of rewriting it ([3d7e075](https://github.com/yohimik/dispat/commit/3d7e0758fe42ceb18d97c94bd34b7a6b0199c590)) (by yohimik, Claude Opus 5.5)
+  SeenSet.Record scanned every entry to prune, marshalled the whole map
+  with sorted keys and replaced the file on every claim: O(S log S) time
+  and O(S) bytes written per claim, S being the attempts accepted in the
+  48-hour horizon. A claim now appends its record, and the records of the
+  triples it pruned, over the file's closing brace in one positioned write;
+  the file is rewritten through a temporary file and a rename only when it
+  holds twice the live records, after a load, or when an append fails.
+  Pruning pops an expiry heap instead of scanning the map.
+
+  The file stays one JSON object from triple to time, so the current
+  reader (and an older dispat) reads it: a repeated name keeps its last
+  value, which is the newest time, and a pruned triple is appended with
+  the zero time, which every horizon drops. That keeps a reload equal to
+  the old rewritten file even when the wall clock is stepped back before
+  a restart.
+
+  Equivalence: IsSeen answers what the whole scan answered after every
+  call. Times with a monotonic reading and times without one wait in
+  separate heaps, because Before compares them by different clocks, and a
+  cutoff without a monotonic reading filters the monotonic heap whole. A
+  randomized comparison against the old algorithm (300 seeds x 400 records,
+  clocks stepping back and forth, mixed monotonic and wall-only times, and
+  reloads at random horizons) agreed on every IsSeen answer and every
+  reloaded entry.
+
+  Finding: "SeenSet.Record rewrites the whole answered-work record on
+  every claim" (state.go:460).
+
+  BenchmarkSeenSetRecord, 10000 answered attempts, -benchtime=2000x,
+  darwin/arm64 (Apple M5), shared machine: allocations are the stable
+  figure, ns/op is indicative only. The after column includes the one
+  rewrite a loaded record pays on its first claim.
+
+  | metric    | before (c7b14d32) | after (this commit) |
+  |-----------|-------------------|---------------------|
+  | allocs/op | 11028             | 38                  |
+  | B/op      | 3783854           | 6244                |
+  | ns/op     | 2793414           | 49721               |
+
+  TestSeenSetRecordAppendsInPlace fails on the previous code (the file
+  was replaced on every claim); TestSeenSetFileStaysWithinTwiceItsLiveRecords
+  pins the file's size to twice the live records over a week of claims.
+  TestSeenSetRecordPrunesWithoutRestart now checks the pruned triple
+  through a reload instead of its absence from the raw file.
+
+  The file crosses the process boundary, so two integration tests follow
+  it. TestExecutionWorkerPrunesAnsweredWorkWhileServing reads the expired
+  triple as forgotten (its last value is the zero time) rather than
+  absent, and TestExecutionClaimWithoutDurableReplayRecordCannotPublish
+  blocks the in-place append as well as the temporary file, since a
+  claim no longer needs the temporary file to persist; the test plan
+  rows say so.
+
+- install a validated output set from the objects its validation read ([9ea4b7a](https://github.com/yohimik/dispat/commit/9ea4b7af9a8ef2f94855510bb7c2430e906ab706)) (by yohimik, Claude Opus 5.5)
+  Validation walks the set's tree with one ls-tree and discarded each
+  entry's object id; installation then ran a second ls-tree of the same
+  immutable tree into a path->oid map, and built a third map of every
+  entry path only to learn which declared roots an entry names. The
+  validating walk now records the object of each entry, aligned with the
+  manifest's entries, ValidateOutputs returns them, and the orchestrator's
+  admission and the worker's input installation hand them to
+  InstallOutputs. The roots check costs the roots instead of the entries.
+  An install without validated objects (the sweep merge) lists the tree as
+  before.
+
+  Equivalence: a passing validation proves a one-to-one match between the
+  tree's entry names and the manifest's paths, so the recorded ids equal
+  the second listing's; the loops that write files or diagnostics still
+  run over the manifest's slices, and every refusal keeps its place.
+
+  Finding: "Install re-lists the output tree that validation just walked,
+  and builds a third O(E) map" (install.go:147). Outside the group's files
+  this touches manifest.go (ValidateOutputs) and taskoutputs.go (the
+  worker's caller).
+
+  BenchmarkAdmitOutputsFromAnotherNode, 1000-file sets, -benchtime=30x,
+  darwin/arm64 (Apple M5), shared machine: git invocations and allocations
+  are the stable figures, ns/op is indicative only.
+
+  | metric             | before (e1a44c23) | after (this commit) |
+  |--------------------|-------------------|---------------------|
+  | git-invocations/op | 4                 | 3                   |
+  | allocs/op          | 34137             | 32017               |
+  | B/op               | 5356225           | 4748740             |
+  | ns/op              | 254252692         | 279043119           |
+
+  TestAdmittingAnotherNodesSetListsItsTreeOnce pins the three processes
+  and fails on the previous code with four.
+
+- keep only the name and totals of an admitted output set ([aa6bdcb](https://github.com/yohimik/dispat/commit/aa6bdcb7d1f6040a9eed923e24dc9aaa681c744f)) (by yohimik, Claude Opus 5.5)
+  The run's record of admitted output sets kept each whole manifest,
+  every entry of every package included, until the run ended. Nothing
+  reads the entries after admission: validation and installation both
+  run inside admitOutputs, and every later reader (input resolution,
+  relays, local inputs, publication inputs, the task summary) uses only
+  the task, package, digest, output tree and the two totals. The record
+  now keeps exactly those, so it costs O(P) words instead of
+  O(sum of entries) for the run's life.
+
+  Finding: "Admitted output manifests are retained whole, entries
+  included, for the life of the run" (admission.go:166).
+
+  BenchmarkAdmitOutputsFromAnotherNode, 1000-file sets, -benchtime=30x,
+  darwin/arm64 (Apple M5), shared machine: allocations and retained bytes
+  are the stable figures, ns/op is indicative only. retained-B/op is the
+  heap still held per admitted set after the admission returned, so a
+  value near zero is within the measurement's noise.
+
+  | metric             | before (c7b14d32) | after (this commit) |
+  |--------------------|-------------------|---------------------|
+  | retained-B/op      | 214635            | -4139 (~0)          |
+  | git-invocations/op | 4                 | 4                   |
+  | allocs/op          | 34137             | 34137               |
+  | B/op               | 5309435           | 5356225             |
+  | ns/op              | 330162739         | 254252692           |
+
+- warn about unmatched initials entries in key order ([2cc1f24](https://github.com/yohimik/dispat/commit/2cc1f247fe358bd54c5a14e6211da102f4e66e07)) (by yohimik, Claude Opus 5.5)
+  Review note (pre-existing): initialVersions and workspaceInitialVersions
+  warned once per initials entry naming no package while ranging over the
+  InitialVersions map, so with two or more such entries the order of the
+  warning lines followed Go's randomised map iteration. The unmatched keys
+  are now collected and sorted before they are reported. The entries that do
+  match are applied as before, and nothing extra is done when every entry
+  matches.
+
+  TestUnmatchedInitialsWarnInKeyOrder (eight unmatched keys, single history
+  and composed workspace) failed 6 of 6 subtests over three runs on the old
+  code.
+
+  BenchmarkPolyrepoInitialVersionIndexes (every entry matches, -benchtime
+  200x, darwin/arm64; allocations are the stable figure on a shared machine):
+
+  | size  | 76cc7dbe allocs/op | B/op    | this commit allocs/op | B/op    |
+  |-------|--------------------|---------|-----------------------|---------|
+  | 100   | 226                | 40673   | 226                   | 40682   |
+  | 1000  | 2050               | 686254  | 2050                  | 686322  |
+  | 10000 | 20196              | 5573188 | 20196                 | 5573223 |
+
+- let compute read the workspace walk its invocation made ([41388d0](https://github.com/yohimik/dispat/commit/41388d0bcc31be696703d78f31041363fbb0299e)) (by yohimik, Claude Opus 5.5)
+  Review suggestion on dda4dcbe: Compute still ran its own
+  config.DiscoverWorkspacePackages walk, and its baseline reading walked
+  again through a.packages(). Both are the unvalidated discovery a.discovery()
+  already remembers per App, so Compute now reads that one walk. It keeps the
+  same packages, declared edges and error ("package discovery failed"), and
+  nothing in compute writes into the packages or the declared list; discovery
+  logs nothing, so no log line changes.
+
+  Once compute has written, the remembered walk no longer matches disk, so
+  Compute forgets it (forgetDiscovery) after applying, the way
+  alignDeclaredList keeps a.cfg in step. A later Compute or planOptions on
+  the same App then walks the rewritten files, as each did on c7b14d32; the
+  CLI exits after compute, so no command's output changes. The memoised
+  packages() answer is left as it was, as c7b14d32 left it. Without the
+  forget step the converging second runs of TestComputeWriteAppliesAndBacksUp,
+  TestComputeWriteRewritesTheRootObject,
+  TestComputeWriteKeepsEdgesWhereTheConsumerDeclaresThem and
+  TestComputeWriteEditsASpaceObjectInPlace fail.
+
+  BenchmarkComputePreview (fresh App per op, 200 untagged packages, preview
+  only, -benchtime 20x, darwin/arm64). Allocations are the stable figure; the
+  machine is shared with other agents, so ns/op is indicative only (two runs
+  at each of the last two revisions are shown).
+
+  | revision           | ns/op                  | B/op    | allocs/op |
+  |--------------------|------------------------|---------|-----------|
+  | c7b14d32 (base)    | 470060156              | 8098561 | 52197     |
+  | 7dbfe26b (before)  | 35296962 / 139088235   | 4036767 | 30749     |
+  | this commit        | 71133819 / 113595546   | 3083942 | 25019     |
+
+  The base column also carries the per-package tag reads cd09e746 removed.
+  TestComputeReadsTheDiscoveredWorkspace fails on 7dbfe26b: a package folder
+  added after the invocation's walk is found by Compute's second walk.
+
+- read each package's own tags when compute's inventory fails ([d23cc65](https://github.com/yohimik/dispat/commit/d23cc651955b12627c2fedf098e50148508a9998)) (by yohimik, Claude Opus 5.5)
+  Review of cd09e746 found that a failed repository tag inventory was handed
+  to every candidate of that repository. The warning "cannot read the release
+  tags; no baseline suggested" then carried the unfiltered inventory command
+  instead of the package's own `git tag --list ... <glob>`, and one malformed
+  inventory record withheld every package's baseline where before only the
+  packages whose glob reached it lost theirs.
+
+  When the inventory read fails and the context is still live, each candidate
+  now asks its own per-package listing, exactly the call compute made before
+  the inventory. The answers, the error texts and the set of withheld
+  packages are the old ones; the extra reads happen only on that error path,
+  so the success path keeps its one inventory per repository.
+
+  TestComputeWithholdsBaselinesWhenReleaseTagsCannotBeRead pinned the old
+  per-package reading (2 tag listings). It now asserts 3 (one inventory, then
+  one listing per package) and that each package's warning names its own
+  glob. On cd09e746 it fails with 1 listing and the inventory command in both
+  errors.
+
+- order a task's output providers by rank, not by the whole plan ([77fb130](https://github.com/yohimik/dispat/commit/77fb130bb36738ab77725828c0cc061b5e96059a)) (by yohimik, Claude Opus 5.5)
+  resolveOutputProviders filtered each task's provider closure by walking
+  the whole plan order, so every Inputs call paid O(P) however small the
+  closure, O(P^2) over a distributed run's tasks. The plan order's ranks are
+  read once per dispatch, and each call sorts its own closure by them: the
+  same providers in the same plan order, for O(|C| log |C|) per call. The
+  per-name memo the finding proposed is not added: it removes only the two to
+  four calls per task (a constant, as the complexity vote showed) at the cost
+  of a mutex-guarded map shared by the dispatch goroutines.
+
+  Finding: "Distributed run recomputes each task's transitive provider closure
+  three times per task" (execution_dispatch.go:67), acted on as the complexity
+  vote re-derived it: the term that did not belong was the plan-order scan.
+
+  BenchmarkResolveOutputProviders (2,000 packages in chains of ten, every
+  package asked once), -benchtime 20x, same machine (darwin/arm64, shared with
+  other jobs: allocations are the stable figure, time is indicative; the
+  added bytes are the rank index, built once per plan):
+
+  | metric    | c7b14d32 (before) | this commit (after) |
+  |-----------|-------------------|---------------------|
+  | ns/op     | 71161690          | 4239190             |
+  | allocs/op | 2400              | 2409                |
+  | B/op      | 462937            | 571887              |
+
+- bucket declared edges once when compute rewrites lists ([d50a7b5](https://github.com/yohimik/dispat/commit/d50a7b56bcd3fb0d04d57f27078663b17fbc41c4)) (by yohimik, Claude Opus 5.5)
+  collectDepEdits rebuilt every touched dependency list by scanning the whole
+  merged declaration list and building each entry's list key again, once per
+  touched list: L x E key strings. One pass over the declarations now hands
+  each entry to its own list's edit, if that list is touched, so each list's
+  surviving entries come out in declared order as before and the edits, their
+  order and the rendered lists are unchanged.
+
+  Finding: "compute --write rebuilds every touched dependency list by
+  rescanning all declared edges" (computedeps.go:384).
+
+  BenchmarkCollectDepEditsPerPackageLists (300 packages, ten providers each in
+  their own folder file, one removal per package), -benchtime 20x, same
+  machine (darwin/arm64, shared with other jobs: allocations are the stable
+  figure, time is indicative):
+
+  | metric    | c7b14d32 (before) | this commit (after) |
+  |-----------|-------------------|---------------------|
+  | allocs/op | 935078            | 37511               |
+  | B/op      | 133283165         | 3784767             |
+  | ns/op     | 57866190          | 6967590             |
+
+- read a changelog once per entry and scan it without splitting ([481133d](https://github.com/yohimik/dispat/commit/481133d9e96ac9ce0c923608586b6e53209eecb8)) (by yohimik, Claude Opus 5.5)
+  The changelog step read each package's CHANGELOG.md twice, once through
+  HasEntryFor to learn whether Record would skip and once inside Record, and
+  each IsEntryPresent copied the file into a string and split it into a slice
+  of every line. The step now asks FileWriter.RecordEntry, which is Record
+  reporting whether it wrote, so the file is read once; HasEntryFor had no
+  other caller and is gone. IsEntryPresent finds the marker at the head or
+  after a newline in the bytes as read, which is the line-by-line answer
+  (TestHasEntryMatchesTheLineByLineReading checks it, a newline in the tag
+  included), and TestIsEntryPresentDoesNotCopyTheFile pins its allocation
+  below 1 KiB on a 2 MB file (the old code allocates about 4.6 MB). The
+  rewrite is assembled in one buffer sized for the file instead of a doubling
+  builder copied into a byte slice. The skip decision, the W226 line, the
+  "changelog written" line and the bytes written are unchanged.
+
+  Finding: "`dispat changelog` reads and line-splits each CHANGELOG.md twice
+  per package" (changelog.go:144). Outside the group's files:
+  services/dispat/internal/changelog/changelog.go (RecordEntry,
+  IsEntryPresent, the rewrite buffer).
+
+  Benchmarks on a 2 MB changelog, -benchtime 50x, same machine (darwin/arm64,
+  shared with other jobs: allocations and bytes are the stable figures, time
+  is indicative):
+
+  | benchmark / metric                          | c7b14d32 (before) | this commit (after) |
+  |---------------------------------------------|-------------------|---------------------|
+  | ChangelogStepSkip B/op                      | 13525851          | 2112640             |
+  | ChangelogStepSkip allocs/op                 | 120               | 97                  |
+  | ChangelogStepSkip ns/op                     | 5224854           | 136845              |
+  | IsEntryPresentAbsent B/op                   | 4653174           | 16                  |
+  | IsEntryPresentAbsent allocs/op              | 2                 | 1                   |
+  | IsEntryPresentAbsent ns/op                  | 1949603           | 903193              |
+  | RecordWritesAboveALargeChangelog B/op       | 13085042          | 6325892             |
+  | RecordWritesAboveALargeChangelog allocs/op  | 132               | 125                 |
+  | RecordWritesAboveALargeChangelog ns/op      | 6079542           | 6664843             |
+
+- resolve --since from the inputs the plan was computed from ([6e9f96b](https://github.com/yohimik/dispat/commit/6e9f96b8fcc877f3f7f6a4f19ef5d5acf2fd5e63)) (by yohimik, Claude Opus 5.5)
+  sincePackages assembled the planner inputs a second time to ask
+  PackagesChangedSince which packages rev..HEAD addresses: another
+  discovery, another `git remote get-url` per source repository in a composed
+  workspace, and a second pass of the initials warnings. It now reads the
+  inputs plan() kept (plannedOptions), assembling them only when no plan has
+  been computed. PackagesChangedSince reads the same packages, edges, parser
+  and histories, so the selection is unchanged; the duplicate uncoded
+  "initials entry matches no discovered package" warning and the second set
+  of workspace debug lines are no longer written.
+  TestSincePackagesReadTheInputsThePlanUsed fails on the old code (the
+  warning is written twice). The fixture moves to tagfixture_test.go.
+
+  Finding: "--since re-runs discovery and polyrepo record resolution although
+  plannedOptions already holds them" (selection.go:412).
+
+  BenchmarkSincePackages (64 packages, --since HEAD~1 after planning),
+  -benchtime 50x, same machine (darwin/arm64, shared with other jobs:
+  allocations are the stable figure, time is indicative). The before column
+  includes the second discovery walk the previous commit already removed:
+
+  | metric    | c7b14d32 (before) | this commit (after) |
+  |-----------|-------------------|---------------------|
+  | allocs/op | 2245              | 328                 |
+  | B/op      | 424163            | 97888               |
+  | ns/op     | 13734824          | 9833641             |
+
+- walk the workspace once per invocation ([3cf76ed](https://github.com/yohimik/dispat/commit/3cf76edc9a7a4ef2bfa52d92a9cab4b462a7cc8a)) (by yohimik, Claude Opus 5.5)
+  Every command that asked for the packages and then planned walked the
+  workspace twice: packages() discovered it for the step mask, the release
+  records, exec and `dispat run`'s script guard, and planOptions discovered it
+  again through config.DiscoverWorkspacePlan. `dispat run`'s guard walked it a
+  third way, through config.DiscoverPackages directly. Discovery now runs once
+  per App (DiscoverWorkspacePackages, the unvalidated walk); packages() and
+  planOptions each judge the declared dependencies from it with the new
+  config.ValidatePlanDependencies, so each keeps the answer and the error it
+  had. A composed workspace's plan resolves record targets into copies, so the
+  packages every other caller is handed stay as discovery found them.
+  TestPlanOptionsReuseTheDiscoveredWorkspace fails on the old code (the second
+  walk misses a folder removed in between).
+
+  Findings: "Workspace discovery walk is performed twice per invocation on
+  common command paths" (app.go:289) and "`dispat run`'s typo guard walks
+  package discovery a second time" (run.go:237), with the design the
+  equivalence vote set out: memoise the unvalidated walk, validate per caller,
+  copy before resolveRepositoryRecords writes.
+
+  BenchmarkDiscoveryPerInvocation (200 packages; packages() then planOptions
+  on a fresh App), -benchtime 50x, same machine (darwin/arm64, shared with
+  other jobs: allocations are the stable figure, time is indicative):
+
+  | metric    | c7b14d32 (before) | this commit (after) |
+  |-----------|-------------------|---------------------|
+  | allocs/op | 11472             | 5739                |
+  | B/op      | 1927712           | 969992              |
+  | ns/op     | 3357046           | 1514480             |
+
+- read compute's release tags from one inventory per repository ([d657896](https://github.com/yohimik/dispat/commit/d65789638e3eac4e2e6873e2000e02673a2d28fd)) (by yohimik, Claude Opus 5.5)
+  compute's baseline half asked git for each candidate package's tags with
+  its own `git tag --list --merged HEAD <glob>`, one process and one
+  reachability walk per package. It now reads one inventory per repository
+  through TagsForPackages, the reader the planner uses (§13.2), and applies
+  each package's alias filter and stable-baseline choice to its share as
+  before. TestBaselineReasonsReadOneInventoryPerRepository pins two git
+  processes per repository and checks every package's list, order included,
+  against its per-package `git tag --list`.
+
+  Finding: "The compute command lists tags once per package with a
+  reachability walk each" (computeinitials.go:269), and its duplicate
+  "compute re-reads the whole tag inventory once per package".
+
+  BenchmarkBaselineReasons (64 released packages, 2 tags each), -benchtime 20x,
+  same machine (darwin/arm64, shared with other jobs: allocations and git
+  processes are the stable figures, time is indicative):
+
+  | metric            | c7b14d32 (before) | this commit (after) |
+  |-------------------|-------------------|---------------------|
+  | GitInvocations/op | 65                | 2                   |
+  | allocs/op         | 8497              | 1752                |
+  | B/op              | 1519506           | 214848              |
+  | ns/op             | 220252012         | 33871404            |
+
+- read the worker's root configuration once ([45dd714](https://github.com/yohimik/dispat/commit/45dd7146d6f5c45f81f221696a84e99e92cd50af)) (by yohimik, Claude Opus 5.5)
+  Review blocker on 2e5d2d19 (dispatch.go:993): the read-once change
+  covered the control path only. `dispat worker` still handed the path to
+  runWorker, whose LoadNode read and parsed the file, $refs included, that
+  the ascent had already parsed.
+
+  LoadNode becomes LoadResolvedNode, which takes the ResolvedFile and
+  decodes its tree, and runWorker takes the ResolvedFile. It is the same
+  argument as for LoadResolvedControl: the same loader built the tree,
+  nothing mutates it, and an explicit --config or a file the ascent could
+  not parse carries no tree and is read at load, so the error is the same.
+  LoadNode had no other caller; TestModeExampleConfigsAreValid loads the
+  worker example through LoadResolvedNode with a path alone.
+  TestWorkerReadsItsConfigurationOnce runs `dispat worker` under worker
+  authority, which stops it right after the load, and counts the loader's
+  file-read events: 1, where the previous commit reads 2 and fails.
+  TestResolveAndLoadNodeReadsEachFileOnce pins 2 reads for a root file
+  with one $ref fragment and checks the result equals a plain load.
+
+  go run github.com/yohimik/dispat/tools/testreport bench <name> --
+  ./internal/config -run '^$' -bench BenchmarkResolveAndLoadNode -benchmem
+  -benchtime 200x -count 1, from services/dispat, Apple M5. The benchmark's
+  helper follows the CLI's call sequence: ResolveConfigFile then LoadNode
+  of the path at df074bec, ResolveConfigFile then LoadResolvedNode here.
+  Files read and allocations are the stable figures; the machine is
+  shared, so the timings are indicative only.
+
+  | per resolve and load | df074bec (before) | this commit (after) |
+  |---|---|---|
+  | files read | 4 | 2 |
+  | allocs/op | 686 | 518 |
+  | B/op | 45,326 | 35,112 |
+  | ns/op (indicative) | 88,120 | 52,743 |
+
+- index a packages map only when it has entries and is asked ([5a05274](https://github.com/yohimik/dispat/commit/5a05274ade13273705a9edd7e40664d0706c8f5b)) (by yohimik, Claude Opus 5.5)
+  Review suggestion on c18aa88b (discover.go): newDiscoveryMode indexed
+  the root packages map for every discovery, ResolvedSpaceConfigs
+  included, which never asks it about a package; every empty map got an
+  index map of its own; and every package name was folded up front even
+  when each map it met was empty or held its exact spelling.
+
+  The root index is now built on the first package lookup, an empty map
+  gets no index, the space-file index list is nil when no space file holds
+  an entry, and a name is folded only when a map with entries misses its
+  exact spelling. Every lookup returns what it did: a lookup in an empty
+  map finds nothing, Fold is pure so folding later gives the same key, and
+  nothing writes a packages map's keys during discovery, so an index built
+  at the first lookup holds the keys one built at the start would.
+  TestPackageEntriesFindIsFoldLookup now also asks an empty map.
+
+  go run github.com/yohimik/dispat/tools/testreport bench <name> --
+  ./internal/config -run '^$' -bench 'PackageLayers|ResolvedSpaceConfigs'
+  -benchmem -benchtime 200x -count 1, from services/dispat, Apple M5. The
+  machine is shared: allocations are the stable figure, timings and the
+  small B/op differences of BenchmarkPackageLayers (temporary folder
+  names) are indicative. The reference column is the BASE sources with
+  discover_bench_test.go from df074bec copied in. With entries in every
+  map the index is the time win of c18aa88b and stays.
+
+  | allocs/op (B/op) | c7b14d32 + df074bec bench | df074bec (before) | this commit (after) |
+  |---|---|---|---|
+  | PackageLayersWithoutEntries, 100 | 221 (28,003) | 225 (28,180) | 221 (28,048) |
+  | PackageLayersWithoutEntries, 500 | 621 (79,316) | 625 (79,519) | 621 (79,294) |
+  | ResolvedSpaceConfigs, 100 | 104 (11,137) | 108 (16,106) | 104 (11,154) |
+  | ResolvedSpaceConfigs, 500 | 104 (11,138) | 108 (52,302) | 104 (11,154) |
+  | PackageLayers, 500 | 9,452 (1,041,765) | 9,465 (1,063,910) | 9,464 (1,070,008) |
+  | ns/op PackageLayers, 500 | 2,780,171 | 537,439 | 526,567 |
+
+- index package folders only when an output root is declared ([293abd7](https://github.com/yohimik/dispat/commit/293abd70751c6bc64b22bf59bbd7c78fd65354bd)) (by yohimik, Claude Opus 5.5)
+  Review blocker on b977c803 (buildoutputs.go:306): the containment
+  checks built the package-folder index before they knew any root existed,
+  so a workspace declaring no buildOutputs, this repository among them,
+  folded every package folder and sorted them for nothing: 904 allocations
+  at 500 packages where the code before b977c803 made none. The sweep
+  check did the same for runOutputs whose scripts list no root.
+
+  checkBuildOutputRootsHoldNoPackage now returns before the index when
+  there is no root, and checkRunOutputRoots returns when no script lists a
+  root rather than only when the map is empty. Both are what the loops
+  would have answered: with nothing to hold against the packages, neither
+  can refuse. The run check now also skips the repository-root walk it
+  used to make in that case, so it allocates less than before b977c803.
+  The folder index and the overlap sort use slices.SortFunc, which needs
+  no reflection swapper; the overlap order is total (folded spelling, then
+  index) and the folder runs are read by minimum position, so neither
+  answer depends on the sort algorithm. TestDiscoveryCheckAllocationBudget
+  pins both checks at 0 allocations with no root declared; on the previous
+  commit they measure 904 and 906 and fail.
+
+  go run github.com/yohimik/dispat/tools/testreport bench <name> --
+  ./internal/config -run '^$' -bench
+  'Undeclared|CheckBuildOutputRoots|CheckRunOutputRoots' -benchmem
+  -benchtime 200x -count 1, from services/dispat, Apple M5. The machine is
+  shared, so allocations and bytes are the stable figures and the timings
+  are indicative only. The reference column is the BASE sources with
+  discover_bench_test.go from df074bec copied in.
+
+  | allocs/op (B/op) | c7b14d32 + df074bec bench | df074bec (before) | this commit (after) |
+  |---|---|---|---|
+  | undeclared build, 100 pkgs | 0 (0) | 104 (5,984) | 0 (0) |
+  | undeclared build, 500 pkgs | 0 (0) | 904 (53,984) | 0 (0) |
+  | undeclared run, 100 pkgs | 2 (32) | 106 (6,016) | 0 (0) |
+  | undeclared run, 500 pkgs | 2 (32) | 906 (54,016) | 0 (0) |
+  | CheckBuildOutputRoots, 500 | - | 2,922 (282,409) | 2,916 (282,272) |
+  | CheckRunOutputRoots, 500 | - | 2,420 (206,592) | 2,417 (206,496) |
+  | ns/op undeclared build, 500 | 368 | 54,479 | 362 |
+
+- read the root configuration once per command ([0dbc7e0](https://github.com/yohimik/dispat/commit/0dbc7e0bd8e983389b15c55acf3a9c9eca5a7b27)) (by yohimik, Claude Opus 5.5)
+  Finding: the CLI resolved the configuration file with ResolveFile, whose
+  ascent parses every file it classifies, and then loaded the chosen path
+  with LoadControl, which read and parsed it again together with every
+  file its $refs pull in (config.go:453).
+
+  ResolveConfigFile now keeps the tree the ascent parsed, and
+  LoadResolvedControl decodes it instead of reading the file. An explicit
+  --config and a file the ascent could not parse carry no tree, so they
+  are read at load exactly as before and a broken file fails with the
+  same error. The decoded configuration is the same: the same loader,
+  formats and $ref rules built the tree, and nothing mutates a tree once
+  read. ResolveFile, Load and LoadControl keep their signatures. Only the
+  loader's debug and trace events for that file are now written once.
+  TestResolveAndLoadControlReadsEachFileOnce pins two file reads (four
+  before) and compares the result with Load of the file;
+  TestLoadResolvedControlReportsAnUnreadableFile pins the error.
+
+  go run github.com/yohimik/dispat/tools/testreport bench <name> --
+  ./internal/config -run '^$' -bench BenchmarkResolveAndLoadControl
+  -benchmem -benchtime 200x -count 1, from services/dispat, Apple M5. The
+  benchmark's helper follows the CLI's call sequence, so it calls
+  ResolveFile and LoadControl before and the new pair after. The machine
+  was under a load average near 28: files read and allocations are the
+  stable figures, the timings are not comparable.
+
+  | per resolve and load | a8be7908 (before) | this commit (after) |
+  |---|---|---|
+  | files read | 4 | 2 |
+  | allocs/op | 686 | 518 |
+  | B/op | 45,296 | 35,110 |
+  | ns/op | 82,348 | 336,979 |
+
+- index each packages map by folded key for package lookups ([6a84a03](https://github.com/yohimik/dispat/commit/6a84a03fb62eac6023f415d3ab3e22561fb48769)) (by yohimik, Claude Opus 5.5)
+  Finding: packageLayers (discover.go:448) asked the root packages map,
+  the space's map and every space file's map for each package through
+  FoldLookup, which scans the whole map with EqualFold on every miss: O(P *
+  K) comparisons per map, and every package misses the maps that do not
+  hold its entry.
+
+  Discovery now indexes each map once by the folded key, the root map
+  when discovery starts and the space and space-file maps when the space
+  is resolved, and folds the package name once per package. The exact key
+  is still tried first. Loading refuses two keys of one map that fold
+  together, and Fold matches EqualFold, so the index returns the one key
+  the scan would: the entry is consumed, labelled and edited under the
+  same spelling. TestPackageEntriesFindIsFoldLookup compares the index
+  with models.FoldLookup over exact, re-capitalised and unicode spellings
+  (final sigma, Kelvin sign, dotted I, micro sign) and missing names.
+
+  The claim is time: the index adds one map per non-empty packages map,
+  which the allocation column shows (+14 allocations, +29 KB at 500
+  packages).
+
+  go run github.com/yohimik/dispat/tools/testreport bench <name> --
+  ./internal/config -run '^$' -bench BenchmarkPackageLayers -benchmem
+  -benchtime 20x -count 1, from services/dispat, Apple M5. The machine is
+  shared, so timings are indicative.
+
+  | packages | a710f850 (before) | this commit (after) |
+  |---|---|---|
+  | 100 ns/op | 402,688 | 291,348 |
+  | 100 allocs/op | 2,016 | 2,030 |
+  | 100 B/op | 208,034 | 212,034 |
+  | 500 ns/op | 4,196,677 | 968,958 |
+  | 500 allocs/op | 9,450 | 9,464 |
+  | 500 B/op | 1,041,108 | 1,070,320 |
+
+- fold package folders once for the output containment checks ([d607cd6](https://github.com/yohimik/dispat/commit/d607cd6c23a419ec863ee504840a83899270ab94)) (by yohimik, Claude Opus 5.5)
+  Finding: checkBuildOutputRootsHoldNoPackage (buildoutputs.go:308) folded
+  every package's folder again for every declared build output root, and
+  isFolderWithin built root+separator on every call: O(R * P) folds and
+  concatenations, R = P under a root-level buildOutputs. checkRunOutputRoot
+  repeated the per-package fold for every sweep root of every repository.
+
+  The package folders are now folded once and sorted. The folders equal to
+  a root and the folders under root+separator are each one contiguous run
+  in byte order, found by binary search, and the refusal names the
+  smallest package position among them, skipping the root's own package:
+  the package the scan in order returned first. The sweep root checks
+  share one index across every root. isFolderWithin compares without
+  allocating. TestPackageFolderIndexIsEveryPackageAsked compares the index
+  and isFolderWithin with the scan and predicate as written, over a root's
+  lexical neighbours (dist-old, dist.d), repeated folders and case
+  spellings; alloc_test.go pins both checks at 500 packages.
+
+  go run github.com/yohimik/dispat/tools/testreport bench <name> --
+  ./internal/config -run '^$' -bench
+  'BenchmarkCheckBuildOutputRoots|BenchmarkCheckRunOutputRoots' -benchmem
+  -benchtime 20x -count 1, from services/dispat, Apple M5. The machine is
+  shared, so allocations are the stable figure and timings are
+  indicative. The build-root column was taken at a710f850 and the sweep
+  column with the sources of a710f850 (neither file changed in f83ed275).
+
+  | benchmark | before | after (this commit) |
+  |---|---|---|
+  | CheckBuildOutputRoots 100 allocs/op | 20,116 | 520 |
+  | CheckBuildOutputRoots 100 B/op | 834,398 | 53,160 |
+  | CheckBuildOutputRoots 100 ns/op | 922,579 | 48,929 |
+  | CheckBuildOutputRoots 500 allocs/op | 700,128 | 2,922 |
+  | CheckBuildOutputRoots 500 B/op | 32,940,016 | 282,679 |
+  | CheckBuildOutputRoots 500 ns/op | 26,610,248 | 273,425 |
+  | CheckRunOutputRoots 100 allocs/op | 714 | 418 |
+  | CheckRunOutputRoots 100 B/op | 49,568 | 39,552 |
+  | CheckRunOutputRoots 100 ns/op | 52,925 | 20,240 |
+  | CheckRunOutputRoots 500 allocs/op | 4,316 | 2,420 |
+  | CheckRunOutputRoots 500 B/op | 283,808 | 206,863 |
+  | CheckRunOutputRoots 500 ns/op | 180,631 | 105,990 |
+
+- ask only the packages that could read an alias tag ([2870533](https://github.com/yohimik/dispat/commit/287053397ce86bb5e349a4fa113ac8505135c757)) (by yohimik, Claude Opus 5.5)
+  Finding: the alias-tag readability check (config.go:2227) tried every
+  package's release format against every rendered alias, O(P^2 * A)
+  ParseVersion calls at about four allocations each, and recompiled the
+  alias template on every render.
+
+  Each distinct alias format is now compiled once, and the rendered tags
+  are looked up in a gitx.ReleaseReaderIndex: packages keyed by the
+  rendered literal-and-name run their format opens with, or closes with
+  when the name follows the version, and a format that never spells the
+  name answered by its first package. Those runs are byte-exact tests in
+  every shape a tag is read in, so the index only skips packages whose
+  parse would fail, and it reports the smallest package position that
+  parses, which is the package the loop used to return first. The error
+  text and the duplicate-alias loop are unchanged.
+
+  TestReleaseReaderIndexIsEveryReaderTried compares the index with every
+  reader tried in order over formats spelling the name in the lead, in
+  the tail, in the middle and not at all; alloc_test.go pins the check at
+  500 packages (2,011,317 allocations before, 6,526 now).
+
+  go run github.com/yohimik/dispat/tools/testreport bench <name> --
+  ./internal/config -run '^$' -bench BenchmarkCheckAliasTagsAreWriteOnly
+  -benchmem -benchtime 20x -count 1, from services/dispat, Apple M5. The
+  machine is shared, so allocations are the stable figure and timings
+  are indicative.
+
+  | packages | a710f850 (before) | this commit (after) |
+  |---|---|---|
+  | 100 allocs/op | 82,114 | 1,164 |
+  | 100 B/op | 4,586,385 | 45,848 |
+  | 100 ns/op | 2,419,515 | 37,258 |
+  | 500 allocs/op | 2,011,351 | 6,526 |
+  | 500 B/op | 112,553,836 | 272,976 |
+  | 500 ns/op | 67,089,221 | 171,412 |
+
+- stream the rev-list answer into a commit graph with one edge array ([400be3e](https://github.com/yohimik/dispat/commit/400be3ec0bec8c5a22981b75d7f6b95c788beffc)) (by yohimik, Claude Opus 5.5)
+  Finding: "commitGraph construction allocates per commit and buffers the whole
+  rev-list output" (services/dispat/internal/gitx/gitx.go:1308).
+
+  commitDAG buffered `git rev-list --parents HEAD` in a growing bytes.Buffer,
+  copied it into a string, and read it twice, allocating a field slice and a
+  parent slice per commit. The answer now streams through gitStream.stdout into
+  a builder that reads each line as it arrives: an id is indexed when it is
+  first named, as a commit or as a parent, every edge goes into one array with
+  a span per commit, and the ids that never had a line of their own (parents a
+  shallow clone does not hold) leave the index at the end, so they still go to
+  merge-base. The first line naming a commit with parents is still the one
+  kept. Indices are no longer dense in line order, which no answer depends on.
+  A differential run of 3,000 generated histories, lines shuffled, split into
+  random writes, with duplicate root lines and absent parents, gave the same
+  index membership and the same isAncestor answer and known flag for every
+  pair as the previous two-pass reader. The git invocation and its trace line
+  are unchanged; the trace still counts its output bytes.
+
+  BenchmarkLoadCommitGraph, 50,000 commits fed in 64 KiB writes as a pipe
+  delivers them, from the bytes git writes to the graph a handle keeps,
+  -benchtime=50x -count=3, Apple M5, shared machine: allocations and bytes are
+  the stable figures, timings indicative.
+
+  | revision                  | ns/op           | B/op       | allocs/op |
+  |---------------------------|-----------------|------------|-----------|
+  | 514d4b7d (before)         | 10.15-11.11 ms  | 30,217,856 | 150,295   |
+  | this commit (after)       | 5.65-5.73 ms    | 9,071,311  | 50,342    |
+
+  TestAllocationBudget pins the load of 10,000 commits at 10,134 allocations;
+  the previous reader makes 30,097 and fails it.
+
+- read a push's porcelain answer once rather than once per ref ([ab4de6b](https://github.com/yohimik/dispat/commit/ab4de6b141bdba5a1ccd6fcaaf16b333ea9e8ddc)) (by yohimik, Claude Opus 5.5)
+  Finding: "Porcelain push output is rescanned once per ref, quadratic in refs
+  per push" (services/dispat/internal/gitx/transport.go:707).
+
+  PushReleaseRefs and DeleteRemoteBranchesLease looked every ref up with
+  findPushStatus, which scans the whole answer, so a push of R refs cost
+  O(R^2) line scans; PushReleaseRefs has no batch cap. Both now read the answer
+  once into a report by destination ref, keeping the first line of a ref
+  mentioned twice exactly as the scan did, and look each ref up in it. The
+  outcomes keep the caller's ref order and every error is raised at the same
+  ref. pushLeased asks about one ref and keeps the scan. The single-rune flag
+  test is the same test spelled without a rune slice. A differential run of
+  300,000 generated answers (duplicate refs, multi-byte, invalid and two-rune
+  flags) gave the report and the scan identical answers for every ref.
+
+  BenchmarkPushStatusLookup, 1,000 refs in one answer, -benchtime=50x
+  -count=3, Apple M5, shared machine: allocations and bytes are the stable
+  figures, timings indicative.
+
+  | revision                  | ns/op              | B/op   | allocs/op |
+  |---------------------------|--------------------|--------|-----------|
+  | 514d4b7d (before)         | 8,991,338-9,761,922 | 0     | 0         |
+  | this commit (after)       | 36,162-41,377      | 98,432 | 6         |
+
+  The report is O(R) transient memory, 98 KB for 1,000 refs, in exchange for
+  O(R) rather than O(R^2) time. TestAllocationBudget pins its 6 allocations.
+
+- parse the control gitlink history with a cursor and one copy per commit header ([e4471ea](https://github.com/yohimik/dispat/commit/e4471ea5fc47d23405c9c65417701db8b772a4bc)) (by yohimik, Claude Opus 5.5)
+  Finding: "Control history parse materialises a field slice and a map bucket
+  per commit" (services/dispat/internal/gitx/control_history.go:72).
+
+  parseControlGitlinkHistory no longer splits the whole `git log -z` answer
+  into a slice of every field: a cursor walks the NUL-separated fields in place
+  and reads them in the same order with the same framing rules and the same
+  errors. The kept header strings of a commit share one copy, the raw metadata
+  is split without a slice, Files and the commit list are allocated once at
+  their size, the two ids of a gitlink share one copy, and Gitlinks is nil for
+  a commit without a transition. The planner's two readers (a range and a
+  comma-ok lookup in plan/history.go) behave the same on a nil map. A
+  differential run of 300,000 generated inputs, malformed ones included,
+  against the previous parser gave identical commits and identical error texts.
+
+  BenchmarkParseControlGitlinkHistory, 20,000 commits (12.7 MB input),
+  -benchtime=50x -count=3, Apple M5, shared machine: allocations and bytes are
+  the stable figures, timings indicative.
+
+  | revision                  | ns/op           | B/op       | allocs/op |
+  |---------------------------|-----------------|------------|-----------|
+  | 514d4b7d (before)         | 15.03-15.08 ms  | 42,941,712 | 380,022   |
+  | this commit (after)       | 14.24-16.27 ms  | 20,960,213 | 180,000   |
+
+  Retained after the parse: 0.42x of the input, down from 0.54x.
+  TestAllocationBudget pins 9 allocations per commit; the previous parser
+  makes 19 and fails it.
+
+- index only the exports a large merge folds ([7234870](https://github.com/yohimik/dispat/commit/72348701552cf83355861a45da8a0e392d250b28)) (by yohimik, Claude Opus 5.5)
+  Review suggestion on the finding "MergeOutputs scans the release's
+  output list once per merged name" (release/outputs.go:92). The index of
+  7507185d held every output of the release and every export, so a merge
+  of a few exports onto a long list built a map of the whole list, and
+  BenchmarkMergeOutputs rose 31-48% in bytes over the scan it replaced.
+
+  The index now holds the exports alone: each name's last export. One
+  pass over the release overrides the first copy of each exported name,
+  then the names it did not carry are appended where their first export
+  stands, one at a time, so the list and its capacity are the scan's.
+  Onto a release with no outputs, which is how dispat run hands a
+  consumer its provider's list, the fold of the exports is the list. Time
+  stays O(|outputs| + |exports|) and the transient memory is O(|exports|).
+
+  outputScanLimit drops from 12 to 7, read from the new
+  BenchmarkMergeOutputsCrossover (a 6-export point is added here): from
+  8 exports the index is no slower onto 100 outputs and faster onto 1000,
+  below that the scan is faster, and at 8 or fewer neither allocates.
+
+  go test -bench -benchmem through testreport bench, Apple M5, shared
+  machine at load 3.8, the two columns run back to back. Allocations and
+  bytes are the stable figures, timings indicative. 33e4a6cb is that tree
+  with this commit's benchmark file.
+
+  BenchmarkMergeOutputs, -benchtime 20x:
+
+  | case                 | 33e4a6cb                        | this commit                    |
+  |----------------------|---------------------------------|--------------------------------|
+  | chain-1-exports-5    | 1154 ns, 2896 B, 6 allocs       | 1542 ns, 2896 B, 6 allocs      |
+  | chain-300-exports-5  | 6.57 ms, 41451022 B, 4828       | 6.34 ms, 41451362 B, 4832      |
+  | chain-300-exports-20 | 47.75 ms, 245575023 B, 11252    | 40.10 ms, 205835612 B, 8883    |
+
+  chain-1 runs the scan in both columns, so its time is noise.
+
+  BenchmarkMergeOutputsCrossover, index rows, -benchtime 20000x:
+
+  | case                  | 33e4a6cb               | this commit        | scan            |
+  |-----------------------|------------------------|--------------------|-----------------|
+  | outputs-100, 4        | 1425 ns, 3496 B, 3     | 681 ns, 0 B, 0     | 397 ns, 0 B     |
+  | outputs-100, 8        | 1389 ns, 3496 B, 3     | 850 ns, 0 B, 0     | 868 ns, 0 B     |
+  | outputs-100, 12       | 1408 ns, 3496 B, 3     | 1166 ns, 456 B, 3  | 1329 ns, 0 B    |
+  | outputs-100, 24       | 1542 ns, 6568 B, 3     | 1830 ns, 936 B, 3  | 2769 ns, 0 B    |
+  | outputs-1000, 4       | 12395 ns, 54608 B, 5   | 5757 ns, 0 B, 0    | 3567 ns, 0 B    |
+  | outputs-1000, 8       | 12482 ns, 54608 B, 5   | 6168 ns, 0 B, 0    | 7903 ns, 0 B    |
+  | outputs-1000, 12      | 12568 ns, 54608 B, 5   | 7523 ns, 456 B, 3  | 12487 ns, 0 B   |
+  | outputs-1000, 24      | 12645 ns, 54608 B, 5   | 9508 ns, 936 B, 3  | 28977 ns, 0 B   |
+
+  Tested alternatives, same machine: folding the exports into a list
+  first and applying it (more bytes per merge), and marking merged names
+  instead of deleting them (no measurable difference).
+
+  TestMergeOutputsIndexHoldsOnlyTheExports pins that the index allocates
+  the same onto 100 outputs as onto 10000 (it fails on 33e4a6cb: 3
+  against 33). TestMergeOutputsIndexAnswersAsTheScanOnDrawnLists compares
+  both ways on 200 drawn lists with names repeated in the release and in
+  the exports, including a release with no outputs.
+
+- let shouldSkip allocate only once a provider is dead ([54ca66d](https://github.com/yohimik/dispat/commit/54ca66dd4d75bca11641c0934194b26ac35741b7)) (by yohimik, Claude Opus 5.5)
+  Follow-up to the review blocker on the admission path
+  (release/stagerelation.go:312). Every admission concatenated the
+  package's declared providers with its reached ones and made a dead-set
+  map sized for the reached list, although nearly every admission finds
+  nothing dead and reads neither. shouldSkip now walks the two lists in
+  the same order without joining them and makes the map on the first
+  dead provider. The answers are the same: same providers, same order,
+  same first record-blocked, last bad and last blocking provider, and
+  hasCauseOfItsOwn gets the same set whenever it is asked.
+
+  BenchmarkAdmission, go test -bench -benchmem -benchtime 20000x through
+  testreport bench, Apple M5, shared machine at load 2.4, the two columns
+  run back to back. Allocations are the stable figure, timings
+  indicative.
+
+  | case                 | a735d8a0              | this commit       |
+  |----------------------|-----------------------|-------------------|
+  | gaps-1               | 84 ns, 16 B, 1        | 80 ns, 0 B, 0     |
+  | gaps-3               | 94 ns, 48 B, 1        | 88 ns, 0 B, 0     |
+  | gaps-8               | 161 ns, 128 B, 1      | 139 ns, 0 B, 0    |
+  | gaps-8-after-a-death | 2368 ns, 10035 B, 4   | 1729 ns, 10 B, 0  |
+
+  Against the base code (c7b14d32, 2194 ns, 10024 B, 4 allocs on every
+  shape), every admission is now cheaper in time and memory, with or
+  without a death. The 10 B after a death is the one-time listing of the
+  consumer's closure amortised over the iterations.
+
+  TestPublishOrderAdmitsWithoutAllocatingWhileEveryProviderLives pins
+  zero allocations for an admission over live declared and reached
+  providers; it fails on a735d8a0.
+
+- ask the skip cascade nothing until a package is dead ([20dc389](https://github.com/yohimik/dispat/commit/20dc389d90deb33579cf1a9696faddaa68f34803)) (by yohimik, Claude Opus 5.5)
+  Review blocker on the finding "reachedProviders retains the per-consumer
+  closure for the whole run and shouldSkip rescans it on every task"
+  (release/executor.go:470, stagerelation.go:312). The lazy closure of
+  8c52d013 kept the memory win but made every admission walk each carrying
+  gap's memoised list without deduplicating, so a consumer whose gaps
+  overlap paid the sum of those lists on every task of every run, which
+  is slower than the deduplicated list the base code read.
+
+  The run now records, under mu, that a releasing package failed, was
+  skipped or had its records blocked, at the six places a result becomes
+  one of those. Until then resolveReachedProviders answers nil without
+  looking at the graph, and the closure memo is no longer walked before
+  the tasks run: a run without a failure never walks it. Once a package
+  is dead, a consumer's closure is listed with Indirect, sorted exactly as
+  before, and kept, so each later admission reads the same list the base
+  code read. isAnyReachedDead, resolveCarriers and newCascadeReach are
+  gone. shouldSkip passes over a live provider, so before any death the
+  nil list answers what the full list did.
+
+  BenchmarkAdmission, go test -bench -benchmem -benchtime 20000x through
+  testreport bench, Apple M5, shared machine at load 3.6, the three
+  columns run back to back. Allocations are the stable figure, timings
+  indicative. c7b14d32 and 3fa3bb3d are those trees with this
+  benchmark added (only its setup differs, to build each revision's run).
+
+  | case                 | c7b14d32 (base)      | 3fa3bb3d            | this commit          |
+  |----------------------|----------------------|---------------------|----------------------|
+  | gaps-1               | 2287 ns, 10024 B, 4  | 1239 ns, 16 B, 1    | 54 ns, 16 B, 1       |
+  | gaps-3               | 2150 ns, 10024 B, 4  | 3601 ns, 48 B, 1    | 69 ns, 48 B, 1       |
+  | gaps-8               | 2157 ns, 10024 B, 4  | 10308 ns, 128 B, 1  | 121 ns, 128 B, 1     |
+  | gaps-8-after-a-death | 2194 ns, 10024 B, 4  | 10603 ns, 128 B, 1  | 2366 ns, 10035 B, 4  |
+
+  After a death the admission costs what the base code's did. The bytes
+  are shouldSkip's own, which the next commit takes on.
+
+  BenchmarkTaskGraph -benchtime 50x, same machine, 3fa3bb3d against this
+  commit: the cascade memo is no longer walked while the graph is built.
+
+  | case      | 3fa3bb3d                       | this commit                    |
+  |-----------|--------------------------------|--------------------------------|
+  | hub-100   | 0.26 ms, 455244 B, 1816 allocs | 0.26 ms, 433166 B, 1796 allocs |
+  | hub-300   | 0.93 ms, 1615398 B, 5073 allocs | 0.86 ms, 1530120 B, 5048 allocs |
+  | chain-300 | 0.50 ms, 613594 B, 2490 allocs | 0.52 ms, 591793 B, 2487 allocs |
+
+  These are also the quiet-load timings for 8c52d013, whose message
+  carries timings taken at load average 46.
+
+  TestPublishOrderListsTheReachedClosureOnlyOnceAProviderDied now pins
+  that nothing is walked or listed before a death (it fails on 3fa3bb3d,
+  which walked every consumer's carriers up front) and records the death
+  through settleFailure. TestPublishOrderSkipsAReachedConsumerBehindIncompleteRecords
+  covers the record-blocked site through the executor. Removing the flag
+  from settleFailure or markPublished makes these tests fail. The two
+  panic sites stop the run, so the cascade never reads them; they set the
+  flag all the same. TestPublishOrderCascadeAnswersAsTheFullClosure
+  still compares against the closure listed up front on 60 random
+  workspaces.
+
+- list the skip cascade's reached closure only after a death ([4e7b346](https://github.com/yohimik/dispat/commit/4e7b34676bf782c98e75e8ecb9de86c247880ebc)) (by yohimik, Claude Opus 5.5)
+  Finding "reachedProviders retains the per-consumer closure for the
+  whole run" (release/executor.go:470). Before any task ran, every
+  changed consumer's closure over the publication order was unioned,
+  sorted and kept for the run: n * m names for n consumers behind one
+  unreleased package over m providers, which after the pass-through
+  nodes is the whole of what stays quadratic. shouldSkip passes over a
+  provider that lives, so the closure only changes its answer once a
+  provider in it failed, was skipped or had its records blocked. The
+  memoised walk is now taken up front and only read afterwards; an
+  admission asks whether anything it reaches is dead, and lists the
+  closure, sorted exactly as before, only when something is, once per
+  consumer, under the run's lock. The blocker, the W194 sentence and
+  DISPAT_BLOCKED_BY are unchanged: TestPublishOrderCascadeAnswersAsTheFull
+  Closure compares both answers over 60 drawn workspaces with mixed
+  outcomes, and TestPublishOrderListsTheReachedClosureOnlyOnceAProvider
+  Died pins that a run where everything lives lists nothing.
+
+  BenchmarkTaskGraph (build the graph and consume it), go test -bench
+  -benchmem -benchtime 50x through testreport bench, Apple M5. The machine
+  was shared and loaded (load average 46 for the last column), so the
+  allocations are the figure to read and the timings are indicative only.
+
+  | case      | f055a944 (base code)  | c47a5b4c (pass-through) | this commit          |
+  |-----------|-----------------------|-------------------------|----------------------|
+  | hub-100   | 4.11 MB, 5543 allocs  | 1.58 MB, 3518 allocs    | 455.1 kB, 1816 allocs |
+  | hub-300   | 32.50 MB, 19986 allocs | 12.52 MB, 11675 allocs | 1.62 MB, 5073 allocs |
+  | chain-300 | 685.7 kB, 2789 allocs | 635.3 kB, 2492 allocs   | 614.0 kB, 2490 allocs |
+  | time      | 5.56 / 54.0 / 0.99 ms | 0.73 / 4.94 / 0.49 ms   | 1.58 / 15.7 / 12.4 ms (loaded) |
+
+- order through unreleased packages with pass-through nodes ([2fdd3bd](https://github.com/yohimik/dispat/commit/2fdd3bd156bb3eda05b8354bac94e2f35b226794)) (by yohimik, Claude Opus 5.5)
+  Finding "Indirect orderings materialised as one task edge per
+  (consumer, reached provider) pair" (release/stagerelation.go:132). The
+  task graph stated one build edge and one publish edge from every changed
+  provider a consumer reaches through packages this run does not release,
+  so n consumers behind one unreleased hub over m providers cost 2nm
+  scheduler edges, plus a memoised union and a sort per consumer for the
+  build index. Each such package now gets a pass-through node per
+  ordering, as the build readiness row of the cost table prices it: the
+  node waits for the stage of every changed provider it carries the
+  ordering from and for the nodes behind it, and its consumers wait for
+  the node, one edge per dependency edge.
+
+  The scheduler learns pass-through nodes: never handed out or counted,
+  completed in place the moment their last dependency is. The hand-out
+  order, which reaches the log and the event stream, is the literal
+  graph's exactly. Done numbers every edge of a scheduler that has
+  pass-through nodes and hands each readied node out at the number of the
+  edge that readied it; the consumer edges are stated in the consumer's
+  turn, where the literal edges stood, and the providers' tasks those
+  edges registered early are registered at the same place, so the initial
+  frontier keeps its insertion order. A graph without pass-through nodes
+  keeps the old code path and pays nothing. TestTaskGraphHandsOutTheLiteral
+  Order* drains the new graph and the literal one side by side under
+  seven completion orders on diamonds, chains through non-building
+  packages, the relation and publication fixtures, a hub with and without
+  a publish group, and 60 random workspaces, and requires the same
+  batches in the same order.
+
+  go test -bench -benchmem through testreport bench, Apple M5, shared
+  machine: allocations are the stable figure, timings indicative.
+
+  BenchmarkTaskGraph (build the graph and consume it), -benchtime 50x:
+
+  | case      | f055a944 (base code)            | this commit                   |
+  |-----------|---------------------------------|-------------------------------|
+  | hub-100   | 5.56 ms, 4.11 MB, 5543 allocs   | 0.73 ms, 1.58 MB, 3518 allocs |
+  | hub-300   | 54.0 ms, 32.50 MB, 19986 allocs | 4.94 ms, 12.52 MB, 11675 allocs |
+  | chain-300 | 0.99 ms, 685.7 kB, 2789 allocs  | 0.49 ms, 635.3 kB, 2492 allocs |
+
+  BenchmarkTopoSort (the planner's scheduler use), -benchtime 500x:
+  f055a944 466 us, 620377 B, 6074 allocs; this commit 375 us, 620376 B,
+  6074 allocs.
+
+  What remains of hub-300 is the per-consumer closure the skip cascade
+  keeps (finding "reachedProviders retains the per-consumer closure").
+
+- render the settled workspace listing once per closing phase ([7f82f4c](https://github.com/yohimik/dispat/commit/7f82f4c6966e3aa90e7d78c4856416205da6d0eb)) (by yohimik, Claude Opus 5.5)
+  Finding "SettledEnv re-renders the whole workspace listing for every
+  package that re-runs syncLock" (release/env.go:337). The listing names
+  no package and the closing phase reads it over one settled run, yet
+  every package's environment rebuilt it: 4P+1 concatenated strings, the
+  key map and the owners JSON, P_sync times. SettledEnvs renders it once
+  and each package's environment copies it, as a release run already
+  does with WorkspaceEnv. The environment each syncLock script receives
+  is unchanged byte for byte: its inputs are the plan and the results,
+  which the closing loop never writes, and the listing's only diagnostic
+  already went to a no-op logger.
+
+  BenchmarkSettledEnv (300 published packages, every one re-running
+  syncLock), go test -bench -benchmem -benchtime 50x through testreport
+  bench, Apple M5, shared machine: allocations are the stable figure,
+  timings indicative.
+
+  | revision              | time/op  | bytes/op | allocs/op |
+  |-----------------------|----------|----------|-----------|
+  | f055a944 (base code)  | 48.0 ms  | 44.65 MB | 647116    |
+  | this commit           | 1.30 ms  | 6.85 MB  | 16211     |
+
+  Touches services/dispat/internal/app/include_sync.go, the one caller.
+
+- index the outputs a large merge folds onto a release ([6c8867a](https://github.com/yohimik/dispat/commit/6c8867a548e2815aa1fd51e8f90b4e1e45a8c69e)) (by yohimik, Claude Opus 5.5)
+  Finding "MergeOutputs scans the release's output list once per merged
+  name" (release/outputs.go:92). Every incoming export scanned the
+  release's whole list, so a merge cost |exports| x |outputs|, and dispat
+  run, which merges each provider's accumulated list into its consumer,
+  paid O(P^3 k^2) comparisons down a chain of P packages exporting k
+  names. A merge of more than 12 exports now looks names up in an index
+  built for that one call, holding the first position of each name and
+  taking every name it appends, so the resulting list is element for
+  element the scan's. A stage's own few exports keep the scan.
+
+  BenchmarkMergeOutputs, go test -bench -benchmem -benchtime 5x through
+  testreport bench, Apple M5, shared machine: allocations are the stable
+  figure, timings indicative.
+
+  | case                  | f055a944 (base code)         | this commit                  |
+  |-----------------------|------------------------------|------------------------------|
+  | chain-1-exports-5     | 900 ns, 2896 B, 6 allocs     | 3125 ns, 2896 B, 6 allocs    |
+  | chain-300-exports-5   | 151.8 ms, 31.6 MB, 3704 allocs | 6.6 ms, 41.5 MB, 4830 allocs |
+  | chain-300-exports-20  | 3373 ms, 165.7 MB, 4755 allocs | 47.9 ms, 245.5 MB, 11250 allocs |
+
+  The added bytes are the per-call index, garbage once the call returns;
+  the retained outputs are unchanged. The one-package case runs the same
+  code as before, so its time difference is machine noise.
+
+- answer a shallower walk from the deeper one kept for its source ([7b56ab6](https://github.com/yohimik/dispat/commit/7b56ab68760bd04931616d7683ac393a7a94281b)) (by yohimik, Claude Opus 5.5)
+  Review suggestion on 0deb7525: a bounded single-source ask whose source
+  has no unbounded walk kept was walked again for every new depth and kept
+  once per depth, although a deeper bounded walk from the same source over
+  the same kinds already held the answer as its prefix.
+
+  The bounded walks now sit in a cache of their own, one per source and
+  kinds: the deepest one asked. A shallower ask reads its prefix through
+  withinDepth, which already serves the prefix of an unbounded walk. A
+  deeper ask walks to its own depth and replaces the kept walk while the
+  budget allows it, and otherwise the shallower one stays. The prefix is
+  exact for the reason 0deb7525 relies on. walkLiteral is a FIFO
+  breadth-first walk, so every level k target is listed before any level
+  k+1 target, with the same origin and level whatever the cut. Cutting at
+  d' >= d expands every level below d, so the targets up to level d are
+  the same, in the same order. TestCachedWalkIsTheLiteralWalk still checks
+  random asks over depths 1, 2, 3 and unbounded against walkLiteral.
+  TestShallowerAskReadsTheDeeperBoundedWalk pins 2 targets walked for a
+  depth-two ask followed by a depth-one ask. The parent walks 3.
+
+  Same machine, -benchtime=5x, through testreport bench. walkTargets,
+  allocations and bytes are the stable figures. Timings are indicative,
+  because the machine is shared:
+
+  | benchmark                 | metric         | aab12ddd   | this commit |
+  |---------------------------|----------------|------------|-------------|
+  | ComputeMixedDepthChain/1024 | walkTargets/op | 3,068    | 2,045       |
+  |                           | allocs/op      | 75,280     | 74,248      |
+  |                           | B/op           | 12,680,380 | 12,336,158  |
+  |                           | ns/op          | 5,504,725  | 5,447,167   |
+  | ComputeMixedDepthChain/4096 | walkTargets/op | 12,284   | 8,189       |
+  |                           | allocs/op      | 300,205    | 296,078     |
+  |                           | B/op           | 51,941,785 | 50,565,000  |
+  |                           | ns/op          | 26,352,842 | 22,758,125  |
+  | ComputeShallowChain/4096  | walkTargets/op | 4,095      | 4,095       |
+  |                           | allocs/op      | 181,259    | 181,262     |
+
+  The ShallowChain allocations grow by 1 at 1,024 packages and by 3 at
+  4,096. That is the second map, made with the cache and grown beside the
+  first.
+
+- drop the attribution's rank sets once releases are attributed ([c684a01](https://github.com/yohimik/dispat/commit/c684a01db99a4fc4728fac697f75c11c8841ab3c)) (by yohimik, Claude Opus 5.5)
+  Review suggestion on ca4dcba7: the composed attribution keeps one rank
+  bitset per shared window (about C/8 bytes each), the control
+  repository's rank set, the merge scratch and the per-commit author ids
+  on the computation, and nothing reads them after collectReleaseAuthors.
+  They stayed live through the provider updates, the owed boundaries and
+  the plan's emission. collectReleaseAuthors now releases them when the
+  last release is attributed. The authorCandidates comment now says it is
+  the one commitSet written after it is built. TestReleaseAuthorsDropTheirScratch
+  fails on the parent.
+
+  At 50,000 commits and 93 windows that is about 0.6 MiB of rank sets and
+  0.2 MiB of author ids freed early. Total bytes allocated cannot move, and
+  did not. The sampled peak is indicative. The allocation deltas of 1 to 8
+  are run-to-run noise: MergedHistory composed measured 134,473 at
+  ca4dcba7 and 134,477 at 7bc931ff, which share this path.
+
+  Same machine, -benchtime=3x, through testreport bench. Allocations and
+  bytes are the stable figures. Timings and the sampled peak heap are
+  indicative, because the machine is shared:
+
+  | benchmark                      | metric       | 7bc931ff    | this commit |
+  |--------------------------------|--------------|-------------|-------------|
+  | ComputeRealHistory composed/50k| peakHeap_MiB | 53.01       | 46.72       |
+  |                                | retained_MiB | 3.366       | 3.367       |
+  |                                | allocs/op    | 363,661     | 363,669     |
+  |                                | B/op         | 86,476,906  | 86,541,616  |
+  |                                | ns/op        | 489,380,472 | 497,019,570 |
+  | ComputeRealHistory composed/10k| peakHeap_MiB | 9.559       | 8.797       |
+  |                                | allocs/op    | 78,611      | 78,612      |
+  | ComputeMergedHistory composed  | peakHeap_MiB | 34.57       | 34.04       |
+  |                                | allocs/op    | 134,477     | 134,481     |
+  |                                | B/op         | 42,716,357  | 42,753,197  |
+
+  ca4dcba7's MergedHistory composed BEFORE column was taken at 0548960b.
+  Retaken at its parent, -benchtime=5x on the same machine, from a git
+  archive of bc7c967e and in the worktree at ca4dcba7:
+
+  | ComputeMergedHistory composed | bc7c967e   | ca4dcba7   |
+  |-------------------------------|------------|------------|
+  | allocs/op                     | 134,213    | 134,473    |
+  | B/op                          | 42,632,742 | 42,676,312 |
+  | peakHeap_MiB                  | 34.65      | 33.81      |
+  | ns/op                         | 46,363,650 | 35,070,933 |
+
+- keep only the link evidence subjects a boundary looks up ([889f8fd](https://github.com/yohimik/dispat/commit/889f8fd58e30b3e2832b614aa835e55bd911f491)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone, and the reviewer's equivalence
+  blocker on 63476f57): linkEvidence.index kept the subject of every
+  release tag of every package for the whole plan, although a boundary
+  only looks up a package's stable and newest tag.
+
+  The read is unchanged. Every tag's commit still goes to the one subject
+  read per repository, so a commit the repository cannot log still stops
+  the plan with the same error, and the debug line still counts every
+  subject read. Only the subjects of the stable and newest tags are
+  interned and kept. resolve looks a subject up under the repository name
+  the index stored it under and a boundary tag's commit, and every such
+  key is kept, so every lookup gets the answer it got before.
+  TestLinkEvidenceRefusesAnUnloggableOlderRelease fails on 63476f57, where
+  the older release's commit was not read.
+  TestLinkEvidenceKeepsOnlyTheBoundarySubjects pins four revisions read and
+  two subjects kept; it fails on the parent, which keeps four.
+
+  Same machine, -benchtime=5x, through testreport bench. Revisions,
+  allocations and bytes are the stable figures. Timings are indicative,
+  because the machine is shared:
+
+  | benchmark                         | metric          | 36a0ad9d  | this commit |
+  |-----------------------------------|-----------------|-----------|-------------|
+  | LinkEvidenceIndex (64 x 256 tags) | revisions/op    | 16,384    | 16,384      |
+  |                                   | subjects kept*  | 16,384    | 64          |
+  |                                   | allocs/op       | 33,127    | 361         |
+  |                                   | B/op            | 7,254,288 | 3,342,552   |
+  |                                   | ns/op           | 5,684,608 | 3,978,842   |
+
+  * not a benchmark metric: one per indexed revision before, one per
+  package here (stable and newest are the same tag in this workload), as
+  TestLinkEvidenceKeepsOnlyTheBoundarySubjects pins on a smaller line.
+
+- read link evidence subjects for every release tag again ([bb27084](https://github.com/yohimik/dispat/commit/bb270840cf30e1326afbb45eb09534df85fbf3f2)) (by yohimik, Claude Opus 5.5)
+  63476f57 asked the subject read about the stable and newest tag of each
+  package only. That is not the same work made cheaper. CommitSubjects is
+  one `git log --no-walk` over every revision it is given, and each one has
+  to resolve. A release tag whose commit the repository cannot log (a
+  pruned or shallow object, or a tag that peels to a non-commit) used to
+  stop the plan with "reading repository X release subjects". With the
+  smaller read set it planned instead, and the debug line counted fewer
+  revisions. CCME section 17.2 holds an optimised plan to the literal
+  reading on every input, and that includes the inputs it refuses, so the
+  read set goes back to every tag. The next commit keeps the saving that
+  is equivalent: it retains only the subjects a boundary looks up.
+
+  Reverts: 63476f574ee51f527216ab5be5a8754069dc844f
+
+- attribute a composed window from its windows, not the union ([6d8e8ed](https://github.com/yohimik/dispat/commit/6d8e8ed2fe447f30314dbfac49cd9e0cb7b95b79)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on equivalence): in a composed workspace
+  collectWindowAuthors visited every commit of the union for each window
+  identity, O(identities x C), where the single-history path visits the
+  window alone. The refuting vote showed why merging the package's
+  windows is not enough: a source package's control-repository keys are
+  decided by the control rule alone, so a fresh control window from an
+  older published boundary holds commits the rule rejects, and the rule
+  admits control commits no window holds.
+
+  The attribution now visits a superset of what inWindow can admit: the
+  commits of the shared windows the package was attached from, each
+  window's ranks built once and shared by every package released at it,
+  plus, for a package outside the control repository, every control
+  commit of the union. Each candidate, in rank order, still has to pass
+  the same test the union pass applied (the repository is reachable and
+  inWindow admits the key), so the commits attributed, their order, the
+  ancestry questions asked of control commits and the lists are those of
+  the pass over the union. TestComposedAttributionVisitsTheWindowsNotTheUnion
+  compares every package's lists with that pass on a merged history and
+  on the vote's case, a source package whose provider lives in the
+  control repository with a published control boundary older than its
+  stable one; dropping the inWindow test fails it there. It also pins the
+  commits examined below half of a union pass per package. The window and
+  control rank sets and the merge scratch are computation fields
+  (plan.go); mergedGit now reports its commits' authors.
+
+  Same machine; AuthorScans, allocations and bytes are the stable
+  figures, timings and the sampled peak heap indicative:
+
+  | benchmark (-benchtime)              | metric         | bc7c967e    | this commit |
+  |-------------------------------------|----------------|-------------|-------------|
+  | ComputeRealHistory composed/50k (3x)| AuthorScans/op | 741,056     | 214,965     |
+  |                                     | allocs/op      | 363,505     | 363,672     |
+  |                                     | B/op           | 86,356,648  | 86,534,528  |
+  |                                     | ns/op          | 518,890,153 | 503,022,597 |
+  | ComputeMergedHistory composed (5x)  | ns/op          | 44,018,800* | 32,635,233  |
+  |                                     | B/op           | 42,490,524* | 42,686,545  |
+
+  * taken at 0548960b; the commits since change no composed path there.
+
+  214,965 is what the same repository planned as one history examines
+  (shape=bounded). The cost is a rank set per shared window, about 6 KiB
+  each at 50,000 commits, held until the plan is computed.
+
+- identify each commit's author once per plan ([0e726e0](https://github.com/yohimik/dispat/commit/0e726e083438338e9a13619e98521e5eaa888f3d)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): the window attribution built an
+  Author per visited commit, folded its email into the dedup key and
+  probed two string-keyed maps it allocated per window identity, so the
+  same commit's author was folded and hashed again for every window that
+  holds it.
+
+  authorOf interns the folded key, the same Author.key, to a plan-wide id
+  the first time a commit is attributed and keeps it by commit rank; each
+  attribution then marks the ids it has listed in two generation-stamped
+  arrays shared by every attribution of the plan, so starting one costs
+  neither a clear nor an allocation. Two commits get one id exactly when
+  their keys are equal, the Author listed is still the visited commit's
+  own spelling, the visiting order is unchanged and containedInBaseline is
+  still asked on every visit, so WindowAuthors and FreshWindowAuthors are
+  the same lists. TestWindowAttributionFoldsEachCommitsAuthorOnce pins a
+  second visit of a commit with a mixed-case address at zero allocations
+  (Fold allocated on every visit before). The id table and the marks are
+  new fields of the computation in plan.go.
+
+  Same machine, -benchtime=3x; allocations and bytes are the stable
+  figures, timings indicative (shared machine):
+
+  | ComputeRealHistory/50k | metric    | 27298330    | this commit |
+  |------------------------|-----------|-------------|-------------|
+  | whole                  | allocs/op | 895,443     | 894,826     |
+  |                        | B/op      | 195,200,277 | 195,232,285 |
+  |                        | ns/op     | 749,790,222 | 703,598,736 |
+  | bounded                | allocs/op | 259,830     | 259,217     |
+  |                        | B/op      | 52,190,312  | 52,068,213  |
+  |                        | ns/op     | 482,813,195 | 435,295,569 |
+  | composed               | allocs/op | 364,118     | 363,505     |
+  |                        | B/op      | 86,497,426  | 86,356,648  |
+  |                        | ns/op     | 558,856,444 | 518,890,153 |
+
+  AuthorScans/op is unchanged (192,366, 214,965 and 741,056): the visits
+  are the same, each is cheaper. The composed scan of the whole union per
+  identity is a separate finding.
+
+- hand releases only the unit marks they name ([166747f](https://github.com/yohimik/dispat/commit/166747f5b29a48fdcd7f9b1d7ef71dcdeaf8a57f)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): finalise gave every release the
+  computation's unitAuthors and unitCommits maps, which hold every valid
+  unit of the union, so a returned plan kept every parsed message of the
+  history alive (49 of 53 MiB at 50,000 commits) although its readers only
+  look units up by keys a release already holds.
+
+  After the versions and the window attribution, shareUnitMarks builds one
+  pair of maps holding the units some release names in Units, Corrects or
+  SuppressedNotes, copied from the computation's, and hands that pair to
+  every release. AuthorsFor, UnitCommit, the digest and the changelog read
+  the maps by those keys alone and never range them, so every answer is
+  the same; the computation keeps its own maps for the fixed-group
+  re-measure. TestReleasesKeepOnlyTheUnitsTheyName pins a three-commit
+  history at one kept unit (the old maps held three).
+
+  The parse results themselves are not held longer than needed: a one-unit
+  message's Result is the same allocation as its unit, which the plan
+  keeps, so releasing it earlier than resolve does would free nothing.
+
+  Same machine, -benchtime=3x; retained heap, allocations and bytes are
+  the stable figures, timings and the sampled peak heap indicative:
+
+  | ComputeRealHistory/50k | metric       | de0d1ce2 | 63476f57-era* | this commit |
+  |------------------------|--------------|----------|---------------|-------------|
+  | whole                  | retained_MiB | 53.15    | 53.15         | 4.18        |
+  | bounded                | retained_MiB | 12.69    | 12.69         | 3.50        |
+  | composed               | retained_MiB | 12.34    | -             | 3.37        |
+
+  * retained_MiB was 53.15 / 12.69 at every commit of this series before
+  this one (measured at 22d2a15d, ab94449e and 59856de3).
+
+- read link evidence subjects for the boundary tags only ([38077c5](https://github.com/yohimik/dispat/commit/38077c56b50be1bbd8f1efb5887ee450b413c6f2)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): linkEvidence.index passed the commit
+  of every release tag of every package to one subject read per
+  repository and kept every subject for the plan, although boundaries are
+  asked only for a package's stable and newest tags.
+
+  index now asks about those two tags' commits per package. A repository
+  is read exactly when it was before, once whenever one of its packages
+  has a tag, so LinkReads and the missing-reader error are unchanged, and
+  every subject resolve looks up is still indexed. The only observable
+  difference is the debug line's revision count, and that a broken commit
+  behind a release tag no boundary uses no longer fails the read, which is
+  the literal reading's answer. TestLinkEvidenceReadsOnlyTheBoundaryTags
+  pins a four-tag line at two revisions in one read.
+
+  Same machine, -benchtime=5x; revisions, allocations and bytes are the
+  stable figures, timings indicative:
+
+  | benchmark                         | metric       | de0d1ce2  | this commit |
+  |-----------------------------------|--------------|-----------|-------------|
+  | LinkEvidenceIndex (64 x 256 tags) | revisions/op | 16,384    | 64          |
+  |                                   | allocs/op    | 33,125    | 153         |
+  |                                   | B/op         | 7,252,204 | 27,208      |
+  |                                   | ns/op        | 4,551,508 | 16,775      |
+
+- index the fleet's link peers once per plan ([589f320](https://github.com/yohimik/dispat/commit/589f3207770e2dd3adac551fa1eb719892b3753c)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): linkRoute's breadth-first search
+  called linkNeighbours for every repository it dequeued, and each call
+  sorted every history name, scanned every history's links and sorted the
+  result: O(Q^2 log Q) per route, and projectSince routes to every
+  repository.
+
+  The peers of every repository are now listed in one pass over the
+  histories in name order, the first time a route is asked for, and kept
+  on the computation (a new linkPeers field in plan.go): a history's own
+  links in name order, and the name of every other history whose links
+  name it, met in history order, each name kept in the spelling met first
+  and the list ordered by folded name. That is what the scan found for
+  each repository, so every route, and every diagnostic that names a hop,
+  is unchanged; TestLinkPeersAreTheScanOfEveryHistory checks the index
+  against the scan over 300 random fleets with one-sided links, case
+  variants and self links. A route is then a search over the index.
+
+  Same machine, -benchtime=5x; allocations and bytes are the stable
+  figures, timings indicative:
+
+  | benchmark                    | metric    | de0d1ce2   | this commit |
+  |------------------------------|-----------|------------|-------------|
+  | LinkRoute/repositories=16    | allocs/op | 780        | 323         |
+  |                              | B/op      | 57,753     | 22,113      |
+  |                              | ns/op     | 163,833    | 39,200      |
+  | LinkRoute/repositories=64    | allocs/op | 12,756     | 3,255       |
+  |                              | B/op      | 2,896,860  | 397,089     |
+  |                              | ns/op     | 10,043,650 | 227,683     |
+
+  The app's planLinks and config.Workspace.LinkRoute have the same shape
+  and are outside this change.
+
+- join each diagnostic's digest sort key once ([5c640db](https://github.com/yohimik/dispat/commit/5c640db278e325f969025714731995e2789acdd3)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): canonicalDiagnostics sorted with a
+  comparator that joined the four key fields of both operands on every
+  comparison, about 2 D log D short-lived strings per digest.
+
+  Each diagnostic's key is joined once beside it and sort.Slice compares
+  the stored keys: the same comparison results in the same sequence, so
+  the same permutation and the same canonical document, ties and fields
+  holding the separator included. TestCanonicalDiagnosticsSortByTheJoinedKey
+  checks the order against the per-comparison definition over 300 random
+  lists with duplicates and NUL-bearing fields, and pins 64 diagnostics at
+  72 allocations (measured 69).
+
+  Same machine, -benchtime=5x; allocations and bytes are the stable
+  figures, timings indicative:
+
+  | benchmark                         | metric    | de0d1ce2   | this commit |
+  |-----------------------------------|-----------|------------|-------------|
+  | CanonicalDiagnostics/5000         | allocs/op | 126,956    | 5,005       |
+  |                                   | B/op      | 6,421,512  | 969,240     |
+  |                                   | ns/op     | 4,155,183  | 787,667     |
+  | CanonicalDiagnostics/50000        | allocs/op | 1,688,282  | 50,008      |
+  |                                   | B/op      | 84,240,552 | 9,612,304   |
+  |                                   | ns/op     | 56,636,808 | 11,412,733  |
+
+- read a group member's direct contributions off its units ([740df4b](https://github.com/yohimik/dispat/commit/740df4b38649932e55d93eef5c276c9b25937a16)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): directBumps appended a
+  groupContrib{key, bump} per admitted (unit, package) for every package,
+  under exactly the guards that append the unit to rel.Units, although
+  only the fixed-group aggregate (groupFresh) reads it and the same pairs
+  are rel.Units' commits (unitCommits) and bumps.
+
+  groupFresh now walks rel.Units, reading each unit's commit from
+  unitCommits and its bump from the unit: the same (commit, bump) sequence
+  in the same order, so the same ancestry questions are asked and the
+  group's version is unchanged. The ownContribs map and the groupContrib
+  type are gone (fixedgroup.go, plan.go). The fixed-group suites pass
+  unchanged.
+
+  Same machine, -benchtime=5x; allocations and bytes are the stable
+  figures, timings indicative:
+
+  | benchmark                         | metric    | 59856de3   | this commit |
+  |-----------------------------------|-----------|------------|-------------|
+  | ComputeGroup/fixed (200 members)  | allocs/op | 3,690      | 3,685       |
+  |                                   | B/op      | 746,100    | 735,108     |
+  | ComputeGroup/fixedSparse          | allocs/op | 2,075      | 2,071       |
+  |                                   | B/op      | 628,947    | 619,041     |
+  | ComputeMergedHistory single       | allocs/op | 78,012     | 77,489      |
+  |                                   | B/op      | 17,498,083 | 17,411,212  |
+  | ComputeMergedHistory composed     | allocs/op | 134,710    | 134,187     |
+
+  The parent column was taken in this worktree with the change stashed;
+  the base revision has no separate figure for ComputeGroup.
+
+- resolve scope-sets without filtered copies of their terms ([32c1b16](https://github.com/yohimik/dispat/commit/32c1b169bc8f37f7a91cc2acf568abd22a79b93e)) (by yohimik, Claude Opus 5.5)
+  Findings: scope-set resolution allocates per unit, one map and two
+  slices of it needlessly (scope.go:64, contested on size alone), and the
+  scope-set accessors and report strings allocate per unit (scope.go:51,
+  refuted on size and on the equivalence of a single-pass sketch).
+
+  ScopeSet.Includes and Excludes each copied the terms into a new slice,
+  three times per resolution and once more in the files pre-pass
+  (isScopeSetDerived in files.go). Resolution now reads the terms in two
+  passes over the written set, inclusions and then exclusions, which is
+  the order the copies gave: every inclusion is still expanded before any
+  exclusion, so W134 lists the inclusions' empty globs first whatever
+  order the terms were written in, the property the refuting vote showed a
+  single pass would break. TestScopeSetExpandsInclusionsBeforeExclusions
+  pins that order. reportScope builds its location text only when there
+  is a diagnostic to carry it. The exclusion set stays a local the
+  compiler keeps on the stack, so nothing else allocates.
+  TestScopeSetResolutionAllocatesOnlyItsResult pins a three-term
+  resolution at 2 allocations (the old code made 5).
+
+  Same machine; allocations and bytes are the stable figures, timings and
+  the sampled peak heap indicative:
+
+  | benchmark (-benchtime)              | metric    | de0d1ce2    | ab94449e    | this commit |
+  |-------------------------------------|-----------|-------------|-------------|-------------|
+  | ComputeRealHistory whole/50k (3x)   | allocs/op | 1,321,552   | 1,029,763   | 895,773     |
+  |                                     | B/op      | 228,552,176 | 203,435,200 | 194,858,202 |
+  | ComputeRealHistory bounded/50k (3x) | allocs/op | 359,262     | 291,277     | 260,174     |
+  |                                     | B/op      | 59,745,450  | 53,838,024  | 51,847,040  |
+  | ComputeMergedHistory single (5x)    | allocs/op | 117,515     | 87,825      | 78,013      |
+  | ComputeMergedHistory composed (5x)  | allocs/op | 174,211     | 144,520     | 134,715     |
+
+- allocate a one-unit commit's unit records together ([2367e63](https://github.com/yohimik/dispat/commit/2367e63bf14691ee25473a9e05259bbdef72f85a)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): resolveCommit made three slices of
+  len(units) per commit, scope-sets, bump axes and channel axes, and
+  resolved the channel axis of every non-cancel unit although at depth 0
+  with no scope footer that record is inert and every reader skips it.
+
+  A one-unit commit, nearly every commit, now takes its three records from
+  one allocation; others make the three slices as before. The channel axis
+  is resolved only when its depth is set or a Propagate-Scope or
+  Propagate-Channel-Scope footer is written, the cases where resolution
+  can produce a live record or a diagnostic; otherwise the zero record,
+  inert by depth 0, stands in. The readers in propagate.go and history.go
+  test inert() before anything else, so the plan is unchanged.
+  TestOneUnitCommitAllocatesItsRecordsOnce pins the one allocation (the
+  old code made three).
+
+  Same machine; allocations and bytes are the stable figures, timings and
+  the sampled peak heap indicative:
+
+  | benchmark (-benchtime)              | metric    | de0d1ce2    | 22d2a15d    | this commit |
+  |-------------------------------------|-----------|-------------|-------------|-------------|
+  | ComputeRealHistory whole/50k (3x)   | allocs/op | 1,321,552   | 1,129,757   | 1,029,763   |
+  |                                     | B/op      | 228,552,176 | 203,834,029 | 203,435,200 |
+  | ComputeRealHistory bounded/50k (3x) | allocs/op | 359,262     | 314,442     | 291,277     |
+  |                                     | B/op      | 59,745,450  | 53,931,080  | 53,838,024  |
+  | ComputeMergedHistory single (5x)    | allocs/op | 117,515     | 97,588      | 87,825      |
+  | ComputeMergedHistory composed (5x)  | allocs/op | 174,211     | 154,288     | 144,520     |
+
+- build a kind set once per configured kind list ([d70f8ab](https://github.com/yohimik/dispat/commit/d70f8aba238036666ca4737ead3e7a3f7e9a1593)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): unitPropagation and
+  unitChannelPropagation each called kindSet(d.Kinds) for every unit,
+  building a fresh map, although Directives.Kinds aliases the parser's one
+  configured list, so every unit of a parser got an identical map and kept
+  it in rec.propagations and rec.channelPropagations for the plan.
+
+  sharedKindSet builds the set once per list, keyed by where the list
+  lives and its length, and hands every unit the same read-only map. Every
+  reader only looks kinds up or, in kindsCacheKey, lists them sorted, so
+  walks, cache keys and the plan are unchanged; a nil list stays every
+  kind and a present empty one stays none. TestSharedKindSetIsBuiltOncePerList
+  pins a second unit's lookup at zero allocations. The memo is a new field
+  of the computation in plan.go.
+
+  Same machine; allocations, bytes and heap are the stable figures,
+  timings indicative:
+
+  | benchmark (-benchtime)          | metric       | de0d1ce2    | this commit |
+  |---------------------------------|--------------|-------------|-------------|
+  | ComputeRealHistory whole/50k (3x)   | allocs/op    | 1,321,552   | 1,129,757   |
+  |                                 | B/op         | 228,552,176 | 203,834,029 |
+  |                                 | peakHeap_MiB | 134.0       | 124.6       |
+  | ComputeRealHistory bounded/50k (3x) | allocs/op    | 359,262     | 314,442     |
+  |                                 | B/op         | 59,745,450  | 53,931,080  |
+  |                                 | peakHeap_MiB | 33.11       | 27.48       |
+  | ComputeMergedHistory single (5x)    | allocs/op    | 117,515     | 97,588      |
+  |                                 | B/op         | 20,857,641  | 18,162,926  |
+  | ComputeMergedHistory composed (5x)  | allocs/op    | 174,211     | 154,288     |
+  |                                 | B/op         | 45,923,768  | 43,275,216  |
+
+  The earlier commits of this series change the walks only, which these
+  histories make few of: 91704a44's MergedHistory figures (116,108 and
+  172,805 allocs/op) put this commit's share at about 18,500 allocations
+  per plan there.
+
+- order a release's contributions by counting providers ([1265348](https://github.com/yohimik/dispat/commit/1265348cc099c93b2cabb927925c902923be7edf)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): every release's Sources was
+  sort.SliceStable'd by provider, O(Z log Z) comparisons and O(Z log^2 Z)
+  swaps, and dedupeProviders then built a map and sorted the distinct
+  providers again for DueTo.
+
+  Contributions already in provider order, the common case of one
+  provider, are kept as they are and only their distinct providers listed.
+  Otherwise the contributions are counted per provider, the k distinct
+  providers sorted once, and each contribution placed after those of the
+  providers before it, in the order it was made: O(Z + k log k), and the
+  sorted provider list is DueTo. That is the order a stable sort by
+  provider gives, ties included; TestContributionsOrderAsAStableSortByProvider
+  checks it against sort.SliceStable on 500 random lists and pins the
+  one-provider case at one allocation. The propagation unit tests move to
+  propagate_test.go beside it.
+
+  Same machine, -benchtime=5x; allocations and bytes are the stable
+  figures, timings indicative:
+
+  | benchmark                    | metric    | de0d1ce2   | 15a3aa04   | this commit |
+  |------------------------------|-----------|------------|------------|-------------|
+  | ComputeDependencyGraph/256   | allocs/op | 7,145      | 7,114      | 6,858       |
+  | ComputeDependencyGraph/4096  | B/op      | 23,448,048 | 21,974,227 | 21,875,992  |
+  |                              | allocs/op | 109,499    | 109,412    | 105,317     |
+  | ComputeMergedHistory/single  | allocs/op | 117,515    | -          | 116,108     |
+  | ComputeMergedHistory/composed| allocs/op | 174,211    | -          | 172,805     |
+
+  The MergedHistory column at de0d1ce2 includes the earlier walk commits'
+  share of the difference; it was not taken at 15a3aa04.
+
+- answer a one-source unit's reaching set without a map ([e799e67](https://github.com/yohimik/dispat/commit/e799e67193e15e967a86afe3833eb5e4d3b14416)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): for a unit over one package
+  reachingSources built a map with one entry per walked target, every
+  entry the same one-element list, which the target loop then looked up
+  once per target.
+
+  The answer is now a reachingSet: the one sorted source list for every
+  target when the unit has a single source, the per-target map otherwise.
+  Every target receives the same list it did, so admissions, Sources
+  records and W208 are unchanged; the multi-source path is the same walk
+  per source. TestOneSourceReachesEveryTargetWithoutAnIndex pins the
+  one-source answer at one allocation, the source's name.
+
+  Same machine, -benchtime=5x; allocations and bytes are the stable
+  figures, timings indicative:
+
+  | benchmark                   | metric    | de0d1ce2      | b18704ca   | this commit |
+  |-----------------------------|-----------|---------------|------------|-------------|
+  | ComputeDependencyGraph/4096 | B/op      | 23,448,048    | 22,367,833 | 21,974,227  |
+  |                             | allocs/op | 109,499       | 109,430    | 109,412     |
+  | ComputeChainTopology/4096   | B/op      | 1,698,456,033 | 40,338,465 | 38,699,353  |
+  |                             | allocs/op | 4,609,883     | 254,966    | 246,774     |
+
+- queue a literal walk's targets in its own output ([be76820](https://github.com/yohimik/dispat/commit/be76820de07a580ed695c5e0d16e4264f42f86da)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): walkLiteral kept an origin map and a
+  second queue slice beside its output, five hashed map operations and
+  two appends per discovered target, although every queued entry already
+  carries its origin and the queue after the sources is exactly the
+  output in output order.
+
+  The walk now expands the sources and then reads its own output by index
+  as the queue, crediting each target with the source of the entry it was
+  reached from. The same targets are discovered in the same order with the
+  same source and level, and the trace line names the same origin.
+  TestLiteralWalkAllocatesItsOutputAndSeenSet pins a 63-target chain walk
+  at 20 allocations (measured 16; the old code made 89).
+
+  Same machine, -benchtime=5x; allocations and bytes are the stable
+  figures, timings indicative:
+
+  | benchmark                  | metric    | de0d1ce2      | 0deb7525   | this commit |
+  |----------------------------|-----------|---------------|------------|-------------|
+  | ComputeChainTopology/4096  | B/op      | 1,698,456,033 | 40,730,585 | 40,338,465  |
+  |                            | allocs/op | 4,609,883     | 263,156    | 254,966     |
+  | ComputeShallowChain/4096   | B/op      | 1,696,541,068 | 38,127,096 | 37,735,004  |
+  |                            | allocs/op | 4,589,440     | 242,665    | 234,476     |
+  | ComputeDependencyGraph/4096| B/op      | 23,448,048    | 23,448,024 | 22,367,833  |
+  |                            | allocs/op | 109,499       | 109,499    | 109,430     |
+
+  The walk cache commit before this one removed the quadratic walks, so
+  what remains here is the constant on the walks still made.
+
+- walk a bounded single-source ask to its own depth ([d5faf32](https://github.com/yohimik/dispat/commit/d5faf328f255e6f13c52087bab27d60160efbbfc)) (by yohimik, Claude Opus 5.5)
+  Finding (contested on size alone): a depth-bounded request from one
+  source computed and cached that source's unbounded reach and returned
+  its prefix, so P units written '^' on a chain cost Theta(P^2) targets
+  where the literal reading reaches P - 1 (appendix B.7a's cost
+  workload). compose took the same route for each of its sources.
+
+  A bounded ask now reads the prefix of the source's unbounded walk only
+  when that walk is already kept; otherwise it walks to its own depth and
+  keeps the result under the source, depth and kinds, charged to the same
+  budget. A breadth-first walk cut off at depth d lists levels 0..d in the
+  order the unbounded walk does, so every answer is the literal walk;
+  TestCachedWalkIsTheLiteralWalk checks every route against walkLiteral
+  and TestBoundedWalkWalksItsOwnDepth pins one walked target for a '^'
+  ask on a chain. The spill flag, which only routed bounded asks after
+  the budget was exceeded, is gone.
+
+  Same machine, -benchtime=5x; allocations, bytes and walkTargets are the
+  stable figures, timings indicative (the machine is shared):
+
+  | benchmark                    | metric         | de0d1ce2      | this commit |
+  |------------------------------|----------------|---------------|-------------|
+  | ComputeShallowChain/1024     | walkTargets/op | 523,776       | 1,023       |
+  |                              | B/op           | 203,698,360   | 9,412,268   |
+  |                              | allocs/op      | 621,077       | 60,890      |
+  |                              | peakHeap_MiB   | 52.06         | 6.32        |
+  |                              | ns/op          | 73,985,983    | 5,902,892   |
+  | ComputeShallowChain/4096     | walkTargets/op | 4,196,055     | 4,095       |
+  |                              | B/op           | 1,696,541,068 | 38,127,096  |
+  |                              | allocs/op      | 4,589,440     | 242,665     |
+  |                              | peakHeap_MiB   | 361.3         | 26.62       |
+  |                              | ns/op          | 569,861,675   | 15,864,750  |
+  | ComputeChainTopology/1024    | B/op           | 204,299,246   | 10,008,918  |
+  |                              | allocs/op      | 626,202       | 66,010      |
+  |                              | peakHeap_MiB   | 54.10         | 6.96        |
+  | ComputeChainTopology/4096    | B/op           | 1,698,456,033 | 40,730,585  |
+  |                              | allocs/op      | 4,609,883     | 263,156     |
+  |                              | peakHeap_MiB   | 344.9         | 25.44       |
+  |                              | ns/op          | 569,956,708   | 17,302,542  |
+
+  de0d1ce2 is the base revision 3d5129a1 with the benchmarks and the
+  walkTargets counter added. BenchmarkComputeDependencyGraph is unchanged
+  (109,499 allocs/op at 4096 before and after).
+
+- read control windows off one listing of the control history ([615f988](https://github.com/yohimik/dispat/commit/615f9882d6786c92ec7d12ba63e16c2340cefb8d)) (by yohimik, Claude Opus 5.5)
+  Finding (refuted on size, the fix small and safe): each control window
+  re-walks the control graph and copies the remaining history as
+  gitx.Commit values.
+
+  The control inventory is listed as commits once, when its parent graph
+  is indexed, and a control window is that listing with the boundary's
+  ancestor closure left out, the same closure walk as before, which load
+  reads in place as it reads a union walk's windows. No window copies the
+  history any more; the whole-history control window, which every plan
+  with control intent loads, was such a copy and is now the listing
+  itself. Windows, their order and their keys are unchanged; the window
+  tests read the same commits through a test helper that applies the
+  exclusion.
+
+  BenchmarkControlWindows (20,000 control commits, 64 windows; the loop
+  now takes each window's size off its exclusion set where it took the
+  copy's length), -benchtime=20x, same machine (timings indicative):
+
+  | metric    | c7b14d32   | this commit |
+  |-----------|------------|-------------|
+  | B/op      | 12,357,469 | 6,726,218   |
+  | allocs/op | 80,265     | 80,266      |
+  | ns/op     | 8,729,992  | 5,810,906   |
+
+  BenchmarkComputeFleetSnapshot repositories=16 is unchanged by this
+  commit (13,361,364 B/op, 114,296 allocs/op): its control history is 256
+  commits.
+
+  The walk per boundary stays: CCME 13.11 accepts a walk per boundary,
+  and the boundaries are few.
+
+- read composed union windows in place and intern keys unbuilt ([169cf10](https://github.com/yohimik/dispat/commit/169cf1083bb44818607e7b40559e9c868c364df8)) (by yohimik, Claude Opus 5.5)
+  Finding (refuted on size alone, the fix small and safe): composed
+  pending windows are materialised as per-boundary commit copies and
+  qualified-key strings.
+
+  A window its repository's union walk read is now indexed straight off
+  the walk, skipping what its boundary excludes, instead of being copied
+  into a listing of its own first. A commit's qualified key is spelled
+  into a buffer the window index reuses and looked up there; only a key
+  no window has interned yet is built as a string. Most commits of a
+  window are in another window of the same repository, so a window costs
+  its key list and membership set and nothing per commit it shares. The
+  keys, their order and every window are unchanged.
+  TestOverlappingWindowsShareTheirKeys pins a second window over 400
+  indexed commits at 13 allocations (the old code made 413).
+
+  Same machine, shared with other agents: allocations, bytes and heap are
+  the stable figures, timings indicative.
+
+  BenchmarkComputeRealHistory, shape=composed, -benchtime=3x:
+
+  | commits | metric       | c7b14d32    | previous commit | this commit |
+  |---------|--------------|-------------|-----------------|-------------|
+  | 10000   | allocs/op    | 205,276     | 166,390         | 97,757      |
+  | 10000   | B/op         | 36,234,026  | 30,608,658      | 18,519,394  |
+  | 10000   | peakHeap_MiB | 13.56       | 12.10           | 12.15       |
+  | 50000   | allocs/op    | 1,083,257   | 885,977         | 463,567     |
+  | 50000   | B/op         | 193,292,736 | 166,824,170     | 94,098,901  |
+  | 50000   | peakHeap_MiB | 78.61       | 70.49           | 45.73       |
+  | 50000   | retained_MiB | 12.43       | 12.34           | 12.34       |
+
+  BenchmarkComputeMergedHistory composed=true and FleetSnapshot,
+  -benchtime=20x:
+
+  | case                        | metric    | c7b14d32    | this commit |
+  |-----------------------------|-----------|-------------|-------------|
+  | MergedHistory composed=true | allocs/op | 520,468     | 174,212     |
+  | MergedHistory composed=true | B/op      | 105,900,652 | 45,937,552  |
+  | FleetSnapshot repos=16      | allocs/op | 118,867     | 114,296     |
+
+  The membership maps themselves stay: replacing them with rank sets
+  changes the composed windows' type for every reader of windowRefs.
+
+- answer the cancellation predicates from per-package masks ([a06a356](https://github.com/yohimik/dispat/commit/a06a3560666cc329b148e6c3074240ae227f21fb)) (by yohimik, Claude Opus 5.5)
+  Finding: cancelledFor scans every cancel per query and asks containment
+  first: an ancestry question on every query, then a scope lookup and a
+  closure call per cancel until the first match.
+
+  When every barrier's closure is its ancestor set in the marker index,
+  collectCancels now indexes the cancels once: per package a mask of the
+  cancels naming it, and per commit a row of the cancels whose barrier it
+  is behind, transposed from the barriers' sets 64 by 64. A query is then
+  two lookups and a word of bits per 64 cancels, the lowest set bit
+  naming the cancel the loop would have flagged, and containment in the
+  baseline is asked only of a commit some cancel reaches. Any barrier the
+  index does not answer for keeps the loop for every query. The cancel
+  set and its scopes are settled before collectCancels and unchanged
+  after it (applyCorrections), so the index never goes stale; the flags,
+  and with them W170, are those of the loop.
+  TestCancelIndexNamesTheFirstCancelTheLoopNames compares the index with
+  the loop for every commit and package over random DAGs with up to 150
+  cancels.
+
+  BenchmarkComputeCancelledHistory, -benchtime=20x, same machine, two
+  runs each at the previous commit and at this one taken back to back at
+  a load average near 7 (the c7b14d32 column was taken earlier under
+  another load, and lacks the earlier commits' savings):
+
+  | metric    | c7b14d32   | previous commit     | this commit         |
+  |-----------|------------|---------------------|---------------------|
+  | ns/op     | 22,362,671 | 8,804,165 8,424,004 | 8,440,727 8,069,450 |
+  | B/op      | 45,762,708 | 20,919,525          | 20,961,295          |
+  | allocs/op | 118,361    | 117,420             | 117,425             |
+
+  The predicates were about 3% of a plan here; the index costs a word per
+  commit per 64 cancels, 42 KB over this union.
+
+- copy only what LocalGitx's commits do not already own ([6778841](https://github.com/yohimik/dispat/commit/6778841baf1dcb3d593f663985f1a02c4e4e11bb)) (by yohimik, Claude Opus 5.5)
+  Findings: cloneHistoryCommit re-copies every commit field gitx already
+  detached, and the control inventory served from the control index is
+  cloned a second time into the window index.
+
+  The canonical copy of a composed window's commit now copies what the
+  Git implementation does not already own. LocalGitx's control history
+  parser copies every field it keeps, so those commits are kept as
+  parsed. Its log copies each commit out of git's output as one record,
+  so a commit's text fields, the ones a plan keeps for its lifetime, are
+  copied each into a string of its own, and its parents and paths are
+  kept as listed: copying nothing at all measured 0.8 MiB more retained
+  at 50,000 commits, because a kept message or author then kept its
+  whole record. Any other implementation's commits are copied whole as
+  before, and the repository and root names are copied once per window
+  instead of once per commit. The values are byte-identical and nothing
+  writes into a commit's parents or paths. TestLocalCommitsAreKeptAsListed
+  pins the allocations of indexing a real repository's window at 7 per
+  commit (measured 6.2; the old code made 10.2).
+
+  Same machine, shared with other agents: allocations, bytes and heap are
+  the stable figures, timings indicative.
+
+  BenchmarkComputeRealHistory, shape=composed, -benchtime=3x:
+
+  | commits | metric       | c7b14d32    | previous commit | this commit |
+  |---------|--------------|-------------|-----------------|-------------|
+  | 10000   | allocs/op    | 205,276     | 174,734         | 166,390     |
+  | 10000   | B/op         | 36,234,026  | 31,033,600      | 30,608,658  |
+  | 10000   | peakHeap_MiB | 13.56       | 13.70           | 12.10       |
+  | 10000   | retained_MiB | 2.535       | 2.536           | 2.521       |
+  | 50000   | allocs/op    | 1,083,257   | 932,450         | 885,977     |
+  | 50000   | B/op         | 193,292,736 | 169,130,160     | 166,824,170 |
+  | 50000   | peakHeap_MiB | 78.61       | 73.89           | 70.49       |
+  | 50000   | retained_MiB | 12.43       | 12.43           | 12.34       |
+
+  With fakes, which are copied whole, only the per-window names change
+  (-benchtime=20x):
+
+  | case                          | metric    | c7b14d32 | this commit |
+  |-------------------------------|-----------|----------|-------------|
+  | FleetSnapshot repos=4         | allocs/op | 32,912   | 31,386      |
+  | FleetSnapshot repos=16        | allocs/op | 118,867  | 114,293     |
+  | MergedHistory composed=true   | allocs/op | 520,468  | 510,223     |
+
+- mark every provider's released commits in one marker pass ([b47475d](https://github.com/yohimik/dispat/commit/b47475d52fa8a8d873f3b1c0c11b6fce1b4be161)) (by yohimik, Claude Opus 5.5)
+  Finding: lazily registered markers run one marker pass each. Measured,
+  every single-marker pass of the real-history and merged-history
+  benchmarks comes from releaseCommits, which marked one provider's
+  in-union release commits per pass: 28 single-marker passes per plan at
+  50,000 commits, 55 in the merged history, each a walk of the union and
+  a C-word mask.
+
+  The first delivery question now lists the released commits of every
+  package that provides for another and marks them in one call, which
+  mark() splits into batches of 512. A package asked about that provides
+  for nobody is still listed, and marked, on its own. Which bit a marker
+  takes decides nothing (ancestry.go), and the sets are the same, so
+  every answer is unchanged; the markers retained for providers no
+  question reaches are one C-bit set each, and only a budget past two
+  thousand markers over a million commits would send a question to git,
+  whose answer for a repository with trusted parents is the same.
+  TestReleaseCommitsMarkEveryProviderInOnePass fails on the old code: the
+  next provider's release was not indexed by the first question.
+
+  Same machine, shared with other agents (load average 17 to 50):
+  allocations and bytes are the stable figures, timings indicative.
+
+  BenchmarkComputeMergedHistory, -benchtime=20x:
+
+  | case           | metric       | c7b14d32    | previous commit | this commit |
+  |----------------|--------------|-------------|-----------------|-------------|
+  | composed=false | B/op         | 45,697,463  | 23,058,063      | 20,854,313  |
+  | composed=false | allocs/op    | 118,455     | 117,527         | 117,512     |
+  | composed=false | peakHeap_MiB | 37.85       | 16.41           | 12.66       |
+  | composed=true  | B/op         | 105,900,652 | 105,859,979     | 103,675,752 |
+
+  BenchmarkComputeRealHistory, -benchtime=3x:
+
+  | shape/commits  | metric | c7b14d32    | this commit |
+  |----------------|--------|-------------|-------------|
+  | whole/10000    | B/op   | 49,066,925  | 46,771,565  |
+  | whole/50000    | B/op   | 239,831,776 | 228,543,549 |
+  | bounded/50000  | B/op   | 88,028,960  | 59,744,573  |
+  | composed/50000 | B/op   | 193,292,736 | 169,130,160 |
+
+  The bounded and composed columns include the earlier commits' savings
+  (62,396,866 and 171,747,666 B/op before this one).
+
+- answer a composed union's own tags behind it from the index ([fb7ba39](https://github.com/yohimik/dispat/commit/fb7ba3936776ad882614036732b1cac2e0a02d75)) (by yohimik, Claude Opus 5.5)
+  Finding: the composed marker index never records boundaries behind the
+  union, so the owed-window decision's question about a provider release
+  in the union against a consumer baseline outside it went to git, whose
+  first answer loads the whole commit DAG.
+
+  indexRepositoryAncestry now records, as the single-history index does,
+  every package's own stable and published release tag that the union
+  does not hold as behind it. A tag is reachable from HEAD and a window
+  is closed under descendants, so no commit of the union is an ancestor
+  of such a tag, which is git's answer. Boundaries in other repositories
+  are pins and tuples and stay unknown, and markedAncestor reads the
+  record only for a question within one repository, so a question across
+  repositories keeps its own path (the control repository's
+  observation). TestComposedOwnTagsBehindTheUnionAskNoGit fails on the old
+  code with one git question and asks none now.
+
+  BenchmarkComputeRealHistory, shape=composed, -benchtime=3x, same machine
+  (shared with other agents at a load average near 50: git calls, output
+  bytes and allocations are the stable figures, timings are not):
+
+  | commits | metric            | c7b14d32    | this commit |
+  |---------|-------------------|-------------|-------------|
+  | 10000   | gitcalls/op       | 11          | 10          |
+  | 10000   | gitOutputBytes/op | 1,399,284   | 567,271     |
+  | 10000   | B/op              | 36,234,026  | 31,290,205  |
+  | 10000   | allocs/op         | 205,276     | 174,680     |
+  | 50000   | gitcalls/op       | 11          | 10          |
+  | 50000   | gitOutputBytes/op | 7,076,766   | 2,916,537   |
+  | 50000   | B/op              | 193,292,736 | 171,747,666 |
+  | 50000   | allocs/op         | 1,083,257   | 932,462     |
+  | 50000   | peakHeap_MiB      | 78.61       | 67.68       |
+
+  The composed shape's git output is now within 41 bytes of the bounded
+  single-history shape's (2,916,496 bytes at 50,000 commits).
+
+- transpose the marker pass 64 by 64 bits at a time ([528a1e5](https://github.com/yohimik/dispat/commit/528a1e509fd3c29ed5352e135270d7db9a441190)) (by yohimik, Claude Opus 5.5)
+  Finding: the marker-pass transpose enumerates every set bit, one scalar
+  step per (commit, marker) ancestor pair, which on a chain with nested
+  markers is about C*m/2 steps against the pass's own C*ceil(m/64) words.
+
+  The rows are now transposed into the markers' columns a 64-by-64 block
+  at a time, six rounds of shifts and masks per block, a block with no bit
+  set skipped, and each column's size taken by popcount. The sets are the
+  same bits with the same sizes: TestTransposeBlockSwapsRowsAndColumns
+  checks the block transpose bit by bit, and
+  TestAncestryIndexAgreesWithAWalk checks every set against a walk,
+  including a batch past one word.
+
+  BenchmarkMarkerPass (new, 50,000-commit chain, markers spread along it;
+  it runs unchanged at c7b14d32), -benchtime=20x -count=3, same machine.
+  The machine was shared with other agents at a load average near 50, so
+  the timings are indicative; the allocations are unchanged by design.
+
+  | markers | metric    | c7b14d32 (3 runs)          | this commit (3 runs)      |
+  |---------|-----------|----------------------------|---------------------------|
+  | 72      | ns/op     | 5,299,817 8,157,590 8,217,831 | 1,213,308 5,579,508 6,002,644 |
+  | 72      | allocs/op | 164                        | 164                       |
+  | 512     | ns/op     | 59,203,044 75,949,367 63,612,167 | 4,082,946 17,729,885 25,005,771 |
+  | 512     | allocs/op | 1,052                      | 1,052                     |
+
+- rank union walks a word at a time and read owed windows as one ranked list ([0ba6c95](https://github.com/yohimik/dispat/commit/0ba6c950b55fe438240b7367d5971023e1ca656e)) (by yohimik, Claude Opus 5.5)
+  Findings: legacy union windows are built by one closure call per rank
+  per boundary (windows.go), and owed windows copy the whole union walk
+  once per boundary before buildUnion discards all but the first-seen
+  commits (owed.go readUnionLists, reported twice).
+
+  A window is now the union minus its boundary's marker bits, built a
+  word at a time (commitSetWithout), O(C/64) per window where a test per
+  rank was O(C). The union is ranked from the windows by one helper,
+  rankByWindows, which both paths share: the longest window first, then
+  what each shorter one adds in walk order, ties in boundary order,
+  visiting a word of commits at a time, and the walk itself when the
+  longest window is all of it. The owed windows no longer materialise a
+  []gitx.Commit per boundary: buildUnion gets the one ranked list and the
+  statistics and the debug log take each window's length from its
+  exclusion set. Ranks, the union's order and every window are unchanged:
+  TestRankByWindowsIsBuildUnionsRanking compares the ranking with
+  buildUnion over per-boundary listings, TestCommitSetWithoutIsTheComplement
+  compares the windows with a rank-by-rank build, and
+  TestMergedHistoryPlansAsReadOneByOne compares whole plans read through
+  the union walk with plans read a window per boundary over a merged
+  history whose windows are not nested and whose owed windows reach past
+  the union.
+
+  Same machine, shared with other agents: allocations are the stable
+  figure, timings indicative only (the unchanged shapes moved as much).
+
+  BenchmarkComputeMergedHistory, -benchtime=20x:
+
+  | case           | metric       | c7b14d32    | this commit |
+  |----------------|--------------|-------------|-------------|
+  | composed=false | B/op         | 45,697,463  | 23,058,071  |
+  | composed=false | allocs/op    | 118,455     | 117,523     |
+  | composed=false | peakHeap_MiB | 37.85       | 14.86       |
+  | composed=false | ns/op        | 15,869,383  | 18,678,267  |
+  | composed=true  | B/op         | 105,900,652 | 105,821,280 |
+  | composed=true  | allocs/op    | 520,468     | 519,582     |
+
+  BenchmarkComputeRealHistory, -benchtime=3x:
+
+  | shape/commits  | metric       | c7b14d32   | this commit |
+  |----------------|--------------|------------|-------------|
+  | bounded/10000  | B/op         | 16,607,741 | 12,642,018  |
+  | bounded/10000  | peakHeap_MiB | 7.149      | 6.415       |
+  | bounded/50000  | B/op         | 88,028,960 | 62,396,866  |
+  | bounded/50000  | allocs/op    | 359,707    | 359,282     |
+  | bounded/50000  | peakHeap_MiB | 44.98      | 33.21       |
+  | whole/50000    | B/op         | 239,831,776| 239,780,736 |
+  | composed/50000 | B/op         | 193,292,736| 193,313,602 |
+
+  The composed shapes read their windows per repository (history.go) and
+  are untouched here.
+
+- list the owed pairs in one pass instead of a walk per provider ([fefd02d](https://github.com/yohimik/dispat/commit/fefd02d94d57cf6bc25c167f2968c17b5d2ec89a)) (by yohimik, Claude Opus 5.5)
+  Finding: listOwedPairs runs one unbounded walk per released provider,
+  Theta(sum |reach(P)|), quadratic on a dependency chain, for an answer of
+  a few distinct baselines per provider.
+
+  The pairs are now read off one pass over the plan order, consumers
+  first. For each package the pass keeps the distinct baselines its walk
+  meets, in the order the walk first meets them: the walk's queue is
+  first-in first-out, so a baseline is first met one level below the
+  least level a direct consumer's own walk meets it at, in the first such
+  consumer, where that consumer's walk first meets it. The cost is
+  O(P + E*B) for B distinct baselines, one list family per provider
+  repository in a fleet. The pairs, their consumers and their order are
+  unchanged; TestOwedPairsAreTheLiteralWalksPairs compares them with the
+  literal walks on 3,000 random DAGs in one history and in fleets, and
+  TestOwedPairsAreLinearOnAChain pins the listing at 2 allocations per
+  package (measured 1,046 for 1,024 packages; the walks allocated
+  563,294). The debug log's "pairs" now counts the distinct pairs.
+
+  BenchmarkComputeChainTopology, -benchtime=3x, same machine (shared with
+  other agents: allocations are the stable figure, timings indicative):
+
+  | packages | metric       | c7b14d32      | this commit   |
+  |----------|--------------|---------------|---------------|
+  | 1024     | ns/op        | 92,965,611    | 72,041,347    |
+  | 1024     | B/op         | 204,560,237   | 204,306,408   |
+  | 1024     | allocs/op    | 632,365       | 626,212       |
+  | 1024     | peakHeap_MiB | 49.02         | 51.72         |
+  | 4096     | ns/op        | 1,377,247,625 | 555,683,569   |
+  | 4096     | B/op         | 3,438,576,216 | 1,698,849,362 |
+  | 4096     | allocs/op    | 8,937,420     | 4,609,913     |
+  | 4096     | peakHeap_MiB | 387.3         | 361.9         |
+
+  At 1,024 packages the units' own single-source walks, which the owed
+  listing used to pre-fill the walk cache with, now compute the same
+  unbounded walks, so the total barely moves there; that cost belongs to
+  the propagation walks (propagate.go).
+
+### Dependencies
+
+- [config](https://github.com/yohimik/dispat/releases/tag/pkg/config/v1.1.0-rc.0): 1.0.2-rc.1 -> 1.1.0-rc.0
+- [manifest](https://github.com/yohimik/dispat/releases/tag/pkg/manifest/v1.2.2-rc.2): 1.2.2-rc.1 -> 1.2.2-rc.2
+- [scanner](https://github.com/yohimik/dispat/releases/tag/pkg/scanner/v1.2.2-rc.2): 1.2.2-rc.1 -> 1.2.2-rc.2
+- [writer](https://github.com/yohimik/dispat/releases/tag/pkg/writer/v1.2.2-rc.2): 1.2.2-rc.1 -> 1.2.2-rc.2
+
+### Authors
+
+- yohimik
+- Claude Fable 5.1
+
+
 ## services/dispat/v1.11.0-rc.7 (2026-10-24)
 
 ### Features
