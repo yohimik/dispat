@@ -25,6 +25,8 @@ type linkedGit struct {
 	subjects map[string]string
 	reads    int
 	subject  int
+	// revisions counts the revisions the subject reads asked about.
+	revisions int
 }
 
 func newLinkedGit(head string, history ...commit) *linkedGit {
@@ -57,6 +59,7 @@ func (g *linkedGit) GitlinksAtPaths(_ context.Context, revision string, paths []
 
 func (g *linkedGit) CommitSubjects(_ context.Context, revisions []string) (map[string]string, error) {
 	g.subject++
+	g.revisions += len(revisions)
 	out := make(map[string]string, len(revisions))
 	for _, revision := range revisions {
 		if subject, ok := g.subjects[revision]; ok {

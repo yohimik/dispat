@@ -72,6 +72,9 @@ type HistoryStats struct {
 	// AuthorScans counts the commits the window attribution examined: what
 	// collecting every release's authors costs, in commits read.
 	AuthorScans atomic.Int64
+	// WalkTargets counts the targets the propagation walks computed rather
+	// than read from the walk cache: what answering reach() costs.
+	WalkTargets atomic.Int64
 }
 
 type historyCommit struct {

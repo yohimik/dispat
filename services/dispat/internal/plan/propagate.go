@@ -288,6 +288,9 @@ func (cp *computation) walkLiteral(sources map[string]bool, depth int, kinds map
 			queue = append(queue, next)
 		}
 	}
+	if cp.stats != nil {
+		cp.stats.WalkTargets.Add(int64(len(out)))
+	}
 	return out
 }
 
