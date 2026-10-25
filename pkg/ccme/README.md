@@ -154,11 +154,14 @@ which source applied.
 The package is built to scan large commit histories using one parser across many messages in parallel. Parsing runs in
 O (n) time relative to message length with no backtracking, and the hot path avoids copying input memory.
 
-- **Normalisation is a no-op when it can be.** Messages formatted with LF line endings, no trailing whitespace, and no
-  trailing blank lines return unchanged without allocations. The fast path uses `strings.IndexByte` across the input,
-  falling back to a single-pass buffer rewrite only when needed.
+- **Normalisation is a no-op when it can be.** A leading BOM and the trailing whitespace and blank lines
+  `git log --format=%B` leaves are sliced off, so a message whose lines are otherwise clean returns as a substring of the
+  input without allocations. The fast path uses `strings.IndexByte` across the input, falling back to a single-pass
+  buffer rewrite only when a CR or a line ending in a space or tab remains.
 - **A single-unit message needs one allocation for its object graph.** The parser allocates `Result`, `Unit`, and
-  `[]*Unit` inside a single backing struct, and multi-unit messages share a single array for all units.
+  `[]*Unit` inside a single backing struct, and multi-unit messages share a single array for all units. The line and
+  unit slices a message is split into live on the stack for messages of up to 32 lines and 4 units, and a scope-set's
+  terms take one allocation however many there are.
 - **Text is sliced, not rebuilt.** Fields including `Unit.Raw`, `Unit.Body`, `Header.Raw`, `Header.Description`, and
   individual scope terms are slices of the normalised message. Escaped separators (`\---`) are the only exception,
   requiring reassembly because their content is non-contiguous.
@@ -174,7 +177,10 @@ The zero-copy design introduces two trade-offs to keep in mind:
 - A `Result` references the original message string, keeping it in memory. Copy descriptions into new strings if you
   intend to hold them after parsing large messages.
 - The `Directives.Kinds` slice aliases your parser configuration because §8.4 allows no per-unit overrides. Treat this
-  slice as read-only; other unit fields are either values or fresh allocations.
+  slice as read-only.
+- Each diagnostic is stored once: a unit's `Diagnostics` and the `Result`'s share storage, and a `ParseError` shares it
+  too when every diagnostic is an error. Treat them as read-only; other unit fields are either values or fresh
+  allocations.
 
 Run `bench_test.go` to test subjects, bodies, directive sets, multi-unit inputs, CRLF handling, errors, and parallel
 execution across sixteen goroutines:
@@ -195,8 +201,8 @@ only when somebody changes what the parser does, which is exactly when a build s
 The allocations come from `Unit` struct allocations rather than from copies of the input, so a message ten times
 longer incurs no extra allocation overhead.
 
-`ParseSimple` incurs one allocation during normalisation because its sample input ends in a newline, matching
-`git log --format=%B`. Stripping that trailing newline allows the input to take the zero-allocation path.
+`ParseSimple`'s sample input ends in a newline, matching `git log --format=%B`; normalisation slices it off rather than
+copying the message.
 
 ### Tune `GOGC` for bulk sweeps
 
