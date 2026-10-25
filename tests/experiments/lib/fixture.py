@@ -1,8 +1,12 @@
-"""The six-package fixture the experiments share, in one flavour per tool.
+"""The fixture the experiments share, in one flavour per tool.
 
-Every flavour has the same graph: cli, ui and api depend on core; theme and
-docs depend on ui. They share
-the same baseline (all six at 1.0.0, tagged, published) and the same bare
+Every flavour has the same graph. The six-package shape is the one every
+experiment uses: cli, ui and api depend on core; theme and docs depend on ui.
+The wide shape, behind --wide, is the timing experiment's second scenario:
+core, a chain of four packages each depending on the one before it (the first
+on core), and 36 leaves depending on core alone, so a release of every
+package has a short longest chain and a large total. Both shapes share
+the same baseline (every package at 1.0.0, tagged, published) and the same bare
 origin the release is pushed to, so the tools differ only in how they are
 told about the change and what they do about it. Dependencies are declared
 as tilde ranges, so a minor of core is outside its consumers' ranges and
@@ -14,7 +18,8 @@ flavour's `dispat.yaml`, nx's `release.version.preVersionCommand`, and the
 `prepack` lifecycle script that `lerna publish` and `changeset publish` run
 for every package they publish. A build failure is therefore one fault seen
 through four tools rather than four faults sharing a name. The orphan and
-midrelease fixtures run no build under lerna, nx or changesets.
+midrelease fixtures run no build under lerna, nx or changesets. The timing
+experiment builds where propagation does, and its build records when it ran.
 
     fixture.py <root> lerna|nx|changesets|dispat
     fixture.py <root> <flavour> --feature      also commit the minor to core
@@ -22,6 +27,8 @@ midrelease fixtures run no build under lerna, nx or changesets.
     fixture.py <root> <flavour> --propagation  also commit the patch to core
     fixture.py <root> <flavour> --deferred    also commit own cli and provider fixes
     fixture.py <root> <flavour> --colleague    also clone the origin a second time
+    fixture.py <root> <flavour> --wide        the wide shape instead of the six
+    fixture.py --packages six|wide             print the shape's package names
 
 EXPERIMENT and SCENARIO are read from the environment, as the harness exports
 them.
@@ -37,9 +44,44 @@ import os
 import subprocess
 import sys
 
-PKGS = os.environ.get("EXPERIMENT_PACKAGES", "core cli ui api theme docs").split()
-DEPS = {"cli": ["core"], "ui": ["core"], "api": ["core"],
-        "theme": ["ui"], "docs": ["ui"]}
+SIX = {"core": [], "cli": ["core"], "ui": ["core"], "api": ["core"],
+       "theme": ["ui"], "docs": ["ui"]}
+
+# The wide shape's sizes. The chain is what makes the longest chain longer
+# than one provider and one consumer; the leaves are what make the total work
+# large beside it.
+WIDE_CHAIN = 4
+WIDE_LEAVES = 36
+
+
+def wide():
+    graph = {"core": []}
+    for i in range(1, WIDE_CHAIN + 1):
+        graph[f"chain{i}"] = ["core" if i == 1 else f"chain{i - 1}"]
+    for i in range(1, WIDE_LEAVES + 1):
+        graph[f"leaf{i:02d}"] = ["core"]
+    return graph
+
+
+SHAPES = {"six": lambda: SIX, "wide": wide}
+
+
+def shape_graph(name):
+    """The shape's graph, held to the package list the harness exported: the
+    observer and the proxy read that list, and a fixture that built other
+    packages would be a run neither of them is about."""
+    graph = SHAPES[name]()
+    named = os.environ.get("EXPERIMENT_PACKAGES")
+    if named is not None and named.split() != list(graph):
+        raise SystemExit(f"EXPERIMENT_PACKAGES names {named.split()}, the {name} shape is {list(graph)}")
+    return graph
+
+
+# The shape this run builds, set once from the command line before anything
+# is written.
+SHAPE = "six"
+PKGS = list(SIX)
+DEPS = SIX
 REG = os.environ.get("REGISTRY", "http://127.0.0.1:4873")
 TOKEN = os.environ.get("NPM_TOKEN", "anonymous")
 BASELINE = os.environ.get("EXPERIMENT_BASELINE", "1.0.0")
@@ -71,6 +113,24 @@ BUILD_FAULT = ('test ! -f /fault-consumer-build || '
 # build script as every other package has it.
 BUILD_FAULT_SCENARIOS = ("build", "build-distributed")
 
+# The experiments whose fixtures build where each tool documents a build.
+BUILDING = ("propagation", "timing")
+
+# The timing experiment's build: the same artefact, held for a fixed half
+# second so a build lasts as long as a short compile rather than as long as
+# node takes to start, then one JSON line with its wall-clock interval
+# appended to the file the harness names in EXPERIMENT_TIMING. The fixture
+# records the build rather than any tool's log, so all four tools are timed
+# by the same clock.
+BUILD_HOLD_MS = 500
+TIMED_BUILD = ('node -e \'const fs=require("fs");const start=Date.now()/1000;'
+               'fs.mkdirSync("dist",{recursive:true});'
+               'fs.writeFileSync("dist/index.js",fs.readFileSync("index.js"));'
+               f'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,{BUILD_HOLD_MS});'
+               'const file=process.env.EXPERIMENT_TIMING;'
+               'if(file)fs.appendFileSync(file,JSON.stringify({package:require("./package.json").name,'
+               'task:"build",start,end:Date.now()/1000})+"\\n")\'')
+
 # Where lerna and changesets document a build: `lerna publish` and
 # `changeset publish` pack every package they publish, and packing runs the
 # package's `prepack` script.
@@ -93,6 +153,8 @@ def build_script(package):
     consumer's."""
     if package == "cli" and experiment() == "propagation" and scenario() in BUILD_FAULT_SCENARIOS:
         return f"{BUILD_FAULT}; {BUILD}"
+    if experiment() == "timing":
+        return TIMED_BUILD
     return BUILD
 
 
@@ -107,7 +169,7 @@ def package_scripts(package, flavour):
             and flavour != "dispat"):
         return {}
     scripts = {"build": build_script(package)}
-    if experiment() == "propagation" and flavour in ("lerna", "changesets"):
+    if experiment() in BUILDING and flavour in ("lerna", "changesets"):
         scripts["prepack"] = PREPACK
     return scripts
 
@@ -260,7 +322,7 @@ def base(root, flavour):
                     "workspaces": ["packages/*"]})
         version = {"conventionalCommits": True,
                    "preserveMatchingDependencyRanges": False}
-        if experiment() == "propagation":
+        if experiment() in BUILDING:
             version["preVersionCommand"] = PRE_VERSION
         write_json(os.path.join(root, "nx.json"),
                    {"release": {
@@ -334,14 +396,21 @@ github:
 def feature(root, flavour):
     """The one pending change: a minor to core. Each tool is told in the
     way it reads: a conventional commit, or a changeset file for changesets,
-    which reads no commit messages."""
+    which reads no commit messages.
+
+    In the wide shape dispat's commit asks for every transitive consumer with
+    `^^`, which is what lerna and nx release on their own, so the chain is in
+    its plan; the six-package shape keeps `^`, its direct consumers. The
+    changeset names core alone either way, and changesets releases what its
+    ranges then require."""
     with open(os.path.join(root, "packages", "core", "index.js"), "a") as f:
         f.write("// streaming\n")
     if flavour == "changesets":
         with open(os.path.join(root, ".changeset", "streaming-reader.md"), "w") as f:
             f.write('---\n"core": minor\n---\n\nstreaming reader\n')
     sh(["git", "add", "-A"], root)
-    commit(root, "feat(core)^: streaming reader" if flavour == "dispat"
+    reach = "^^" if SHAPE == "wide" else "^"
+    commit(root, f"feat(core){reach}: streaming reader" if flavour == "dispat"
            else "feat(core): streaming reader")
     sh(["git", "push", "-q", "origin", "main"], root)
 
@@ -439,7 +508,13 @@ def colleague(root):
 
 
 if __name__ == "__main__":
+    if sys.argv[1] == "--packages":
+        print(" ".join(SHAPES[sys.argv[2]]()))
+        sys.exit(0)
     root, flavour = sys.argv[1], sys.argv[2]
+    SHAPE = "wide" if "--wide" in sys.argv[3:] else "six"
+    DEPS = shape_graph(SHAPE)
+    PKGS = list(DEPS)
     base(root, flavour)
     if "--feature" in sys.argv[3:]:
         feature(root, flavour)

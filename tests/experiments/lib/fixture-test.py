@@ -8,6 +8,7 @@ it."""
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -303,6 +304,87 @@ class CompetitorScenarioTest(FixtureTest):
                 self.assertIn("build", self.manifest(kept, "cli")["scripts"])
         self.assertEqual(["build"], list(self.manifest(
             self.build("dispat", scenario="deferred", flags=("--deferred",)), "cli")["scripts"]))
+
+
+class TimingTest(FixtureTest):
+    """The timing experiment's two shapes, and a build that records itself
+    where each tool runs it."""
+
+    def build_timing(self, flavour, wide=False):
+        flags = ("--feature", "--wide") if wide else ("--feature",)
+        return self.build(flavour, experiment="timing", scenario="wide" if wide else "six", flags=flags)
+
+    def packages(self, root):
+        return sorted(path.name for path in (root / "packages").iterdir())
+
+    def test_the_wide_shape(self):
+        root = self.build_timing("dispat", wide=True)
+        names = self.packages(root)
+        self.assertGreaterEqual(len(names), 40)
+        self.assertEqual(names, sorted(subprocess.run(
+            ["python3", str(FIXTURE), "--packages", "wide"], check=True, capture_output=True, text=True).stdout.split()))
+        self.assertEqual(self.manifest(root, "chain1")["dependencies"], {"core": "~1.0.0"})
+        self.assertEqual(self.manifest(root, "chain4")["dependencies"], {"chain3": "~1.0.0"})
+        leaves = [name for name in names if name.startswith("leaf")]
+        self.assertGreaterEqual(len(leaves), 30)
+        for leaf in leaves:
+            self.assertEqual(self.manifest(root, leaf)["dependencies"], {"core": "~1.0.0"})
+        self.assertEqual(self.manifest(root, "core")["dependencies"], {})
+
+    def test_the_wide_shape_is_deterministic_and_baselined(self):
+        first, second = self.build_timing("lerna", wide=True), self.build_timing("lerna", wide=True)
+        self.assertEqual(self.git(first, "rev-parse", "HEAD"), self.git(second, "rev-parse", "HEAD"))
+        tags = self.git(first, "tag", "-l").split()
+        self.assertEqual(sorted(tags), sorted(f"{name}@1.0.0" for name in self.packages(first)))
+        for tag in tags:
+            self.assertEqual("tag", self.git(first, "cat-file", "-t", tag).strip(), f"{tag} is not annotated")
+        self.assertEqual(self.git(first, "rev-parse", "HEAD").strip(),
+                         self.git(first, "rev-parse", "origin/main").strip(), "the feature was not pushed")
+
+    def test_the_wide_feature_reaches_every_dependent_under_dispat(self):
+        subjects = {flavour: self.git(self.build_timing(flavour, wide=True), "log", "-1", "--format=%s").strip()
+                    for flavour in ("dispat", "nx")}
+        self.assertEqual(subjects, {"dispat": "feat(core)^^: streaming reader", "nx": "feat(core): streaming reader"})
+        six = self.git(self.build_timing("dispat"), "log", "-1", "--format=%s").strip()
+        self.assertEqual(six, "feat(core)^: streaming reader")
+
+    def test_the_package_list_must_match_the_shape(self):
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.build("dispat", experiment="timing", scenario="wide", flags=("--feature", "--wide"),
+                       env={"EXPERIMENT_PACKAGES": "core cli ui api theme docs"})
+
+    def test_the_build_records_itself(self):
+        for flavour in ("dispat", "lerna", "nx", "changesets"):
+            with self.subTest(flavour=flavour):
+                build = self.manifest(self.build_timing(flavour), "core")["scripts"]["build"]
+                self.assertIn("EXPERIMENT_TIMING", build)
+                self.assertIn('task:"build"', build)
+                self.assertIn('dist/index.js', build)
+
+    @unittest.skipUnless(shutil.which("node"), "the build is a node script")
+    def test_the_build_writes_one_line_with_its_interval(self):
+        root = self.build_timing("dispat")
+        script = self.manifest(root, "cli")["scripts"]["build"]
+        timing = root / "timing.jsonl"
+        subprocess.run(["sh", "-c", script], cwd=root / "packages" / "cli", check=True,
+                       env={**os.environ, "EXPERIMENT_TIMING": str(timing)})
+        [line] = timing.read_text().splitlines()
+        record = json.loads(line)
+        self.assertEqual((record["package"], record["task"]), ("cli", "build"))
+        self.assertGreaterEqual(record["end"] - record["start"], 0.5)
+        self.assertTrue((root / "packages" / "cli" / "dist" / "index.js").exists())
+
+    def test_each_tool_builds_where_it_documents_a_build(self):
+        for flavour in ("lerna", "changesets"):
+            with self.subTest(flavour=flavour):
+                self.assertEqual(self.manifest(self.build_timing(flavour), "ui")["scripts"]["prepack"],
+                                 "npm run --silent build")
+        version = json.loads((self.build_timing("nx") / "nx.json").read_text())["release"]["version"]
+        self.assertEqual(version["preVersionCommand"], "npx nx run-many -t build")
+        config = (self.build_timing("dispat") / "dispat.yaml").read_text()
+        self.assertIn("build: npm run --silent build", config)
+        self.assertNotIn("isBuildWaitingPublish", config)
+        self.assertNotIn("revertOnFail", config)
 
 
 class BaselineTest(FixtureTest):
