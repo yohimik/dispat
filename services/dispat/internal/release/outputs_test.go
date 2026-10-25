@@ -2,8 +2,10 @@ package release
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -292,4 +294,35 @@ func TestCommandEnv(t *testing.T) {
 	assert.True(t, got["DISPAT_WORKSPACE_CORE_VERSION=1.1.0"], "the workspace listing travels")
 	assert.True(t, got["DISPAT_UPDATED_CORE_NEW_VERSION=1.1.0"], "provider updates are all considered live")
 	assert.True(t, got["DISPAT_OUTPUT_STEP=done"], "accumulated outputs travel too")
+}
+
+// TestMergeOutputsIndexMatchesTheScan: the index a large merge builds answers
+// exactly what the scan does, including the two cases a naive index gets
+// wrong. A release can already carry a name twice, because wire exports are
+// never deduplicated, and the scan overrides the first of them; and an export
+// list can name one output twice, and the scan overrides the copy it appended
+// for the first.
+func TestMergeOutputsIndexMatchesTheScan(t *testing.T) {
+	current := []plan.Output{
+		{Name: "A", Value: "1", Source: "p:build"},
+		{Name: "B", Value: "2", Source: "p:build"},
+		{Name: "A", Value: "3", Source: "p:build"},
+	}
+	var exports []plan.Output
+	for i := range outputScanLimit + 4 {
+		exports = append(exports, plan.Output{Name: fmt.Sprintf("N%d", i%5), Value: fmt.Sprint(i), Source: "c:build"})
+	}
+	exports = append(exports, plan.Output{Name: "A", Value: "new", Source: "c:build"},
+		plan.Output{Name: "B", Value: "new", Source: "c:build"})
+
+	scanned := &plan.Release{Outputs: slices.Clone(current)}
+	mergeOutputsByScan(scanned, exports)
+	indexed := &plan.Release{Outputs: slices.Clone(current)}
+	mergeOutputsByIndex(indexed, exports)
+
+	assert.Equal(t, scanned.Outputs, indexed.Outputs)
+	assert.Equal(t, plan.Output{Name: "A", Value: "new", Source: "c:build"}, indexed.Outputs[0],
+		"the first copy of a repeated name takes the new value")
+	assert.Equal(t, "3", indexed.Outputs[2].Value, "and the second keeps its own")
+	assert.Len(t, indexed.Outputs, 3+5, "a name exported twice in one list is appended once")
 }

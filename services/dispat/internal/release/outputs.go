@@ -89,6 +89,23 @@ func normalizeOutputName(name string) (string, bool) {
 // reads its providers' outputs only after their tasks completed — so no lock
 // is needed.
 func MergeOutputs(rel *plan.Release, outs []plan.Output) {
+	if len(outs) <= outputScanLimit {
+		mergeOutputsByScan(rel, outs)
+		return
+	}
+	mergeOutputsByIndex(rel, outs)
+}
+
+// outputScanLimit is the most exports a merge looks up by scanning. A scan
+// costs a comparison per output per export and the index a map insert per
+// output, so the index wins once a merge carries more exports than a map
+// insert costs comparisons, which is what `dispat run` does when a consumer
+// takes its provider's whole accumulated list. A stage's own few exports
+// keep the scan, which then costs no more than building the index would.
+const outputScanLimit = 12
+
+// mergeOutputsByScan merges by looking each name up in the release's list.
+func mergeOutputsByScan(rel *plan.Release, outs []plan.Output) {
 	for _, o := range outs {
 		found := false
 		for i := range rel.Outputs {
@@ -101,6 +118,28 @@ func MergeOutputs(rel *plan.Release, outs []plan.Output) {
 		if !found {
 			rel.Outputs = append(rel.Outputs, o)
 		}
+	}
+}
+
+// mergeOutputsByIndex merges exactly as the scan does, through an index built
+// for this one call. The index is not kept on the release: a shallow copy of
+// a release shares its outputs, and some writers append to them directly.
+// It holds the first position of a name because the scan overrides the first
+// match, and wire exports can carry a name twice.
+func mergeOutputsByIndex(rel *plan.Release, outs []plan.Output) {
+	positions := make(map[string]int, len(rel.Outputs)+len(outs))
+	for i, o := range rel.Outputs {
+		if _, isIndexed := positions[o.Name]; !isIndexed {
+			positions[o.Name] = i
+		}
+	}
+	for _, o := range outs {
+		if i, isIndexed := positions[o.Name]; isIndexed {
+			rel.Outputs[i].Value, rel.Outputs[i].Source = o.Value, o.Source
+			continue
+		}
+		positions[o.Name] = len(rel.Outputs)
+		rel.Outputs = append(rel.Outputs, o)
 	}
 }
 
