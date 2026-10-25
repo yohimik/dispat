@@ -402,7 +402,7 @@ func (cp *computation) loadOwedWindows(ordinary []windowBoundary) error {
 			break
 		}
 	}
-	cp.log.Debug().Int("pairs", len(pairs)).Int("boundaries", len(owed)).Msg("plan: owed windows examined")
+	cp.log.Debug().Int("providerBaselines", len(pairs)).Int("boundaries", len(owed)).Msg("plan: owed windows examined")
 	if len(owed) == 0 {
 		return nil
 	}
@@ -587,7 +587,7 @@ func (cp *computation) loadRepositoryOwedWindows(idx *windowIndex) error {
 		decided[boundary] = true
 		queued = append(queued, owedLoad{history: history, boundary: boundary, consumer: pair.consumer})
 	}
-	cp.log.Debug().Int("pairs", len(pairs)).Int("boundaries", len(queued)).Msg("plan: owed windows examined")
+	cp.log.Debug().Int("providerBaselines", len(pairs)).Int("boundaries", len(queued)).Msg("plan: owed windows examined")
 	if len(queued) == 0 {
 		return nil
 	}

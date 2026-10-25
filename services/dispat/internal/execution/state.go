@@ -514,9 +514,10 @@ func decodeSeenRecord(content []byte) (map[string]time.Time, error) {
 // decodeCutSeenRecord reads a file that ends inside its object with nothing
 // before the end that a reader would refuse. An append overwrites the closing
 // brace with its first byte, so a process killed partway through leaves
-// exactly that. The members before the cut are kept and the unfinished one is
-// dropped, which is safe because the Record writing it never returned, so its
-// attempt was never run.
+// exactly that. The members before the cut are kept and a member whose value
+// was cut is dropped, which is safe because the Record writing it never
+// returned, so its attempt was never run; a member cut after its value is
+// complete is kept, as a claim that did return.
 func decodeCutSeenRecord(content []byte) (map[string]time.Time, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	if open, err := decoder.Token(); err != nil || open != json.Delim('{') {
@@ -780,23 +781,40 @@ func (s *SeenSet) rewrite() error {
 // formatRecord is the whole file: one JSON object of every live entry, in the
 // order their recordings wait to expire.
 func (s *SeenSet) formatRecord() ([]byte, error) {
+	live := s.liveRecordings()
 	content := []byte{'{'}
-	for _, queue := range []seenQueue{s.wallExpiry, s.monotonicExpiry} {
-		for _, recording := range queue {
-			if s.entries[recording.triple].version != recording.version {
-				continue
-			}
-			record, err := formatSeenRecord(recording.triple, recording.at)
-			if err != nil {
-				return nil, err
-			}
-			if len(content) > 1 {
-				content = append(content, ',')
-			}
-			content = append(content, record...)
+	for _, recording := range live {
+		record, err := formatSeenRecord(recording.triple, recording.at)
+		if err != nil {
+			return nil, err
 		}
+		if len(content) > 1 {
+			content = append(content, ',')
+		}
+		content = append(content, record...)
 	}
 	return append(content, '}'), nil
+}
+
+// liveRecordings is every claim the record still holds, ordered by time and
+// then by triple, the order LoadSeenSet reads them back in, so a rewrite of
+// the same claims is the same bytes whatever the heaps' shape.
+func (s *SeenSet) liveRecordings() []seenExpiry {
+	var live []seenExpiry
+	for _, queue := range []seenQueue{s.wallExpiry, s.monotonicExpiry} {
+		for _, recording := range queue {
+			if s.entries[recording.triple].version == recording.version {
+				live = append(live, recording)
+			}
+		}
+	}
+	slices.SortFunc(live, func(a, b seenExpiry) int {
+		if c := a.at.Compare(b.at); c != 0 {
+			return c
+		}
+		return strings.Compare(a.triple, b.triple)
+	})
+	return live
 }
 
 // formatSeenRecord is one member of the file's object, encoded exactly as

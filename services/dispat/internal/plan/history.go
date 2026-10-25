@@ -110,10 +110,12 @@ func cloneCommit(commit gitx.Commit) gitx.Commit {
 // copyCommitFor is how much of a window's commit the canonical copy copies,
 // none of it pointing into a buffer the Git implementation holds anything
 // else in. Only LocalGitx is known to hand out commits that own their strings
-// already: its control history parser copies every field it keeps on its own
-// (parseControlGitlinkHistory), so those are kept as they are, and its log
-// copies each commit out of git's output as one record (gitx commitLog), so
-// those copy their text. Any other implementation's are copied whole.
+// already: its control history parser copies each commit's header into one
+// string of that commit's own (parseControlGitlinkHistory), so a field kept
+// keeps that header and nothing of the log, and those are kept as they are;
+// its log copies each commit out of git's output as one record (gitx
+// commitLog), so those copy their text. Any other implementation's are copied
+// whole.
 func (cp *computation) copyCommitFor(history RepositoryHistory) func(gitx.Commit) gitx.Commit {
 	if _, isLocal := history.Git.(*gitx.LocalGitx); !isLocal {
 		return cloneCommit
@@ -1252,11 +1254,6 @@ func (cp *computation) indexControlParents() {
 	}
 }
 
-// controlWindow is the control window after a boundary as the bulk
-// inventory's listing and the commits of it the window leaves out, so that
-// no window copies the listing. The excluded set is the boundary's native
-// ancestor closure, so branches merged after the boundary remain in the
-// window exactly as they do in boundary..HEAD.
 // listControlCommits is the control inventory as commits, listed on the first
 // window read and shared by every window after it: a run that reads no
 // control window never pays for the listing.
@@ -1274,6 +1271,11 @@ func (cp *computation) listControlCommits() []gitx.Commit {
 	return cp.controlListing
 }
 
+// controlWindow is the control window after a boundary as the bulk
+// inventory's listing and the commits of it the window leaves out, so that
+// no window copies the listing. The excluded set is the boundary's native
+// ancestor closure, so branches merged after the boundary remain in the
+// window exactly as they do in boundary..HEAD.
 func (cp *computation) controlWindow(boundary string) (listing []gitx.Commit, excluded *commitSet) {
 	if cp.controlPosition == nil {
 		cp.indexControlParents() // a computation assembled by hand

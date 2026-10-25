@@ -1231,9 +1231,9 @@ type computation struct {
 	repositoryHeads         map[string]string
 	controlHistory          []gitx.ControlHistoryCommit
 	// controlParents is controlHistory's parent graph by position, and
-	// controlListing the history as commits, built once with the history so
-	// that every control window is a walk over them rather than a rebuilt map
-	// and a copy (controlWindow).
+	// controlListing the history as commits, listed on the first control
+	// window read and shared by every window after it (listControlCommits),
+	// so no window rebuilds the map or copies the listing.
 	controlParents   [][]int32
 	controlPosition  map[string]int32
 	controlListing   []gitx.Commit
