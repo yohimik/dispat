@@ -76,6 +76,13 @@ func TestTransportPushesOnlyExplicitMailboxRefsWithFollowTagsConfigured(t *testi
 	tag, err := f.git.RemoteTagObject(ctx, f.bare, "release-probe")
 	require.NoError(t, err)
 	require.Empty(t, tag, "a transport push cannot publish a reachable release tag")
+	outcomes, err := f.git.DeleteRemoteBranchesLease(ctx, f.bare,
+		[]BranchLease{{Branch: "dispat-single", ExpectedOld: f.first}})
+	require.NoError(t, err)
+	require.Equal(t, BranchDeleted, outcomes[0].Result)
+	tag, err = f.git.RemoteTagObject(ctx, f.bare, "release-probe")
+	require.NoError(t, err)
+	require.Empty(t, tag, "closing a coordination ref cannot auto-publish a release tag")
 	runGit(t, f.root, "push", f.bare, f.second+":refs/heads/control")
 	tag, err = f.git.RemoteTagObject(ctx, f.bare, "release-probe")
 	require.NoError(t, err)

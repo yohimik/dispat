@@ -387,7 +387,7 @@ func (c *LocalGitx) DeleteRemoteBranchesLease(ctx context.Context, remote string
 		return nil, fmt.Errorf("gitx: %d refs in one delete, at most %d: %w",
 			len(leases), MaxTransportBatch, ErrTransportLimit)
 	}
-	args := []string{"push", "--porcelain"}
+	args := []string{"push", "--porcelain", "--no-follow-tags"}
 	refspecs := make([]string, 0, len(leases))
 	refs := make([]string, 0, len(leases))
 	for _, lease := range leases {
