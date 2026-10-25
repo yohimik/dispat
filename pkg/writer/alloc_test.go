@@ -6,6 +6,8 @@ package writer
 // normal build, hence the build tag.
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -31,5 +33,23 @@ func TestAllocationBudget(t *testing.T) {
 	got := testing.AllocsPerRun(20, func() { allocBytes, _ = ReplaceBytes(data, reps) })
 	if want := 4.0; got > want {
 		t.Errorf("ReplaceBytes over twenty applied replacements: %v allocations, want at most %v", got, want)
+	}
+
+	// Opening a megabyte file for a rewrite: the open file, its stat, the
+	// splicer and one buffer of the file's size, where growing a buffer from
+	// 512 bytes takes two dozen more.
+	path := filepath.Join(t.TempDir(), "README.md")
+	if err := os.WriteFile(path, []byte(strings.Repeat("filler text\n", 1<<20/12)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = testing.AllocsPerRun(20, func() {
+		sp, err := openSplicer(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		allocBytes = sp.bytes()
+	})
+	if want := 10.0; got > want {
+		t.Errorf("openSplicer of a 1 MiB file: %v allocations, want at most %v", got, want)
 	}
 }

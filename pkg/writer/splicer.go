@@ -77,7 +77,7 @@ func openSplicer(path string) (*splicer, error) {
 	if info.Size() > maxManifestBytes {
 		return nil, tooLarge(path, info.Size())
 	}
-	data, err := io.ReadAll(io.LimitReader(f, maxManifestBytes+1))
+	data, err := readSized(io.LimitReader(f, maxManifestBytes+1), info.Size())
 	if err != nil {
 		return nil, err
 	}
@@ -85,6 +85,17 @@ func openSplicer(path string) (*splicer, error) {
 		return nil, tooLarge(path, int64(len(data)))
 	}
 	return &splicer{path: path, data: data}, nil
+}
+
+// readSized reads r to its end into one buffer sized for the size the file
+// reported, with room left to see the end without growing. io.ReadAll starts
+// at 512 bytes and grows by copying, which allocates about twice the file.
+// A file that grew since it was measured still reads whole.
+func readSized(r io.Reader, size int64) ([]byte, error) {
+	var buf bytes.Buffer
+	buf.Grow(int(size) + bytes.MinRead)
+	_, err := buf.ReadFrom(r)
+	return buf.Bytes(), err
 }
 
 // tooLarge is the refusal every read cap reports.
