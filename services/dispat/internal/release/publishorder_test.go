@@ -5,6 +5,7 @@ package release
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"math/rand/v2"
 	"slices"
@@ -263,22 +264,52 @@ func TestPublishOrderSkipsAConsumerItReachesOnlyThroughAnUnreleasingPackage(t *t
 	assert.Equal(t, -1, r.indexOf("publish app"), "nothing published behind the failure")
 }
 
+// TestPublishOrderSkipsAReachedConsumerBehindIncompleteRecords: a provider
+// that published with its required records missing is as dead to the
+// cascade as one that failed, whether the consumer names it or reaches it
+// through a package this run does not release, and it outranks the
+// consumer's own reason.
+func TestPublishOrderSkipsAReachedConsumerBehindIncompleteRecords(t *testing.T) {
+	p := mkPublishOrderPlan(models.StageWaitBuild, models.StageWaitBuild)
+	r := &fakeRunner{}
+	e := newExecutor(execSpec{Runner: r, Tagger: &fakeTagger{}, Build: 2, Publish: 2})
+	e.BlockOnRecordFailure = true
+	e.Recorders = []ReleaseRecorderx{recorderFunc(func(_ context.Context, rel *plan.Release) error {
+		if rel.Pkg.Name == "core" {
+			return errors.New("record failed")
+		}
+		return nil
+	})}
+
+	res := e.Run(context.Background(), p)
+
+	require.Equal(t, StatusPublished, res["core"].Status)
+	require.True(t, res["core"].RecordBlocked)
+	assert.Equal(t, StatusSkipped, res["app"].Status, "err: %v", res["app"].Err)
+	assert.Equal(t, "core", res["app"].BlockedBy)
+	assert.Equal(t, -1, r.indexOf("publish app"), "nothing published behind the incomplete records")
+}
+
 // TestPublishOrderListsTheReachedClosureOnlyOnceAProviderDied: the closure
-// the cascade reads is listed for a consumer only once a provider in it is
-// dead, because a live provider changes nothing the cascade answers, and
-// listing it for every consumer of every run is what costs consumers times
-// providers behind one shared unreleased package.
+// the cascade reads is neither walked nor listed until a package is dead,
+// because a live provider changes nothing the cascade answers, and walking it
+// for every admission of every run is what costs consumers times providers
+// behind one shared unreleased package. The death is the executor's own
+// record of a failed build, so a write site that forgot to note it fails here.
 func TestPublishOrderListsTheReachedClosureOnlyOnceAProviderDied(t *testing.T) {
 	p := mkPublishOrderPlan(models.StageWaitBuild, models.StageWaitBuild)
 	changed := releasingNames(p)
-	r := &run{plan: p, publishReach: newCascadeReach(newStageEdges(p, changed), []string{"app", "core"}),
-		reachedProviders: map[string][]string{},
-		results:          map[string]*Result{"app": {Name: "app"}, "core": {Name: "core", Status: StatusPublished}}}
+	_, publishReach := (&Executor{}).buildTaskGraph(p, changed)
+	r := &run{plan: p, publishReach: publishReach, reachedProviders: map[string][]string{},
+		started: map[string]time.Time{},
+		results: map[string]*Result{"app": {Name: "app"}, "core": {Name: "core"}}}
 
-	assert.Nil(t, r.resolveReachedProviders("app"), "every provider it reaches lives")
-	assert.Empty(t, r.reachedProviders, "so nothing was listed")
+	assert.Nil(t, r.resolveReachedProviders("app"), "nothing is dead")
+	assert.Empty(t, r.publishReach.nearest, "so nothing was walked")
+	assert.Empty(t, r.reachedProviders, "and nothing was listed")
 
-	r.results["core"].Status = StatusFailed
+	core := &taskCtx{run: r, t: task{"core", taskBuild}}
+	core.settleFailure(r.results["core"], errors.New("build failed"), false)
 	assert.Equal(t, []string{"core"}, r.resolveReachedProviders("app"))
 	assert.Equal(t, map[string][]string{"app": {"core"}}, r.reachedProviders, "listed once, then read")
 }
@@ -301,8 +332,9 @@ func TestPublishOrderCascadeAnswersAsTheFullClosure(t *testing.T) {
 		}
 		edges := newStageEdges(p, changed)
 		upFront := newPublishReach(edges)
-		r := &run{plan: p, publishReach: newCascadeReach(edges, names),
-			reachedProviders: map[string][]string{}, results: results}
+		r := &run{plan: p, publishReach: newPublishReach(edges),
+			reachedProviders: map[string][]string{}, results: results,
+			isAnyDead: slices.ContainsFunc(names, func(name string) bool { return isDeadOutcome(results[name]) })}
 		for _, name := range names {
 			wantSkip, wantBlocker := shouldSkip(name, p, results, upFront.Indirect(name))
 			skip, blocker := shouldSkip(name, p, results, r.resolveReachedProviders(name))
@@ -310,4 +342,9 @@ func TestPublishOrderCascadeAnswersAsTheFullClosure(t *testing.T) {
 			require.Equal(t, wantBlocker, blocker, "seed %d, %s", seed, name)
 		}
 	}
+}
+
+// isDeadOutcome reports whether a result is one the skip cascade acts on.
+func isDeadOutcome(res *Result) bool {
+	return res.RecordBlocked || res.Status == StatusFailed || res.Status == StatusSkipped
 }

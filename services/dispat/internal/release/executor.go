@@ -430,7 +430,10 @@ func newSpaceLogins(p *plan.Plan) map[spaceLoginKey]*spaceLogin {
 }
 
 // buildTaskGraph states the releasing packages' task graph and returns it with
-// the index of what each consumer reaches over the publication order.
+// the index of what each consumer reaches over the publication order, which
+// the skip cascade reads: §19.3 computes its closure over the full workspace
+// graph, so the providers that can block a package are the same set that
+// orders it.
 func (e *Executor) buildTaskGraph(p *plan.Plan, changed map[string]bool) (*graph.Scheduler[task], *stageReach) {
 	// Sorted iteration: the scheduler hands nodes out in insertion order, so
 	// building the edges in name order is what makes launch order — not just
@@ -470,7 +473,7 @@ func (e *Executor) buildTaskGraph(p *plan.Plan, changed map[string]bool) (*graph
 	if e.PublishGroup != nil {
 		e.addPublishGroupEdges(sched, p, changed)
 	}
-	return sched, newCascadeReach(edges, names)
+	return sched, newPublishReach(edges)
 }
 
 // addPublishGroupEdges chains the publishes of each publish group in plan
@@ -490,19 +493,6 @@ func (e *Executor) addPublishGroupEdges(sched *graph.Scheduler[task], p *plan.Pl
 		}
 		last[group] = name
 	}
-}
-
-// newCascadeReach indexes what each consumer reaches over the publication
-// order, for the skip cascade: §19.3 computes its closure over the full
-// workspace graph, so the providers that can block a package are the same set
-// that orders it. Every walk is taken before any task runs, so the tasks only
-// read the index.
-func newCascadeReach(edges stageEdges, names []string) *stageReach {
-	reach := newPublishReach(edges)
-	for _, name := range names {
-		reach.resolveCarriers(name)
-	}
-	return reach
 }
 
 // drain runs the task graph under the stage budgets until every task ran or
@@ -622,16 +612,20 @@ type run struct {
 	// that panicked ends every task in flight and lets Drain start nothing
 	// new, while the run's own context stays live for its closing phase.
 	stop context.CancelCauseFunc
-	// publishReach indexes, per changed consumer, the changed providers it
-	// reaches only through packages this run does not release (§19.2, §19.3).
-	// Built with the task graph and only read afterwards.
+	// publishReach (guarded by mu) indexes, per changed consumer, the changed
+	// providers it reaches only through packages this run does not release
+	// (§19.2, §19.3), walked on the first question asked of it.
 	publishReach *stageReach
 	// reachedProviders (guarded by mu) lists them per consumer once the skip
 	// cascade needs them; see resolveReachedProviders.
 	reachedProviders map[string][]string
-	results          map[string]*Result
-	mu               sync.Mutex
-	started          map[string]time.Time
+	// isAnyDead (guarded by mu) records that a releasing package failed, was
+	// skipped or had its records blocked. Until one has, the cascade has
+	// nothing to act on, and an admission asks no closure at all.
+	isAnyDead bool
+	results   map[string]*Result
+	mu        sync.Mutex
+	started   map[string]time.Time
 	// The native auto-versioning inputs, built once in Run when any releasing
 	// package's space enables it: the manifest scanner and the workspace's
 	// manifest-name and folder indexes (see workspaceNames).
@@ -882,17 +876,18 @@ func (r *run) settleAdmission(ctx context.Context, tc *taskCtx, res *Result) adm
 
 // resolveReachedProviders answers, with mu held, the providers shouldSkip
 // reads beyond the package's own: the changed providers it reaches through
-// packages this run does not release, once one of them is dead, and none
-// while every one of them lives, because shouldSkip passes over a live
-// provider. Listed for every consumer up front, they cost consumers times
-// providers behind one shared unreleased package on every run, when only a
-// run with a failure reads them.
+// packages this run does not release, once any package is dead, and none
+// before, because shouldSkip passes over a live provider. Listed for every
+// consumer up front, they cost consumers times providers behind one shared
+// unreleased package on every run, when only a run with a failure reads them.
+// Once one is read it is kept, so every later admission of the package costs
+// what an admission over a list made up front did.
 func (r *run) resolveReachedProviders(pkg string) []string {
+	if !r.isAnyDead {
+		return nil
+	}
 	if reached, isListed := r.reachedProviders[pkg]; isListed {
 		return reached
-	}
-	if !r.publishReach.isAnyReachedDead(pkg, r.results) {
-		return nil
 	}
 	reached := r.publishReach.Indirect(pkg)
 	r.reachedProviders[pkg] = reached
@@ -910,6 +905,7 @@ func (r *run) resolveReachedProviders(pkg string) []string {
 func (r *run) markBlocked(tc *taskCtx, res *Result, blocker, reason string) admission {
 	res.Status = StatusSkipped
 	res.Blocked, res.BlockedBy = true, blocker
+	r.isAnyDead = true
 	res.RecordBlocked = r.results[blocker].RecordBlocked
 	_, isStarted := r.started[tc.t.pkg] // earlier stages already modified the folder?
 	tc.updates = liveProviderUpdates(tc.t.pkg, r.plan, r.results)
@@ -1236,6 +1232,7 @@ func (tc *taskCtx) settleFailure(res *Result, err error, isInterrupted bool) {
 		res.Status = StatusFailed
 		res.FailedStage = tc.stage.Name
 		res.Err = fmt.Errorf("%s: %w", tc.stage.Name, err)
+		tc.isAnyDead = true
 	}
 	res.Duration = time.Since(tc.started[tc.t.pkg])
 }
@@ -1354,6 +1351,9 @@ func (tc *taskCtx) markPublished(res *Result) {
 	defer tc.mu.Unlock()
 	res.Status = StatusPublished
 	res.RecordBlocked = tc.BlockOnRecordFailure && len(res.Critical) > 0
+	if res.RecordBlocked {
+		tc.isAnyDead = true
+	}
 	res.Duration = time.Since(tc.started[tc.t.pkg])
 }
 

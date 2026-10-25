@@ -106,6 +106,7 @@ func (tc *taskCtx) settlePanic(res *Result, err error) panicOutcome {
 		}
 		res.Critical = append(res.Critical, fmt.Errorf("%s: recording stopped by an internal error: %w", code, err))
 		res.RecordBlocked = true
+		tc.isAnyDead = true
 		if res.Status == StatusPublished {
 			return panicSettled
 		}
@@ -119,5 +120,6 @@ func (tc *taskCtx) settlePanic(res *Result, err error) panicOutcome {
 	res.Status = StatusFailed
 	res.FailedStage = tc.stage.Name
 	res.Err = err
+	tc.isAnyDead = true
 	return panicFailed
 }
