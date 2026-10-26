@@ -9,7 +9,7 @@ and return claim and result requests to the orchestrator over the authenticated 
 values are refused before task effects. The orchestrator computes the plan and graph,
 creates an inert branch for every executable logical task before work starts, and publishes a signed readiness feed.
 Workers select eligible ready tasks themselves. The orchestrator validates and persists each exact proposal;
-an accepted signed claim alone permits the command to start. A missing input, different digest, or missing required
+an accepted signed claim and confirmed remote pending ref permit the command to start. A missing input, different digest, or missing required
 attestation refuses execution before any claim.
 
 To try it, [configure the nodes](#configuring-the-nodes), [start a worker](#starting-a-worker), then choose
@@ -71,8 +71,8 @@ the run-level hooks. It executes eligible build and validation tasks.
 
 **A worker executes work.** It verifies the signed compiled task graph and exact inputs, chooses compatible ready
 work within its physical capacity, and requests an exact claim. It runs a task only after
-the orchestrator confirms that the authoritative claim landed and it has created its pending branch from the
-accepted task tip. It pushes a signed output or failed branch descended from that pending tip, then returns the
+the orchestrator confirms that the authoritative claim landed and the worker confirms its pending branch's
+exact remote OID from that accepted task tip. It pushes a signed output or failed branch descended from that pending tip, then returns the
 result for the orchestrator to verify and settle.
 A stage and its surrounding hooks form a **frame**, which always runs together on one node.
 

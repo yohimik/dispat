@@ -154,7 +154,7 @@ to be interpreted as described in RFC 2119.
 | **Repository revision**  | A pair `(repository identity, full commit object ID)`. A bare commit ID is never a fleet-wide identity (§27.2).          |
 | **Fleet link**           | A submodule joining two peers of a linked peer tree, named by the linked peer's identity and declared by its roster (§27.11). |
 | **Execution node** | A machine or runner executing the release engine; independent of repository identity (§28.1). |
-| **Orchestrator** | The first node of a run, owning its locks, Git pushes, publication and durable admission (§28). |
+| **Orchestrator** | The first node of a run, owning its locks, canonical and native Git refs, publication and durable admission (§28). |
 | **Choreographer** | Another node running or proposing tasks without first-node authority (§28.1). |
 | **Execution link** | An authenticated choreographer endpoint, distinct from a repository or fleet link (§28.2). |
 | **Task receipt** | Identity-bound execution evidence; never an ordinary release or rollback-completion record (§28.6). |
@@ -8196,10 +8196,12 @@ The node where a run starts is its **orchestrator**. Every other execution node 
 compatible tasks within its own capacity. A machine may be the orchestrator of one run and a choreographer of
 another. There is no persistent configured role or second worker product.
 
-The orchestrator alone owns release locks, release publication, native recording and every engine-managed Git
-push of the run, including preflight, task claims, results, retries, cancellation and cleanup. A choreographer
-may fetch exact coordination objects read-only and return authenticated proposals and results over the non-Git
-channel of §28.4. It has no authorized Git-push effect. A configured shell command is trusted executable policy,
+The orchestrator alone owns release locks, release publication, native recording and every canonical task,
+ledger, membership, result-admission, retry, cancellation and cleanup Git push of the run. A choreographer
+fetches exact coordination objects read-only and returns authenticated proposals and results over the non-Git
+channel of §28.4. After an accepted Claim, it may create only its own unique signed pending ref and its
+corresponding output or failed ref in the canonical coordination repository. It has no authority to advance
+canonical task, ledger, release or native refs. A configured shell command is trusted executable policy,
 not a sandbox: this rule does not claim to stop arbitrary shell code with independently available credentials
 from contacting Git or a registry. Such a command still cannot gain engine-managed native-release authority.
 The orchestrator verifies the current release-lock objects and generation before new write-capable effects.
@@ -8353,12 +8355,14 @@ node, admitted membership epoch, capacity-authority ID and lease-intent ID and w
 the first node over §28.4. It does not recompute `Plan(input)` or the graph compiler. The first node validates
 current graph readiness, inputs, eligibility, weighted run budget, membership and task/ledger CAS state, then
 persists or refuses that exact proposal. It cannot substitute another task or node. An exact signed accepted
-claim receipt alone permits the command to start. Before effects, the worker creates a unique signed pending
-ref whose commit descends from that accepted canonical Claim. Its signed result is the next child commit on a
+claim receipt is necessary but does not alone permit the command to start. Before any command or hook, the
+worker creates and confirms the exact remote OID of a unique signed pending ref whose commit descends from
+that accepted canonical Claim. Its signed result is the next child commit on a
 separate unique output or failed ref; both refs bind the pickup ID, task, admitted authority, exact lease and
 compiled input identity. A lost push reply is reconciled against the same immutable ref and object, never by
 minting a new pickup ID. The first node may itself pick up compatible ordinary work
-through the same claim rules. All engine-managed Git writes remain there. An ambiguous reply leaves the
+through the same claim rules. The first node alone advances canonical and native Git refs; the worker's
+create-only pickup refs are the narrow exception. An ambiguous reply leaves the
 identical proposal and its local lease pending until an exact receipt or signed fence settles it. A definitive
 signed refusal that binds the proposal and its expected task and ledger OIDs proves it unaccepted;
 the peer durably
@@ -8389,14 +8393,17 @@ cross-run capacity. A proposal is not authority to start. The orchestrator valid
 against fixed graph readiness, accepted predecessor outcomes and exact input IDs, attempt/branch state,
 platform and global weighted budgets. It MUST NOT silently replace the proposal with a different task or
 node of its own choice. It atomically persists accepted claim and capacity change in the one authoritative
-CAS domain, then returns an exact signed receipt. Only that receipt authorizes execution. A disconnected
+CAS domain, then returns an exact signed receipt. Execution also requires the worker to create and confirm
+the exact remote OID of its signed pending ref from that Claim before any command or hook starts. A disconnected
 first node stalls new claims and admission; it is a persistence dependency, not central task selection.
 The orchestrator cannot certify a peer's actual free local slots from a timestamp: the peer enforces and
 attests its own cross-run limit. A failed attempt is not a logical terminal failure until its retry/exhaustion
 decision is durable. First-node local work uses the same broker rules.
 
-In `hybrid`, the orchestrator compiles known tasks whose engine-managed effects do not push Git or perform a
-native release mutation; eligible nodes pick up ready compiled command paths under the same exact claim rules.
+In `hybrid`, the orchestrator compiles known tasks whose engine-managed effects do not advance canonical or
+native Git refs or perform a native release mutation; eligible nodes pick up ready compiled command paths
+under the same exact claim rules. The worker's create-only pickup refs do not make such a command a native
+Git-push effect.
 Delegable preparation, test, build and user stages are in that
 segment. Version, sign, syncLock and shared-file preparation may be compiled there only when their
 engine-managed effects are nonpush; they retain required first-node placement and file/owner lanes.
@@ -8442,7 +8449,8 @@ precreated node-neutral task roots, previous accepted outcomes or first-node Git
 and hybrid, an admitted node reads the already compiled descriptors and signed event frontier before it picks
 an eligible ready command; in interpretation it independently recomputes the plan and graph first. Hybrid
 still interprets first-only effect decisions after exact prerequisites settle. A late node cannot change a
-compiled descriptor, publish, record or perform an engine-managed Git push. Dynamic resources are not
+compiled descriptor, publish, record or advance a canonical or native Git ref; its create-only pickup refs
+remain subject to §28.4. Dynamic resources are not
 runtime-added tasks. The membership view is a separate ordered state on the same signed first-node ledger;
 it does not change the graph digest or semantic plan.
 
@@ -8505,11 +8513,13 @@ cancellation; it is not evidence that an accepted command, child process or exte
 ### 28.4 Return channel, Git state and recovery
 
 The first node starts the authenticated return listener before signed preflight. Peers send signed probes,
-claim proposals, result bundles and receipt queries there; they only fetch Git read-only. The first node
+claim proposals, result bundles and receipt queries there; they fetch canonical Git state read-only and
+create only their own unique signed pending and output or failed refs after an accepted Claim. The first node
 verifies a probe and persists its Claim/Result on its owned probe ref. A proposal sent before the task broker
 is initialized receives a bounded refusal, not an implicit claim. A result body is streamed to bounded
-temporary storage, checked against its digest and exact task/input binding, then admitted and pushed only by
-the first node. A lost response is settled by proposal ID and exact persisted object; repeating a request is
+temporary storage, checked against its digest and exact task/input binding, then admitted to canonical task
+and ledger state only by the first node. A lost response is settled by proposal ID and exact persisted object;
+repeating a request is
 not permission to repeat an external effect.
 
 All three modes use one canonical shared authoritative coordination Git repository per run. Every initially
@@ -8542,9 +8552,10 @@ failed ref from that exact pending commit; each ref is create-only and unique to
 pickup. A signed Result or Ack may be admitted as pickup evidence on the ledger without advancing the
 canonical task tip while a successor pickup is active. The first node selects at most one verified successful
 Result as the canonical terminal winner before installing its outputs. A failed Result can reopen the task
-for a bounded successor only when the signed run policy declares that every delegated command and hook is
-safe to repeat without conflicting external effects. This operator declaration defaults to false and is
-bound into the bootstrap and complete graph; it never authorizes a native first-node effect retry. Without
+for a bounded successor only when the signed `execution.retryAfterUncertainAttempt` policy declares that every
+delegated command and hook is safe to repeat without conflicting external effects. This operator declaration
+defaults to false and is bound into the bootstrap and complete graph; it never authorizes a native first-node
+effect retry. Without
 it, an accepted failed Result or Ack reaches a terminal failure, and uncertain contact loss retains its
 charge and exclusion without starting a successor. Failure alone does not discharge logical successors.
 The durable Claim contains
@@ -8884,8 +8895,9 @@ is not applicable, while that mode's invocation must fail before effects. Every 
     and the sweep continues. The same absence under a build output root fails the build's prerequisite (§28.5).
 34. A read-only invocation is given execution links: it reports the plan digest and MAY probe the links, and no
     node receives an executable claim.
-35. A peer sends a probe, claim, result or cancellation response: only the orchestrator pushes its Git state.
-    A peer with read-only mailbox access can complete the task through the authenticated return channel.
+35. A peer sends a probe, claim, result or cancellation response: only the orchestrator advances canonical
+    task, ledger and native Git state. A peer fetches those refs read-only and, after its accepted Claim,
+    creates only its own signed pending and output or failed refs. It confirms its pending ref before effects.
 36. In interpretation, two peers derive one plan and graph digest from the same pinned input. A changed config
     byte, missing annotated tag object, same-target tag-object replacement or carrier mismatch refuses claims.
 37. In interpretation, two peers propose one logical task concurrently: exactly one claim is accepted at the
@@ -8894,28 +8906,37 @@ is not applicable, while that mode's invocation must fail before effects. Every 
     replays without gaps after peer or first-node restart and processes each graph edge once per terminal event.
 39. In hybrid, each executable task has one policy owner. Nodes pick up eligible compiled nonpush paths, while
     first-only effects are interpreted after exact prerequisites. Accepted outcomes cross those gates in both
-    directions; a provider publication can gate a later compiled consumer build. No peer pushes.
-40. In every advertised mode, the orchestrator executes eligible ordinary tasks and alone performs every
-    engine-managed Git push. An unreachable first-node return route refuses remote participation before frames.
+    directions; a provider publication can gate a later compiled consumer build. Peers push only their own
+    create-only pickup refs, never canonical or native refs.
+40. In every advertised mode, the orchestrator executes eligible ordinary tasks and alone advances canonical
+    task, ledger and native Git refs. Workers create only their own signed pickup refs. An unreachable first-node
+    return route refuses remote participation before frames.
 41. In each advertised mode, start a run with only the first node admitted, then join an authorized second
     node after independent tasks become ready. Compilation and hybrid let it pick up a ready command from
     existing compiled descriptors; interpretation has it independently recompute the same graph first. Its signed
     membership receipt precedes any offer or accepted claim. The plan, task IDs and existing claims remain
-    identical, and the second node sends no Git push. A task restricted to a choreographer can wait only until
-    the signed admission deadline; expiry does not fabricate a command result.
+    identical, and the second node creates only its own pickup refs after its accepted Claim. A task restricted
+    to a choreographer can wait only until the signed admission deadline; expiry does not fabricate a command
+    result.
 42. Submit two joins with one node identity, a stale membership epoch, a changed input or graph digest, an
     unauthenticated endpoint and incompatible capacity authorities. At most one exact identity is admitted;
     none of the mismatches creates capacity or a claim. Repeating one identical accepted join returns its
     exact receipt after reply loss. A failed bounded slot initialization admits no partial member.
 43. Drain or disconnect a node with an accepted running claim, then let another node select the same task.
-    The new claim is refused until exact stop and finality evidence fences the old attempt. Where an explicit
-    durable offer exists, it can move only after its fence; a peer's private selection needs no offer fence.
-    A missing heartbeat or `404` alone frees no slot. After first-node restart,
-    replay signed membership and task events before new claims, without double-counting the joined capacity.
+    By default, the new claim is refused until exact stop and finality evidence fences the old attempt.
+    With signed `execution.retryAfterUncertainAttempt` enabled for repeat-safe delegated work, the first node
+    first signs Cancel, waits its bounded reply deadline, then may admit one bounded successor using spare
+    capacity while the old physical lease and run-budget charge remain held. A later old Result cannot replace
+    the canonical winner; its immutable output or failed ref remains evidence. There is no deliberate
+    simultaneous fanout before the cancellation grace. Where an explicit durable offer exists, it can move
+    only after its fence; a peer's private selection needs no offer fence. A missing heartbeat or `404` alone
+    frees no slot. After first-node restart, replay signed membership and task events before new claims,
+    without double-counting the joined capacity.
 44. In compilation, initialize every executable logical task ref before the first command. Two eligible peers read the
     same compiled graph and terminal feed, select a ready task without receiving a first-node placement, and
-    race exact claims. One accepted receipt authorizes one execution; the other peer consumes the winner's
-    signed event and selects other eligible work. Neither peer reruns the semantic planner or scans all task
+    race exact claims. One accepted receipt plus confirmed signed pending ref authorizes one execution; the
+    other peer consumes the winner's signed event and selects other eligible work. Neither peer reruns the
+    semantic planner or scans all task
     refs after each completion. A predecessor Result fills the waiting descriptor's typed input slots without
     changing its task identity or creating a new task branch.
 45. Race an authorized late join and a ready claim against signed run-stopping. The shared ledger CAS orders
@@ -8996,7 +9017,8 @@ and it returns its exports as a build returns its manifest. Its signed compiled 
 preinitialized logical-task branch (§28.4). Interpretation peers independently derive the same pinned sweep
 task graph and propose ready work; compilation peers pick up ready tasks from compiled descriptors without
 semantic replanning. Hybrid has no publication segment in a sweep and follows the same compiled nonpush pickup.
-In every mode the first node alone persists Git state.
+In every mode the first node alone advances canonical task, ledger and native Git state; workers create only
+their own signed pickup refs under §28.4.
 
 A sweep MAY declare, per script and in the entry configuration only, repository-relative roots its tasks write. They
 are captured on the node after the task succeeds under the manifest and validation of §28.5 and installed on the

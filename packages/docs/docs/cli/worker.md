@@ -2,7 +2,7 @@
 
 Run `dispat worker` on a peer node that can execute build, test and other eligible prepublication stages.
 It reads the signed compiled graph, discovers ready tasks, and executes only after its authenticated claim is
-accepted and its pending Git branch is created. It writes its own output or failed branch. The orchestrator also
+accepted and its pending Git branch's exact remote OID is confirmed. It writes its own output or failed branch. The orchestrator also
 executes ordinary work and alone advances canonical task, ledger and release refs, publishes artifacts and writes
 release records.
 
