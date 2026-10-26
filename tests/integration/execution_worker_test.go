@@ -74,7 +74,7 @@ func TestExecutionWorkerRefusesWorkWhenItsReplayRecordCannotBeSaved(t *testing.T
 	if runtime.GOOS == "windows" {
 		t.Skip("the distributed durable node-slot backend is not available on Windows")
 	}
-	rig := newExecutionSweepRig(t, `printf 'worker-v3 %s\n' "$DISPAT_PACKAGE" >> "$DISPAT_IT_EXECUTION_LOG"`, func(cfg *models.File) {
+	rig := newExecutionSweepRig(t, executionRecordingScript, func(cfg *models.File) {
 		cfg.Execution.Workers = cfg.Execution.Workers[:1]
 		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 3}
 		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker,
@@ -626,11 +626,15 @@ func TestExecutionWorkerStopsOnSignal(t *testing.T) {
 // TestExecutionWorkerSurvivesALostStateDir: the object cache is a cache. A
 // node whose folder disappears under it makes another one and carries on.
 func TestExecutionWorkerSurvivesALostStateDir(t *testing.T) {
-	rig := newExecutionRig(t)
+	rig := newExecutionRig(t, pinPackages(map[string]*models.RunOnly{
+		"core": placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+	}))
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
 	first := rig.release()
 	require.Equal(t, 0, first.Code, "stdout:\n%s\nstderr:\n%s", first.Stdout, first.Stderr)
 	require.Contains(t, rig.repo.TagList(), "core@0.1.0")
+	firstLedger := executionProtocolRefs(t, rig.mailbox, "dispat-ledger-")
+	require.Len(t, firstLedger, 1, "the first release has one signed event feed")
 
 	require.NoError(t, os.RemoveAll(filepath.Join(worker.stateDir, executionNode, "cache")))
 	rig.repo.WriteFile("packages/core/after-loss.txt", "new input\n")
@@ -638,12 +642,41 @@ func TestExecutionWorkerSurvivesALostStateDir(t *testing.T) {
 	second := rig.release()
 	require.Equal(t, 0, second.Code, "stdout:\n%s\nstderr:\n%s", second.Stdout, second.Stderr)
 	require.Contains(t, rig.repo.TagList(), "core@0.2.0")
+	secondLedgers := executionProtocolRefs(t, rig.mailbox, "dispat-ledger-")
+	require.Len(t, secondLedgers, 2, "the second release has its own signed event feed")
+	secondLedger := ""
+	for _, ref := range secondLedgers {
+		if ref != firstLedger[0] {
+			secondLedger = ref
+		}
+	}
+	require.NotEmpty(t, secondLedger, "the second signed run is retained")
+	ledgerCommits := strings.Fields(bareGit(t, rig.mailbox, "rev-list", "--first-parent",
+		"-n", strconv.Itoa(lateJoinLedgerScanLimit), "refs/heads/"+secondLedger))
+	claimFound := false
+	for _, oid := range ledgerCommits {
+		document := bareGit(t, rig.mailbox, "show", oid+":dispat/choreography-ledger.json")
+		signature := strings.TrimSpace(bareGit(t, rig.mailbox, "show", oid+":dispat/choreography-ledger.sig"))
+		require.Equal(t, executionSign("choreography-ledger", executionSecret, []byte(document)), signature,
+			"the second run's claim is in its signed event feed")
+		var record struct {
+			Event *executionLateJoinLedgerEvent `json:"event"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(document), &record))
+		if record.Event != nil && record.Event.Kind == pickupFailoverClaimKind && record.Event.Task == "core:1:" {
+			assert.Equal(t, executionNode, record.Event.Node, "the second build was claimed by this worker")
+			claimFound = true
+			break
+		}
+	}
+	require.True(t, claimFound, "the second signed run contains a worker build claim")
 
 	worker.proc.Signal(syscall.SIGINT)
 	res := worker.proc.Wait()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, res.Stdout, "task claimed", "the same process served the second signed run")
+	assert.Equal(t, 2, strings.Count(res.Stdout, `"message":"task claimed"`),
+		"the same worker process claimed both runs across the cache deletion")
 }
 
 // Transient Git read errors on the v3 serving node cannot make it push or
@@ -660,7 +693,7 @@ func TestExecutionWorkerGitFaults(t *testing.T) {
 		mayFail       bool
 	}{
 		{"poll fails once", "*ls-remote*", 1, false},
-		{"fetch fails once", "*fetch*", 1, false},
+		{"fetch fails once", "*-C * fetch *", 1, false},
 		{"blob write fails once", "*hash-object*", 1, true},
 		{"tree write fails once", "*mktree*", 1, true},
 		{"commit write fails once", "*commit-tree*", 1, true},

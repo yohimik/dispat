@@ -74,15 +74,29 @@ func TestExecutionLostLockIsRememberedForEveryLaterTask(t *testing.T) {
 		"only the build that took the lock away ran: %v", rig.runs())
 	assert.Empty(t, executionReleaseTags(rig), "no version was recorded")
 	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock this run lost is not re-created by it")
+	served := requireExecutionUnsettledClaimAfterLockLoss(t, executionUnsettledClaimExpectation{
+		rig: rig, worker: worker, task: "alpha:1:"})
+	assert.NotContains(t, served.Stdout, `"message":"publication authorized"`)
+}
+
+type executionUnsettledClaimExpectation struct {
+	rig    *executionRig
+	worker *executionWorker
+	task   string
+}
+
+func requireExecutionUnsettledClaimAfterLockLoss(t *testing.T, expectation executionUnsettledClaimExpectation) harness.RunResult {
+	t.Helper()
+	rig, worker, task := expectation.rig, expectation.worker, expectation.task
 	events := executionLateJoinLedgerEvents(t, rig.mailbox)
 	var claim executionLateJoinLedgerEvent
 	for _, event := range events {
-		if event.Kind == "claim-accepted" && event.Task == "alpha:1:" {
-			require.Empty(t, claim.TaskOID, "the worker took only one alpha build claim")
+		if event.Kind == "claim-accepted" && event.Task == task {
+			require.Empty(t, claim.TaskOID, "the worker took only one build claim for %s", task)
 			claim = event
 		}
 		assert.False(t, event.Kind == "run-stopping" ||
-			event.Task == "alpha:1:" && (event.Kind == "result-accepted" ||
+			event.Task == task && (event.Kind == "result-accepted" ||
 				event.Kind == "ack-accepted" || event.Kind == "terminal"),
 			"lost ownership cannot sign a later settlement: %+v", event)
 	}
@@ -119,7 +133,7 @@ func TestExecutionLostLockIsRememberedForEveryLaterTask(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(summary, &occupied))
 	assert.Equal(t, 1, occupied.Used, "the unresolved signed Claim retains its durable physical slot")
-	assert.NotContains(t, served.Stdout, `"message":"publication authorized"`)
+	return served
 }
 
 // executionOwnershipHold keeps the first build on the only node while the

@@ -201,11 +201,12 @@ func TestExecutionLockLossStopsNewEffects(t *testing.T) {
 	// build deleted the lock, no local publish stage can start.
 	assert.Empty(t, executionPlacements(res, "core:publish"),
 		"no publish task was placed after the lock disappeared")
-	assert.Empty(t, rig.repo.TagList(), "no version was recorded")
+	assert.Empty(t, executionReleaseTags(rig), "no version was recorded")
 	assert.False(t, remoteHoldsLock(t, rig.origin),
 		"the lock this run lost is not re-created by it")
 
-	served := worker.stop(t)
+	served := requireExecutionUnsettledClaimAfterLockLoss(t, executionUnsettledClaimExpectation{
+		rig: rig, worker: worker, task: "core:1:"})
 	assert.NotContains(t, served.Stdout, `"message":"publication authorized"`)
 	assert.Len(t, rig.runs(), 1,
 		"the build that deleted the lock ran, and nothing after it did: %v", rig.runs())

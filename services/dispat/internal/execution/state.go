@@ -569,6 +569,20 @@ func (s *SeenSet) IsSeen(run, task string, attempt int) bool {
 	return isSeen
 }
 
+// Persist verifies that the current replay record can still be saved before
+// admission or a new claim. It does not remember an unaccepted attempt, so an
+// unanswered proposal can be retried with its original identity. On an intact
+// file, append only rewrites the closing brace; changed files are restored
+// from memory through the normal replacement path.
+func (s *SeenSet) Persist() error {
+	if s.written != nil {
+		if err := s.append(nil); err == nil {
+			return nil
+		}
+	}
+	return s.rewrite()
+}
+
 // Record remembers one answered attempt and persists the record.
 //
 // It is written before the work is reported rather than after, because the

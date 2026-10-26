@@ -8,6 +8,8 @@ package integration
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -26,6 +28,8 @@ type foreignWithdrawalCase struct {
 	isWrongProtocol bool
 	reason          string
 }
+
+const executionForeignWithdrawalUnsettledCode = "E229"
 
 func TestExecutionWorkerRefusesForeignWithdrawalAfterResultLeaseLoss(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -48,11 +52,12 @@ func runWorkerForeignWithdrawalAfterResultLeaseLoss(t *testing.T, scenario forei
 		cfg.LogLevel = "debug"
 		cfg.Scripts["build"] = models.Script{executionRecordingScript}
 		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
-		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 10, Task: 4, Cancel: 5}
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 10, Task: 10, Cancel: 5}
 	})
 	pushReject, resultGate := harness.NewGitFaultChain(t,
 		harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128},
-		harness.GitFault{Pattern: "*commit-tree*dispat transport result*", Nth: 1, Hold: true})
+		harness.GitFault{Pattern: "*commit-tree*dispat transport result*", Nth: 1,
+			ArmAfter: "*commit-tree*dispat transport pending*", Hold: true})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60, pushReject.Env()...)
 	defer resultGate.Resume()
 	release := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
@@ -76,6 +81,10 @@ func runWorkerForeignWithdrawalAfterResultLeaseLoss(t *testing.T, scenario forei
 	offered, ok := claim["expectedOid"].(string)
 	require.True(t, ok)
 	claimed := executionTipOID(t, rig.mailbox, branch)
+	for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+		require.False(t, event.Task == assignment["task"] && event.Kind == "result-accepted",
+			"the worker Result is held before any acceptance: %+v", event)
+	}
 	writer := newExecutionFakeOrchestrator(t, rig.mailbox)
 	foreignDocument := executionOrderedJSON{}.with(
 		executionField{"protocol", 3}, executionField{"kind", assignment["kind"]},
@@ -96,13 +105,21 @@ func runWorkerForeignWithdrawalAfterResultLeaseLoss(t *testing.T, scenario forei
 	}
 	foreign := writer.commit(executionMessageOptions{secret: executionSecret, kind: "cancel", isSigned: true},
 		foreignBytes, claimed)
-	bareGit(t, rig.mailbox, "update-ref", "refs/heads/"+branch, foreign)
+	bareGit(t, rig.mailbox, "update-ref", "refs/heads/"+branch, foreign, claimed)
 	time.Sleep(time.Second)
 	resultGate.Resume()
 	res := release.Wait()
-	served := worker.stop(t)
+	worker.proc.Signal(os.Interrupt)
+	served := worker.proc.Wait()
 
 	require.NotEqual(t, 0, res.Code, "a foreign withdrawal cannot complete the release\nstdout:\n%s", res.Stdout)
+	assert.NotEqual(t, 0, served.Code, "a worker cannot cleanly release an attempt without signed finality")
+	assert.True(t, harness.IsCodePresent(executionEvents(served), executionForeignWithdrawalUnsettledCode),
+		"the worker reports the retained unsettled attempt\nstdout:\n%s", served.Stdout)
+	if tip := executionTipOID(t, rig.mailbox, branch); tip != foreign {
+		t.Logf("foreign tip moved: chain=%v ledger=%+v", executionChain(t, rig.mailbox, branch),
+			executionLateJoinLedgerEvents(t, rig.mailbox))
+	}
 	assert.Equal(t, foreign, executionTipOID(t, rig.mailbox, branch),
 		"the worker and release leave the foreign tip for investigation")
 	assert.Contains(t, rig.branches(), "refs/heads/"+branch)
@@ -114,4 +131,23 @@ func runWorkerForeignWithdrawalAfterResultLeaseLoss(t *testing.T, scenario forei
 	assert.Empty(t, executionReleaseTags(rig))
 	assert.Len(t, rig.runs(), 1, "the build finished once before its report lost the lease")
 	assert.Zero(t, pushReject.Matches(), "a peer attempted a canonical task Git push")
+	var summaries []string
+	err = filepath.WalkDir(worker.stateDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() && entry.Name() == "slots.json" && strings.Contains(path, "node-state") {
+			summaries = append(summaries, path)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Len(t, summaries, 1, "one durable node-slot authority remains")
+	summary, err := os.ReadFile(summaries[0])
+	require.NoError(t, err)
+	var slots struct {
+		Used int `json:"used"`
+	}
+	require.NoError(t, json.Unmarshal(summary, &slots))
+	assert.Equal(t, 1, slots.Used, "the foreign tip cannot release the accepted attempt's physical slot")
 }

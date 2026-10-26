@@ -118,48 +118,60 @@ func (m *GitMailbox) readChoreographyTaskLedgerTips(ctx context.Context,
 		if !taskKnown {
 			continue
 		}
-		switch event.Kind {
-		case ChoreographyAssignmentOffered, ChoreographyClaimAccepted,
-			ChoreographyCancelIssued, ChoreographyQueueFenced,
-			ChoreographyRetryReady, ChoreographyTerminal,
-			ChoreographyBlocked, ChoreographyNoClaimExpired, ChoreographyInertCancelled:
-			if event.PriorTaskOID != prior || event.TaskOID == prior {
-				return nil, fmt.Errorf(choreographyTaskLedgerEventError)
-			}
-			tips[event.Task] = event.TaskOID
-		case ChoreographyAckAccepted:
-			if event.PickupID != choreographyTaskLedgerNoOID &&
-				event.ResultReceiptOID != choreographyTaskLedgerNoOID {
-				if event.PriorTaskOID != prior || event.TaskOID != prior {
-					return nil, fmt.Errorf(choreographyTaskLedgerEventError)
-				}
-				continue
-			}
-			if event.PriorTaskOID != prior || event.TaskOID == prior {
-				return nil, fmt.Errorf(choreographyTaskLedgerEventError)
-			}
-			tips[event.Task] = event.TaskOID
-		case ChoreographyResultAccepted:
-			if event.PickupID != choreographyTaskLedgerNoOID {
-				if event.PriorTaskOID != prior || event.TaskOID != prior {
-					return nil, fmt.Errorf(choreographyTaskLedgerEventError)
-				}
-				continue
-			}
-			if event.PriorTaskOID != prior || event.TaskOID == prior {
-				return nil, fmt.Errorf(choreographyTaskLedgerEventError)
-			}
-			tips[event.Task] = event.TaskOID
-		case ChoreographyClaimRefused, ChoreographyFrameReady, ChoreographyNoClaimPackageSettled,
-			ChoreographyTaskPackageSettled,
-			ChoreographyInertCancelSettled, ChoreographyPickupContactLost,
-			ChoreographyPickupSettled:
-			if event.TaskOID != prior {
-				return nil, fmt.Errorf(choreographyTaskLedgerEventError)
-			}
-		default:
-			return nil, fmt.Errorf(choreographyTaskLedgerEventError)
+		next, err := choreographySignedTaskTipTransition(prior, *event)
+		if err != nil {
+			return nil, err
 		}
+		tips[event.Task] = next
 	}
 	return tips, nil
+}
+
+// choreographySignedTaskTipTransition is the common hot and cold projection
+// of one task event. In particular, a ledger-only refusal or ready-frame may
+// not replace the exact signed task tip with an unledgered remote commit.
+func choreographySignedTaskTipTransition(prior string, event ChoreographyEvent) (string, error) {
+	switch event.Kind {
+	case ChoreographyAssignmentOffered, ChoreographyClaimAccepted,
+		ChoreographyCancelIssued, ChoreographyQueueFenced,
+		ChoreographyRetryReady, ChoreographyTerminal,
+		ChoreographyBlocked, ChoreographyNoClaimExpired, ChoreographyInertCancelled:
+		if event.PriorTaskOID != prior || event.TaskOID == prior {
+			return choreographyTaskLedgerNoOID, fmt.Errorf(choreographyTaskLedgerEventError)
+		}
+		return event.TaskOID, nil
+	case ChoreographyAckAccepted:
+		if event.PickupID != choreographyTaskLedgerNoOID &&
+			event.ResultReceiptOID != choreographyTaskLedgerNoOID {
+			if event.PriorTaskOID != prior || event.TaskOID != prior {
+				return choreographyTaskLedgerNoOID, fmt.Errorf(choreographyTaskLedgerEventError)
+			}
+			return prior, nil
+		}
+		if event.PriorTaskOID != prior || event.TaskOID == prior {
+			return choreographyTaskLedgerNoOID, fmt.Errorf(choreographyTaskLedgerEventError)
+		}
+		return event.TaskOID, nil
+	case ChoreographyResultAccepted:
+		if event.PickupID != choreographyTaskLedgerNoOID {
+			if event.PriorTaskOID != prior || event.TaskOID != prior {
+				return choreographyTaskLedgerNoOID, fmt.Errorf(choreographyTaskLedgerEventError)
+			}
+			return prior, nil
+		}
+		if event.PriorTaskOID != prior || event.TaskOID == prior {
+			return choreographyTaskLedgerNoOID, fmt.Errorf(choreographyTaskLedgerEventError)
+		}
+		return event.TaskOID, nil
+	case ChoreographyClaimRefused, ChoreographyFrameReady, ChoreographyNoClaimPackageSettled,
+		ChoreographyTaskPackageSettled,
+		ChoreographyInertCancelSettled, ChoreographyPickupContactLost,
+		ChoreographyPickupSettled:
+		if event.TaskOID != prior {
+			return choreographyTaskLedgerNoOID, fmt.Errorf(choreographyTaskLedgerEventError)
+		}
+		return prior, nil
+	default:
+		return choreographyTaskLedgerNoOID, fmt.Errorf(choreographyTaskLedgerEventError)
+	}
 }

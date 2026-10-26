@@ -902,6 +902,11 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 	}
 	proposal := w.formatReturnClaim(returnClaimRequest{Binding: channel.binding,
 		LedgerOID: page.Head.OID, Tip: tip, Assignment: assignment})
+	if err := w.Seen.Persist(); err != nil {
+		<-w.slots
+		w.reconsiderOfferedTask(tip.Branch)
+		return workerRuntimeTaskNotClaimed, err
+	}
 	lease, available, err := w.reserveNodeSlot(claimCtx, assignment, channel, proposal)
 	if err != nil {
 		<-w.slots
@@ -956,7 +961,8 @@ func (w *Worker) startClaimedTask(ctx context.Context, tip ChainTip, assignment 
 	// Remembered before the work starts: an attempt this node took on and then
 	// failed to report must not be taken on again.
 	if err := w.Seen.Record(assignment.Run, assignment.Task, assignment.Attempt, time.Now()); err != nil {
-		<-w.slots
+		// The accepted claim remains pending with its exact proposal and slot.
+		// A later poll may repair the record, but no command may start yet.
 		return false, err
 	}
 	// The task's own context is created here rather than inside the goroutine
@@ -1217,6 +1223,11 @@ func (w *Worker) answerProbeByReturn(ctx context.Context, tip ChainTip, assignme
 	}
 	probeCtx, stopProbe := context.WithTimeout(ctx, taskReportTimeout)
 	defer stopProbe()
+	if err := w.Seen.Persist(); err != nil {
+		w.closeUnrememberedReturnChannel(channel)
+		w.Mailbox.Reconsider(tip.Branch)
+		return err
+	}
 	report := w.Report
 	report.Protocol = assignment.Protocol
 	receipt, err := channel.client.SubmitProbe(probeCtx, ChoreographyProbeReply{
@@ -1232,11 +1243,13 @@ func (w *Worker) answerProbeByReturn(ctx context.Context, tip ChainTip, assignme
 		w.closeUnrememberedReturnChannel(channel)
 		return fmt.Errorf(workerRuntimeProbeReceiptError)
 	}
+	// The accepted roster entry survives a later replay-record failure. Keep
+	// its authenticated channel so a repaired record can resume this run;
+	// the claim gate still requires persistence before any new work.
+	w.rememberReturnChannel(channel)
 	if err := w.Seen.Record(assignment.Run, assignment.Task, assignment.Attempt, time.Now()); err != nil {
-		w.closeUnrememberedReturnChannel(channel)
 		return err
 	}
-	w.rememberReturnChannel(channel)
 	w.Log.Info().Str(workerRuntimeBranchLogField, tip.Branch).Str(workerRuntimeCommitLogField, receipt.OID).
 		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Str(workerRuntimeStatusLogField, StatusSucceeded).Msg(workerRuntimePreflightDoneMessage)

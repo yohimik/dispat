@@ -622,8 +622,12 @@ func TestExecutionRunSweepUnderRunOnlyOrchestratorStaysLocal(t *testing.T) {
 	res := rig.sweep(nil)
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	fixed, hasFixedPlan := executionLine(res, "plan fixed")
+	require.True(t, hasFixedPlan, "the signed sweep reports its first-node identity")
+	firstNode := fixed.Str("node")
+	require.NotEmpty(t, firstNode)
 	for _, name := range executionSweepPackages {
-		assert.Equal(t, "orchestrator", rig.nodesByPackage()[name], "%s ran here", name)
+		assert.Equal(t, firstNode, rig.nodesByPackage()[name], "%s ran here", name)
 	}
 	assert.Equal(t, "from-core", executionProbeValues(rig, "export")["api"])
 	for name, line := range executionTaskOutcomes(res) {

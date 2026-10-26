@@ -776,3 +776,32 @@ separately from simultaneous graph replicas. It charges planning, graph construc
 retained graph state, auxiliary counters, payloads and durable evidence to their respective phases.
 Weighted task-time bounds remain pathwise and conditional on resources; the argument establishes no fastest
 distribution mode or joint memory minimum. The mode-specific §28 runtime contract is unchanged.
+
+## 2026-10-27: Complexity scope of the task-graph theorem
+
+Section 13.11 now distinguishes the input bit length used by `P` and `NP` from the size, work and span of
+an already supplied task DAG. Uniform effective construction, terminating tasks and output extraction yield
+a serial algorithm, whereas graph existence or a unique answer alone does not. The illustrated brute-force
+SAT graph gets short ideal span by constructing exponentially many tasks and using exponentially many slots;
+an opaque solver task instead leaves its effective solving cost inside its duration. These are costs of that
+construction, not lower bounds for every SAT algorithm. A uniform polynomial-size and polynomial-cost
+task-graph family correctly deciding SAT would imply `P = NP` by serial simulation, but the theorem supplies
+no such family and does not prove strict `P` versus `NP` separation.
+No strict solving-versus-verification cost gap is established. Saga recovery addresses external effects and
+crashes, not pure decision computation or the P-versus-NP question.
+Parity supplies a direct equal-cost example in a fresh exact bit-query model without a cached result:
+solving and checking an untrusted proposed bit both need `Theta(n)` input queries. The slot-work pigeonhole
+bound charges a chosen DAG, not all algorithms.
+For an exact deterministic function output, rerunning a solver and comparing a candidate within a charged
+output bound gives a checker with no greater asymptotic cost than that solver. This allows equality and
+does not extend to arbitrary search witnesses or settle `P` versus `NP`.
+Known graph structure may coexist with hidden durations or outcomes; new runtime vertices or edges require a
+new pinned plan and charge discovery work. A distinguishing execution run is necessary only if no other
+permitted observation separates cases that demand different correct next actions.
+The ideal earliest-start bound is attained without prior duration knowledge; profiling is not universally
+necessary or beneficial, and known weights do not make the finite-resource list bound exact.
+An additional informative online-discovery comparison uses three known unit roots, two slots and one
+hidden unit child. Every deterministic online policy has one fixed instance taking at least 3 while an
+offline schedule takes 2. A finite parent-revealed forest with unlimited slots instead attains its realized
+span by immediate dispatch, provided each completion discloses all children. Neither example changes the
+fixed-graph contract of a CCME run.

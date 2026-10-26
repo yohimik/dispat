@@ -73,6 +73,33 @@ func TestChoreographyWorkerRefusesForeignCancelOnClaimedRef(t *testing.T) {
 				assignmentTip, claim.OID, assignment))
 			require.Equal(t, cancelOID, remoteChoreographyOID(t, fixture, spec.Branch),
 				"a refused foreign cancellation cannot become an Ack")
+			before, err := persist.LedgerHead(t.Context())
+			require.NoError(t, err)
+			foreignRefusal := proposal
+			foreignRefusal.ExpectedOID = cancelOID
+			foreignRefusal.ExpectedLedgerOID = before.OID
+			foreignRefusal.ProposalID = "foreign-cancel-refusal"
+			_, err = persist.PersistRefusal(t.Context(), foreignRefusal, ChoreographyRefusalStale)
+			require.ErrorContains(t, err, choreographyLedgerTaskTipDiffersFromSignedHistoryErr,
+				"a ledger-only refusal cannot promote the foreign tip into signed history")
+			result := Result{Header: Header{Protocol: ChoreographyProtocolVersion,
+				Kind: KindBuild, Run: binding.Run, Generation: binding.Generation,
+				PlanDigest: binding.PlanDigest, Task: spec.Task, Attempt: proposal.Attempt,
+				Node: proposal.Node, Branch: spec.Branch}, Assignment: claim.OID,
+				Status: StatusSucceeded}
+			resultProposal, pack := prepareChoreographyFixturePickupResult(t, fixture,
+				choreographyFixturePickupResult{Claim: proposal, Accepted: claim,
+					Result: result, ProposalID: "foreign-cancel-result"})
+			_, err = broker.AcceptResult(t.Context(), resultProposal, pack)
+			require.ErrorContains(t, err, choreographyLedgerTaskTipDiffersFromSignedHistoryErr)
+			after, err := persist.LedgerHead(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, before.OID, after.OID,
+				"a foreign task tip cannot become signed Result acceptance")
+			require.Equal(t, cancelOID, remoteChoreographyOID(t, fixture, spec.Branch))
+			require.False(t, broker.tasks[spec.Task].terminal)
+			require.Equal(t, spec.Weight, broker.nodeUsed[proposal.Node],
+				"the rejected foreign tip retains the accepted pickup's capacity")
 		})
 	}
 }

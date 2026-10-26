@@ -4325,6 +4325,106 @@ indexes its graph and evaluates first-only effects as their gates settle. Shared
 representations and replay strategies change these accounts; no universal fastest mode or joint
 auxiliary-memory minimum follows.
 
+**Complexity scope: P versus NP.** Let `m` be the input bit length of a decision instance, distinct from
+the task and edge counts `Tk` and `Dk`. `P` contains decision languages solvable in deterministic time
+polynomial in `m`; `NP` contains those with polynomial-length certificates checkable in polynomial time.
+`P` is contained in `NP`, and whether that inclusion is strict remains open
+([Cook, *The P versus NP Problem*](https://www.claymath.org/wp-content/uploads/2022/06/pvsnp.pdf)).
+The dispat bounds start with a finite weighted DAG. They do not bound uniform graph construction, graph
+or output bit size, per-task algorithmic cost or the number of processors. A DAG for one terminating
+computation is not a uniform efficient solver; even a completed execution trace can be drawn as a DAG without
+having an effective way to construct that graph before execution.
+
+Computability follows under stronger constructive premises. Suppose one total effective constructor maps
+every encoded instance to a finite explicit DAG with effective task descriptions, typed outcome rules and a
+designated output map. Suppose each enabled task reached under those rules is a deterministic computable
+program that halts with finite output on its admitted inputs; input transfer, skip/outcome propagation and
+output extraction are computable and terminate on reached finite data; and the extracted finite answer is
+correct for every encoded instance.
+In the pure no-crash model, evaluating enabled tasks in topological order terminates and computes that
+answer by induction over the finite DAG.
+This gives an algorithm, not a polynomial-time bound or a unique implementation. A one-vertex graph
+labelled `decide Halting` lacks that vertex implementation: the Halting Problem is undecidable
+([Cook, §2](https://www.claymath.org/wp-content/uploads/2022/06/pvsnp.pdf)). A unique yes/no truth value
+or earliest-start vector alone does not supply uniform effective graph construction and executable tasks.
+No uniform total implementation with those premises can decide every decision problem.
+
+A fixed graph can have known vertices and edges but unknown task durations or outcomes; the bounds use their
+realized values. Under the ideal earliest-start premises above, immediate dispatch attains `Lk` for every
+realized duration vector without knowing future task times. That ideal optimum exists for the realized graph
+regardless of advance knowledge. Typed outcome gates use accepted evidence when they settle, rather than
+forecasts of every future outcome. Full advance knowledge does not make clause 2's finite-resource list bound
+exact, and gathering information has its own cost, so profiling is neither universally required nor beneficial.
+Discovering new vertices or edges during execution instead leaves that fixed-graph premise
+and needs a newly pinned plan before the bounds apply. A discovery or profiling run contributes its own
+work and elapsed time. Drawing a finite DAG from its completed trace afterward gives no uniform advance
+construction or polynomial cost. Reusing an exact pinned plan requires matching its complete planning inputs;
+reusing a task output or effect as authority also requires matching semantic inputs, valid provenance and
+relevant observations. A learned method may generalize with separate validation.
+If two admitted cases have identical available inputs and observations before a decision, yet require
+disjoint correct next actions or outputs, a deterministic procedure correct on both must obtain a
+distinguishing observation; otherwise it makes the same choice.
+At least one execution run follows only when execution is the sole way to obtain that observation.
+No universal one-run or `P` versus `NP` claim follows.
+
+**Unknown graph as a separate online model.** Suppose roots `A`, `B` and `C` are known at time zero, each
+takes one unit on either of two nonpreemptive slots, and one unit task `D` depends on exactly one root.
+The identity of `D` and its parent is revealed only when that parent finishes. These are three fixed
+DAG instances, not a graph changed by the adversary during execution. Before time 1 no root can finish,
+so any deterministic online policy behaves identically on them. At most two roots start before time 1;
+choose the fixed instance whose parent starts at or after 1. That parent ends no earlier than 2 and `D`
+ends no earlier than 3. An offline scheduler starts that parent and another root at zero, then `D` and
+the remaining root at 1, finishing at 2. Thus hidden graph structure can defeat universal exactness
+with finite slots, without proving that every algorithm must discover its whole graph first.
+
+For a different class, take a finite rooted forest whose complete root set is known. Each child's sole
+prerequisite is its parent, and each complete child list is revealed immediately when that parent finishes.
+With unlimited compatible slots and zero dispatch and discovery overhead, start each ready root or child
+immediately.
+Induction gives each node's start as the sum of its ancestors' nonnegative durations, so task makespan
+equals the realized weighted root-to-leaf span even though the forest was unknown initially. Resolve
+zero-duration child cascades immediately. Safe admission needs every incoming dependency known for the
+task. Declaring completion needs every discovered task terminal with its full child list disclosed. This is an
+informative online-discovery model, not a mutable-graph promise for a CCME run; discovered work needs a
+new pinned plan before §13.11's fixed-graph bounds apply.
+
+For a SAT formula of encoded length `m` with `k` variables, a supplied `k`-bit assignment can be checked
+in `poly(m)` bit time. One explicit brute-force DAG has `2^k` verifier leaves and `2^k - 1` binary OR gates,
+hence `2^(k+1) - 1` vertices and `2^(k+1) - 2` edges. Its assignment labels
+take `Omega(k 2^k)` bits when each label is stored explicitly; construction and serial evaluation take at
+least `Omega(2^k)` work regardless. With `2^k` ideal slots, zero overhead and parallel leaf checks, its
+span can be `poly(m) + O(k)` while its graph, total work and processor demand are exponential in `k`.
+Under binary-index variable names, a family mentioning each variable once has `m = Theta(k log k)`, already
+making these costs superpolynomial in `m`. A single opaque `solve SAT` vertex supplies no speedup theorem;
+the cost of its effective solver belongs in that vertex's duration.
+These are costs of this exhaustive construction, not lower bounds for all SAT algorithms.
+The span `Lk` bounds schedules of this chosen DAG, not every algorithm or graph representation for SAT.
+Proving `P != NP` would require an NP language with no deterministic polynomial-time solver; this
+brute-force graph does not exclude a different solver.
+
+Conversely, suppose a uniform polynomial-time compiler emitted, for every SAT instance, a polynomial-bit-size
+explicit DAG with deterministic effective task algorithms of uniformly polynomial bit cost, no oracle or
+uncharged external service, polynomial-size intermediate values and a yes/no result readable in polynomial
+time that correctly decides satisfiability for every input. Serial topological simulation would then decide
+SAT in polynomial time.
+Since SAT is NP-complete, that conditional construction would imply `P = NP`; the dispat theorem does not
+supply it. These arguments establish no strict asymptotic separation between solving and certificate checking.
+A direct counterexample to a universal strict solve-versus-check gap is parity in the fresh exact
+deterministic bit-query model, with no trusted cached parity or oracle. On `n` input bits, computing their
+XOR and checking an untrusted proposed parity bit both take `Theta(n)` queries:
+if either procedure leaves one input bit unread, flipping it reverses the correct answer or check result;
+one XOR scan gives the matching upper bound. The pigeonhole slot-work bound charges one chosen DAG's work,
+not all solver and checker algorithms without a separate lower-bound argument.
+For one exact function output `y = f(x)`, a deterministic checker can rerun a solver of worst-case bit cost
+`C(n)` and compare a proposed `y` of length `ell`, taking `O(C(n) + ell)` in the same bit-cost model. If
+candidates obey a declared output bound `b(n) = O(C(n))`, this gives a checker with `V(n) = O(C(n))` and
+permits equal solve and check costs. This weak asymptotic comparison is not a pointwise time inequality,
+the definition of verification, or a claim about arbitrary witnesses when several outputs are valid.
+Saga recovery concerns crashes and non-atomic external effects, not pure decision computation; a local
+verifier with no such effects needs no saga. Recovery is not a unique protocol or a P-versus-NP lower bound:
+arbitrarily many failures can add unbounded time, while bounded or absent recovery overhead need not change
+an asymptotic class.
+
 **Build readiness: what a weaker relation can and cannot buy.** Let `b_i` and `p_i` be the build and publication
 durations of package `i`. First suppose only those tasks take positive time, every ready task starts immediately
 because slots are unlimited, and no transfer or other capacity binds. Task makespan then equals the longest path

@@ -29,6 +29,7 @@ const choreographyLedgerStopIdentityPrefix = "stop:"
 const choreographyLedgerSealIdentityPrefix = "seal:"
 const choreographyLedgerAuthorityHexDigits = 32
 const choreographyLedgerNoItems = 0
+const choreographyLedgerLastTaskEventOffset = 1
 const choreographyLedgerFirstItemIndex = 0
 const choreographyLedgerSecondItemIndex = 1
 const choreographyLedgerThirdItemIndex = 2
@@ -62,6 +63,7 @@ const choreographyLedgerRunSealedErr = "execution: choreography run is sealed"
 const choreographyLedgerAdmissionStoppedErr = "execution: choreography claim admission has stopped"
 const choreographyLedgerAdvancedErr = "execution: remote ledger advanced; broker state needs recovery before another effect"
 const choreographyLedgerStaleEpochErr = "execution: claim proposal names a stale capacity epoch"
+const choreographyLedgerTaskTipDiffersFromSignedHistoryErr = "execution: canonical task tip differs from exact signed ledger history"
 const choreographyLedgerEventSizeErr = "execution: signed ledger event exceeds the documented transfer limit"
 const choreographyLedgerCASUnresolvedFormat = "execution: task and capacity CAS is unresolved (task %s, ledger %s): %w"
 const choreographyLedgerRemoteRefsErr = "remote refs do not name the proposed transaction"
@@ -372,6 +374,20 @@ type choreographyAtomicPush struct {
 }
 
 func (g *GitChoreographyPersist) persistAtomic(ctx context.Context, mutation choreographyLedgerMutation) error {
+	// A task event that only advances the ledger still fences the canonical
+	// ref. Without this no-op CAS, a foreign tip could coexist with a signed
+	// refusal, ready-frame or package settlement and poison later admission.
+	if mutation.TaskBranch == choreographyLedgerMissingIdentity {
+		switch mutation.Event.Kind {
+		case ChoreographyClaimRefused, ChoreographyFrameReady,
+			ChoreographyNoClaimPackageSettled, ChoreographyTaskPackageSettled,
+			ChoreographyInertCancelSettled:
+			if spec := g.tasks[mutation.Event.Task]; spec.Task != choreographyLedgerMissingIdentity {
+				mutation.TaskBranch = spec.Branch
+				mutation.OldTaskOID = mutation.Event.TaskOID
+			}
+		}
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.pending != nil {
@@ -402,6 +418,23 @@ func (g *GitChoreographyPersist) persistAtomic(ctx context.Context, mutation cho
 		}
 		if mutation.ExpectedLedgerOID != choreographyLedgerMissingIdentity && mutation.ExpectedLedgerOID != g.ledgerTip {
 			return fmt.Errorf(choreographyLedgerStaleEpochErr)
+		}
+		if spec, known := g.tasks[mutation.Event.Task]; known {
+			signedTip := spec.ReservationOID
+			if events := g.taskEvents[mutation.Event.Task]; len(events) != choreographyLedgerNoItems {
+				signedTip = g.events[events[len(events)-choreographyLedgerLastTaskEventOffset]].TaskOID
+			}
+			if signedTip == choreographyLedgerMissingIdentity ||
+				mutation.TaskBranch != choreographyLedgerMissingIdentity &&
+					(spec.Branch != mutation.TaskBranch || mutation.OldTaskOID != signedTip) {
+				return fmt.Errorf(choreographyLedgerTaskTipDiffersFromSignedHistoryErr)
+			}
+			if _, err := choreographySignedTaskTipTransition(signedTip, mutation.Event); err != nil ||
+				mutation.NewTaskOID != mutation.Event.TaskOID {
+				return fmt.Errorf(choreographyLedgerTaskTipDiffersFromSignedHistoryErr)
+			}
+		} else if mutation.TaskBranch != choreographyLedgerMissingIdentity {
+			return fmt.Errorf(choreographyLedgerTaskTipDiffersFromSignedHistoryErr)
 		}
 		mutation.Event.Sequence = g.sequence + choreographyLedgerFirstSequence
 		record := choreographyLedgerRecord{ChoreographyRunBinding: g.opts.Binding,
@@ -877,6 +910,15 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 					record.Event.Kind == ChoreographyPickupSettled) &&
 				parents[choreographyLedgerThirdItemIndex] != record.Event.ResultReceiptOID {
 			return fmt.Errorf(choreographyLedgerEventParentErr)
+		}
+		if spec, known := g.tasks[record.Event.Task]; known {
+			signedTip := spec.ReservationOID
+			if events := g.taskEvents[record.Event.Task]; len(events) != choreographyLedgerNoItems {
+				signedTip = g.events[events[len(events)-choreographyLedgerLastTaskEventOffset]].TaskOID
+			}
+			if _, err := choreographySignedTaskTipTransition(signedTip, *record.Event); err != nil {
+				return fmt.Errorf(choreographyLedgerTaskTipDiffersFromSignedHistoryErr)
+			}
 		}
 		if record.Event.Kind == ChoreographyBlocked {
 			blockedParents, err := mailbox.plumbing.CommitParents(ctx, record.Event.TaskOID)

@@ -458,6 +458,9 @@ func (w *Worker) startReturnedClaim(request returnedClaimStart) (bool, bool, err
 		// command must inherit the serving run's context instead, or the
 		// successful claim cancels its own materialization immediately.
 		started, err := w.startClaimedTask(taskCtx, tip, assignment, claim, held...)
+		if err != nil {
+			return started, workerReturnClaimStateUnknown, err
+		}
 		return started, workerReturnClaimStateHandled, err
 	}
 	ackTask := &claimedTask{assignment: assignment, tip: tip, claimed: claim,

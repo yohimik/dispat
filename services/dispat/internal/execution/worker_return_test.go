@@ -150,6 +150,7 @@ func TestWorkerDefinitivelyRefusedClaimReleasesSlotWithoutStarting(t *testing.T)
 				returnChannels: map[string]*workerReturnChannel{binding.Run: {binding: binding, client: fake}},
 				slotForTask:    map[string]string{tip.Branch: "dispat-slot-run-1-node-a-0"},
 				slots:          make(chan struct{}, 1), Log: zerolog.Nop()}
+			w.Seen = newWorkerReplayRecord(t)
 			started, err := w.takeTask(t.Context(), tip, assignment)
 			require.NoError(t, err)
 			require.False(t, started)
@@ -189,6 +190,7 @@ func TestWorkerDelayedRefusalHoldsThenReleasesExactPendingClaim(t *testing.T) {
 	w := &Worker{Node: "node-a", ReturnSigner: signer, Mailbox: mailbox,
 		returnChannels: map[string]*workerReturnChannel{binding.Run: {binding: binding, client: fake}},
 		slots:          make(chan struct{}, 1), Log: zerolog.Nop()}
+	w.Seen = newWorkerReplayRecord(t)
 	started, err := w.takeTask(t.Context(), tip, assignment)
 	require.NoError(t, err)
 	require.False(t, started)
@@ -243,6 +245,7 @@ func TestWorkerV3UnknownClaimRetainsSharedNodeLeaseUntilSignedRefusal(t *testing
 				ChoreographyRunBinding: binding,
 				CoordinationEndpoint:   "file:///canonical-mailbox"}, client: fake}},
 		slots: make(chan struct{}, 1), Log: zerolog.Nop()}
+	w.Seen = newWorkerReplayRecord(t)
 	started, err := w.takeTask(t.Context(), tip, assignment)
 	require.NoError(t, err)
 	require.False(t, started)
@@ -309,6 +312,7 @@ func TestWorkerRearmsVerifiedSlotWhenAnotherRunHoldsPhysicalCapacity(t *testing.
 				Protocol: ChoreographyProtocolVersion, Mode: workerCompiledBootstrapMode,
 				ChoreographyRunBinding: binding,
 				CoordinationEndpoint:   "file:///canonical-mailbox"}, client: client}}}
+	w.Seen = newWorkerReplayRecord(t)
 	started, err := w.takeTask(t.Context(), tip, assignment)
 	require.NoError(t, err)
 	require.False(t, started)
@@ -673,6 +677,7 @@ func TestWorkerUnansweredClaimKeepsSlotAndExactProposal(t *testing.T) {
 	w := &Worker{Node: "node-a", ReturnSigner: signer,
 		returnChannels: map[string]*workerReturnChannel{binding.Run: {binding: binding, client: fake}},
 		slots:          make(chan struct{}, 1), Log: zerolog.Nop()}
+	w.Seen = newWorkerReplayRecord(t)
 	started, err := w.takeTask(t.Context(), tip, assignment)
 	require.NoError(t, err)
 	require.False(t, started)
@@ -701,6 +706,7 @@ func TestWorkerNoSignedCapacityEpochCannotProposeClaim(t *testing.T) {
 	w := &Worker{Node: "node-a", ReturnSigner: signer,
 		returnChannels: map[string]*workerReturnChannel{binding.Run: {binding: binding, client: fake}},
 		slots:          make(chan struct{}, 1), Log: zerolog.Nop()}
+	w.Seen = newWorkerReplayRecord(t)
 	started, err := w.takeTask(t.Context(), tip, assignment)
 	require.Error(t, err)
 	require.False(t, started)

@@ -32,9 +32,11 @@ func TestRetainedFinalityRejectsLedgerEventWithoutExactDecisionParent(t *testing
 		document, []string{spec.ReservationOID}, nil) // deliberately not ackOID
 	require.NoError(t, err)
 	require.NoError(t, persist.persistAtomic(t.Context(), choreographyLedgerMutation{
-		Identity: "forged-finality-parent", NewTaskOID: decisionOID,
+		Identity: "forged-finality-parent", TaskBranch: spec.Branch,
+		OldTaskOID: spec.ReservationOID, NewTaskOID: decisionOID,
 		Event: ChoreographyEvent{Kind: ChoreographyTerminal, Task: spec.Task,
 			Attempt: 1, Node: "node-a", TaskOID: decisionOID,
+			PriorTaskOID:     spec.ReservationOID,
 			ResultReceiptOID: ackOID},
 	}))
 	page, err := persist.ReadEvents(t.Context(), ChoreographyEventCursor{}, 1)

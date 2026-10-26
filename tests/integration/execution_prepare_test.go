@@ -613,7 +613,7 @@ func TestExecutionPreparedProviderObeysItsOwnPlacement(t *testing.T) {
 	produced := executionProbeValues(rig, "inputs")
 	bundle := produced["assets"]
 	require.NotEmpty(t, bundle)
-	assert.Contains(t, bundle, executionOrchestratorLabel, "the bytes say where they were built")
+	assert.Contains(t, bundle, started.Str("node"), "the bytes say where they were built")
 	assert.Equal(t, bundle, produced["ui"], "and the node read exactly them")
 	carried := carriers.seen()
 	assert.Contains(t, carried["ui:build"], "assets:prepare",

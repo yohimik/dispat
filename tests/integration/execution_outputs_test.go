@@ -337,32 +337,57 @@ func executionObservedAssignmentCarriers(mailbox, ref string) (string, []string)
 	if err != nil {
 		return "", nil
 	}
-	commits := strings.Fields(string(listed))
-	if len(commits) < 2 {
+	// A prepared frame can sign a ready-frame transition before Claim, so the
+	// Assignment is not necessarily the second first-parent commit.
+	var assignmentOID string
+	var document []byte
+	for _, oid := range strings.Fields(string(listed)) {
+		candidate, readErr := exec.Command("git", "-C", mailbox, "cat-file", "blob",
+			oid+":dispat/assignment.json").Output()
+		if readErr == nil {
+			assignmentOID, document = oid, candidate
+			break
+		}
+	}
+	if assignmentOID == "" {
 		return "", nil
 	}
-	document, err := exec.Command("git", "-C", mailbox, "cat-file", "blob",
-		commits[1]+":dispat/assignment.json").Output()
-	if err != nil {
+	signature, err := exec.Command("git", "-C", mailbox, "cat-file", "blob",
+		assignmentOID+":dispat/assignment.sig").Output()
+	if err != nil || strings.TrimSpace(string(signature)) != executionSign("assignment", executionSecret, document) {
 		return "", nil
 	}
-	var assignment map[string]any
-	if json.Unmarshal(document, &assignment) != nil {
+	var assignment struct {
+		Kind    string `json:"kind"`
+		Package struct {
+			Name string `json:"name"`
+		} `json:"package"`
+	}
+	if json.Unmarshal(document, &assignment) != nil || assignment.Package.Name == "" || assignment.Kind == "" {
 		return "", nil
 	}
-	task, _ := assignment["task"].(string)
-	commit, err := exec.Command("git", "-C", mailbox, "cat-file", "-p", commits[1]).Output()
+	task := assignment.Package.Name + ":" + assignment.Kind
+	commit, err := exec.Command("git", "-C", mailbox, "cat-file", "-p", assignmentOID).Output()
 	if err != nil {
 		return "", nil
 	}
 	var sources []string
+	firstParent := true
 	for _, line := range strings.Split(string(commit), "\n") {
-		if !strings.HasPrefix(line, "parent ") || line == "parent "+commits[0] {
+		if !strings.HasPrefix(line, "parent ") {
+			continue
+		}
+		if firstParent {
+			firstParent = false
 			continue
 		}
 		oid := strings.TrimPrefix(line, "parent ")
 		blob, err := exec.Command("git", "-C", mailbox, "cat-file", "blob", oid+":dispat/result.json").Output()
 		if err != nil {
+			continue
+		}
+		signature, err := exec.Command("git", "-C", mailbox, "cat-file", "blob", oid+":dispat/result.sig").Output()
+		if err != nil || strings.TrimSpace(string(signature)) != executionSign("result", executionSecret, blob) {
 			continue
 		}
 		var result map[string]any

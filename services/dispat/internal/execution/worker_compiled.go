@@ -462,8 +462,12 @@ func (w *Worker) pickCompiledTasks(ctx context.Context, run *workerCompiledRun) 
 		}
 		progress = progress || settled
 	}
-	if !w.isStateOwned() || len(w.slots) == cap(w.slots) || run.frontier.stopped || run.frontier.sealed {
+	if !w.isStateOwned() || len(w.slots) == cap(w.slots) || run.frontier.stopped || run.frontier.sealed ||
+		run.frontier.head == len(run.frontier.ready) {
 		return progress, nil
+	}
+	if err := w.Seen.Persist(); err != nil {
+		return progress, err
 	}
 	limit := len(run.frontier.ready) - run.frontier.head
 	for tried := compiledFirstSelectionIndex; tried < limit && len(w.slots) < cap(w.slots); tried++ {
