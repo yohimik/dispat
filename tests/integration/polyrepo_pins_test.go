@@ -116,7 +116,8 @@ probe pin-has-vanished DISPAT_INTERNAL_WORKSPACE_LIVE_PINS="$SCRATCH/vanished-pi
 
 probe owners-are-unreadable DISPAT_INTERNAL_WORKSPACE_OWNERS=not-json
 probe repositories-are-unreadable DISPAT_INTERNAL_WORKSPACE_REPOSITORIES=not-json
-probe repository-is-the-control-identity DISPAT_INTERNAL_WORKSPACE_REPOSITORIES='["control"]'
+probe repository-identity-is-empty DISPAT_INTERNAL_WORKSPACE_REPOSITORIES='["","control","lib-source"]'
+probe source-owner-omitted-from-roster DISPAT_INTERNAL_WORKSPACE_REPOSITORIES='["control"]'
 probe repository-is-listed-twice DISPAT_INTERNAL_WORKSPACE_REPOSITORIES='["lib-source","lib-source"]'
 probe owner-names-an-absent-repository DISPAT_INTERNAL_WORKSPACE_OWNERS='{"PACKAGE_GHOST":"ghost-source"}'
 
@@ -182,8 +183,9 @@ func TestPolyrepoNestedCommandRefusesALivePinContextItCannotTrust(t *testing.T) 
 		{"pin-is-a-link", "1", "live pin file is not a regular file"},
 		{"owners-are-unreadable", "1", "live pin context has no valid package owners"},
 		{"repositories-are-unreadable", "1", "live pin context has no valid repository identities"},
-		{"repository-is-the-control-identity", "1", "invalid source repository identity"},
-		{"repository-is-listed-twice", "1", "duplicate source repository identity"},
+		{"repository-identity-is-empty", "1", "invalid participating repository identity"},
+		{"source-owner-omitted-from-roster", "1", "names unknown repository"},
+		{"repository-is-listed-twice", "1", "duplicate participating repository identity"},
 		{"owner-names-an-absent-repository", "1", "names unknown repository"},
 	}
 	for _, tc := range cases {
