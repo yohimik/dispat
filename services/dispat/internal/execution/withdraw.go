@@ -9,17 +9,14 @@ package execution
 // cannot free capacity for a possibly overlapping attempt. So a node does not
 // simply stop when it is told to. It ends the work, waits for the processes it
 // started to be gone, and only then writes the acknowledgement that says what
-// the attempt had got to. The run reads that sentence and nothing else: a slot
-// comes back on a result or on an acknowledgement, and on nothing that merely
-// elapsed.
+// the attempt had got to. The first node keeps the attempt's capacity fenced
+// until it has persisted a retry or terminal decision after that evidence;
+// elapsed time alone never frees it.
 //
-// The other half is what the acknowledgement has to carry. For a build it is a
-// courtesy; for a publication it is the only evidence anybody has about an
-// effect that was authorized. A node that was withdrawn before its publish
-// command began leaves an outcome the run knows, and one that was withdrawn in
-// the middle of it leaves an outcome nobody can establish from here, so the
-// two are told apart by the node, where the difference is a fact rather than
-// an inference.
+// The acknowledgement distinguishes a frame stopped before its commands
+// from one stopped after they began. The first node uses that fact when it
+// decides whether an attempt may be retried. It does not infer that an
+// arbitrary command's external effects were absent after the command began.
 
 import (
 	"context"
@@ -42,10 +39,21 @@ import (
 // progress, and every one of them is behind the mutex below.
 type claimedTask struct {
 	assignment Assignment
+	// slotLease survives a lost return reply. Only a verified first-node
+	// Result or Ack receipt releases the shared physical-node capacity.
+	slotLease   NodeSlotLease
+	slotMu      sync.Mutex
+	slotSettled bool
 	// tip is the assignment's own commit, which every reply of the attempt
 	// names, and claimed is the commit this node wrote to take the work.
 	tip     ChainTip
 	claimed string
+	// finalityCtx belongs to the serving run, not the bounded Result/Ack
+	// submission. A signed receipt can precede package cleanup by longer than
+	// the report timeout; the physical lease stays owned until the later
+	// signed RetryReady or Terminal (or this process stops and cold recovery
+	// takes over).
+	finalityCtx context.Context
 	// stop ends the task's context, which kills the process group the runner
 	// started exactly as an interrupt does.
 	stop context.CancelFunc
@@ -197,8 +205,7 @@ func (w *Worker) observeWithdrawal(ctx context.Context, tip ChainTip) bool {
 // is: the cancellation that ended the work may have been an interrupt, and the
 // one thing the node still owes is the sentence saying what the work had got
 // to. A node that let the same signal cancel that write would leave the run
-// with no evidence at all, which for a publication is the difference between a
-// lock released and a lock retained.
+// with no durable evidence of where the stopped attempt had reached.
 func (w *Worker) acknowledgeCancellation(ctx context.Context, task *claimedTask,
 	log zerolog.Logger) {
 	acked, done := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
@@ -213,10 +220,7 @@ func (w *Worker) writeCancellationAcknowledgement(ctx context.Context, task *cla
 	log zerolog.Logger) {
 	cancel, reached, isCommandStarted := task.readProgress()
 	phase := resolveCancelledPhase(reached)
-	written, err := w.advance(ctx, task.tip, cancel, MessageAck, Ack{
-		Header: w.formatReplyHeader(task.assignment.Header), Assignment: task.tip.OID,
-		Cancel: cancel, Phase: phase, CommandStarted: isCommandStarted,
-	}, nil)
+	written, err := w.returnTaskAck(ctx, task, cancel, phase, isCommandStarted)
 	if err != nil {
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
 			Msg("the cancelled task could not be acknowledged")
@@ -250,7 +254,8 @@ func (w *Worker) checkWithdrawal(ctx context.Context, answer ChainTip, tip Chain
 	if err := json.Unmarshal(document, &message); err != nil {
 		return ReasonUnreadable
 	}
-	if reason := CheckHeader(message.Header, Binding{Node: w.Node, Branch: tip.Branch}, time.Now()); reason != "" {
+	if reason := CheckHeaderVersion(HeaderVersionCheck{Header: message.Header,
+		Binding: Binding{Node: w.Node, Branch: tip.Branch}, Now: time.Now(), Version: assignment.Protocol}); reason != "" {
 		return reason
 	}
 	if !IsTransitionLegal(answer.Previous, MessageCancel, PartyOrchestrator) ||

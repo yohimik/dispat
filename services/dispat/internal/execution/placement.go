@@ -16,10 +16,35 @@ package execution
 
 import (
 	public "github.com/yohimik/dispat/pkg/models"
+	"slices"
 
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
+
+const (
+	ChoreographyBudgetBuild    = "build"
+	ChoreographyBudgetPublish  = "publish"
+	ChoreographyBudgetSyncLock = "syncLock"
+)
+
+// EligibleChoreographyNodes applies the same platform and runOnly rules as
+// Pool over the retained post-preflight roster. A peer can reconstruct this
+// set without consulting node-local configuration or scanning the pool.
+func EligibleChoreographyNodes(roster []ChoreographyRuntimeNode,
+	platforms []string, placement Placement, weight int) []string {
+	var eligible []string
+	for _, entry := range roster {
+		candidate := &poolNode{isLocal: entry.First}
+		if entry.Capacity < weight || !isNodeAllowed(candidate, placement) ||
+			!isPlatformCompatible(entry.Platform, platforms) {
+			continue
+		}
+		eligible = append(eligible, entry.Name)
+	}
+	slices.Sort(eligible)
+	return eligible
+}
 
 // Placement is where a run may put one stage frame.
 //

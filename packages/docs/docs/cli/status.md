@@ -56,3 +56,8 @@ worker links, from the file or from the flag, `status` fixes and prints the plan
 in its `plan fixed` line, and it still takes no lock, resolves no remote, probes no node and assigns nothing. The
 links are no part of the digest. A value that is neither a node name alone nor `name=endpoint` with both halves stated
 exits `2`, and a link breaking a rule a configured link is held to exits `1` with `E225`.
+
+### `--distribution-mode`
+
+Selects `compilation`, the only supported mode. `status` validates it alongside the plan and starts no
+return-channel listener or task. Other values are refused.

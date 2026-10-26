@@ -20,9 +20,34 @@ import (
 	"sort"
 	"strings"
 
+	public "github.com/yohimik/dispat/pkg/models"
+
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 )
+
+// checkDistributionMode keeps direct App callers from silently using the
+// compiled executor when they requested interpretation. The interpretation
+// branch is enabled when the peer protocol and interpreter are installed.
+func (a *App) checkDistributionMode(mode public.DistributionMode) error {
+	switch mode {
+	case "", public.DistributionModeCompilation:
+		return nil
+	case public.DistributionModeInterpretation:
+		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
+			"distribution mode interpretation is not available in this build")
+	default:
+		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
+			"unsupported distribution mode %q (this build supports compilation)", mode)
+	}
+}
+
+func effectiveDistributionMode(mode public.DistributionMode) string {
+	if mode == "" {
+		return string(public.DistributionModeCompilation)
+	}
+	return string(mode)
+}
 
 // checkExecutionEntry decides whether this process may start this release,
 // and is the one call the release path makes into the execution profile
@@ -83,12 +108,6 @@ func (a *App) refuseWorkerInitiation(started runKind) error {
 			execution.CodeAuthority, execution.CategoryAuthority,
 			"a task running under worker authority cannot start a %s: it executes what its assignment authorized and owns no run of its own",
 			started), nil, nil)
-	}
-	if a.cfg.Execution.IsWorker() {
-		return a.reportExecutionRefusal(started, execution.NewDiagnostic(
-			execution.CodeAuthority, execution.CategoryAuthority,
-			"execution.role is %q on this node, and a worker cannot start a %s: it executes the tasks an orchestrator authorized",
-			a.cfg.Execution.ResolveRole(), started), nil, nil)
 	}
 	return nil
 }

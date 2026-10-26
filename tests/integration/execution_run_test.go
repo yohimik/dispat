@@ -84,7 +84,8 @@ func newExecutionSweepRig(t *testing.T, script string, adjust ...func(*models.Fi
 // environment, and whatever else the scenario passes.
 func (r *executionRig) sweep(env []string, flags ...string) harness.RunResult {
 	r.t.Helper()
-	return r.repo.CommandEnv(r.env(env...), append([]string{"run", "tests", "--since", "all"}, flags...)...)
+	args := []string{"run", "tests", "--since", "all", "--return-endpoint", r.returnURL}
+	return r.repo.CommandEnv(r.env(env...), append(args, flags...)...)
 }
 
 // executionSweepPinnedToWorkers keeps every task of the sweep off the
@@ -109,7 +110,7 @@ func executionTaskOutcomes(res harness.RunResult) map[string]harness.Event {
 // every package's task on a node, none of them here, providers first; the
 // provider's export reaches a consumer that ran on another machine; the
 // summary names the node of every task; and the sweep takes no release lock
-// and leaves no coordination branch behind.
+// and retains signed task and ledger history for later finality checks.
 func TestExecutionRunSweepPlacesScriptsOnWorkers(t *testing.T) {
 	rig := newExecutionSweepRig(t, executionSweepScript)
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 1)
@@ -143,7 +144,7 @@ func TestExecutionRunSweepPlacesScriptsOnWorkers(t *testing.T) {
 		require.Contains(t, outcomes, name, "stdout:\n%s", res.Stdout)
 		line := outcomes[name]
 		assert.Equal(t, placed[name], line.Str("worker"), "the summary names where %s ran", name)
-		assert.Equal(t, "run", line.Str("stage"))
+		assert.Equal(t, "run:tests", line.Str("stage"))
 		assert.Equal(t, "completed", line.Str("computation"))
 		assert.Equal(t, "none", line.Str("publication"))
 		assert.Equal(t, "orchestrator", line.Str("role"), "the line names its writer")
@@ -156,7 +157,7 @@ func TestExecutionRunSweepPlacesScriptsOnWorkers(t *testing.T) {
 	assert.Zero(t, fault.Matches(), "a sweep never pushes a release lock")
 	assert.False(t, remoteHoldsLock(t, rig.origin))
 	assert.Empty(t, rig.repo.TagList(), "and records nothing")
-	assert.Empty(t, rig.branches(), "every coordination branch is closed")
+	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 	assert.Empty(t, executionWorkerRefs(t, rig.origin))
 	stopAll(t, workers)
 }
@@ -245,7 +246,7 @@ func TestExecutionRunWorkerFlagNamesAMachineTheFileDoesNot(t *testing.T) {
 	for _, name := range executionSweepPackages {
 		assert.Equal(t, executionNode, rig.nodesByPackage()[name], "%s ran on the named machine", name)
 	}
-	assert.Empty(t, rig.branches())
+	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 	stopAll(t, []*executionWorker{worker})
 
 	untouched, other := executionMailbox(t), executionMailbox(t)
@@ -301,11 +302,6 @@ func TestExecutionRunWorkerFlagRefusals(t *testing.T) {
 			execution: &models.ExecutionConfig{SecretEnv: executionSecretEnv},
 			flag:      "w=file:///srv/mailbox", env: executionWorkerMarker, code: 1,
 			want: "worker authority", diagnosis: executionAuthorityCode},
-		"a worker's own file": {
-			execution: &models.ExecutionConfig{Role: models.ExecutionRoleWorker, Name: "w",
-				Endpoint: "file:///srv/mailbox", SecretEnv: executionSecretEnv},
-			flag: "other=file:///srv/mailbox", code: 1, want: "dispatches nothing",
-			diagnosis: executionAuthorityCode},
 		"the lock bypass beside a link": {
 			execution: &models.ExecutionConfig{SecretEnv: executionSecretEnv},
 			flag:      "w=file:///srv/mailbox", isBypass: true, code: 1,
@@ -321,7 +317,7 @@ func TestExecutionRunWorkerFlagRefusals(t *testing.T) {
 			}
 
 			res := rig.repo.CommandEnv(env, "run", "tests", "--since", "all", "--worker", tc.flag,
-				"--log-format", "json")
+				"--return-endpoint", rig.returnURL, "--log-format", "json")
 
 			require.Equal(t, tc.code, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.Contains(t, diagnosticText(res), tc.want)
@@ -532,85 +528,30 @@ func TestExecutionRunOutputsInASpaceAreUnknown(t *testing.T) {
 	assert.Contains(t, diagnosticText(res), "runOutputs")
 }
 
-// executionSweepCraft turns the fake worker's default build set into a
-// sweep's: the root is `coverage` relative to the repository, the one file is
-// `coverage/app.out`, and the row's own change is applied on top.
-func executionSweepCraft(change func(*executionCraftedOutputs)) func(*executionCraftedOutputs) {
-	return func(c *executionCraftedOutputs) {
-		c.entries = map[string]executionTreeFile{"coverage/app.out": {mode: "100644", content: "one\n"}}
-		c.manifest = c.manifest.set("roots", []any{"coverage"}).set("entries", []any{
-			executionCraftedEntry("coverage/app.out", "file", "0644", 4, executionDigestOf("one\n")),
-		})
-		change(c)
-	}
-}
+// A retired Git-push result writer cannot answer the authenticated v3 sweep
+// probe or start a task. Production real-Git validators cover the individual
+// tree, path, byte-limit and missing-output faults at v3 Result admission.
+func TestExecutionRetiredSweepOutputWriterCannotClaim(t *testing.T) {
+	rig := newExecutionSweepRig(t, executionSweepScript, func(cfg *models.File) {
+		executionSweepOutputs(cfg)
+		cfg.Execution.Workers = cfg.Execution.Workers[:1]
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 5}
+	})
+	writer := newExecutionFakeWorker(t, rig.mailbox, executionNode,
+		func(*executionCraftedOutputs) {})
+	writer.serve()
+	defer writer.close()
 
-// TestExecutionRunOutputsCraftedRefusals: a node reporting a sweep set nobody
-// may merge is refused through the one validator every output set goes
-// through, with the rule's own word, and nothing of it reaches the
-// orchestrator's checkout.
-func TestExecutionRunOutputsCraftedRefusals(t *testing.T) {
-	for name, tc := range map[string]struct {
-		craft  func(*executionCraftedOutputs)
-		limits *models.ExecutionTransferConfig
-		reason string
-	}{
-		"a file the tree does not hold": {
-			craft: func(c *executionCraftedOutputs) {
-				c.manifest = c.manifest.set("entries", []any{
-					executionCraftedEntry("coverage/app.out", "file", "0644", 4, executionDigestOf("one\n")),
-					executionCraftedEntry("coverage/zz.out", "file", "0644", 4, executionDigestOf("one\n")),
-				}).set("files", 2).set("bytes", 8)
-			},
-			reason: "tree-missing"},
-		"a path leaving its root": {
-			craft: func(c *executionCraftedOutputs) {
-				c.manifest = c.manifest.set("entries", []any{
-					executionCraftedEntry("coverage/../../escape.out", "file", "0644", 4, executionDigestOf("one\n")),
-				})
-			},
-			reason: "path-escape"},
-		"a path under no declared root": {
-			craft: func(c *executionCraftedOutputs) {
-				c.entries = map[string]executionTreeFile{"reports/app.out": {mode: "100644", content: "one\n"}}
-				c.manifest = c.manifest.set("entries", []any{
-					executionCraftedEntry("reports/app.out", "file", "0644", 4, executionDigestOf("one\n")),
-				})
-			},
-			reason: "path-outside-root"},
-		"more bytes than the run allows": {
-			craft:  func(*executionCraftedOutputs) {},
-			limits: &models.ExecutionTransferConfig{MaxBytes: 2},
-			reason: "too-many-bytes"},
-		"a result describing no outputs at all": {
-			craft:  func(c *executionCraftedOutputs) { c.isOutputsOmitted = true },
-			reason: "bytes-missing"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			rig := newExecutionSweepRig(t, executionSweepScript, func(cfg *models.File) {
-				executionSweepOutputs(cfg)
-				cfg.Execution.Workers = cfg.Execution.Workers[:1]
-				cfg.Execution.Transfer = tc.limits
-			})
-			worker := newExecutionFakeWorker(t, rig.mailbox, executionNode, executionSweepCraft(tc.craft))
-			worker.serve()
-			defer worker.close()
-
-			res := rig.sweep(nil)
-
-			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			rejected, isRejected := executionLine(res, "outputs rejected")
-			require.True(t, isRejected, "stdout:\n%s", res.Stdout)
-			assert.Equal(t, tc.reason, rejected.Str("reason"))
-			assert.Equal(t, executionIntegrityCode, rejected.Code())
-			assert.NoDirExists(t, rig.repo.Path("coverage"), "nothing of the set was merged")
-		})
-	}
+	res := rig.sweep(nil)
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
+	assert.Empty(t, rig.runs(), "retired result transport cannot start a sweep task")
+	assert.NoDirExists(t, rig.repo.Path("coverage"), "no unverified output can be merged")
 }
 
 // TestExecutionRunSweepTaskTimesOutLikeABuild: a node that does not report a
-// sweep task within `timeouts.task` fails that task exactly as it fails a
-// build, the dependents are skipped, and the sweep leaves nothing behind.
+// sweep task within `timeouts.task` is stopped through signed Cancel, Ack and
+// terminal decision. Dependents are skipped and nothing is published.
 func TestExecutionRunSweepTaskTimesOutLikeABuild(t *testing.T) {
 	rig := newExecutionSweepRig(t, executionSweepScript+" && sleep 60", func(cfg *models.File) {
 		executionSweepPinnedToWorkers(cfg)
@@ -622,8 +563,10 @@ func TestExecutionRunSweepTaskTimesOutLikeABuild(t *testing.T) {
 	res := rig.sweep(nil)
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, "core"),
-		"the task that did not report is failed with the integrity code\nstdout:\n%s", res.Stdout)
+	requireChoreographyTaskChain(t, rig.mailbox, rig.branches(),
+		"choreography-claim", "cancel", "ack", "choreography-decision")
+	assert.Contains(t, diagnosticText(res), "stopped after signed cancellation",
+		"the timed-out task has an authenticated stop before finality")
 	assert.Equal(t, []string{"core"}, func() []string {
 		var ran []string
 		for name := range rig.nodesByPackage() {
@@ -769,7 +712,8 @@ func TestExecutionRunInterruptedSweepMergesNothing(t *testing.T) {
 		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 600, Cancel: 30}
 	})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
-	started := rig.repo.StartReleaseEnv(rig.env(), "run", "tests", "--since", "all")
+	started := rig.repo.StartReleaseEnv(rig.env(), "run", "tests", "--since", "all",
+		"--return-endpoint", rig.returnURL)
 
 	executionAwaitProbe(t, rig, executionNode)
 	started.Signal(syscall.SIGINT)
@@ -778,8 +722,8 @@ func TestExecutionRunInterruptedSweepMergesNothing(t *testing.T) {
 	assert.NotEqual(t, 0, res.Code, "an interrupted sweep exits non-zero")
 	_, isSkipped := executionLine(res, "run outputs not merged: the sweep was interrupted")
 	assert.True(t, isSkipped, "stdout:\n%s", res.Stdout)
-	_, isWithdrawn := executionLine(res, "attempt withdrawn")
-	assert.True(t, isWithdrawn, "the running task was withdrawn\nstdout:\n%s", res.Stdout)
+	requireChoreographyTaskChain(t, rig.mailbox, rig.branches(),
+		"choreography-claim", "cancel", "ack", "choreography-decision")
 	assert.NoDirExists(t, rig.repo.Path("coverage"), "nothing was merged")
 	stopAll(t, []*executionWorker{worker})
 }

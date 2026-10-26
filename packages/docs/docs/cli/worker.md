@@ -1,8 +1,9 @@
 # The worker command
 
-Run `dispat worker` on a machine that should accept build, test and other eligible prepublication stages from an
-orchestrator. It waits for work addressed to its node name, runs the assigned commands, and reports the results. The
-orchestrator plans the release, publishes and writes release records.
+Run `dispat worker` on a peer node that can execute build, test and other eligible prepublication stages.
+It reads the signed compiled graph, discovers ready tasks, and executes only after its authenticated claim is
+accepted. The orchestrator also executes ordinary work and alone pushes Git refs, publishes artifacts and writes
+release records.
 
 ```
 dispat worker [--state-dir <dir>] [--idle-timeout <seconds>]
@@ -20,7 +21,8 @@ worker runs in a checkout with a suitable release remote:
 |------------------------|--------------------------------------------------------------------------------------|
 | `execution.name`       | required: it is how this node recognises the work addressed to it                    |
 | `execution.secretEnv`  | required: it names the environment variable holding the secret every message is signed with |
-| `execution.endpoint`   | the repository this node reads that work from: the repository being released, or the mailbox the orchestrator's link names. Without it, the push URL of the release remote of the checkout the worker runs in |
+| `execution.identityKeyEnv` | for a late worker, names the environment variable holding its independent base64url Ed25519 private seed |
+| `execution.endpoint`   | the repository this node reads pinned Git inputs and coordination state from; without it, the release remote of the checkout it runs in |
 
 A worker started in a checkout of the repository being released needs no `execution.endpoint`: it reads its work from
 that checkout's release remote, `commit.remote` or `origin`, at the push URL Git resolves for it, which is where an
@@ -29,13 +31,12 @@ that is not a Git repository, a remote that is not configured or pushes to more 
 carries a credential or is otherwise no endpoint are refused with `E225`, naming both remedies: state
 `execution.endpoint`, or start the worker in a checkout of that repository.
 
-`execution.concurrency` (default `1`) is how many assigned command tasks this node takes on at once, counted across
+`execution.concurrency` (default `1`) is how many claimed command tasks this node takes on at once, counted across
 every run that reaches it. `execution.transfer` is what this node accepts as one task's build outputs; a run whose
 own ceilings are higher than a node's is refused before it dispatches anything.
 
 ```yaml title="dispat.worker.yaml"
 execution:
-  role: worker
   name: build-a
   endpoint: git@github.com:acme/project.git
   secretEnv: DISPAT_EXECUTION_SECRET
@@ -44,9 +45,17 @@ execution:
 logFormat: json
 ```
 
-A worker configuration does not need spaces, packages, or release policy. Each assignment supplies the commands,
-environment variable names, and exact source revision. When `execution.endpoint` is set, the worker can start outside
-a Git repository and fetch the source it needs.
+For a late worker, also set `execution.identityKeyEnv: DISPAT_WORKER_JOIN_SEED` and provide that environment
+variable from its secret store. It holds the canonical unpadded base64url encoding of a 32-byte Ed25519 private
+seed; the orchestrator pins the matching `workers[].identityPublicKey`. The private seed never goes in the
+configuration or logs. The shared message secret alone cannot authorize a late join.
+
+A worker configuration does not need a separate release policy. The signed graph binds commands
+and exact inputs; the worker verifies its root and each eligible task before claiming. When `execution.endpoint` is set,
+the worker can start outside a Git checkout. The orchestrator advertises its HTTPS return URL and exact
+TLS leaf SHA-256 in signed per-run bootstrap data; the peer needs no independent return URL setting.
+The worker sends signed claim and result requests through that authenticated non-Git channel. It may read
+Git objects, but only the orchestrator can push coordination, lock or release refs.
 
 Set the signing secret and any credentials or variables the assigned commands need. Environment values are expanded
 on the worker, using its own environment:
@@ -79,7 +88,7 @@ it has been rewritten.
 **One process per node.** Two workers cannot share a node name and state directory. `worker.lock` records the serving
 process ID and is removed on shutdown. A restarted worker can recover a stale lock, including one with its own reused
 process ID, as commonly happens in containers. A new claim settles for one second to resolve simultaneous starts.
-The worker checks the lock before every assignment and stops if another process has taken it.
+The worker checks its own state lock before every claim and stops if another process has taken it.
 
 ### `--idle-timeout`
 
@@ -121,8 +130,8 @@ bare invocation, `commit`, `github`, `changelog`, `autoversion`, `compute` and `
 Everything a build script legitimately calls stays available, including `exec`, `if`, `for`, `install`, `scanner`,
 `writer`, `replacer`, `autowriter` and `trigger`, so a stage script behaves the same wherever it was placed.
 
-A node with `execution.role: orchestrator` may run this command. While it serves a task it has that task's authority
-and never consults its own worker list.
+This command serves tasks and does not initiate a release. While it executes a task it has that task's authority;
+the static configuration has no node-role key.
 
 ## Examples
 

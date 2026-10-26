@@ -337,7 +337,8 @@ func (a *App) consumeReceipts(ctx context.Context, remote string, rels []*plan.R
 //     plan is computed again from that record.
 //   - A receipt on a commit the head does not reach cannot affect this plan
 //     and is left alone.
-func (a *App) settleReceipts(ctx context.Context, opts ReleaseOptions, pl *plan.Plan) (*plan.Plan, error) {
+func (a *App) settleReceipts(ctx context.Context, opts ReleaseOptions, pl *plan.Plan,
+	replan func(context.Context, ReleaseOptions) (*plan.Plan, error)) (*plan.Plan, error) {
 	if !a.isRecordPushing() {
 		return pl, nil
 	}
@@ -364,7 +365,7 @@ func (a *App) settleReceipts(ctx context.Context, opts ReleaseOptions, pl *plan.
 		if err != nil {
 			return nil, err
 		}
-		pl, err = a.selectedPlan(ctx, opts)
+		pl, err = replan(ctx, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -378,7 +379,7 @@ func (a *App) settleReceipts(ctx context.Context, opts ReleaseOptions, pl *plan.
 		if !isReplanned {
 			return pl, nil
 		}
-		if pl, err = a.selectedPlan(ctx, opts); err != nil {
+		if pl, err = replan(ctx, opts); err != nil {
 			return nil, err
 		}
 	}

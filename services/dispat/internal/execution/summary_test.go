@@ -24,6 +24,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTaskRecordsResolveSweepMergeFailureByCanonicalTaskKind(t *testing.T) {
+	coordinator := &Coordinator{sweepOutputs: newSweepOutputs(), taskRecords: []TaskRecord{
+		{Package: "core", Stage: "run:tests", Task: "core:run", Outputs: OutputsNone},
+		{Package: "core", Stage: "run:tests", Task: "core:custom", Outputs: OutputsAdmitted},
+	}}
+	coordinator.sweepOutputs.reject("core:run")
+
+	records := coordinator.TaskRecords()
+
+	require.Len(t, records, 2)
+	assert.Equal(t, OutputsRejected, records[0].Outputs,
+		"a deferred sweep merge refusal reaches the published task summary")
+	assert.Equal(t, OutputsAdmitted, records[1].Outputs,
+		"a custom release stage with the same display name is not a sweep task")
+}
+
 // TestTheSummaryFollowsThePlanAndNotTheClock: the lines are sorted by the
 // plan's package order and, inside one package, by the order a release
 // performs its stages. The records are handed in backwards on purpose.

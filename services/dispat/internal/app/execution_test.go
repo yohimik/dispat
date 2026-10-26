@@ -155,11 +155,11 @@ func TestCheckExecutionEntryRefusals(t *testing.T) {
 		want        string
 	}{
 		"no execution settings at all": {},
-		"an orchestrator with no workers": {
-			execution: &public.ExecutionConfig{Role: public.ExecutionRoleOrchestrator},
+		"a node with no worker links": {
+			execution: &public.ExecutionConfig{},
 		},
 		"a node with no workers releasing without the lock": {
-			execution: &public.ExecutionConfig{Role: public.ExecutionRoleOrchestrator},
+			execution: &public.ExecutionConfig{},
 			bypass:    true,
 		},
 		"a task running under worker authority": {
@@ -172,17 +172,6 @@ func TestCheckExecutionEntryRefusals(t *testing.T) {
 			authority: "worker",
 			code:      execution.CodeAuthority, category: execution.CategoryAuthority,
 			want: "worker authority",
-		},
-		"a worker node": {
-			execution: &public.ExecutionConfig{Role: public.ExecutionRoleWorker},
-			code:      execution.CodeAuthority, category: execution.CategoryAuthority,
-			want: "execution.role is \"worker\"",
-		},
-		"a worker node whose authority says nothing": {
-			execution: &public.ExecutionConfig{Role: public.ExecutionRoleWorker},
-			authority: "orchestrator",
-			code:      execution.CodeAuthority, category: execution.CategoryAuthority,
-			want: "execution.role is \"worker\"",
 		},
 		"workers and the configured bypass": {
 			execution: executionWorkers(),
@@ -295,7 +284,7 @@ func TestCheckExecutionEntryReportsIgnoredPeerSettings(t *testing.T) {
 	a, logs := executionEntry(t, entry)
 	a.workspace = &config.Workspace{Repositories: []config.Repository{
 		{Name: "control", Config: entry, Entry: true},
-		{Name: "sdk", Config: &config.File{Execution: &public.ExecutionConfig{Role: public.ExecutionRoleWorker}}},
+		{Name: "sdk", Config: &config.File{Execution: &public.ExecutionConfig{Name: "sdk"}}},
 		{Name: "ui", Config: entry},
 		{Name: "web", Config: &config.File{}},
 		{Name: "docs"},
@@ -327,9 +316,6 @@ func TestCheckExecutionEntryRefusesASweepByTheSameRules(t *testing.T) {
 		"a task under worker authority": {
 			execution: executionWorkers(), authority: "worker",
 			want: "cannot start a sweep", code: execution.CodeAuthority},
-		"a worker node": {
-			execution: &public.ExecutionConfig{Role: public.ExecutionRoleWorker},
-			want:      "a worker cannot start a sweep", code: execution.CodeAuthority},
 		"workers and the configured bypass": {
 			execution: executionWorkers(), bypass: true,
 			want: "none to dispatch a sweep through", code: execution.CodeConfiguration},
@@ -397,8 +383,8 @@ func TestWorkerLinksReachTheReleaseRemoteByDefault(t *testing.T) {
 	origin := t.TempDir()
 	recordGit(t, origin, "init", "-q", "--bare")
 	a, logs := linkedEntry(t, origin,
-		public.ExecutionWorkerConfig{Name: "build-a"},
-		public.ExecutionWorkerConfig{Name: "build-b", Endpoint: "/srv/mailboxes/b.git"})
+		public.ExecutionWorkerConfig{Name: "build-a", LateJoin: true},
+		public.ExecutionWorkerConfig{Name: "build-b", Endpoint: origin})
 
 	require.NoError(t, a.checkExecutionEntry(t.Context(), runRelease))
 
@@ -406,8 +392,8 @@ func TestWorkerLinksReachTheReleaseRemoteByDefault(t *testing.T) {
 	links, err := a.formatWorkerLinks(a.coordination)
 	require.NoError(t, err)
 	assert.Equal(t, []execution.Link{
-		{Name: "build-a", Endpoint: origin},
-		{Name: "build-b", Endpoint: "/srv/mailboxes/b.git"},
+		{Name: "build-a", Endpoint: origin, LateJoin: true},
+		{Name: "build-b", Endpoint: origin},
 	}, links)
 	assert.Equal(t, 1, strings.Count(logs.String(), "worker link reaches the release remote"),
 		"one line per link that states no endpoint")

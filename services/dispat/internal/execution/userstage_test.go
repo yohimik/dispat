@@ -38,7 +38,7 @@ func TestAUserStageTravelsUnderTheGenericKind(t *testing.T) {
 		Pkg: &model.Package{Name: "core", Space: &model.Space{BuildOutputs: []string{"dist"}}},
 	}}
 	assert.Equal(t, KindStage, resolveStageKind(request.Descriptor))
-	assert.Nil(t, resolveDeclaredOutputs(KindStage, request))
+	assert.Nil(t, resolveDeclaredOutputs(request))
 	assert.Equal(t, "scanImages", resolveAssignmentStage(KindStage, request))
 
 	assignment := Assignment{Header: Header{Kind: KindStage}, Stage: "scanImages"}

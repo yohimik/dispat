@@ -3,15 +3,13 @@
 
 package integration
 
-// Goal 57: losing a finished Result's Git lease to a foreign withdrawal must
-// not make a real worker acknowledge that party's cancellation.
+// Goal 57: a foreign Cancel on the canonical task ref must not make a real
+// v3 worker acknowledge that party while its finished Result waits.
 
 import (
 	"encoding/json"
-	"os"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -19,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/pkg/models"
+	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
 type foreignWithdrawalCase struct {
@@ -49,40 +48,46 @@ func runWorkerForeignWithdrawalAfterResultLeaseLoss(t *testing.T, scenario forei
 		cfg.LogLevel = "debug"
 		cfg.Scripts["build"] = models.Script{executionRecordingScript}
 		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
-		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 45, Cancel: 5}
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 10, Task: 4, Cancel: 5}
 	})
-	barrier := newTerminalLeaseRendezvous(t)
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 20, barrier.env...)
-	isWorkerDone := false
-	release := rig.repo.StartReleaseEnv(rig.env(), "release")
-	isReleaseDone := false
-	t.Cleanup(func() {
-		_ = os.WriteFile(barrier.proceed, nil, 0o600)
-		if !isReleaseDone {
-			release.Signal(syscall.SIGINT)
-			_ = release.Wait()
+	pushReject, resultGate := harness.NewGitFaultChain(t,
+		harness.GitFault{Pattern: "*push*", Code: 128},
+		harness.GitFault{Pattern: "*commit-tree*dispat transport result*", Nth: 1, Hold: true})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60, pushReject.Env()...)
+	defer resultGate.Resume()
+	release := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
+	for until := time.After(25 * time.Second); !resultGate.IsHeld(); {
+		select {
+		case <-until:
+			resultGate.Resume()
+			res := release.Wait()
+			t.Fatalf("the finished Result was not held; matches=%d stdout:\n%s\nstderr:\n%s",
+				resultGate.Matches(), res.Stdout, res.Stderr)
+		case <-time.After(25 * time.Millisecond):
 		}
-		if !isWorkerDone {
-			worker.proc.Signal(syscall.SIGINT)
-			_ = worker.proc.Wait()
-		}
-	})
-
-	require.True(t, waitForExecutionFile(barrier.entered, 30*time.Second),
-		"the worker did not reach its Result push; trace: %s", readExecutionFile(barrier.trace))
+	}
 	branch := executionAwaitBranch(t, rig, "build")
-	require.Equal(t, []string{"reservation", "assignment", "claim"}, executionChain(t, rig.mailbox, branch))
-	assignment := executionMessage(t, rig.mailbox, branch+"^", "assignment")
-	claim := executionMessage(t, rig.mailbox, branch, "claim")
-	offered, ok := claim["assignment"].(string)
+	chain := executionChain(t, rig.mailbox, branch)
+	require.Contains(t, chain, "choreography-claim")
+	require.NotContains(t, chain, "choreography-result")
+	assignment := executionTaskAssignment(t, rig.mailbox, branch)
+	require.NotNil(t, assignment)
+	claim := executionMessage(t, rig.mailbox, branch, "choreography-claim")
+	offered, ok := claim["expectedOid"].(string)
 	require.True(t, ok)
 	claimed := executionTipOID(t, rig.mailbox, branch)
 	writer := newExecutionFakeOrchestrator(t, rig.mailbox)
-	foreignDocument := executionOrderedJSON{}.with(executionReplyHeader(assignment, executionNode)...).with(
+	foreignDocument := executionOrderedJSON{}.with(
+		executionField{"protocol", 3}, executionField{"kind", assignment["kind"]},
+		executionField{"run", assignment["run"]}, executionField{"planDigest", assignment["planDigest"]},
+		executionField{"task", assignment["task"]}, executionField{"attempt", assignment["attempt"]},
+		executionField{"generation", assignment["generation"]},
+		executionField{"node", assignment["node"]}, executionField{"branch", assignment["branch"]},
+		executionField{"issuedAt", time.Now().UTC().Format(time.RFC3339)},
 		executionField{"assignment", offered}, executionField{"tip", claimed},
 	).set("run", strings.Repeat("a", 32))
 	if scenario.isWrongProtocol {
-		foreignDocument = foreignDocument.set("run", assignment["run"]).set("protocol", executionProtocolVersion+1)
+		foreignDocument = foreignDocument.set("run", assignment["run"]).set("protocol", 4)
 	}
 	foreignBytes, err := json.Marshal(foreignDocument)
 	require.NoError(t, err)
@@ -92,24 +97,21 @@ func runWorkerForeignWithdrawalAfterResultLeaseLoss(t *testing.T, scenario forei
 	foreign := writer.commit(executionMessageOptions{secret: executionSecret, kind: "cancel", isSigned: true},
 		foreignBytes, claimed)
 	bareGit(t, rig.mailbox, "update-ref", "refs/heads/"+branch, foreign)
-	require.NoError(t, os.WriteFile(barrier.proceed, nil, 0o600))
-	release.Signal(syscall.SIGINT)
+	time.Sleep(time.Second)
+	resultGate.Resume()
 	res := release.Wait()
-	isReleaseDone = true
 	served := worker.stop(t)
-	isWorkerDone = true
 
 	require.NotEqual(t, 0, res.Code, "a foreign withdrawal cannot complete the release\nstdout:\n%s", res.Stdout)
 	assert.Equal(t, foreign, executionTipOID(t, rig.mailbox, branch),
 		"the worker and release leave the foreign tip for investigation")
-	assert.Equal(t, []string{"refs/heads/" + branch}, rig.branches())
+	assert.Contains(t, rig.branches(), "refs/heads/"+branch)
 	assert.NotContains(t, served.Stdout, `"message":"cancellation acknowledged"`,
 		"the worker did not acknowledge somebody else's cancellation")
-	assert.Contains(t, served.Stdout, `"message":"the task result could not be reported"`,
-		"the worker must observe the rejected Result lease before this check is meaningful")
 	assert.Contains(t, executionRejections(served), scenario.reason,
 		"the worker names why the signed withdrawal cannot settle this attempt")
 	assert.NotContains(t, executionChain(t, rig.mailbox, branch), "ack")
 	assert.Empty(t, executionReleaseTags(rig))
 	assert.Len(t, rig.runs(), 1, "the build finished once before its report lost the lease")
+	assert.Zero(t, pushReject.Matches(), "a peer attempted an engine Git push")
 }

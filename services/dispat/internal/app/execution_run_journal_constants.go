@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
+package app
+
+const (
+	firstRunJournalAbsentIdentityText                     = ""
+	firstRunJournalActiveLocatorFileName                  = "active-run"
+	firstRunJournalActiveLocatorReadBytes                 = 33
+	firstRunJournalActiveLocatorUnreadableErrorFormat     = "execution: active first-node locator is unreadable: %w"
+	firstRunJournalApplicationDirectoryName               = "dispat"
+	firstRunJournalBootstrapAlreadyPreparedErrorText      = "execution: choreography bootstrap identity was already prepared or is incomplete"
+	firstRunJournalBranchRefPrefixText                    = "refs/heads/"
+	firstRunJournalCertificateChainLengthErrorFormat      = "execution: first-node return certificate has %d leaves, expected one"
+	firstRunJournalCertificateEndpointMismatchErrorText   = "execution: first-node return certificate is not valid for its endpoint"
+	firstRunJournalCertificateInvalidErrorFormat          = "execution: invalid first-node return certificate: %w"
+	firstRunJournalCertificateLeafAbsentErrorText         = "execution: first-node certificate has no single leaf"
+	firstRunJournalCertificatePEMType                     = "CERTIFICATE"
+	firstRunJournalCertificateParseErrorFormat            = "execution: first-node return certificate cannot be parsed: %w"
+	firstRunJournalCertificatePinMismatchErrorText        = "execution: first-node return certificate pin differs from journal"
+	firstRunJournalCertificateValidityErrorText           = "execution: first-node return certificate is outside its validity period"
+	firstRunJournalCheckoutAlreadyOwnedErrorFormat        = "execution: first-node run already has an owner in this checkout: %w"
+	firstRunJournalCheckoutLockFileName                   = "first-node.lock"
+	firstRunJournalDeferredTagAlreadyExpectedErrorFormat  = "execution: deferred release tag %q was already expected"
+	firstRunJournalDeferredTagIntentInvalidErrorFormat    = "execution: deferred release tag %q has an invalid pre-tag intent"
+	firstRunJournalDeferredTagIntentSetMismatchErrorText  = "execution: deferred release tag intent set differs from settled tasks"
+	firstRunJournalDeferredTagLedgerAbsentErrorFormat     = "execution: deferred release tag %q has no retained ledger root"
+	firstRunJournalDeferredTagMalformedErrorFormat        = "execution: malformed deferred release tag intent %q"
+	firstRunJournalDeferredTagObjectChangedErrorFormat    = "execution: deferred release tag %q changed its protected object"
+	firstRunJournalDeferredTagObjectSlotAbsentErrorFormat = "execution: deferred release tag %q has no prepared object slot"
+	firstRunJournalDirectoryNotDurableErrorFormat         = "execution: first-node journal directory is not durable: %w"
+	firstRunJournalDirectoryNotPrivateErrorFormat         = "execution: private run directory %s is not owner-only"
+	firstRunJournalGateRetainedState                      = true
+	firstRunJournalGateUnretainedState                    = false
+	firstRunJournalIdentityFileName                       = "identity.json"
+	firstRunJournalIdentityLimitErrorText                 = "execution: first-node identity exceeds its bound"
+	firstRunJournalIdentityMalformedErrorText             = "execution: malformed first-node identity"
+	firstRunJournalIdentityMismatchErrorText              = "execution: mismatched first-node run identity"
+	firstRunJournalIdentityNoLongerReadableErrorFormat    = "execution: first-node identity is no longer readable: %w"
+	firstRunJournalIdentityReadLimitErrorText             = "execution: first-node identity exceeds its read bound"
+	firstRunJournalIdentityUnreadableErrorFormat          = "execution: first-node identity is unreadable: %w"
+	firstRunJournalInvalidActiveLocatorErrorText          = "execution: invalid active first-node locator"
+	firstRunJournalInvalidIdentityState                   = false
+	firstRunJournalInvalidPrivateIdentityErrorText        = "execution: invalid private run identity"
+	firstRunJournalJournalAbsentErrorText                 = "execution: first-node journal is absent"
+	firstRunJournalJournalOwnerAbsentErrorText            = "execution: first-node journal has no owner"
+	firstRunJournalLeafCertificateIndex                   = 0
+	firstRunJournalLedgerAlreadyPreparedErrorText         = "execution: choreography ledger identity was already prepared or is incomplete"
+	firstRunJournalListenAddressMalformedErrorText        = "execution: malformed first-node return listen address"
+	firstRunJournalLockMetadataUnavailableErrorFormat     = "first-node lock metadata is unavailable: %w"
+	firstRunJournalMaximumIdentityBytes                   = 128 << 10
+	firstRunJournalNoDeferredTagsCount                    = 0
+	firstRunJournalNoPermissionBits                       = 0
+	firstRunJournalOtherUsersPermissionMask               = 0o077
+	firstRunJournalOwnerLockFileName                      = "owner.lock"
+	firstRunJournalPreparedLockMalformedErrorText         = "execution: malformed prepared release lock identity"
+	firstRunJournalPriorRunUnreconciledErrorFormat        = "execution: prior first-node run %s still needs reconciliation"
+	firstRunJournalPrivateDirectoryMode                   = 0o700
+	firstRunJournalPrivateFileMode                        = 0o600
+	firstRunJournalPrivateKeyPEMType                      = "PRIVATE KEY"
+	firstRunJournalReadProbeBytes                         = 1
+	firstRunJournalReleaseLockAlreadyPreparedErrorFormat  = "execution: release lock attempt for repository %q was already prepared"
+	firstRunJournalReleaseLockIncompleteErrorText         = "execution: incomplete release lock attempt"
+	firstRunJournalReturnIdentityIncompleteErrorText      = "execution: incomplete first-node return identity"
+	firstRunJournalReturnSchemeName                       = "https"
+	firstRunJournalRunAlreadyOwnedErrorFormat             = "execution: first-node run %s already has an owner: %w"
+	firstRunJournalRunIDHexCharacters                     = 32
+	firstRunJournalRunIdentityMalformedErrorText          = "execution: malformed first-node run identity"
+	firstRunJournalRunLocatorChangedErrorText             = "execution: first-node run locator changed"
+	firstRunJournalRunsDirectoryName                      = "return-runs"
+	firstRunJournalSHA1HexCharacters                      = 40
+	firstRunJournalSHA256HexCharacters                    = 64
+	firstRunJournalSingleLeafCount                        = 1
+	firstRunJournalUnsafeActiveLocatorErrorText           = "execution: unsafe active first-node locator"
+	firstRunJournalUnsafeIdentityFileErrorText            = "execution: unsafe first-node identity file"
+	firstRunJournalUnsafeLockFileErrorText                = "unsafe first-node lock file"
+	firstRunJournalWindowsDurabilityUnavailableErrorText  = "durable first-node journal is unavailable on Windows"
+	firstRunJournalWindowsLockBytes                       = 1
+	firstRunJournalWindowsLockHighBytes                   = 0
+	firstRunJournalWindowsLockReservedValue               = 0
+)

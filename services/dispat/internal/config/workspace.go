@@ -358,6 +358,59 @@ func newWorkspace(controlRoot string, repositories []Repository, modules []submo
 	return &Workspace{ControlRoot: controlRoot, Repositories: repositories, modules: modules}
 }
 
+// MaterializedRoots gives one planning pass the same repository identities
+// over private checkout paths. It does not recompose links or change ownership;
+// the caller has already authenticated the pinned repository roster.
+func (w *Workspace) MaterializedRoots(roots map[string]string) (*Workspace, error) {
+	if w == nil {
+		return nil, nil
+	}
+	if len(roots) != len(w.Repositories) {
+		return nil, fmt.Errorf(materializedWorkspaceIncompleteRosterErrorText)
+	}
+	copy := Workspace{
+		ControlRoot:      materializedWorkspaceAbsentPath,
+		Repositories:     append([]Repository(nil), w.Repositories...),
+		Findings:         w.Findings,
+		modules:          w.modules,
+		inheritedPins:    w.inheritedPins,
+		disabled:         w.disabled,
+		excludedPackages: w.excludedPackages,
+		excludedSpaces:   w.excludedSpaces,
+	}
+	for i := range copy.Repositories {
+		repository := &copy.Repositories[i]
+		root := roots[repository.Name]
+		if root == materializedWorkspaceAbsentPath || !filepath.IsAbs(root) {
+			return nil, fmt.Errorf(materializedWorkspaceMissingRepositoryErrorFormat, repository.Name)
+		}
+		if repository.ConfigPath != materializedWorkspaceAbsentPath {
+			configPath, err := canonicalFile(repository.ConfigPath)
+			if err != nil {
+				return nil, fmt.Errorf(materializedConfigResolutionErrorFormat, repository.Name, err)
+			}
+			originalRoot, err := filepath.EvalSymlinks(repository.Root)
+			if err != nil {
+				return nil, fmt.Errorf(materializedRepositoryResolutionErrorFormat, repository.Name, err)
+			}
+			relative, err := filepath.Rel(originalRoot, configPath)
+			if err != nil || relative == materializedWorkspaceParentPath || strings.HasPrefix(relative, materializedWorkspaceParentPath+string(filepath.Separator)) {
+				return nil, fmt.Errorf(materializedConfigEscapesRepositoryErrorFormat,
+					repository.ConfigPath, repository.Name, repository.Root)
+			}
+			repository.ConfigPath = filepath.Join(root, relative)
+		}
+		if repository.Root == w.ControlRoot {
+			copy.ControlRoot = root
+		}
+		repository.Root = root
+	}
+	if copy.ControlRoot == materializedWorkspaceAbsentPath {
+		return nil, fmt.Errorf(materializedWorkspaceMissingControlErrorText)
+	}
+	return &copy, nil
+}
+
 // workspaceIndex is the lookup a workspace answers its repository questions
 // from: by exact name, by folded name, by root, and the source repositories in
 // root order. It is built once, on the first question, from the repositories

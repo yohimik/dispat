@@ -230,6 +230,17 @@ func (f *GitFault) IsHeld() bool {
 	return err == nil
 }
 
+// HeldPID names the waiting wrapper process so a crash test can kill it
+// without resuming a remote write after the parent process has died.
+func (f *GitFault) HeldPID() int {
+	f.t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.dir, "held-pid"))
+	require.NoError(f.t, err)
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	require.NoError(f.t, err)
+	return pid
+}
+
 // Resume lets every held invocation run the real command, and every later
 // selected invocation run without waiting.
 func (f *GitFault) Resume() {
@@ -288,6 +299,7 @@ $DISPAT_IT_GIT_FAULT_PATTERN)
 	fi
 	if [ "$selected" -eq 1 ]; then
 		if [ "$DISPAT_IT_GIT_FAULT_HOLD" -eq 1 ]; then
+			printf '%s\n' "$$" > "$DISPAT_IT_GIT_FAULT_HOLD_DIR/held-pid"
 			: > "$DISPAT_IT_GIT_FAULT_HOLD_DIR/held"
 			while [ ! -f "$DISPAT_IT_GIT_FAULT_HOLD_DIR/resumed" ]; do
 				sleep 0.1

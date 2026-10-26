@@ -10,7 +10,7 @@ package execution
 
 import (
 	"context"
-	"encoding/json"
+	"io"
 	"testing"
 	"time"
 
@@ -70,16 +70,32 @@ func TestPreflightContainsAPanicToItsNode(t *testing.T) {
 }
 
 // TestWorkerContainsAPanicToItsTask: a task that panics before its command
-// started reports a failure, and one that panics after reports nothing,
-// leaving the run's own unknown-outcome path to decide.
+// started returns a failure to the first node, and one that panics after
+// starting reports nothing so the first node settles the unknown attempt.
 func TestWorkerContainsAPanicToItsTask(t *testing.T) {
 	for name, isStarted := range map[string]bool{"before its command": false, "after its command": true} {
 		t.Run(name, func(t *testing.T) {
-			branch := "dispat-worker-build-a-20260921-publish-abc"
+			branch := "dispat-task-run-1-build-abc"
 			tip := ChainTip{Branch: branch, OID: "assignment-oid", Kind: MessageAssignment}
 			message := validProbe(branch)
-			message.Kind = KindPublish
+			message.Kind, message.Task = KindBuild, "pkg:build"
+			message.Limits.MaxPackBytes = 1 << 20
 			worker, mailbox := newWorkerFixture(t, branch, tip, message)
+			fixture := newMailboxFixture(t)
+			worker.Cache, worker.ReturnSigner = fixture.git, fixture.signer
+			worker.Report.Limits.MaxPackBytes = 1 << 20
+			binding := ChoreographyRunBinding{Run: message.Run, Generation: message.Generation,
+				PlanDigest: message.PlanDigest, GraphDigest: "graph"}
+			returned := 0
+			fake := &fakeWorkerReturn{result: func(p ChoreographyResultProposal,
+				_ io.ReadSeeker) (ChoreographyReceipt, error) {
+				returned++
+				query, err := FormatResultReceiptQuery(p)
+				require.NoError(t, err)
+				return testReturnReceipt(choreographyResultKind, binding, p.Task, p.Attempt,
+					p.Node, p.Branch, p.ProposalID, query.ProposalDigest, "first-result-oid"), nil
+			}}
+			worker.returnChannels = map[string]*workerReturnChannel{message.Run: {binding: binding, client: fake}}
 			task := &claimedTask{assignment: message, tip: tip, claimed: "claim-oid", expectedTip: "go-oid"}
 			task.reportPhase(release.PartCommands, isStarted)
 
@@ -92,12 +108,12 @@ func TestWorkerContainsAPanicToItsTask(t *testing.T) {
 
 			if isStarted {
 				assert.Empty(t, mailbox.written, "a started command's outcome is not this node's to state")
+				assert.Zero(t, returned)
 				return
 			}
-			require.Equal(t, []MessageKind{MessageResult}, mailbox.written)
-			var result Result
-			require.NoError(t, json.Unmarshal(mailbox.documents[branch+"/result"], &result))
-			assert.Equal(t, StatusFailed, result.Status)
+			assert.Empty(t, mailbox.written, "the peer does not push its failed result")
+			assert.Equal(t, 1, returned)
+			assert.Empty(t, fixture.remoteBranches(t))
 		})
 	}
 }

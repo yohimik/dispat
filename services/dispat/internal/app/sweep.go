@@ -2,11 +2,16 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"sync"
+	"time"
 
+	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/graph"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 // The package sweep: the one graph-ordered execution every command that covers
@@ -50,6 +55,17 @@ type sweepOptions struct {
 	// serial sweep, which is what the commands writing one shared resource —
 	// the git index, a lock file — need.
 	Budget int
+	// LocalSlots applies only to an explicitly capacity-limited, no-link
+	// command run. Distributed tasks use the signed broker and node slots.
+	LocalSlots *execution.NodeSlotAuthority
+	LocalRun   string
+	SlotWait   time.Duration
+	// TaskOutcomeSettled is the first-node v3 finality gate for a command
+	// whose signed Result was admitted by the coordinator. It runs after the
+	// command returns but before this package discharges its dependency edge.
+	TaskOutcomeSettled func(context.Context, string, release.PackageOutcome) error
+	// TaskBlocked persists a no-claim skip before its successor edges fire.
+	TaskBlocked func(context.Context, string, string) error
 }
 
 // sweepReport is what one sweep did, in counts. Resolved is independent of the
@@ -76,13 +92,20 @@ type outcome struct {
 // per-package outcomes (mu guards results; everything else is read-only once
 // built) and the work being swept.
 type sweep struct {
-	app     *App
-	pl      *plan.Plan
-	work    packageWork
-	onError string
-	covered map[string]*plan.Release
-	results map[string]*outcome
-	mu      sync.Mutex
+	app                *App
+	pl                 *plan.Plan
+	work               packageWork
+	onError            string
+	covered            map[string]*plan.Release
+	results            map[string]*outcome
+	mu                 sync.Mutex
+	localSlots         *execution.NodeSlotAuthority
+	localRun           string
+	slotWait           time.Duration
+	taskOutcomeSettled func(context.Context, string, release.PackageOutcome) error
+	taskBlocked        func(context.Context, string, string) error
+	stopSettlement     func(error)
+	settlementErr      error
 }
 
 // runSweep executes work over the covered packages, honouring the dependency
@@ -102,8 +125,17 @@ func (a *App) runSweep(ctx context.Context, pl *plan.Plan, covered []string,
 	}
 	s := &sweep{
 		app: a, pl: pl, work: work, onError: onError,
-		covered: coveredReleases(pl, covered),
-		results: make(map[string]*outcome, len(covered)),
+		covered:    coveredReleases(pl, covered),
+		results:    make(map[string]*outcome, len(covered)),
+		localSlots: opts.LocalSlots, localRun: opts.LocalRun, slotWait: opts.SlotWait,
+		taskOutcomeSettled: opts.TaskOutcomeSettled,
+		taskBlocked:        opts.TaskBlocked,
+	}
+	if s.taskOutcomeSettled != nil || s.taskBlocked != nil {
+		var stop context.CancelCauseFunc
+		ctx, stop = context.WithCancelCause(ctx)
+		defer stop(nil)
+		s.stopSettlement = stop
 	}
 
 	// The task graph: one node per covered package, edges from every covered
@@ -150,6 +182,9 @@ func (a *App) runSweep(ctx context.Context, pl *plan.Plan, covered []string,
 		},
 		func(pkg string) { s.execute(ctx, pkg) })
 
+	if s.settlementErr != nil {
+		return s.report(), s.settlementErr
+	}
 	return s.report(), drainErr
 }
 
@@ -264,6 +299,16 @@ func (s *sweep) execute(ctx context.Context, pkg string) {
 		blocker := s.blocker(pkg)
 		s.mu.Unlock()
 		if blocker != "" {
+			if t != nil && s.taskBlocked != nil {
+				settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), release.RecordTimeout)
+				settleErr := s.taskBlocked(settleCtx, pkg, blocker)
+				cancel()
+				if settleErr != nil {
+					s.recordSettlementError(pkg, settleErr)
+					res.failed = true
+					return
+				}
+			}
 			res.skipped, res.blockedBy = true, blocker
 			log.Warn().Str("blockedBy", blocker).
 				Msg("package skipped: a dependency failed or was skipped")
@@ -274,7 +319,46 @@ func (s *sweep) execute(ctx context.Context, pkg string) {
 	if t == nil {
 		return // the work said its piece while resolving
 	}
-	if err := t(ctx); err != nil {
+	var slot execution.NodeSlotLease
+	if s.localSlots != nil {
+		var slotErr error
+		slot, slotErr = waitLocalSweepSlot(ctx, s.localSlots, execution.NodeSlotIntent{
+			Run: s.localRun, Task: pkg + ":" + s.work.stage(), Attempt: 1,
+			Weight: s.pl.Releases[pkg].Pkg.BuildWeight,
+		}, s.slotWait)
+		if slotErr != nil {
+			res.failed = true
+			annotateError(log.Error().Err(slotErr), slotErr).Msg("package could not take local node capacity")
+			return
+		}
+	}
+	runErr := t(ctx)
+	if s.localSlots != nil {
+		status := "succeeded"
+		if runErr != nil {
+			status = "failed"
+		}
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		settleErr := s.localSlots.ReleaseLocalSettled(settleCtx, slot.ID,
+			execution.NodeSlotLocalCompletion{Run: s.localRun,
+				Task: pkg + ":" + s.work.stage(), Attempt: 1, Status: status})
+		cancel()
+		runErr = errors.Join(runErr, settleErr)
+	}
+	if s.taskOutcomeSettled != nil {
+		status := release.PackageOutcome("")
+		if runErr != nil {
+			status = release.OutcomeFailed
+		}
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), release.RecordTimeout)
+		settleErr := s.taskOutcomeSettled(settleCtx, pkg, status)
+		cancel()
+		if settleErr != nil {
+			s.recordSettlementError(pkg, settleErr)
+		}
+		runErr = errors.Join(runErr, settleErr)
+	}
+	if err := runErr; err != nil {
 		res.failed = true
 		// A failure that names itself says so on the line: a script that
 		// exited non-zero carries nothing and is logged as it always was, and
@@ -283,4 +367,13 @@ func (s *sweep) execute(ctx context.Context, pkg string) {
 		return
 	}
 	res.ran = true
+}
+
+func (s *sweep) recordSettlementError(pkg string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.settlementErr == nil {
+		s.settlementErr = fmt.Errorf("execution: settling signed sweep task %s: %w", pkg, err)
+		s.stopSettlement(s.settlementErr)
+	}
 }

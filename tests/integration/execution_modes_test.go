@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -64,9 +65,11 @@ var executionModePackages = []string{executionModeProvider, executionModeConsume
 // owns the package, and a node has to reproduce the same relative layout, so
 // the test has to know that layout as well as the run does.
 type executionModeFleet struct {
-	t       *testing.T
-	entry   *harness.Repo
-	mailbox string
+	t         *testing.T
+	entry     *harness.Repo
+	mailbox   string
+	returnURL string
+	homeState string
 	// builds is the file every build script appends a line to, outside every
 	// checkout, because the folder a node built in is removed when the task
 	// ends.
@@ -192,7 +195,8 @@ func newExecutionSingleFleet(t *testing.T, isDistributed bool) *executionModeFle
 	repo.Commit(fmt.Sprintf("feat(%s): bootstrap the workspace", strings.Join(executionModePackages, ",")))
 	repo.AddBareRemote()
 	repo.Git("push", "-q", "origin", harness.DefaultBranch)
-	return &executionModeFleet{t: t, entry: repo, mailbox: mailbox,
+	return &executionModeFleet{t: t, entry: repo, mailbox: mailbox, homeState: t.TempDir(),
+		returnURL: executionModeReturnURL(t, isDistributed),
 		builds:    filepath.Join(t.TempDir(), "builds.log"),
 		gate:      filepath.Join(t.TempDir(), "consumers.gate"),
 		checkouts: map[string]string{"entry": "."},
@@ -251,7 +255,8 @@ func newExecutionControlFleet(t *testing.T, isDistributed bool) *executionModeFl
 	control.Commit("chore: assemble the control repository")
 	control.AddBareRemote()
 	control.Git("push", "-q", "origin", harness.DefaultBranch)
-	return &executionModeFleet{t: t, entry: control, mailbox: mailbox,
+	return &executionModeFleet{t: t, entry: control, mailbox: mailbox, homeState: t.TempDir(),
+		returnURL: executionModeReturnURL(t, isDistributed),
 		builds:    filepath.Join(t.TempDir(), "builds.log"),
 		gate:      filepath.Join(t.TempDir(), "consumers.gate"),
 		checkouts: map[string]string{"control": ".", "alpha": "sources/alpha", "beta": "sources/beta"},
@@ -290,7 +295,8 @@ func newExecutionLinkedFleet(t *testing.T, isDistributed bool) *executionModeFle
 		executionModeConsumerA, executionModeConsumerB))
 	fleet.push("beta")
 	fleet.link("alpha", "beta")
-	return &executionModeFleet{t: t, entry: fleet.peer("alpha").Repo, mailbox: mailbox,
+	return &executionModeFleet{t: t, entry: fleet.peer("alpha").Repo, mailbox: mailbox, homeState: t.TempDir(),
+		returnURL: executionModeReturnURL(t, isDistributed),
 		builds:    filepath.Join(t.TempDir(), "builds.log"),
 		gate:      filepath.Join(t.TempDir(), "consumers.gate"),
 		checkouts: map[string]string{"alpha": ".", "beta": ".links/beta"},
@@ -336,7 +342,8 @@ func executionModeLinkedConfig(cfg *models.File, isProvider bool) {
 // mode itself requires.
 func (f *executionModeFleet) env(extra ...string) []string {
 	return append(append(append(append([]string{},
-		harness.LockEnabled...), f.extra...), f.scriptEnv()...), extra...)
+		harness.LockEnabled...), f.extra...), f.scriptEnv()...),
+		append(executionNodeHomeEnv(f.t, f.homeState), extra...)...)
 }
 
 // scriptEnv is what the fixture's own scripts need wherever they run: the
@@ -353,7 +360,18 @@ func (f *executionModeFleet) scriptEnv() []string {
 // release runs this mode's release from its entry checkout.
 func (f *executionModeFleet) release(extra ...string) harness.RunResult {
 	f.t.Helper()
-	return f.entry.CommandEnv(f.env(extra...), "--package", "*")
+	args := []string{"release", "--package", "*"}
+	if f.returnURL != "" {
+		args = append(args, "--return-endpoint", f.returnURL)
+	}
+	return f.entry.CommandEnv(f.env(extra...), args...)
+}
+
+func executionModeReturnURL(t *testing.T, distributed bool) string {
+	if !distributed {
+		return ""
+	}
+	return executionLoopbackReturnURL(t)
 }
 
 // status reads this mode's plan without executing anything.
@@ -576,8 +594,8 @@ func TestExecutionModesReleaseAsTheirTwinWithoutWorkers(t *testing.T) {
 					"no transport commit entered %s's history", repository)
 			}
 			executionModeEvidence(t, mode, localRes, distributed, res)
-			assert.Empty(t, executionMailboxBranches(t, distributed.mailbox),
-				"the run closed every coordination branch it created")
+			assert.Len(t, executionProtocolRefs(t, distributed.mailbox, "dispat-ledger-"), 1,
+				"the sealed signed feed remains available for reconciliation")
 		})
 	}
 }
@@ -684,7 +702,8 @@ func TestExecutionFleetBuildSeesProviderOutputsAcrossRepositories(t *testing.T) 
 			for _, reply := range replies {
 				assert.Equal(t, 0, reply.Code, "the nodes carried on serving")
 			}
-			assert.Empty(t, executionMailboxBranches(t, fleet.mailbox))
+			assert.Len(t, executionProtocolRefs(t, fleet.mailbox, "dispat-ledger-"), 1,
+				"the sealed signed feed remains available for reconciliation")
 		})
 	}
 }
@@ -719,8 +738,53 @@ func TestExecutionConcurrentEntriesOneAcquiresAllLocks(t *testing.T) {
 	first, second := newExecutionEntriesFleet(t)
 	workers := append(first.startWorkers([]string{executionNode}, 2),
 		second.startWorkers([]string{executionNode}, 2)...)
-	running := first.entry.StartCommandEnv(first.env(), "--package", "*")
-	executionAwaitBuild(t, first)
+	running := first.entry.StartCommandEnv(first.env(), "release", "--package", "*",
+		"--return-endpoint", first.returnURL)
+	runningDone := make(chan harness.RunResult, 1)
+	go func() { runningDone <- running.Wait() }()
+	var firstResult *harness.RunResult
+	defer func() {
+		if !t.Failed() {
+			return
+		}
+		if firstResult == nil {
+			running.Signal(os.Interrupt)
+			result := <-runningDone
+			firstResult = &result
+		}
+		t.Logf("first entry exit=%d stdout:\n%s\nstderr:\n%s",
+			firstResult.Code, firstResult.Stdout, firstResult.Stderr)
+		for index, reply := range stopAll(t, workers) {
+			t.Logf("worker %d stdout:\n%s\nstderr:\n%s", index, reply.Stdout, reply.Stderr)
+		}
+	}()
+	deadline := time.After(90 * time.Second)
+	buildStarted := false
+	for !buildStarted {
+		for _, run := range first.runs() {
+			if !strings.HasPrefix(run.Node, executionProbePrefix) {
+				buildStarted = true
+				break
+			}
+		}
+		if buildStarted {
+			break
+		}
+		select {
+		case result := <-runningDone:
+			firstResult = &result
+			t.Fatalf("first entry exited before a build: exit=%d stdout:\n%s\nstderr:\n%s",
+				result.Code, result.Stdout, result.Stderr)
+		case <-deadline:
+			// Signal 3 dumps Go stacks on the supported distributed Unix hosts.
+			running.Signal(syscall.Signal(3))
+			result := <-runningDone
+			firstResult = &result
+			t.Fatalf("first entry stalled before a build: exit=%d stdout:\n%s\nstderr:\n%s",
+				result.Code, result.Stdout, result.Stderr)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 
 	held := lockObject(t, first.remotes[executionEntryContested])
 	blocked := second.release()
@@ -739,7 +803,8 @@ func TestExecutionConcurrentEntriesOneAcquiresAllLocks(t *testing.T) {
 	assert.False(t, isFixed, "it never got as far as fixing a plan")
 
 	require.NoError(t, os.WriteFile(first.gate, nil, 0o644))
-	res := running.Wait()
+	res := <-runningDone
+	firstResult = &res
 	stopAll(t, workers)
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -750,23 +815,6 @@ func TestExecutionConcurrentEntriesOneAcquiresAllLocks(t *testing.T) {
 	assert.Equal(t, []string{executionEntryContested + "-pkg@0.1.0"},
 		tagsIn(first.entry, ".links/"+executionEntryContested))
 	assert.Empty(t, second.entry.TagList(), "and the refused run released nothing")
-}
-
-// executionAwaitBuild waits until a build of the run under way has started on
-// a node, which is the moment that run owns every lock it will take and has
-// work in flight.
-func executionAwaitBuild(t *testing.T, fleet *executionModeFleet) {
-	t.Helper()
-	deadline := time.Now().Add(90 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, run := range fleet.runs() {
-			if !strings.HasPrefix(run.Node, executionProbePrefix) {
-				return
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("no build of the first run started within the deadline: %v", fleet.runs())
 }
 
 // newExecutionEntriesFleet builds the contention fixture and answers the two
@@ -830,7 +878,8 @@ func executionEntriesLinks(fleet *choreographyFleet, name string) []models.Repos
 func executionEntriesEntry(t *testing.T, fleet *choreographyFleet, name, gate string,
 	mailboxes, remotes map[string]string) *executionModeFleet {
 	t.Helper()
-	return &executionModeFleet{t: t, entry: fleet.peer(name).Repo, mailbox: mailboxes[name],
+	return &executionModeFleet{t: t, entry: fleet.peer(name).Repo, mailbox: mailboxes[name], homeState: t.TempDir(),
+		returnURL: executionLoopbackReturnURL(t),
 		builds:    filepath.Join(t.TempDir(), name+"-builds.log"),
 		gate:      gate,
 		checkouts: map[string]string{name: ".", executionEntryContested: ".links/" + executionEntryContested},

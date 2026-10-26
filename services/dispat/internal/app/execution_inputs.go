@@ -59,6 +59,8 @@ const codeLockLost = execution.CodeLockLost
 // back to.
 const defaultChangelogFile = "CHANGELOG.md"
 
+const compiledRelevantInputChangedErrorFormat = "%d file(s) this package's build read changed after it was built (%s): the artefact does not describe the repository any more, so the publication is withheld and a new plan is required"
+
 // resolvePrePublishCheck is the callback the executor runs after a package's
 // beforePublish hook and immediately before its publish command.
 //
@@ -185,6 +187,9 @@ func (r *relevantInputs) checkRelevantInputs(ctx context.Context, rel *plan.Rele
 	if git == nil {
 		return nil
 	}
+	if r.coordinator != nil && r.coordinator.GraphRootOID != "" {
+		return r.checkCompiledRelevantInputs(ctx, git, root, rel)
+	}
 	head, err := git.HeadSHA(ctx)
 	if err != nil {
 		return r.refuse(rel, fmt.Errorf("reading the head of %s: %w", rel.Pkg.Repository, err))
@@ -204,9 +209,109 @@ func (r *relevantInputs) checkRelevantInputs(ctx context.Context, rel *plan.Rele
 			Msg("the repository moved, and nothing this package was built from moved with it")
 		return nil
 	}
+	if r.coordinator != nil && r.coordinator.GraphRootOID != "" {
+		oldPreparedOID := r.coordinator.PreparedSnapshot(rel.Pkg.Name)
+		if oldPreparedOID != "" {
+			if err := r.coordinator.InvalidatePackagePreparedInput(ctx,
+				execution.ChoreographyPreparedInputChange{Repository: rel.Pkg.Repository,
+					Package: rel.Pkg.Name, OldPreparedOID: oldPreparedOID, NewPreparedOID: head}); err != nil {
+				return r.refuse(rel, err)
+			}
+		}
+	}
 	return r.refuse(rel, fmt.Errorf(
-		"%d file(s) this package's build read changed after it was built (%s): the artefact does not describe the repository any more, so the publication is withheld and a new plan is required",
+		compiledRelevantInputChangedErrorFormat,
 		len(changed), strings.Join(changed, ", ")))
+}
+
+// checkCompiledRelevantInputs compares the accepted build's prepared tree to
+// the current captured worktree. Native version and syncLock scripts can
+// change tracked or untracked input bytes without moving HEAD.
+func (r *relevantInputs) checkCompiledRelevantInputs(ctx context.Context,
+	git *gitx.LocalGitx, root string, rel *plan.Release) error {
+	return r.checkCompiledRelevantInputsWithCapture(ctx, compiledRelevantInputCaptureCheck{
+		Git: git, Root: root, Release: rel,
+		Capture: r.coordinator.CaptureCurrentPreparedSnapshot})
+}
+
+type compiledRelevantInputCaptureCheck struct {
+	Git     *gitx.LocalGitx
+	Root    string
+	Release *plan.Release
+	Capture func(context.Context, string, string) (string, error)
+}
+
+func (r *relevantInputs) checkCompiledRelevantInputsWithCapture(ctx context.Context,
+	check compiledRelevantInputCaptureCheck) error {
+	git, root, rel, capture := check.Git, check.Root, check.Release, check.Capture
+	baseline, accepted, err := r.coordinator.AcceptedPreparedSnapshot(ctx,
+		rel.Pkg.Repository, rel.Pkg.Name)
+	if err != nil {
+		return r.refuse(rel, err)
+	}
+	if !accepted {
+		baseline = r.app.plannedHeads[rel.Pkg.Repository]
+	}
+	current, err := capture(ctx,
+		rel.Pkg.Name, rel.Pkg.Repository)
+	if err != nil {
+		return r.refuse(rel, err)
+	}
+	pathspecs := r.formatRelevantPathspecs(root, rel)
+	if len(pathspecs) == 0 {
+		return nil
+	}
+	changed, err := git.ChangedPathsBetween(ctx, baseline, current, pathspecs)
+	if err != nil {
+		return r.refuse(rel, err)
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	if accepted {
+		if err := r.coordinator.InvalidatePackagePreparedInput(ctx,
+			execution.ChoreographyPreparedInputChange{Repository: rel.Pkg.Repository,
+				Package: rel.Pkg.Name, OldPreparedOID: baseline, NewPreparedOID: current}); err != nil {
+			return r.refuse(rel, err)
+		}
+	}
+	return r.refuse(rel, fmt.Errorf(
+		compiledRelevantInputChangedErrorFormat,
+		len(changed), strings.Join(changed, ", ")))
+}
+
+// afterNativeFrame runs before a native writer releases its repository lane.
+// It checks every earlier accepted build in that repository, including shared
+// include paths which may sit outside all package folders.
+func (r *relevantInputs) afterNativeFrame(ctx context.Context, _, writer string) error {
+	writerRelease := r.plan.Releases[writer]
+	if writerRelease == nil || writerRelease.Pkg == nil {
+		return nil
+	}
+	for _, name := range r.plan.Order {
+		rel := r.plan.Releases[name]
+		if rel == nil || rel.Pkg == nil || rel.Pkg.Repository != writerRelease.Pkg.Repository {
+			continue
+		}
+		_, accepted, err := r.coordinator.AcceptedPreparedSnapshot(ctx,
+			rel.Pkg.Repository, name)
+		if err != nil {
+			return r.refuse(rel, err)
+		}
+		if !accepted {
+			continue
+		}
+		git, root := r.resolveOwner(rel)
+		if git == nil {
+			continue
+		}
+		if err := r.checkCompiledRelevantInputsWithCapture(ctx, compiledRelevantInputCaptureCheck{
+			Git: git, Root: root, Release: rel,
+			Capture: r.coordinator.CaptureCurrentPreparedSnapshotGuarded}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // resolveChangedInputs is the comparison itself: what differs, between the
@@ -261,6 +366,11 @@ func (r *relevantInputs) formatRelevantPathspecs(root string, rel *plan.Release)
 			continue
 		}
 		exclusions = append(exclusions, ":(exclude)"+path.Join(folder, resolveChangelogFile(relevant)))
+	}
+	if r.coordinator != nil && r.coordinator.GraphRootOID != "" && r.fleet == nil {
+		// A shared include (commonly a workspace lockfile) is captured by
+		// every build even when it lies outside every package folder.
+		folders = append(folders, r.app.cfg.Commit.Include...)
 	}
 	if len(folders) == 0 {
 		return nil

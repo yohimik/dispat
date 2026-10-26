@@ -18,12 +18,6 @@ func TestExecutionDefaultsAnswerAnAbsentKey(t *testing.T) {
 	// Nil is what File.Execution holds when the key is absent, and it is the
 	// receiver every accessor is called on in that state.
 	var absent *ExecutionConfig
-	if got := absent.ResolveRole(); got != ExecutionRoleOrchestrator {
-		t.Errorf("an absent execution key is the orchestrator role, got %q", got)
-	}
-	if absent.IsWorker() {
-		t.Error("an absent execution key is not a worker")
-	}
 	if absent.IsDistributed() {
 		t.Error("an absent execution key delegates nothing")
 	}
@@ -32,6 +26,7 @@ func TestExecutionDefaultsAnswerAnAbsentKey(t *testing.T) {
 	}
 	wantTimeouts := ExecutionTimeoutsConfig{
 		Preflight: DefaultExecutionPreflightTimeout,
+		Admission: DefaultExecutionAdmissionTimeoutSeconds,
 		Task:      DefaultExecutionTaskTimeout,
 		Cancel:    DefaultExecutionCancelTimeout,
 	}
@@ -42,6 +37,7 @@ func TestExecutionDefaultsAnswerAnAbsentKey(t *testing.T) {
 		MaxFiles:         DefaultExecutionMaxFiles,
 		MaxBytes:         DefaultExecutionMaxBytes,
 		MaxManifestBytes: DefaultExecutionMaxManifestBytes,
+		MaxPackBytes:     DefaultExecutionMaxPackBytes,
 		Timeout:          DefaultExecutionTransferTimeout,
 	}
 	if got := absent.ResolveTransfer(); got != wantTransfer {
@@ -51,8 +47,7 @@ func TestExecutionDefaultsAnswerAnAbsentKey(t *testing.T) {
 	// what lets the loader check the defaults with the same sentences it
 	// checks a written configuration with.
 	stated := &ExecutionConfig{}
-	if stated.ResolveRole() != absent.ResolveRole() ||
-		stated.ResolveConcurrency() != absent.ResolveConcurrency() ||
+	if stated.ResolveConcurrency() != absent.ResolveConcurrency() ||
 		stated.ResolveTimeouts() != absent.ResolveTimeouts() ||
 		stated.ResolveTransfer() != absent.ResolveTransfer() {
 		t.Error("an empty execution object must resolve exactly as an absent one")
@@ -65,16 +60,9 @@ func TestExecutionResolvesStatedValues(t *testing.T) {
 	// as written so the loader can name it in the refusal rather than quietly
 	// repairing it.
 	c := &ExecutionConfig{
-		Role:        ExecutionRoleWorker,
 		Concurrency: Int(0),
-		Timeouts:    &ExecutionTimeoutsConfig{Task: 90},
+		Timeouts:    &ExecutionTimeoutsConfig{Admission: 120, Task: 90},
 		Transfer:    &ExecutionTransferConfig{MaxBytes: 4096},
-	}
-	if got := c.ResolveRole(); got != ExecutionRoleWorker {
-		t.Errorf("ResolveRole() = %q", got)
-	}
-	if !c.IsWorker() {
-		t.Error("the worker role must read as a worker")
 	}
 	if got := c.ResolveConcurrency(); got != 0 {
 		t.Errorf("ResolveConcurrency() = %d, want the stated 0 back", got)
@@ -82,6 +70,9 @@ func TestExecutionResolvesStatedValues(t *testing.T) {
 	timeouts := c.ResolveTimeouts()
 	if timeouts.Task != 90 {
 		t.Errorf("stated task timeout lost: %+v", timeouts)
+	}
+	if timeouts.Admission != 120 {
+		t.Errorf("stated admission timeout lost: %+v", timeouts)
 	}
 	if timeouts.Preflight != DefaultExecutionPreflightTimeout || timeouts.Cancel != DefaultExecutionCancelTimeout {
 		t.Errorf("an unstated sibling must keep its default: %+v", timeouts)
@@ -92,6 +83,7 @@ func TestExecutionResolvesStatedValues(t *testing.T) {
 	}
 	if transfer.MaxFiles != DefaultExecutionMaxFiles ||
 		transfer.MaxManifestBytes != DefaultExecutionMaxManifestBytes ||
+		transfer.MaxPackBytes != DefaultExecutionMaxPackBytes ||
 		transfer.Timeout != DefaultExecutionTransferTimeout {
 		t.Errorf("an unstated sibling must keep its default: %+v", transfer)
 	}
@@ -105,12 +97,12 @@ func TestExecutionIsDistributedFollowsTheWorkerList(t *testing.T) {
 		config *ExecutionConfig
 		want   bool
 	}{
-		"absent":               {nil, false},
-		"empty object":         {&ExecutionConfig{}, false},
-		"named node only":      {&ExecutionConfig{Name: "build-a", Endpoint: "/srv/mail.git"}, false},
-		"empty worker list":    {&ExecutionConfig{Workers: []ExecutionWorkerConfig{}}, false},
-		"one worker":           {&ExecutionConfig{Workers: []ExecutionWorkerConfig{{Name: "a"}}}, true},
-		"worker role, no list": {&ExecutionConfig{Role: ExecutionRoleWorker}, false},
+		"absent":            {nil, false},
+		"empty object":      {&ExecutionConfig{}, false},
+		"named node only":   {&ExecutionConfig{Name: "build-a", Endpoint: "/srv/mail.git"}, false},
+		"empty worker list": {&ExecutionConfig{Workers: []ExecutionWorkerConfig{}}, false},
+		"one worker":        {&ExecutionConfig{Workers: []ExecutionWorkerConfig{{Name: "a"}}}, true},
+		"late worker only":  {&ExecutionConfig{Workers: []ExecutionWorkerConfig{{Name: "a", LateJoin: true}}}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := tc.config.IsDistributed(); got != tc.want {
@@ -128,15 +120,16 @@ func TestExecutionModelRoundTrip(t *testing.T) {
 	// field is a pointer.
 	f := File{
 		Execution: &ExecutionConfig{
-			Role:        ExecutionRoleOrchestrator,
-			Concurrency: Int(2),
-			Name:        "Build-A",
-			Endpoint:    "ssh://build.example.test/srv/mailbox.git",
-			SecretEnv:   "DISPAT_EXECUTION_SECRET",
+			Concurrency:    Int(2),
+			Name:           "Build-A",
+			Endpoint:       "ssh://build.example.test/srv/mailbox.git",
+			SecretEnv:      "DISPAT_EXECUTION_SECRET",
+			IdentityKeyEnv: "DISPAT_JOIN_SEED",
 			Workers: []ExecutionWorkerConfig{
-				{Name: "Build-B", Endpoint: "https://git.example.test/mailbox-b.git"},
+				{Name: "Build-B", Endpoint: "https://git.example.test/mailbox-b.git", LateJoin: true,
+					IdentityPublicKey: "public-key-model-roundtrip"},
 			},
-			Timeouts: &ExecutionTimeoutsConfig{Preflight: 30, Task: 600, Cancel: 15},
+			Timeouts: &ExecutionTimeoutsConfig{Preflight: 30, Admission: 300, Task: 600, Cancel: 15},
 			Transfer: &ExecutionTransferConfig{MaxFiles: 10, MaxBytes: 20, MaxManifestBytes: 30, Timeout: 40},
 		},
 	}
@@ -159,7 +152,7 @@ func TestExecutionModelRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("the execution key must marshal back into a loadable file: %s", data)
 	}
-	for _, key := range []string{"role", "concurrency", "name", "endpoint", "secretEnv", "workers", "timeouts", "transfer"} {
+	for _, key := range []string{"concurrency", "name", "endpoint", "secretEnv", "identityKeyEnv", "workers", "timeouts", "transfer"} {
 		if _, stated := execution[key]; !stated {
 			t.Errorf("execution is missing key %q: %v", key, execution)
 		}
@@ -170,6 +163,12 @@ func TestExecutionModelRoundTrip(t *testing.T) {
 	}
 	if name := workers[0].(map[string]any)["name"]; name != "Build-B" {
 		t.Errorf("node name case lost in the round trip: %v", name)
+	}
+	if lateJoin := workers[0].(map[string]any)["lateJoin"]; lateJoin != true {
+		t.Errorf("late admission policy lost in the round trip: %v", lateJoin)
+	}
+	if key := workers[0].(map[string]any)["identityPublicKey"]; key != "public-key-model-roundtrip" {
+		t.Errorf("late admission public identity key lost in the round trip: %v", key)
 	}
 	// A stated capacity of 0 is a refusal the loader owes the reader, so the
 	// key has to survive the file rather than being dropped as a zero value.

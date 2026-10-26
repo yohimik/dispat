@@ -53,11 +53,14 @@ type taskOutcome struct {
 	failedPart string
 	// exit is the exit status of the command that failed the frame, 0 when
 	// the failure was not a command's (an input, a deadline, a refusal).
-	exit        int
-	reason      OutputReason
-	exports     []plan.Output
-	strayWrites int
-	outputs     *OutputManifest
+	exit    int
+	reason  OutputReason
+	exports []plan.Output
+	// Transport exports preserve literal values unless a successful v3
+	// output capture proves that one names a declared-root-relative path.
+	transportExports []ExportedValue
+	strayWrites      int
+	outputs          *OutputManifest
 	// expectedTip is the object the attempt's terminal message is written on
 	// top of, empty while that is still the claim. A publication moves the
 	// branch twice before its commands run, so the lease its result is pushed
@@ -116,7 +119,7 @@ func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Log
 		return taskOutcome{status: StatusFailed}
 	}
 	owner := ownerPathOf(assignment)
-	installed, reason, err := w.installTaskInputs(ctx, task.tip.OID, assignment, checkout, dir, log)
+	installed, proofs, reason, err := w.installTaskInputs(ctx, task.tip.OID, assignment, checkout, dir, log)
 	if err != nil {
 		// No command of the stage has run, and none will: a prerequisite that
 		// could not be verified is a prerequisite, not a build failure (§28.5).
@@ -124,12 +127,120 @@ func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Log
 			Str("category", CategoryIntegrity).Msg("the task's inputs could not be installed")
 		return taskOutcome{status: StatusFailed, failedPart: release.PartInputs, reason: reason}
 	}
+	if assignment.Protocol == ChoreographyProtocolVersion {
+		assignment, err = rehomeVerifiedTaskExports(assignment, checkout, proofs)
+		if err != nil {
+			log.Warn().Err(err).Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
+				Msg("the task's typed prior exports could not be verified")
+			return taskOutcome{status: StatusFailed, failedPart: release.PartInputs,
+				reason: ReasonOutputIdentity}
+		}
+		task.assignment = assignment
+	}
 	outcome := w.runFrame(ctx, task, checkout.Dir(owner, assignment.Package.Dir), log)
 	outcome.strayWrites = checkout.CountStrayWrites(ctx, owner, formatDeclaredPaths(assignment))
 	if outcome.status != StatusSucceeded {
+		if assignment.Protocol == ChoreographyProtocolVersion && assignment.Kind == KindRun &&
+			outcome.status == StatusFailed && ctx.Err() == nil {
+			// A sweep configured to continue can consume a failed predecessor's
+			// verified partial files. Preserve the command's failed status and
+			// failing part even if collecting those files also fails.
+			if len(assignment.Outputs) != 0 {
+				captured := w.captureTaskOutputs(ctx, assignment, checkout, installed, outcome, log)
+				outcome.outputs = captured.outputs
+			}
+			root := checkout.Dir(owner, resolveCapturePath(assignment))
+			outcome.transportExports = formatFailedSweepExports(outcome.exports, assignment,
+				root, checkout.root, outcome.outputs, log)
+		}
 		return outcome
 	}
-	return w.captureTaskOutputs(ctx, assignment, checkout, installed, outcome, log)
+	outcome = w.captureTaskOutputs(ctx, assignment, checkout, installed, outcome, log)
+	if outcome.status == StatusSucceeded && outcome.outputs != nil &&
+		assignment.Protocol == ChoreographyProtocolVersion {
+		root := checkout.Dir(owner, resolveCapturePath(assignment))
+		outcome.transportExports = formatDeclaredTaskExports(outcome.exports, assignment, root)
+	}
+	return outcome
+}
+
+// formatFailedSweepExports retains scalar values and only makes a private
+// path portable when the failed task captured the exact declared file. A
+// private checkout is removed after this function returns, so an unproven
+// path into it cannot be sent as a literal export to a later task.
+func formatFailedSweepExports(outputs []plan.Output, assignment Assignment,
+	sourceRoot, checkoutRoot string, manifest *OutputManifest, log zerolog.Logger) []ExportedValue {
+	plain := formatExports(outputs)
+	typed := formatDeclaredTaskExports(outputs, assignment, sourceRoot)
+	portable := make([]ExportedValue, 0, len(plain))
+	for index, value := range plain {
+		ref := typed[index].DeclaredPath
+		if ref != nil && manifestContainsDeclaredPath(manifest, ref.Root, ref.Relative) {
+			portable = append(portable, typed[index])
+			continue
+		}
+		if privateTaskPath(value.Value, checkoutRoot) {
+			log.Warn().Str("output", value.Name).Str("reason", string(ReasonOutputIdentity)).
+				Msg("failed sweep did not capture a private file export; the value is omitted")
+			continue
+		}
+		portable = append(portable, value)
+	}
+	return portable
+}
+
+func privateTaskPath(value, checkoutRoot string) bool {
+	if !filepath.IsAbs(value) {
+		return false
+	}
+	inside := func(root, candidate string) bool {
+		relative, err := filepath.Rel(root, candidate)
+		return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+	}
+	if inside(filepath.Clean(checkoutRoot), filepath.Clean(value)) {
+		return true
+	}
+	root, err := filepath.EvalSymlinks(checkoutRoot)
+	if err != nil {
+		return false
+	}
+	if inside(root, filepath.Clean(value)) {
+		return true
+	}
+	resolved, err := filepath.EvalSymlinks(value)
+	if err != nil {
+		parent, parentErr := filepath.EvalSymlinks(filepath.Dir(value))
+		if parentErr != nil {
+			return false
+		}
+		resolved = filepath.Join(parent, filepath.Base(value))
+	}
+	return inside(root, resolved)
+}
+
+func formatDeclaredTaskExports(outputs []plan.Output, assignment Assignment, sourceRoot string) []ExportedValue {
+	exports := formatExports(outputs)
+	// Shells may report a canonical spelling of a task folder created below
+	// an OS symlink (macOS /var -> /private/var). Compare existing resolved
+	// paths so a symlink leaving the declared root cannot become a typed ref.
+	resolvedRoot, rootErr := filepath.EvalSymlinks(sourceRoot)
+	for i := range exports {
+		if rootErr != nil || !filepath.IsAbs(exports[i].Value) {
+			continue
+		}
+		resolvedValue, err := filepath.EvalSymlinks(exports[i].Value)
+		if err != nil {
+			continue
+		}
+		ref, ok := release.IdentifyDeclaredOutputPath(resolvedValue, resolvedRoot, assignment.Outputs)
+		if !ok {
+			continue
+		}
+		exports[i].Value = ""
+		exports[i].DeclaredPath = &ExportedDeclaredPath{Repository: assignment.Package.Repository,
+			Package: assignment.Package.Name, Root: ref.Root, Relative: ref.Relative}
+	}
+	return exports
 }
 
 // formatDeclaredPaths is where one task's declared output roots sit inside

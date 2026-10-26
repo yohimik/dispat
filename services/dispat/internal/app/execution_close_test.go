@@ -56,4 +56,6 @@ func TestCloseCoordinatorIsBoundedAndClosesOnce(t *testing.T) {
 
 	a.closeCoordinator(run, coordinator)
 	assert.Equal(t, 1, coordinator.calls, "a second close does nothing")
+	require.ErrorIs(t, a.coordinatorCloseErr, context.DeadlineExceeded,
+		"a retained coordination close must keep the first-node locator active")
 }

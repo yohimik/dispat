@@ -35,6 +35,8 @@ type coordinationRemote struct {
 	url  string
 }
 
+const differentWorkerCoordinationEndpointErrorFormat = "worker %q names a different coordination endpoint: a distributed run requires one canonical Git mailbox"
+
 // resolveWorkerLinks resolves, before any lock, the remote every link with no
 // endpoint reaches, holds its push URL to the rules of an endpoint, and says
 // where each such link goes in one debug line apiece.
@@ -42,19 +44,32 @@ type coordinationRemote struct {
 // A run whose links all state an endpoint resolves nothing, so a remote nobody
 // uses cannot refuse a run.
 func (a *App) resolveWorkerLinks(ctx context.Context, started runKind) error {
-	if !a.isCoordinationRemoteNeeded() {
-		return nil
+	remote := coordinationRemote{}
+	if a.isCoordinationRemoteNeeded() {
+		name, url, err := a.resolveCoordinationRemote(ctx)
+		if err != nil {
+			return a.reportExecutionRefusal(started, execution.NewDiagnostic(
+				execution.CodeConfiguration, execution.CategoryConfiguration,
+				"a worker link states no endpoint, and the release remote it would reach could not be resolved: %w",
+				err), nil, nil)
+		}
+		remote = coordinationRemote{name: name, url: url}
 	}
-	name, url, err := a.resolveCoordinationRemote(ctx)
+	links, err := a.formatWorkerLinks(remote)
 	if err != nil {
-		return a.reportExecutionRefusal(started, execution.NewDiagnostic(
-			execution.CodeConfiguration, execution.CategoryConfiguration,
-			"a worker link states no endpoint, and the release remote it would reach could not be resolved: %w",
-			err), nil, nil)
-	}
-	remote := coordinationRemote{name: name, url: url}
-	if _, err := a.formatWorkerLinks(remote); err != nil {
 		return a.reportExecutionRefusal(started, err, nil, nil)
+	}
+	canonicalEndpoint := ""
+	for _, link := range links {
+		if canonicalEndpoint == "" {
+			canonicalEndpoint = link.Endpoint
+			continue
+		}
+		if link.Endpoint != canonicalEndpoint {
+			return a.reportExecutionRefusal(started, execution.NewDiagnostic(
+				execution.CodeConfiguration, execution.CategoryConfiguration,
+				differentWorkerCoordinationEndpointErrorFormat, link.Name), nil, nil)
+		}
 	}
 	for _, worker := range a.cfg.Execution.Workers {
 		if worker.Endpoint != "" {
@@ -137,7 +152,8 @@ func (a *App) formatWorkerLinks(remote coordinationRemote) ([]execution.Link, er
 			}
 			endpoint = remote.url
 		}
-		links = append(links, execution.Link{Name: worker.Name, Endpoint: endpoint})
+		links = append(links, execution.Link{Name: worker.Name, Endpoint: endpoint,
+			LateJoin: worker.LateJoin, IdentityPublicKey: worker.IdentityPublicKey})
 	}
 	return links, nil
 }

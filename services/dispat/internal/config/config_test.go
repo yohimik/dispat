@@ -955,7 +955,6 @@ func TestModeExampleConfigsAreValid(t *testing.T) {
 		}},
 		"an orchestrator with worker links": {"dispat.example.orchestrator.yaml", Load, func(t *testing.T, cfg *File) {
 			assert.True(t, cfg.Execution.IsDistributed())
-			assert.False(t, cfg.Execution.IsWorker())
 			assert.Equal(t, []string{"dist"}, cfg.BuildOutputs)
 			for _, worker := range cfg.Execution.Workers {
 				assert.Empty(t, worker.Endpoint,
@@ -963,7 +962,6 @@ func TestModeExampleConfigsAreValid(t *testing.T) {
 			}
 		}},
 		"a worker node": {"dispat.example.worker.yaml", loadNode, func(t *testing.T, cfg *File) {
-			assert.True(t, cfg.Execution.IsWorker())
 			assert.False(t, cfg.Execution.IsDistributed(), "a worker delegates nothing")
 			assert.Empty(t, cfg.Spaces, "a worker states no release policy of its own")
 		}},

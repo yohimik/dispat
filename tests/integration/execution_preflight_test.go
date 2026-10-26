@@ -46,7 +46,7 @@ func TestExecutionPreflightRefusesBeforeAnyStage(t *testing.T) {
 		"a node whose answered-work record cannot be persisted": {
 			isAlive: true, says: "did not pass preflight",
 			prepareState: func(t *testing.T, worker *executionWorker) {
-				require.NoError(t, os.MkdirAll(filepath.Join(worker.stateDir, executionNode, "seen.json.tmp"), 0o755))
+				require.NoError(t, os.MkdirAll(filepath.Join(worker.stateDir, executionNode, "seen.json"), 0o755))
 			},
 		},
 		"a node that would move fewer bytes than this run transfers": {
@@ -54,7 +54,7 @@ func TestExecutionPreflightRefusesBeforeAnyStage(t *testing.T) {
 			node: func(settings *models.ExecutionConfig) {
 				settings.Transfer = &models.ExecutionTransferConfig{MaxBytes: 1024}
 			},
-			says: "transfer.maxBytes"},
+			says: "did not pass preflight"},
 		"a package no configured node can build": {
 			isAlive: true,
 			adjust: func(cfg *models.File) {
@@ -100,9 +100,13 @@ func TestExecutionPreflightRefusesBeforeAnyStage(t *testing.T) {
 			if worker != nil {
 				worker.proc.Signal(syscall.SIGINT)
 				stopped := worker.proc.Wait()
-				require.Equal(t, 0, stopped.Code)
+				expectedExit := 0
 				if tc.prepareState != nil {
-					assert.Contains(t, stopped.Stdout+stopped.Stderr, "seen.json.tmp",
+					expectedExit = 1 // the poisoned durable state prevents serving
+				}
+				require.Equal(t, expectedExit, stopped.Code)
+				if tc.prepareState != nil {
+					assert.Contains(t, stopped.Stdout+stopped.Stderr, "seen.json",
 						"the worker refused to answer because its replay record could not be saved")
 				}
 			}
@@ -160,17 +164,16 @@ func TestExecutionPreflightPassesThenReleasesLocally(t *testing.T) {
 	assert.NotEmpty(t, fixed.Str("planDigest"))
 
 	assert.Equal(t, []string{"core@0.1.0"}, rig.repo.TagList())
-	assert.Empty(t, rig.branches(), "a finished run leaves its mailbox as it found it")
+	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 	assert.False(t, remoteHoldsLock(t, rig.origin))
 	assert.NotContains(t, res.Stdout, executionSecret, "the secret never reaches a log")
 
 	worker.proc.Signal(syscall.SIGINT)
 	reply := worker.proc.Wait()
 	require.Equal(t, 0, reply.Code, "stdout:\n%s\nstderr:\n%s", reply.Stdout, reply.Stderr)
-	claimed, isClaimed := executionLine(reply, "task claimed")
-	require.True(t, isClaimed, "the node answered the run's probe\nstdout:\n%s", reply.Stdout)
-	assert.Equal(t, "probe", claimed.Str("kind"))
-	assert.Equal(t, ready.Str("run"), claimed.Str("run"))
+	returned, isReturned := executionLine(reply, "preflight returned")
+	require.True(t, isReturned, "the node answered the run's probe\nstdout:\n%s", reply.Stdout)
+	assert.Equal(t, ready.Str("run"), returned.Str("run"))
 	assert.NotContains(t, reply.Stdout, executionSecret)
 }
 
@@ -214,7 +217,7 @@ func TestExecutionPreflightIgnoresUnauthenticReplies(t *testing.T) {
 				cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 10}
 			})
 			node := newExecutionFakeOrchestrator(t, rig.mailbox)
-			started := rig.repo.StartReleaseEnv(rig.env(), "release")
+			started := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
 
 			branch := executionAwaitBranch(t, rig, "probe")
 			assignment := executionMessage(t, rig.mailbox, branch, "assignment")
@@ -282,10 +285,12 @@ func executionReply(assignment map[string]any, offered string) map[string]any {
 	reply["assignment"] = offered
 	reply["status"] = "succeeded"
 	reply["report"] = map[string]any{
-		"protocol": executionProtocolVersion, "dispat": "dev",
+		"protocol": assignment["protocol"], "dispat": "dev",
 		"os": "linux", "arch": "amd64", "capacity": 1,
+		"authorityId": strings.Repeat("a", 32),
 		"limits": map[string]any{
-			"maxFiles": 20000, "maxBytes": 2147483648, "maxManifestBytes": 8388608},
+			"maxFiles": 20000, "maxBytes": 2147483648, "maxManifestBytes": 8388608,
+			"maxPackBytes": int64(4 << 30)},
 	}
 	return reply
 }
@@ -309,8 +314,8 @@ func executionDocument(t *testing.T, message map[string]any) []byte {
 }
 
 // TestExecutionMailboxGitFaults: the orchestrator's own git failing where the
-// mailbox is written. Each one fails preflight rather than dispatching
-// something it could not describe, and nothing of the release runs.
+// mailbox is written. Some v3 writes precede the preflight diagnostic's
+// creation; every fault still stops dispatch before a command or tag.
 func TestExecutionMailboxGitFaults(t *testing.T) {
 	for name, pattern := range map[string]string{
 		"an object write that fails": "*hash-object*",
@@ -330,7 +335,6 @@ func TestExecutionMailboxGitFaults(t *testing.T) {
 			res := rig.release(fault.Env()...)
 
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
 			assert.Positive(t, fault.Matches(), "the fault reached the invocation it names")
 			assert.Equal(t, 0, buildRuns(rig.repo), "no stage ran")
 			assert.Empty(t, rig.repo.TagList(), "nothing was tagged")
@@ -341,26 +345,33 @@ func TestExecutionMailboxGitFaults(t *testing.T) {
 	}
 }
 
-// TestExecutionRetainedBranchIsAWarning: a coordination branch this run could
-// not close is untidy rather than unsafe, so it is reported with the retained
-// code and the release still ends as it would have.
-func TestExecutionRetainedBranchIsAWarning(t *testing.T) {
+// A completed v3 run retains signed task and ledger refs so an interrupted
+// worker can authenticate its finality after the return listener exits.
+func TestExecutionCompletedRunRetainsSignedRecoveryRefs(t *testing.T) {
 	rig := newExecutionRig(t)
 	worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 0)
-	// The delete is what fails, and only that: everything before it is the
-	// run this scenario is about.
-	// Only the delete, whose refspec has an empty source half: every other
-	// push of the run names an object before the colon.
-	fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*push* :refs/heads/dispat-worker-*"})
-
-	res := rig.release(fault.Env()...)
+	res := rig.release()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.IsCodePresent(executionEvents(res), executionRetainedCode),
-		"a branch that could not be closed is a warning\nstdout:\n%s", res.Stdout)
 	assert.Equal(t, []string{"core@0.1.0"}, rig.repo.TagList(), "and the release is still a release")
 
 	worker.proc.Signal(syscall.SIGINT)
 	require.Equal(t, 0, worker.proc.Wait().Code)
-	assert.NotEmpty(t, rig.branches(), "the branch it could not close is still there")
+	refs := rig.branches()
+	assert.Condition(t, func() bool {
+		for _, ref := range refs {
+			if strings.Contains(ref, "dispat-ledger-") {
+				return true
+			}
+		}
+		return false
+	}, "the signed ledger stays readable after the worker exits")
+	assert.Condition(t, func() bool {
+		for _, ref := range refs {
+			if strings.Contains(ref, "dispat-task-") {
+				return true
+			}
+		}
+		return false
+	}, "canonical task refs stay readable after the worker exits")
 }

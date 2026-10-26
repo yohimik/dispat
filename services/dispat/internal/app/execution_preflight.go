@@ -31,11 +31,28 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
-// preflightWorkers probes every configured worker node and answers the
+type releasePreflightRequest struct {
+	plan          *plan.Plan
+	mode          string
+	fleet         *workspaceRecorder
+	compiled      *release.CompiledTaskGraph
+	returnChannel *runReturnChannel
+	pinnedSources *execution.PinnedRunSources
+	pinnedInputs  *execution.PinnedRunInputs
+}
+
+const invalidExecutionAdmissionPolicyErrorFormat = "execution admission policy is invalid: %w"
+const invalidExecutionCoordinationEndpointErrorFormat = "execution coordination endpoint is invalid: %w"
+
+// preflightWorkers probes every configured worker and answers the
 // coordinator that owns this run's refs, or nil when the run delegates
 // nothing.
-func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *workspaceRecorder) (*execution.Coordinator, error) {
+func (a *App) preflightWorkers(ctx context.Context, request releasePreflightRequest) (*execution.Coordinator, error) {
 	if !a.cfg.Execution.IsDistributed() {
+		return nil, nil
+	}
+	pl, fleet, compiled, returnChannel := request.plan, request.fleet, request.compiled, request.returnChannel
+	if compiled != nil && len(compiled.TaskShapes()) == 0 {
 		return nil, nil
 	}
 	// The links reach the release remote at the destination this run's own
@@ -49,6 +66,32 @@ func (a *App) preflightWorkers(ctx context.Context, pl *plan.Plan, fleet *worksp
 		return nil, a.reportPreflightFailure(err)
 	}
 	a.coordinator = coordinator
+	if compiled == nil {
+		return coordinator, a.reportPreflightFailure(execution.NewDiagnostic(
+			execution.CodeConfiguration, execution.CategoryConfiguration,
+			"distributed preflight has no compiled task graph"))
+	}
+	_, _, _, graphDigest, err := a.releaseChoreographyInventory(coordinator, pl, compiled)
+	if err != nil {
+		return coordinator, a.reportPreflightFailure(err)
+	}
+	coordinator.GraphDigest = graphDigest
+	coordinator.Mode = request.mode
+	if returnChannel == nil {
+		return coordinator, a.reportPreflightFailure(execution.NewDiagnostic(
+			execution.CodeConfiguration, execution.CategoryConfiguration,
+			"distributed preflight has no return channel"))
+	}
+	coordinator.ReturnEndpoint = returnChannel.endpoint
+	coordinator.ReturnCertSHA256 = returnChannel.certPin
+	coordinator.PinnedSources = request.pinnedSources
+	coordinator.PinnedInputs = request.pinnedInputs
+	if err := a.prepareRunChoreographyBootstrap(ctx, coordinator); err != nil {
+		return coordinator, a.reportPreflightFailure(err)
+	}
+	if err := a.bindProbeReturnHandler(coordinator, returnChannel); err != nil {
+		return coordinator, a.reportPreflightFailure(err)
+	}
 	if err := coordinator.Preflight(ctx, planPlatforms(pl)); err != nil {
 		// The refs this run offered are closed by the caller's own deferred
 		// cleanup, so a refusal here leaves nothing behind even though it
@@ -93,16 +136,49 @@ func (a *App) newCoordinator(generation string, ownership *execution.OwnershipGa
 		mailboxes[link.Name] = execution.NewGitMailbox(link.Endpoint, a.git, signer, a.log)
 	}
 	timeouts := settings.ResolveTimeouts()
+	localSlots, err := openSharedNodeSlots(a.sender.Node, settings.ResolveConcurrency())
+	if err != nil {
+		return nil, execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
+			"first-node shared task capacity cannot be established: %w", err)
+	}
+	a.localNodeSlots = localSlots
 	// This machine joins its own pool: it is a node under the same rules
 	// (§28.1), and the name it joins under is the one it already writes on
 	// every line of this run.
-	local := execution.LocalNode{Name: a.sender.Node, Capacity: settings.ResolveConcurrency()}
+	local := execution.LocalNode{Name: a.sender.Node, Capacity: settings.ResolveConcurrency(),
+		AuthorityID: localSlots.AuthorityID()}
 	coordinator := execution.NewCoordinator(a.runID, a.planDigest, generation,
 		local, links, mailboxes, signer, execution.Timeouts{
 			Preflight: time.Duration(timeouts.Preflight) * time.Second,
 			Task:      time.Duration(timeouts.Task) * time.Second,
 			Cancel:    time.Duration(timeouts.Cancel) * time.Second,
 		}, formatTransferLimits(settings), a.log)
+	var canonicalEndpoint string
+	var canonicalMailbox *execution.GitMailbox
+	authorized := make([]execution.ChoreographyAuthorizedNode, 0, len(links))
+	for _, link := range links {
+		if canonicalEndpoint == "" {
+			canonicalEndpoint = link.Endpoint
+			canonicalMailbox = mailboxes[link.Name]
+		}
+		authorized = append(authorized, execution.ChoreographyAuthorizedNode{
+			Name: link.Name, CoordinationEndpoint: link.Endpoint, LateJoin: link.LateJoin,
+			IdentityPublicKey: link.IdentityPublicKey,
+		})
+	}
+	coordinator.AlgorithmVersion = execution.ChoreographyGraphAlgorithmVersion
+	coordinator.JoinPolicy = execution.ChoreographyJoinPolicy{
+		AdmissionDurationSeconds: timeouts.Admission,
+		Authorized:               authorized,
+	}
+	if err := coordinator.JoinPolicy.Validate(canonicalEndpoint); err != nil {
+		return nil, execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
+			invalidExecutionAdmissionPolicyErrorFormat, err)
+	}
+	if err := coordinator.SetCanonicalChoreographyMailbox(canonicalEndpoint, canonicalMailbox); err != nil {
+		return nil, execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
+			invalidExecutionCoordinationEndpointErrorFormat, err)
+	}
 	coordinator.UseOwnership(ownership)
 	return coordinator, nil
 }
@@ -201,6 +277,7 @@ func (a *App) closeCoordinator(ctx context.Context, coordinator coordinationClos
 	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coordinationCloseTimeout)
 	defer cancel()
 	if err := coordinator.Close(closeCtx); err != nil {
+		a.coordinatorCloseErr = err
 		event := a.log.Warn().Err(err).Str("code", execution.CodeTransportRetained).
 			Str("category", execution.CategoryTransportCleanup)
 		execution.AttachIdentity(event, err).Msg("coordination branches were not closed")

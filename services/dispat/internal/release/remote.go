@@ -21,10 +21,13 @@ package release
 
 import (
 	"context"
+	"errors"
 
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
+
+const nativeFrameInvalidationFailure = "native input invalidation failed"
 
 // Remotex runs a package's stage frames on another execution node.
 //
@@ -61,6 +64,36 @@ type Remotex interface {
 	// release without any of this performs.
 	Stage(ctx context.Context, request StageRequest, here LocalFrame,
 		authorize func(context.Context) error) (StageOutcome, error)
+}
+
+// NativeInputWritex fences new compiled claims while a first-node frame may
+// rewrite prepared source bytes and while its relevant-state check settles.
+type NativeInputWritex interface {
+	BeginNativeInputWrite(context.Context) (func(), error)
+}
+
+// StageReservationRequest fixes the graph task before its package admission
+// or any checkout write. A distributed placement waits for capacity here,
+// before the executor counts the package task as in flight.
+type StageReservationRequest struct {
+	TaskID     string
+	Release    *plan.Release
+	Descriptor Stage
+}
+
+// StageReservationx owns one exact placement until its frame either starts or
+// is refused. Close releases an unoffered placement; a landed or ambiguous
+// offer remains fenced until its durable decision.
+type StageReservationx interface {
+	Stage(context.Context, StageRequest, LocalFrame,
+		func(context.Context) error) (StageOutcome, error)
+	Close() error
+}
+
+// StageReserverx is optional because a local run needs no remote capacity
+// before package admission. A v3 coordinator uses it for placed stages.
+type StageReserverx interface {
+	ReserveStage(context.Context, StageReservationRequest) (StageReservationx, error)
 }
 
 // LocalFrame is one stage frame as this process runs it.
@@ -115,6 +148,8 @@ func ResolveLocalStageExecution(ctx context.Context, fallbackDir string, fallbac
 // repository and its version are all read from it, and a summary would be a
 // second description of the release that could disagree with the first.
 type StageRequest struct {
+	// TaskID is the compiled graph vertex identity used by the v3 task ref.
+	TaskID string
 	// Release is the package's planned release, which names the package, its
 	// folder and the repository it belongs to.
 	Release *plan.Release
@@ -169,7 +204,39 @@ type StageOutcome struct {
 	// a local release has always printed; a failure somewhere else is
 	// described by the part the node reported.
 	LocalFailure string
+	// NoClaim is set only when the placement proves that this task never
+	// offered or accepted a claim. A failed or ambiguous offer leaves it nil.
+	NoClaim *NoClaimFinality
+	// UnresolvedOffer means a signed offer may still have an accepted claim
+	// without a verified Result, Ack, or no-claim fence. The executor must not
+	// settle package failure or run outcome hooks while that effect is unknown.
+	UnresolvedOffer bool
 }
+
+// NoClaimFinality carries a blocker derived from the canonical task and
+// shared outcome policy, not from an error string.
+type NoClaimFinality struct {
+	Blocker string
+	// SignedTerminal says the canonical task ref was already terminalized by
+	// the admission deadline. Executor now owes only package settlement.
+	SignedTerminal bool
+}
+
+// DelegatedFailureEvidence binds a no-claim local failure without carrying
+// potentially sensitive error text into a signed transport document.
+type DelegatedFailureEvidence struct {
+	Part        string
+	ErrorSHA256 string
+}
+
+const (
+	DelegatedFailurePreludePart = "prelude"
+	DelegatedFailureInputsPart  = PartInputs
+	DelegatedFailureFramePart   = "frame"
+
+	noClaimWithoutFailedFrameErrorFormat = "release: stage reported no claim without a failed frame"
+	noClaimWithoutBlockerErrorFormat     = "release: failed no-claim stage named no blocker"
+)
 
 // The parts of a stage frame, as an executing node names the one that failed.
 // They are the frame's own vocabulary rather than the hook names, because a
@@ -223,13 +290,29 @@ func (tc *taskCtx) runStage(ctx context.Context, s stage) (what string, err erro
 // its writes out of a snapshot somebody is taking at the same moment.
 func (tc *taskCtx) guardedStage(ctx context.Context, s stage) (string, error) {
 	stage := tc.stage.Name
+	if writer, ok := tc.Remote.(NativeInputWritex); ok {
+		releaseNative, err := writer.BeginNativeInputWrite(ctx)
+		if err != nil {
+			return nativeFrameInvalidationFailure, err
+		}
+		defer releaseNative()
+	}
 	releaseGuard, err := tc.Remote.Guard(ctx, stage, tc.t.pkg)
 	if err != nil {
 		return stage + " could not be guarded", err
 	}
 	defer releaseGuard()
 	tc.log.Trace().Str("stage", stage).Msg("stage guarded against a concurrent snapshot")
-	return tc.stageFrame(ctx, s)
+	what, frameErr := tc.stageFrame(ctx, s)
+	if tc.AfterNativeFrame != nil {
+		if invalidationErr := tc.AfterNativeFrame(ctx, stage, tc.t.pkg); invalidationErr != nil {
+			if frameErr != nil {
+				return what, errors.Join(frameErr, invalidationErr)
+			}
+			return nativeFrameInvalidationFailure, invalidationErr
+		}
+	}
+	return what, frameErr
 }
 
 // placedStage runs one frame wherever this run places it and folds what came
@@ -247,7 +330,14 @@ func (tc *taskCtx) placedStage(ctx context.Context, s stage) (string, error) {
 	if tc.stage.IsAuthorized {
 		authorize = tc.revalidatePublication
 	}
-	outcome, err := tc.Remote.Stage(ctx, tc.stageRequest(s), tc.localFrame(s), authorize)
+	request := tc.stageRequest(s)
+	var outcome StageOutcome
+	var err error
+	if tc.stageReservation != nil {
+		outcome, err = tc.stageReservation.Stage(ctx, request, tc.localFrame(s), authorize)
+	} else {
+		outcome, err = tc.Remote.Stage(ctx, request, tc.localFrame(s), authorize)
+	}
 	return tc.foldPlacement(outcome, err)
 }
 
@@ -267,14 +357,21 @@ func (tc *taskCtx) revalidatePublication(ctx context.Context) error {
 // it is, and the configuration's own pairs travel unresolved so that a value
 // naming a secret expands on the node that runs the command.
 func (tc *taskCtx) stageRequest(s stage) StageRequest {
+	request := renderStageRequest(tc.rel, tc.stage, s, tc.wsVars, tc.updates)
+	request.TaskID = taskGraphID(tc.t)
+	return request
+}
+
+func renderStageRequest(rel *plan.Release, descriptor Stage, s stage,
+	wsVars []string, updates []providerUpdate) StageRequest {
 	return StageRequest{
-		Release:    tc.rel,
-		Stage:      tc.stage.Name,
-		Descriptor: tc.stage,
+		Release:    rel,
+		Stage:      descriptor.Name,
+		Descriptor: descriptor,
 		Frame:      StageFrame{Before: s.before, Commands: s.commands, After: s.after},
-		Env:        computedReleaseEnv(tc.rel, tc.wsVars, tc.updates, tc.stage.Name),
-		StaticEnv:  tc.rel.Pkg.Space.Env,
-		Dir:        tc.rel.Pkg.Dir,
+		Env:        computedReleaseEnv(rel, wsVars, updates, descriptor.Name),
+		StaticEnv:  rel.Pkg.Space.Env,
+		Dir:        rel.Pkg.Dir,
 	}
 }
 
@@ -289,6 +386,22 @@ func (tc *taskCtx) localFrame(s stage) LocalFrame {
 // release: the exports it produced, the node it named, and the sentence the
 // failure is reported with.
 func (tc *taskCtx) foldPlacement(outcome StageOutcome, err error) (string, error) {
+	if outcome.UnresolvedOffer {
+		tc.unresolvedEffect = true
+	}
+	if err != nil {
+		tc.placementFailedPart = outcome.FailedPart
+	}
+	if outcome.NoClaim != nil {
+		if err == nil {
+			return "", errors.New(noClaimWithoutFailedFrameErrorFormat)
+		}
+		if outcome.NoClaim.Blocker == "" {
+			return "", errors.New(noClaimWithoutBlockerErrorFormat)
+		}
+		copy := *outcome.NoClaim
+		tc.noClaim = &copy
+	}
 	MergeOutputs(tc.rel, outcome.Exports)
 	// Before the error is looked at, for the reason the exports are: a frame
 	// that failed on a node is a failure that node is reported for, and the

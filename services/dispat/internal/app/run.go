@@ -39,6 +39,11 @@ const SinceAll = "all"
 
 // RunOptions selects what RunScript runs over, beyond the script name.
 type RunOptions struct {
+	// DistributionMode selects the invocation mode; RC.9 accepts compilation only.
+	// Empty preserves compilation for direct App callers.
+	DistributionMode public.DistributionMode
+	ReturnEndpoint   string
+	ReturnListen     string
 	// OnError is the failure policy for the failed package's dependents:
 	// OnErrorSkip (the default when empty) or OnErrorContinue.
 	OnError string
@@ -72,7 +77,13 @@ type RunOptions struct {
 // packages changed, not that the script reaches them. opts decides which
 // packages the run covers (see RunOptions); any failure makes the whole
 // command fail.
-func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error {
+func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) (runErr error) {
+	if err := a.checkDistributionMode(opts.DistributionMode); err != nil {
+		return err
+	}
+	if err := a.checkReturnAddress(opts.ReturnEndpoint, opts.ReturnListen); err != nil {
+		return err
+	}
 	if !a.scriptDefinedAnywhere(name) {
 		msg := fmt.Sprintf("no script %q is defined at the top level, in a space or in a package", name)
 		if note, ok := lookupNote(name); ok {
@@ -81,6 +92,13 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 		err := errors.New(msg)
 		a.log.Error().Err(err).Msg("unknown run script")
 		return err
+	}
+	if err := a.reconcilePriorFirstRun(ctx); err != nil {
+		return a.reportSweepRefusal(err)
+	}
+	if err := a.prepareExplicitLocalSlots(); err != nil {
+		return a.reportSweepRefusal(execution.NewDiagnostic(
+			execution.CodeConfiguration, execution.CategoryConfiguration, "%w", err))
 	}
 
 	// Who may start a sweep that reaches other machines, and whether it could
@@ -92,14 +110,57 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 			return err
 		}
 		a.startExecutionRun()
+		if err := a.prepareFirstRunIdentity(ctx, opts.ReturnEndpoint, opts.ReturnListen); err != nil {
+			return a.reportSweepRefusal(err)
+		}
+		defer func() {
+			safe := a.coordinatorCloseErr == nil &&
+				(a.coordinator == nil || a.isCoordinatorClosed) &&
+				(!a.choreographyRetained || a.choreographyBound)
+			if finishErr := a.finishFirstRunIdentity(safe); finishErr != nil {
+				a.logError(finishErr).Msg("first-node sweep identity remains for reconciliation")
+				runErr = errors.Join(runErr, finishErr)
+			}
+		}()
 	}
-	pl, err := a.computePlan(ctx)
+	beforePlanning, err := a.capturePrePlanningSources(ctx)
+	if err != nil {
+		return a.reportSweepRefusal(err)
+	}
+	if beforePlanning != nil {
+		defer beforePlanning.Close()
+	}
+	planningRefs, err := a.capturePlanningRefs(ctx, nil)
+	if err != nil {
+		return a.reportSweepRefusal(err)
+	}
+	var pl *plan.Plan
+	if beforePlanning != nil {
+		private, materializeErr := a.openPinnedPlanning(ctx, beforePlanning, planningRefs)
+		if materializeErr != nil {
+			return a.reportSweepRefusal(materializeErr)
+		}
+		pl, err = a.planFromMaterialization(ctx, private, nil)
+		err = errors.Join(err, private.close())
+	} else {
+		pl, err = a.computePlan(ctx)
+	}
 	if err != nil {
 		return err
 	}
 	if pl.IsFatal() {
 		a.log.Error().Msg("refusing to run: the repository cannot produce a correct plan")
 		return errors.New("no correct plan exists")
+	}
+	var sinceAnchor *execution.PinnedSinceAnchor
+	if a.cfg.Execution.IsDistributed() {
+		sinceAnchor, err = a.pinSweepSince(ctx, opts.Window.Since)
+		if err != nil {
+			return a.reportSweepRefusal(err)
+		}
+		if sinceAnchor != nil {
+			opts.Window.Since = sinceAnchor.OID
+		}
 	}
 	sel, covered, err := a.coveredSelection(ctx, pl, opts.Window)
 	if err != nil {
@@ -108,7 +169,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 	}
 
 	work := &scriptWork{
-		app: a, pl: pl, name: name, args: opts.Args,
+		app: a, pl: pl, name: name, args: opts.Args, onError: opts.OnError,
 		// The workspace listing depends only on the plan, so it is built once
 		// here and shared by every package's environment.
 		wsVars:  release.WorkspaceEnv(pl, a.log),
@@ -118,18 +179,126 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) error
 	if err := a.checkSweepPlacements(work, covered); err != nil {
 		return err
 	}
+	var pinnedSources *execution.PinnedRunSources
+	var pinnedInputs *execution.PinnedRunInputs
+	if a.cfg.Execution.IsDistributed() {
+		if err := a.recordFixedPlan(ctx, pl, ReleaseOptions{}); err != nil {
+			return err
+		}
+		if err := a.finishPlanningRefs(ctx, planningRefs); err != nil {
+			return a.reportSweepRefusal(err)
+		}
+		var rootRepository string
+		pinnedSources, rootRepository, err = a.capturePinnedRunSources(ctx, pl)
+		if err != nil {
+			return a.reportSweepRefusal(err)
+		}
+		defer pinnedSources.Close()
+		if !samePinnedPlanningSources(beforePlanning, pinnedSources) {
+			return a.reportSweepRefusal(fmt.Errorf(
+				"execution: source or configuration bytes changed while the run plan was computed"))
+		}
+		selection, options, err := a.pinnedSweepDocuments(name, opts, covered)
+		if err != nil {
+			return a.reportSweepRefusal(err)
+		}
+		configFiles, err := a.pinnedConfigFiles()
+		if err != nil {
+			return a.reportSweepRefusal(err)
+		}
+		invocation, err := a.pinnedInvocation()
+		if err != nil {
+			return a.reportSweepRefusal(err)
+		}
+		pinnedInputs = &execution.PinnedRunInputs{
+			Repositories: pinnedSources.Repositories, RepositoryCoordinates: a.pinnedRepositoryCoordinates(),
+			ConfigFiles: configFiles, NativeRefs: a.pinnedNativeRefs, SinceAnchor: sinceAnchor,
+			Invocation: invocation,
+			Selection:  selection, Options: options, RootRepository: rootRepository,
+		}
+	}
+	returnChannel, err := a.openRunReturnChannel(opts.ReturnEndpoint, opts.ReturnListen)
+	if err != nil {
+		return a.reportSweepRefusal(err)
+	}
+	if returnChannel != nil {
+		defer func() {
+			if closeErr := returnChannel.close(); closeErr != nil {
+				a.log.Warn().Err(closeErr).Msg("return channel did not close cleanly")
+			}
+		}()
+	}
 	// With worker links the pool is opened here, and the coordinator owns
 	// every ref the sweep creates until the deferred close deletes them.
-	coordinator, err := a.openSweepDispatch(ctx, work, covered)
+	coordinator, err := a.openSweepDispatch(ctx, sweepDispatchRequest{
+		work: work, mode: effectiveDistributionMode(opts.DistributionMode),
+		onError: opts.OnError,
+		covered: covered, returnChannel: returnChannel,
+		pinnedSources: pinnedSources, pinnedInputs: pinnedInputs,
+	})
 	if coordinator != nil {
 		defer a.closeCoordinator(ctx, coordinator)
 	}
 	if err != nil {
 		return err
 	}
+	dispatchCtx := ctx
+	var stopCompiledPicker func() error
+	if coordinator != nil && work.broker != nil && coordinator.GraphRootOID != "" {
+		if _, startErr := work.broker.StartExecution(ctx); startErr != nil {
+			return a.reportSweepRefusal(startErr)
+		}
+		pickerCtx, stopPicker, pickerErr := a.startCompiledLocalPicker(ctx, coordinator, work.broker)
+		if pickerErr != nil {
+			return a.reportSweepRefusal(pickerErr)
+		}
+		ctx = pickerCtx
+		stopCompiledPicker = stopPicker
+		defer func() {
+			if stopCompiledPicker != nil {
+				stopErr := stopCompiledPicker()
+				if stopErr != nil {
+					a.log.Error().Err(stopErr).Msg("first-node compiled sweep picker stopped before settlement")
+				}
+			}
+		}()
+	}
 	started := time.Now()
-	rep, drainErr := a.runSweep(ctx, pl, covered, work, sweepOptions{OnError: opts.OnError})
-	mergeErr := a.finishSweepDispatch(ctx, coordinator, pl, rep, started)
+	sweepPolicy := sweepOptions{OnError: opts.OnError}
+	if coordinator != nil && a.choreographyBound {
+		sweepPolicy.TaskOutcomeSettled = func(settleCtx context.Context, pkg string,
+			status release.PackageOutcome) error {
+			return coordinator.SettleChoreographyTask(settleCtx, pkg+":"+execution.KindRun, status)
+		}
+		sweepPolicy.TaskBlocked = func(settleCtx context.Context, pkg, blocker string) error {
+			if work.broker == nil {
+				return fmt.Errorf("execution: sweep has no signed blocked-outcome authority")
+			}
+			return work.broker.AcceptBlocked(settleCtx, execution.ChoreographyBlockedOutcome{
+				ChoreographyRunBinding: execution.ChoreographyRunBinding{
+					Run: coordinator.Run, Generation: coordinator.Generation,
+					PlanDigest: coordinator.PlanDigest, GraphDigest: coordinator.GraphDigest,
+				},
+				Task: pkg + ":" + execution.KindRun, Package: pkg,
+				BlockedBy: blocker, PackageOutcome: string(release.OutcomeSkipped),
+			})
+		}
+	}
+	if !a.cfg.Execution.IsDistributed() && a.localNodeSlots != nil {
+		sweepPolicy.LocalSlots = a.localNodeSlots
+		sweepPolicy.LocalRun = a.localSlotRunID
+		sweepPolicy.SlotWait = time.Duration(a.cfg.Execution.ResolveTimeouts().Task) * time.Second
+	}
+	rep, drainErr := a.runSweep(ctx, pl, covered, work, sweepPolicy)
+	if stopCompiledPicker != nil {
+		drainErr = errors.Join(drainErr, stopCompiledPicker())
+		stopCompiledPicker = nil
+	}
+	mergeCtx := ctx
+	if drainErr == nil {
+		mergeCtx = dispatchCtx
+	}
+	mergeErr := a.finishSweepDispatch(mergeCtx, coordinator, pl, rep, started)
 
 	a.log.Info().Str("script", name).Int("ran", rep.Ran).Int("failed", rep.Failed).
 		Int("skipped", rep.Skipped).Msg("run finished")
@@ -254,12 +423,14 @@ type scriptWork struct {
 	pl      *plan.Plan
 	name    string
 	args    []string // what followed `--`, appended to every package's command
+	onError string   // the selected provider-failure policy for carried partial outputs
 	wsVars  []string // the shared workspace listing, built once per run
 	runner  script.Runnerx
 	covered map[string]*plan.Release
 	// coordinator places every package's task on the pool when the sweep has
 	// worker links, and is nil for a sweep that runs everything here.
 	coordinator *execution.Coordinator
+	broker      *execution.FirstNodeBroker
 	// roots are the folders the entry configuration declares the script
 	// writes, which a task placed on another machine carries back.
 	roots []string
@@ -330,8 +501,9 @@ func (w *scriptWork) placeTask(ctx context.Context, rel *plan.Release, seq relea
 			StaticEnv: rel.Pkg.Space.Env,
 			Dir:       rel.Pkg.Dir,
 		},
-		Script: w.name,
-		Roots:  w.roots,
+		Script:          w.name,
+		Roots:           w.roots,
+		ContinueOnError: w.onError == OnErrorContinue,
 		Here: func(ctx context.Context) ([]plan.Output, error) {
 			return seq.RunCollectingOutputs(ctx, pkg+":"+seq.Stage)
 		},

@@ -1,6 +1,10 @@
 package config
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"math"
 	"path/filepath"
 	"testing"
 
@@ -10,6 +14,26 @@ import (
 
 	"github.com/yohimik/dispat/pkg/models"
 )
+
+func executionTestPublicKey(t *testing.T) string {
+	t.Helper()
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	return base64.RawURLEncoding.EncodeToString(public)
+}
+
+func TestLoadExecutionBoundsAdmissionAtSignedProtocolMaximum(t *testing.T) {
+	seconds := models.MaxExecutionAdmissionTimeoutSeconds
+	_, err := loadModel(t, executionConfig(&ExecutionConfig{
+		Timeouts: &ExecutionTimeoutsConfig{Admission: seconds},
+	}), "pkgs/core")
+	require.NoError(t, err)
+	_, err = loadModel(t, executionConfig(&ExecutionConfig{
+		Timeouts: &ExecutionTimeoutsConfig{Admission: seconds + 1},
+	}), "pkgs/core")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "execution.timeouts.admission must be <=")
+}
 
 // The execution key is refused at load or it is not refused at all: nothing
 // reads it before the locks, so a mistake in it has to be caught while the
@@ -31,7 +55,6 @@ func executionConfig(x *ExecutionConfig) File {
 // with.
 func orchestratorWithWorkers() *ExecutionConfig {
 	return &ExecutionConfig{
-		Role:        models.ExecutionRoleOrchestrator,
 		Concurrency: models.Int(2),
 		SecretEnv:   "DISPAT_EXECUTION_SECRET",
 		Workers: []ExecutionWorkerConfig{
@@ -47,7 +70,6 @@ func TestLoadExecutionAbsentStaysAbsent(t *testing.T) {
 	loaded, err := loadModel(t, minimalConfig(), "pkgs/core")
 	require.NoError(t, err)
 	assert.Nil(t, loaded.Execution)
-	assert.Equal(t, models.ExecutionRoleOrchestrator, loaded.Execution.ResolveRole())
 	assert.False(t, loaded.Execution.IsDistributed())
 }
 
@@ -64,24 +86,22 @@ func TestLoadExecutionAcceptedShapes(t *testing.T) {
 			assert.True(t, loaded.Execution.IsDistributed())
 			assert.Equal(t, 2, loaded.Execution.ResolveConcurrency())
 		}},
-		"a worker node": {&ExecutionConfig{
-			Role:      models.ExecutionRoleWorker,
+		"a serving worker": {&ExecutionConfig{
 			Name:      "build-a",
 			Endpoint:  "/srv/mailboxes/build-a.git",
 			SecretEnv: "DISPAT_EXECUTION_SECRET",
 		}, func(t *testing.T, loaded *File) {
-			assert.True(t, loaded.Execution.IsWorker())
 			assert.False(t, loaded.Execution.IsDistributed())
 			// A worker states no capacity here, so it takes the default.
 			assert.Equal(t, models.DefaultExecutionConcurrency, loaded.Execution.ResolveConcurrency())
 		}},
 		"stated bounds": {&ExecutionConfig{
-			Timeouts: &ExecutionTimeoutsConfig{Preflight: 10, Task: 20, Cancel: 30},
-			Transfer: &ExecutionTransferConfig{MaxFiles: 1, MaxBytes: 2, MaxManifestBytes: 3, Timeout: 4},
+			Timeouts: &ExecutionTimeoutsConfig{Preflight: 10, Admission: 15, Task: 20, Cancel: 30},
+			Transfer: &ExecutionTransferConfig{MaxFiles: 1, MaxBytes: 2, MaxManifestBytes: 3, MaxPackBytes: 5, Timeout: 4},
 		}, func(t *testing.T, loaded *File) {
-			assert.Equal(t, ExecutionTimeoutsConfig{Preflight: 10, Task: 20, Cancel: 30},
+			assert.Equal(t, ExecutionTimeoutsConfig{Preflight: 10, Admission: 15, Task: 20, Cancel: 30},
 				loaded.Execution.ResolveTimeouts())
-			assert.Equal(t, ExecutionTransferConfig{MaxFiles: 1, MaxBytes: 2, MaxManifestBytes: 3, Timeout: 4},
+			assert.Equal(t, ExecutionTransferConfig{MaxFiles: 1, MaxBytes: 2, MaxManifestBytes: 3, MaxPackBytes: 5, Timeout: 4},
 				loaded.Execution.ResolveTransfer())
 		}},
 		"every endpoint form": {&ExecutionConfig{
@@ -109,6 +129,16 @@ func TestLoadExecutionAcceptedShapes(t *testing.T) {
 				loaded.Execution.Workers)
 			assert.True(t, loaded.Execution.IsDistributed())
 		}},
+		"only a preauthorized late worker": {&ExecutionConfig{
+			SecretEnv: "S",
+			Workers: []ExecutionWorkerConfig{{Name: "build-a", LateJoin: true,
+				IdentityPublicKey: executionTestPublicKey(t)}},
+		}, func(t *testing.T, loaded *File) {
+			assert.True(t, loaded.Execution.IsDistributed())
+			require.Len(t, loaded.Execution.Workers, 1)
+			assert.True(t, loaded.Execution.Workers[0].LateJoin)
+			assert.NotEmpty(t, loaded.Execution.Workers[0].IdentityPublicKey)
+		}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			loaded, err := loadModel(t, executionConfig(tc.execution), "pkgs/core")
@@ -132,15 +162,26 @@ func TestLoadExecutionEmptyWorkerListIsLocalExecution(t *testing.T) {
 	assert.False(t, loaded.Execution.IsDistributed())
 }
 
+func TestRemovedExecutionKeysAreRefused(t *testing.T) {
+	for _, key := range []string{"role", "workers"} {
+		t.Run(key, func(t *testing.T) {
+			root := writeRawRepo(t, map[string]any{
+				"scripts":   map[string]any{"build": []string{"echo b"}},
+				"spaces":    map[string]any{"libs": map[string]any{"path": []string{"pkgs"}}},
+				"execution": map[string]any{key: "worker"},
+			}, "pkgs/core")
+			_, err := Load(filepath.Join(root, "dispat.json"), nil)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), key)
+		})
+	}
+}
+
 func TestLoadExecutionRejections(t *testing.T) {
 	for name, tc := range map[string]struct {
 		execution *ExecutionConfig
 		want      string
 	}{
-		"an unknown role": {
-			&ExecutionConfig{Role: "coordinator"}, `execution.role "coordinator" is invalid`},
-		"a role spelled with the wrong case": {
-			&ExecutionConfig{Role: "Worker"}, `execution.role "Worker" is invalid`},
 		"a capacity of zero": {
 			&ExecutionConfig{Concurrency: models.Int(0)}, "execution.concurrency must be >= 1, got 0"},
 		"a negative capacity": {
@@ -148,9 +189,18 @@ func TestLoadExecutionRejections(t *testing.T) {
 		"a negative wait": {
 			&ExecutionConfig{Timeouts: &ExecutionTimeoutsConfig{Task: -1}},
 			"execution.timeouts.task must be >= 0, got -1"},
+		"a negative admission deadline": {
+			&ExecutionConfig{Timeouts: &ExecutionTimeoutsConfig{Admission: -1}},
+			"execution.timeouts.admission must be >= 0, got -1"},
 		"a negative ceiling": {
 			&ExecutionConfig{Transfer: &ExecutionTransferConfig{MaxBytes: -3}},
 			"execution.transfer.maxBytes must be >= 0, got -3"},
+		"a negative Git pack ceiling": {
+			&ExecutionConfig{Transfer: &ExecutionTransferConfig{MaxPackBytes: -3}},
+			"execution.transfer.maxPackBytes must be >= 0, got -3"},
+		"a Git pack ceiling that cannot be probed": {
+			&ExecutionConfig{Transfer: &ExecutionTransferConfig{MaxPackBytes: math.MaxInt64}},
+			"execution.transfer.maxPackBytes must be <= 9223372036854775806"},
 		"a node name that is not one": {
 			&ExecutionConfig{Name: "build a"}, `execution.name "build a" is not a node name`},
 		"a node name git could not write into a branch name": {
@@ -159,10 +209,15 @@ func TestLoadExecutionRejections(t *testing.T) {
 			&ExecutionConfig{Endpoint: "../mailbox.git"}, "execution.endpoint: "},
 		"a secret variable that is not a variable name": {
 			&ExecutionConfig{SecretEnv: "2secret"}, `execution.secretEnv "2secret" is not an environment variable name`},
-		"a worker that delegates": {
-			&ExecutionConfig{Role: models.ExecutionRoleWorker, SecretEnv: "S",
-				Workers: []ExecutionWorkerConfig{{Name: "a", Endpoint: "/srv/a.git"}}},
-			"execution.workers is not a worker's to state"},
+		"an identity seed variable that is not a variable name": {
+			&ExecutionConfig{IdentityKeyEnv: "2seed"}, `execution.identityKeyEnv "2seed" is not an environment variable name`},
+		"late admission with no pinned identity key": {
+			&ExecutionConfig{SecretEnv: "S", Workers: []ExecutionWorkerConfig{{Name: "late", LateJoin: true}}},
+			"execution.workers[0].identityPublicKey must be a canonical base64url Ed25519 public key"},
+		"late admission with a malformed identity key": {
+			&ExecutionConfig{SecretEnv: "S", Workers: []ExecutionWorkerConfig{{Name: "late", LateJoin: true,
+				IdentityPublicKey: "not-a-key"}}},
+			"execution.workers[0].identityPublicKey must be a canonical base64url Ed25519 public key"},
 		"a link with no name": {
 			&ExecutionConfig{SecretEnv: "S", Workers: []ExecutionWorkerConfig{{Endpoint: "/srv/a.git"}}},
 			"execution.workers[0]: name is required"},
@@ -260,14 +315,14 @@ func TestExecutionIsARootKeyOnly(t *testing.T) {
 	// The key exists in fileFields alone, which is what makes a space, a
 	// package entry, a space folder's file and a package folder's file refuse
 	// it as an unknown key: a checkout travelling to another machine must not
-	// be able to tell that machine what role it plays.
-	stated := map[string]any{"execution": map[string]any{"role": "worker"}}
+	// be able to state another machine's runtime settings.
+	stated := map[string]any{"execution": map[string]any{"name": "build-a"}}
 	t.Run("a space in the root file", func(t *testing.T) {
 		root := writeRawRepo(t, map[string]any{
 			"scripts": map[string]any{"build": []string{"echo b"}},
 			"spaces": map[string]any{"libs": map[string]any{
 				"path":      []string{"pkgs"},
-				"execution": map[string]any{"role": "worker"},
+				"execution": map[string]any{"name": "build-a"},
 			}},
 		}, "pkgs/core")
 		_, err := Load(filepath.Join(root, "dispat.json"), nil)
@@ -362,12 +417,6 @@ func TestWorkerFlagRefusals(t *testing.T) {
 		"no signing secret named": {
 			cfg: minimalConfig(), values: []string{"w=file:///m"},
 			want: "execution.secretEnv is required", code: DiagnosticExecution},
-		"a worker's own file": {
-			cfg: executionConfig(&ExecutionConfig{Role: models.ExecutionRoleWorker, Name: "w",
-				Endpoint: "file:///m", SecretEnv: "DISPAT_EXECUTION_SECRET"}),
-			values: []string{"other=file:///m"},
-			want:   "a worker executes the tasks it is given and dispatches nothing",
-			code:   DiagnosticExecutionAuthority},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := loadWithWorkerFlags(t, row.cfg, row.values...)

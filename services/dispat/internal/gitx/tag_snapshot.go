@@ -72,6 +72,39 @@ func (c *LocalGitx) RelevantTagSnapshot(ctx context.Context, matcher *TagSnapsho
 	return parseRelevantTagSnapshot(out, matcher), nil
 }
 
+// AllTagSnapshot captures every non-coordination tag ref at one read. An
+// independent planner cannot choose its own release-tag matcher before it
+// has interpreted the pinned configuration and history, so its input closure
+// begins with this complete inventory rather than a plan-derived subset.
+func (c *LocalGitx) AllTagSnapshot(ctx context.Context) (TagSnapshot, error) {
+	out, err := c.run(ctx, transportListRefsCommandName,
+		transportTagSnapshotFormatFlag, transportTagNamespaceText)
+	if err != nil {
+		return nil, err
+	}
+	return parseAllTagSnapshot(out), nil
+}
+
+func parseAllTagSnapshot(out string) TagSnapshot {
+	result := make(TagSnapshot)
+	for line := range strings.Lines(out) {
+		line = strings.TrimSuffix(strings.TrimSuffix(line, transportObjectLineSeparatorText), transportCarriageReturnText)
+		name, rest, ok := strings.Cut(line, transportTagSnapshotFieldSeparatorText)
+		if !ok || name == transportAbsentObjectText || name == LockTagName || strings.HasPrefix(name, LockAttemptTagPrefix) {
+			continue
+		}
+		object, peeled, ok := strings.Cut(rest, transportTagSnapshotFieldSeparatorText)
+		if !ok || object == transportAbsentObjectText {
+			continue
+		}
+		if extra, _, found := strings.Cut(peeled, transportTagSnapshotFieldSeparatorText); found {
+			peeled = extra
+		}
+		result[strings.Clone(name)] = TagRefTarget{Object: strings.Clone(object), Peeled: strings.Clone(peeled)}
+	}
+	return result
+}
+
 type refNamespaceMatcher struct {
 	prefix  string
 	matches func(string) bool

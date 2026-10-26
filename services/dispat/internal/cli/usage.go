@@ -130,7 +130,7 @@ just created. A name alone reaches the repository being released, and
 configured link is.
 
 This is what a bare "dispat" does.`,
-		flags: append([]string{"strict", "require-release", "worker"}, selectionFlags...),
+		flags: append([]string{releaseStrictFlagName, requireReleaseFlagName, linkedWorkerFlagName, distributionModeFlagName, returnEndpointFlagName, returnListenFlagName}, selectionFlags...),
 	},
 	{
 		name:  cmdStatus,
@@ -152,7 +152,7 @@ plan that releases nothing exits 3, so a pipeline gating on it can tell
 With worker links, from execution.workers or from --worker name[=endpoint],
 it fixes and prints the plan digest a distributed run would carry, and
 still resolves no remote, dispatches nothing and takes no lock.`,
-		flags: append([]string{"strict", "require-release", "worker"}, selectionFlags...),
+		flags: append([]string{releaseStrictFlagName, requireReleaseFlagName, linkedWorkerFlagName, distributionModeFlagName}, selectionFlags...),
 	},
 	{
 		name:     cmdRun,
@@ -179,7 +179,7 @@ carried back and merged into this checkout once every task has answered.
 A link with no endpoint reaches the repository being released.
 
 "dispat <script>" is a shorthand when <script> is not a command name.`,
-		flags: append(append([]string{}, windowFlags...), "worker"),
+		flags: append(append([]string{}, windowFlags...), linkedWorkerFlagName, distributionModeFlagName, returnEndpointFlagName, returnListenFlagName),
 	},
 	{
 		name:  cmdInit,
@@ -402,32 +402,7 @@ Links are proposed without changes unless --write or --interactive is used.`,
 	{
 		name:  cmdWorker,
 		short: "serve the tasks an orchestrator addressed to this node",
-		long: `Serve the build and publish tasks another node's release assigns to this
-one, and nothing else. A worker never starts a release, never writes a
-release record and never plans: it reads the work addressed to it, runs
-what its assignment authorized, and reports back.
-
-The node is described by the execution object of the config file, and three
-of its settings are required here: execution.name, which is how this node
-recognises the work addressed to it; execution.endpoint, the repository it
-reads that work from, which is the repository being released unless the
-orchestrator's link names another mailbox; and execution.secretEnv, naming
-the environment variable holding the secret every message between the two
-nodes is signed with. execution.concurrency (default 1) is how many assigned
-command tasks this node takes on at once.
-
-Nothing else about the repository is needed: no packages, no spaces and no
-git repository at the root, because a serving node is told what to do rather
-than discovering it.
-
-The mailbox is polled over git alone, so a node needs no inbound network
-address of any kind. --state-dir names the folder this node keeps its object
-cache and its record of already-answered work in; two workers must not share
-one folder for one node name, and the second one to start refuses.
---idle-timeout stops the process after that many seconds with nothing to do,
-which is how a node started for one release ends by itself. A SIGINT or a
-SIGTERM stops it as soon as what it has claimed is finished; both exits are
-exit code 0, because a serving command asked to stop has done its job.`,
+		long:  workerCompiledUsageText,
 		flags: []string{"state-dir", "idle-timeout"},
 	},
 	{

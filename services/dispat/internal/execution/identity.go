@@ -9,9 +9,7 @@ package execution
 // A release spread over several machines is read from several logs at once,
 // and the first question of any reading is which machine wrote the line. The
 // answer is two fields, `role` and `node`, and they name the writer rather
-// than the work: a line about another node names that node separately, so
-// "the orchestrator says build-a became unhealthy" cannot be read as "build-a
-// says it became unhealthy".
+// than the work: a line about another node names that node separately.
 //
 // The decision is here, in one function, because three callers ask it and
 // they have to agree: the command line, which derives the run logger; the
@@ -32,34 +30,31 @@ import (
 // execution.name in the file and a machine that cannot say what it is called.
 // It is a last resort rather than a default, because an empty field would be
 // a line that answers the first question with nothing.
-const UnnamedNode = "orchestrator"
+const UnnamedNode = "unnamed-node"
+
+const (
+	senderOrchestrator = "orchestrator"
+	senderWorker       = "worker"
+)
 
 // ResolveSender answers who this process is when it takes part in distributed
 // execution, and the zero sender when it does not.
 //
 // The three branches are three different questions and are answered in the
-// order they overrule each other. A process executing somebody else's task is
-// a worker however it was invoked and whatever the checkout it was handed
-// says, because the configuration that travelled with that checkout describes
-// the orchestrator that sent it. A process serving a mailbox is a worker for
-// as long as it serves, including on a node whose file calls it an
-// orchestrator: a node serving a task has worker authority for it (§28.1).
-// Everything else is what the entry configuration says it is, and a
-// configuration that says nothing about execution says nothing at all.
+// order they overrule each other. A process executing a task or serving a
+// mailbox is a worker for log purposes. The first node's authority is
+// verified from its run and locks, never from this log identity.
 func ResolveSender(settings *public.ExecutionConfig, isServingTasks bool, env []string) release.Sender {
 	if IsWorkerAuthority(env) {
-		return release.Sender{Role: public.ExecutionRoleWorker, Node: resolveTaskNode(env)}
+		return release.Sender{Role: senderWorker, Node: resolveTaskNode(env)}
 	}
 	if isServingTasks {
-		return release.Sender{Role: public.ExecutionRoleWorker, Node: resolveNodeName(statedName(settings))}
+		return release.Sender{Role: senderWorker, Node: resolveNodeName(statedName(settings))}
 	}
 	if settings == nil {
 		return release.Sender{}
 	}
-	if settings.Role == public.ExecutionRoleWorker {
-		return release.Sender{Role: public.ExecutionRoleWorker, Node: resolveNodeName(settings.Name)}
-	}
-	return release.Sender{Role: public.ExecutionRoleOrchestrator, Node: resolveNodeName(settings.Name)}
+	return release.Sender{Role: senderOrchestrator, Node: resolveNodeName(settings.Name)}
 }
 
 // resolveTaskNode is the node a task is running on, as its command

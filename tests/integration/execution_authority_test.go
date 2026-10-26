@@ -106,7 +106,6 @@ func executionMailboxBranches(t *testing.T, mailbox string) []string {
 // the variable naming the secret its messages are signed with.
 func executionDistributedConfig(mailbox string) *models.ExecutionConfig {
 	return &models.ExecutionConfig{
-		Role:      models.ExecutionRoleOrchestrator,
 		SecretEnv: executionSecretEnv,
 		Workers:   []models.ExecutionWorkerConfig{{Name: "build-a", Endpoint: "file://" + mailbox}},
 	}
@@ -135,30 +134,20 @@ func executionSays(execution *models.ExecutionConfig) func(*models.File) {
 
 func executionSaysNothing(*models.File) {}
 
-// TestExecutionWorkerRoleRefusesRelease: a node that calls itself a worker
-// refuses to start a release before it has taken any ownership at all. The
-// lock push is counted rather than faulted: what has to be true is that the
-// invocation never happened. The same node still answers `dispat status`,
-// because reading the plan is not initiating a release.
-func TestExecutionWorkerRoleRefusesRelease(t *testing.T) {
+// TestExecutionNodeNameDoesNotPreventRelease: a node name and read endpoint
+// no longer act as a static worker role. The first node may release and run
+// ordinary work while it retains exclusive publication authority.
+func TestExecutionNodeNameDoesNotPreventRelease(t *testing.T) {
 	r, bare := executionReleasableRepo(t, executionSays(&models.ExecutionConfig{
-		Role: models.ExecutionRoleWorker, Name: "build-a",
+		Name:     "build-a",
 		Endpoint: "file:///srv/mailboxes/build-a.git",
 	}))
-	fault := harness.NewGitFault(t, harness.GitFault{Pattern: lockPushPattern})
-
-	res := r.CommandEnv(append(fault.Env(), harness.LockEnabled...))
-
-	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	requireExecutionRefusal(t, res, executionAuthorityCode, executionAuthorityCategory)
-	assert.Contains(t, diagnosticText(res), "execution.role")
-	assert.Zero(t, fault.Matches(), "the refusal comes before the release lock is pushed")
-	assert.False(t, remoteHoldsLock(t, bare), "and before anything is on the remote")
-	assert.Empty(t, r.TagList(), "a refused release tags nothing")
-
 	status := r.StatusOK()
 	assert.Equal(t, "● changed", harness.GraphLine(status.Events, "core").Str("message"),
-		"a worker still reads the plan it is asked about")
+		"the node still reads the plan it is asked about")
+	r.ReleaseOK()
+	assert.Contains(t, r.TagList(), "core@0.1.0")
+	assert.False(t, remoteHoldsLock(t, bare), "the completed release gave back its lock")
 }
 
 // TestExecutionWorkerAuthorityRefusesNativeRefWrites: a task executing
@@ -368,7 +357,13 @@ func TestExecutionMissingSecretRefusesDistributedRelease(t *testing.T) {
 					executionSecretEnv+"=hunter2").stop(t)
 			}
 
-			res := r.CommandEnv(append(harness.LockEnabled, tc.env...))
+			args := []string{"release"}
+			env := append(append([]string{}, harness.LockEnabled...), tc.env...)
+			if tc.code == 0 {
+				args = append(args, "--return-endpoint", executionLoopbackReturnURL(t))
+				env = append(env, executionNodeHomeEnv(t, t.TempDir())...)
+			}
+			res := r.CommandEnv(env, args...)
 
 			if tc.code == 0 {
 				require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -420,7 +415,7 @@ func TestExecutionLinkedPeerExecutionKeysAreIgnored(t *testing.T) {
 
 		plain, _ := released(t, nil)
 		stated, res := released(t, &models.ExecutionConfig{
-			Role: models.ExecutionRoleWorker, Name: "build-a",
+			Name:     "build-a",
 			Endpoint: "file:///srv/mailboxes/build-a.git",
 		})
 
@@ -453,7 +448,7 @@ func TestExecutionLinkedPeerExecutionKeysAreIgnored(t *testing.T) {
 		}
 
 		plain, _ := released(t, nil)
-		stated, res := released(t, &models.ExecutionConfig{Role: models.ExecutionRoleWorker})
+		stated, res := released(t, &models.ExecutionConfig{Concurrency: models.Int(2)})
 
 		assert.Equal(t, []string{"api-pkg@0.1.0", "sdk-pkg@0.1.0"}, plain)
 		assert.Equal(t, plain, stated, "a peer's execution settings change nothing about this run")

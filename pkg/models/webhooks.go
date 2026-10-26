@@ -154,8 +154,8 @@ func WebhookScriptEvent(word string) string { return "script." + word }
 // runs under, and is empty for a stage given none.
 //
 // The last three name the machines a release ran on. `role` and `node` say
-// which process sent the event, and `worker` says which node the event is
-// about, so a receiver that hears from several machines at once can tell an
+// which process sent the event, and `worker` says which node the event
+// is about, so a receiver that hears from several machines at once can tell an
 // orchestrator's report of a worker apart from the worker's own. They are
 // empty on every release that states no execution object, exactly as an
 // absent `blockedBy` is, so a template naming them renders nothing there.

@@ -38,6 +38,61 @@ type Scheduler[N comparable] struct {
 	edgeCount     int
 }
 
+// Edge is one stated dependency, including edges through a pass-through
+// vertex. It exposes the exact compiled graph without draining it.
+type Edge[N comparable] struct {
+	Before N
+	After  N
+}
+
+const schedulerInitialEdgeSliceLength = 0
+
+// Edges returns the compiled edges in a stable node/dependent order. A caller
+// may digest or index them once; repeated calls are not part of scheduling.
+func (s *Scheduler[N]) Edges() []Edge[N] {
+	edges := make([]Edge[N], schedulerInitialEdgeSliceLength, s.edgeCount)
+	for _, before := range append(slices.Clone(s.passThroughs), s.nodes...) {
+		for _, after := range s.dependents[before] {
+			edges = append(edges, Edge[N]{Before: before, After: after})
+		}
+	}
+	return edges
+}
+
+// PassThroughNodes names graph-only vertices in their registration order.
+func (s *Scheduler[N]) PassThroughNodes() []N { return slices.Clone(s.passThroughs) }
+
+// Clone creates an independent scheduler at the same frontier. A release can
+// compile once before preflight and drain a copy without mutating the graph
+// whose digest all nodes verified.
+func (s *Scheduler[N]) Clone() *Scheduler[N] {
+	copy := &Scheduler[N]{
+		nodes: slices.Clone(s.nodes), indeg: make(map[N]int, len(s.indeg)),
+		dependents: make(map[N][]N, len(s.dependents)), handed: make(map[N]bool, len(s.handed)),
+		passThroughs: slices.Clone(s.passThroughs), edgeCount: s.edgeCount,
+	}
+	if s.isPassThrough != nil {
+		copy.isPassThrough = make(map[N]bool, len(s.isPassThrough))
+		copy.edgeSequences = make(map[N][]int, len(s.edgeSequences))
+	}
+	for n, degree := range s.indeg {
+		copy.indeg[n] = degree
+	}
+	for n, children := range s.dependents {
+		copy.dependents[n] = slices.Clone(children)
+	}
+	for n, handed := range s.handed {
+		copy.handed[n] = handed
+	}
+	for n, through := range s.isPassThrough {
+		copy.isPassThrough[n] = through
+	}
+	for n, sequence := range s.edgeSequences {
+		copy.edgeSequences[n] = slices.Clone(sequence)
+	}
+	return copy
+}
+
 // NewScheduler returns an empty scheduler.
 func NewScheduler[N comparable]() *Scheduler[N] {
 	return &Scheduler[N]{

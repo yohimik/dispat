@@ -51,7 +51,7 @@ func TestATestsFrameCarriesNoDeclaredOutputs(t *testing.T) {
 		Pkg: &model.Package{Name: "core", Space: &model.Space{BuildOutputs: []string{"dist"}}},
 	}}
 	assert.Equal(t, KindStage, resolveStageKind(request.Descriptor))
-	assert.Nil(t, resolveDeclaredOutputs(KindStage, request))
+	assert.Nil(t, resolveDeclaredOutputs(request))
 	assert.Equal(t, KindBuild, resolveStageKind(release.BuildStage()), "the build keeps its own kind")
 }
 

@@ -35,31 +35,28 @@ func TestResolveSender(t *testing.T) {
 		"a repository that states no execution object": {},
 		"an orchestrator that names itself": {
 			settings: &public.ExecutionConfig{Name: "ci-1"},
-			wantRole: public.ExecutionRoleOrchestrator, wantNode: "ci-1"},
+			wantRole: senderOrchestrator, wantNode: "ci-1"},
 		"an orchestrator that names no node": {
-			settings: &public.ExecutionConfig{Role: public.ExecutionRoleOrchestrator},
-			wantRole: public.ExecutionRoleOrchestrator, wantNode: host},
-		"a node whose file calls it a worker": {
-			settings: &public.ExecutionConfig{Role: public.ExecutionRoleWorker, Name: "build-b"},
-			wantRole: public.ExecutionRoleWorker, wantNode: "build-b"},
+			settings: &public.ExecutionConfig{},
+			wantRole: senderOrchestrator, wantNode: host},
 		"a node serving tasks": {
 			settings: &public.ExecutionConfig{Name: "build-a"}, isServingTasks: true,
-			wantRole: public.ExecutionRoleWorker, wantNode: "build-a"},
+			wantRole: senderWorker, wantNode: "build-a"},
 		"a node serving tasks with nothing configured yet": {
 			isServingTasks: true,
-			wantRole:       public.ExecutionRoleWorker, wantNode: host},
+			wantRole:       senderWorker, wantNode: host},
 		"a task's nested command, whatever the checkout says": {
 			settings: &public.ExecutionConfig{Name: "ci-1",
 				Workers: []public.ExecutionWorkerConfig{{Name: "build-a"}}},
 			env:      workerAuthority,
-			wantRole: public.ExecutionRoleWorker, wantNode: "build-a"},
+			wantRole: senderWorker, wantNode: "build-a"},
 		"a task's nested command that was told no node": {
 			env:      []string{AuthorityEnv + "=" + WorkerAuthority},
-			wantRole: public.ExecutionRoleWorker, wantNode: host},
+			wantRole: senderWorker, wantNode: host},
 		"a serving command under somebody else's authority": {
 			settings: &public.ExecutionConfig{Name: "build-b"}, isServingTasks: true,
 			env:      workerAuthority,
-			wantRole: public.ExecutionRoleWorker, wantNode: "build-a"},
+			wantRole: senderWorker, wantNode: "build-a"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			sender := ResolveSender(tc.settings, tc.isServingTasks, tc.env)

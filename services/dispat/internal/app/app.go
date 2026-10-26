@@ -96,6 +96,15 @@ type App struct {
 	// closing summary can ask it what every task came to. It is nil for every
 	// run that delegates nothing, and the summary then prints nothing.
 	coordinator *execution.Coordinator
+	// returnJournal owns the protected first-node TLS identity and the active
+	// run locator before a distributed release can push its first lock.
+	returnJournal        *firstRunJournal
+	localNodeSlots       *execution.NodeSlotAuthority
+	localTaskLeases      sync.Map
+	localSlotRunID       string
+	choreographyRetained bool
+	choreographyBound    bool
+	coordinatorCloseErr  error
 	// isCoordinatorClosed records that the coordinator's refs were closed, so
 	// the deferred close that guards every early return of a run does nothing
 	// once the closing phase has closed them before the locks went back.
@@ -116,6 +125,11 @@ type App struct {
 	// exactly these commits (§28.3), so they are read once, where the digest
 	// reads them, rather than asked of git again later.
 	plannedHeads map[string]string
+	// pinnedNativeRefs is the exact tag inventory bracketed around planning
+	// when remote workers must recompute that plan from pinned inputs.
+	pinnedNativeRefs   []execution.PinnedNativeRef
+	planningInvocation PlanningConfigInvocation
+	planningRemotes    map[string]planningRemoteCoordinate
 
 	// owedAtHead are the pairs E201 refuses in the plan this invocation
 	// selected: a provider it would release at the baseline commit of a
@@ -208,6 +222,9 @@ func NewWorkspace(root string, cfg *config.File, workspace *config.Workspace, lo
 // seeing the plan is the point of the operation, and the plan it printed is the
 // one a release would use.
 func (a *App) Status(ctx context.Context, opts ReleaseOptions) error {
+	if err := a.checkDistributionMode(opts.DistributionMode); err != nil {
+		return err
+	}
 	pl, err := a.selectedPlan(ctx, opts)
 	if err != nil {
 		return err
@@ -488,6 +505,9 @@ func (a *App) logWorkspace(pkgs []*model.Package, deps []model.Dependency, exclu
 // reporting it — for the commands whose output is not the graph (`test`,
 // `preview`), which print the diagnostics alone.
 func (a *App) plan(ctx context.Context) (*plan.Plan, error) {
+	// A fresh live plan must never inherit a prior private snapshot's HEAD.
+	// planFromMaterialization installs its own exact heads after this pass.
+	a.plannedHeads = nil
 	if err := a.checkGit(); err != nil {
 		a.log.Error().Err(err).Msg("git prerequisites missing")
 		return nil, err

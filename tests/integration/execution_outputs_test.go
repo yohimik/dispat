@@ -163,7 +163,7 @@ func TestExecutionIgnoredOutputsReachConsumersOnOtherWorkers(t *testing.T) {
 
 	assert.ElementsMatch(t,
 		[]string{"assets@0.1.0", "ui@0.1.0", "docs@0.1.0", "app@0.1.0"}, rig.repo.TagList())
-	assert.Empty(t, rig.branches(), "the run closed every coordination branch it created")
+	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 	assert.Empty(t, executionWorkerRefs(t, rig.origin), "and put none of them on the release remote")
 	stopAll(t, workers)
 }
@@ -210,10 +210,18 @@ printf '%s %s %s\n' probe-tested "$DISPAT_PACKAGE" "$DISPAT_OUTPUT_TESTED_ON" >>
 			"%s's tests ran on a worker, as its build was pinned to", name)
 		assert.Equal(t, nodes[name], published[name], "%s's tests export reached its publication", name)
 	}
-	assert.Contains(t, res.Stdout, `"task":"assets:test"`, "the frame travels as a task of its own")
+	var testTask string
+	for _, event := range executionEvents(res) {
+		if event.Str("message") == "task outcome" && event.Str("package") == "assets" &&
+			event.Str("stage") == "test" {
+			testTask = event.Str("task")
+			break
+		}
+	}
+	assert.NotEmpty(t, testTask, "the test frame has its own canonical task identity")
 	assert.ElementsMatch(t,
 		[]string{"assets@0.1.0", "ui@0.1.0", "docs@0.1.0", "app@0.1.0"}, rig.repo.TagList())
-	assert.Empty(t, rig.branches(), "the run closed every coordination branch it created")
+	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 	stopAll(t, workers)
 }
 
@@ -228,58 +236,28 @@ func executionWorkerRefs(t *testing.T, bare string) []string {
 	return executionCoordinationBranches(t, bare)
 }
 
-// TestExecutionOutputsTravelAsParentsAcrossDedicatedMailboxes: the consumer's
-// assignment directly names the provider's result object even when the two
-// nodes read different mailboxes. No separate relay ref is created.
-func TestExecutionOutputsTravelAsParentsAcrossDedicatedMailboxes(t *testing.T) {
+// V3 keeps every task, receipt, and input carrier in one canonical mailbox.
+// Two configured endpoints must be refused before any build; the cross-node
+// carrier path is exercised by TestExecutionIgnoredOutputsReachConsumersOnOtherWorkers.
+func TestExecutionRejectsDifferentCoordinationEndpointsBeforeBuild(t *testing.T) {
 	second := executionMailbox(t)
 	rig := newExecutionOutputWorkspaceWith(t, func(repo *harness.Repo) string {
 		return executionOutputBuild + " && " +
 			repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE", executionStageWindow)
 	}, func(cfg *models.File) {
-		// The assignment carriers are transport evidence, so retain debug logs.
-		cfg.LogLevel = "debug"
 		cfg.Execution.Workers[1].Endpoint = "file://" + second
-		// Two builds at once against one slot per node: `ui` and `docs` are
-		// placed together, so one of them is on the mailbox `assets` did not
-		// answer on and the exact result object must be carried there.
-		cfg.Concurrency = []int{2, 1}
 	})
-	first := rig.startWorker(executionWorkerConfig(rig.mailbox,
-		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(1) }), 0)
-	other := rig.startWorker(executionWorkerConfig(second,
-		func(settings *models.ExecutionConfig) {
-			settings.Name = executionSecondNode
-			settings.Concurrency = models.Int(1)
-		}), 0)
-	carriers := newExecutionCarrierWatch(t, rig.mailbox, second)
-
 	res := rig.release()
-
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	produced := executionProbeValues(rig, "inputs")
-	assert.Equal(t, produced["assets"], produced["ui"], "one consumer read what the producer wrote")
-	assert.Equal(t, produced["assets"], produced["docs"], "and so did the other")
-	placed := rig.nodesByPackage()
-	assert.NotEqual(t, placed["ui"], placed["docs"], "the two consumers were on two machines")
-	observed := carriers.seen()
-	assert.Contains(t, observed["ui:build"], "assets:build", "ui assignment directly carries the provider result")
-	assert.Contains(t, observed["docs:build"], "assets:build", "docs assignment directly carries the provider result")
-	assert.Empty(t, observed["legacy-relay"], "there is no runtime relay branch")
-	for _, ref := range executionMailboxBranches(t, rig.mailbox) {
-		assert.NotContains(t, ref, executionSecondNode, "one node's mailbox never holds the other's work")
-	}
-	for _, ref := range executionMailboxBranches(t, second) {
-		assert.NotContains(t, ref, "dispat-worker-"+executionNode+"-", "and the other way round")
-	}
-	assert.Empty(t, rig.branches(), "both mailboxes are closed at the end")
-	assert.Empty(t, executionMailboxBranches(t, second))
-	stopAll(t, []*executionWorker{first, other})
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, diagnosticText(res), "one canonical Git mailbox")
+	assert.Equal(t, 0, buildRuns(rig.repo), "no build ran with split coordination")
+	assert.Empty(t, rig.repo.TagList(), "nothing was published")
+	assert.False(t, remoteHoldsLock(t, rig.origin), "the release lock was given back")
+	assert.Empty(t, rig.branches(), "no run refs were initialized")
+	assert.Empty(t, executionMailboxBranches(t, second), "the second mailbox was untouched")
 }
 
-// executionCarrierWatch records direct result parents while task refs exist.
-// The run deletes those refs at completion, so the assertion needs a bounded
-// observation during the release rather than a post-run branch listing.
+// executionCarrierWatch records direct result parents while a run is active.
 type executionCarrierWatch struct {
 	done  chan struct{}
 	found chan map[string][]string
@@ -804,9 +782,7 @@ func newExecutionTipVandal(t *testing.T, rig *executionRig, gate string) *execut
 					continue
 				}
 				for _, ref := range executionMailboxBranches(t, rig.mailbox) {
-					name := strings.TrimPrefix(ref, "refs/heads/")
-					task, _ := executionObservedAssignmentCarriers(rig.mailbox, ref)
-					if !strings.HasSuffix(task, ":build") || !executionCarries(t, rig.mailbox, name, "result") {
+					if !executionCompletedAssetsBuild(rig.mailbox, ref) {
 						continue
 					}
 					tip := strings.TrimSpace(bareGit(t, rig.mailbox, "rev-parse", ref))
@@ -827,6 +803,54 @@ func newExecutionTipVandal(t *testing.T, rig *executionRig, gate string) *execut
 func (v *executionTipVandal) moved() int {
 	close(v.done)
 	return <-v.counts
+}
+
+const (
+	executionAssignmentDocumentPath = "dispat/assignment.json"
+	executionDecisionDocumentPath   = "dispat/choreography-decision.json"
+	executionTaskBranchRefPrefix    = "refs/heads/dispat-task-"
+	executionAssetsTaskPrefix       = "assets:"
+	executionBuildAssignmentKind    = "build"
+)
+
+// executionCompletedAssetsBuild observes the exact v3 build attempt after its
+// signed terminal decision. The mutator never moves a reservation or an
+// in-flight claim, whose effects could still be running.
+func executionCompletedAssetsBuild(mailbox, ref string) bool {
+	if !strings.HasPrefix(ref, executionTaskBranchRefPrefix) {
+		return false
+	}
+	listed, err := exec.Command("git", "-C", mailbox, "rev-list", "--first-parent", "--reverse", ref).Output()
+	if err != nil {
+		return false
+	}
+	build, decided := false, false
+	for _, commit := range strings.Fields(string(listed)) {
+		entries, err := exec.Command("git", "-C", mailbox, "ls-tree", "-r", "--name-only", commit).Output()
+		if err != nil {
+			return false
+		}
+		paths := "\n" + string(entries)
+		if strings.Contains(paths, "\n"+executionDecisionDocumentPath+"\n") {
+			decided = true
+		}
+		if !strings.Contains(paths, "\n"+executionAssignmentDocumentPath+"\n") {
+			continue
+		}
+		document, err := exec.Command("git", "-C", mailbox, "cat-file", "blob",
+			commit+":"+executionAssignmentDocumentPath).Output()
+		if err != nil {
+			return false
+		}
+		var assignment map[string]any
+		if json.Unmarshal(document, &assignment) != nil {
+			return false
+		}
+		task, _ := assignment["task"].(string)
+		kind, _ := assignment["kind"].(string)
+		build = build || strings.HasPrefix(task, executionAssetsTaskPrefix) && kind == executionBuildAssignmentKind
+	}
+	return build && decided
 }
 
 // executionCarries reports whether one branch has carried a message of this
@@ -879,7 +903,7 @@ func TestExecutionOutputGitFaults(t *testing.T) {
 			assert.Empty(t, rig.repo.TagList(), "nothing was published")
 			reply := stopAll(t, []*executionWorker{worker})[0]
 			assert.Equal(t, 0, reply.Code, "the node carries on serving after its git failed")
-			assert.Empty(t, rig.branches(), "and the run closed the branches it created")
+			assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 		})
 	}
 }
@@ -906,7 +930,7 @@ func TestExecutionProducerRefusesNamedPipeOutput(t *testing.T) {
 	assert.NotContains(t, executionReleasedPackages(res), "assets",
 		"the rejected producer output cannot be published")
 	assert.NotContains(t, rig.repo.TagList(), "assets@0.1.0")
-	assert.Empty(t, rig.branches())
+	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 }
 
 // A build output can contain a complete nested Git repository. Git records
@@ -934,7 +958,7 @@ else printf 'ordinary\n' > dist/file; fi`}
 	assert.Contains(t, reply.Stdout+reply.Stderr, "gitlink")
 	assert.NotContains(t, executionReleasedPackages(res), "assets")
 	assert.NotContains(t, rig.repo.TagList(), "assets@0.1.0")
-	assert.Empty(t, rig.branches())
+	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 }
 
 // A successful hash-object exit is not enough to describe every captured
@@ -956,7 +980,7 @@ func TestExecutionIncompleteHashReplyCannotPublish(t *testing.T) {
 	assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode))
 	assert.NotContains(t, executionReleasedPackages(res), "assets")
 	assert.NotContains(t, rig.repo.TagList(), "assets@0.1.0")
-	assert.Empty(t, rig.branches())
+	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 }
 
 // executionFakeWorker plays a node: it answers the probe a preflight sends and
@@ -1435,223 +1459,33 @@ func executionDigestOfBytes(body []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// TestExecutionCraftedOutputSetsNeverReachAConsumer: every rule an output set
-// is held to, offered by a node that reports whatever it likes.
-//
-// The claim in every row is the same and is the one §28.5 makes: the
-// prerequisite fails, the package that produced the set fails with it, and the
-// consumer never starts. What differs is the rule, and the rule is what the
-// orchestrator's refusal names, so an operator can tell a manifest naming
-// `../` from one whose digest nobody could have produced.
-func TestExecutionCraftedOutputSetsNeverReachAConsumer(t *testing.T) {
-	for name, tc := range map[string]struct {
-		craft     func(*executionCraftedOutputs)
-		configure func(*models.File)
-		limits    *models.ExecutionTransferConfig
-		reason    string
-	}{
-		"a content digest nothing hashes to": {
-			craft: func(c *executionCraftedOutputs) {
-				c.manifest = c.manifest.set("entries", []any{executionCraftedEntry("dist/app.js",
-					"file", "0644", 4, executionDigestOf("something else"))})
-			},
-			reason: "content-digest",
-		},
-		"a length the tree disagrees with": {
-			craft: func(c *executionCraftedOutputs) {
-				c.manifest = c.manifest.set("entries", []any{executionCraftedEntry("dist/app.js",
-					"file", "0644", 9, executionDigestOf("one\n"))}).set("bytes", 9)
-			},
-			reason: "tree-size",
-		},
-		"a path leaving its root": {
-			craft:  executionCraftedPath("dist/../../escape.js"),
-			reason: "path-escape",
-		},
-		"an absolute path": {
-			craft:  executionCraftedPath("/etc/passwd"),
-			reason: "path-absolute",
-		},
-		"a path reaching into repository metadata": {
-			craft:  executionCraftedPath("dist/.git/config"),
-			reason: "path-git-folder",
-		},
-		"a path written with backslashes": {
-			craft:  executionCraftedPath(`dist\app.js`),
-			reason: "path-backslash",
-		},
-		"a symlink leaving its root": {
-			craft: func(c *executionCraftedOutputs) {
-				target := "../../../etc/passwd"
-				c.entries = map[string]executionTreeFile{"dist/link": {mode: "120000", content: target}}
-				c.manifest = c.manifest.set("entries", []any{executionOrderedJSON{}.with(
-					executionField{"path", "dist/link"},
-					executionField{"type", "symlink"},
-					executionField{"mode", "0644"},
-					executionField{"size", len(target)},
-					executionField{"sha256", executionDigestOf(target)},
-					executionField{"target", target},
-				)}).set("bytes", len(target))
-			},
-			reason: "link-escape",
-		},
-		"a symlink that climbs after it descended": {
-			// Lexically dist/app.js, inside the root: refused because a `sub`
-			// that is itself a link upwards would carry it outside.
-			craft: func(c *executionCraftedOutputs) {
-				target := "sub/../app.js"
-				c.entries = map[string]executionTreeFile{"dist/link": {mode: "120000", content: target}}
-				c.manifest = c.manifest.set("entries", []any{executionOrderedJSON{}.with(
-					executionField{"path", "dist/link"},
-					executionField{"type", "symlink"},
-					executionField{"mode", "0644"},
-					executionField{"size", len(target)},
-					executionField{"sha256", executionDigestOf(target)},
-					executionField{"target", target},
-				)}).set("bytes", len(target))
-			},
-			reason: "link-escape",
-		},
-		"an absolute symlink": {
-			craft: func(c *executionCraftedOutputs) {
-				target := "/etc/passwd"
-				c.entries = map[string]executionTreeFile{"dist/link": {mode: "120000", content: target}}
-				c.manifest = c.manifest.set("entries", []any{executionOrderedJSON{}.with(
-					executionField{"path", "dist/link"},
-					executionField{"type", "symlink"},
-					executionField{"mode", "0644"},
-					executionField{"size", len(target)},
-					executionField{"sha256", executionDigestOf(target)},
-					executionField{"target", target},
-				)}).set("bytes", len(target))
-			},
-			reason: "link-absolute",
-		},
-		"a submodule": {
-			craft: func(c *executionCraftedOutputs) {
-				c.entries = map[string]executionTreeFile{
-					"dist/sub": {mode: "160000", oid: strings.Repeat("0", 40)},
-				}
-				c.manifest = c.manifest.remove("entries").set("files", 0).set("bytes", 0)
-			},
-			reason: "gitlink",
-		},
-		"two paths that are one file after case folding": {
-			craft: func(c *executionCraftedOutputs) {
-				c.entries["dist/App.js"] = executionTreeFile{mode: "100644", content: "one\n"}
-				c.manifest = c.manifest.set("entries", []any{
-					executionCraftedEntry("dist/App.js", "file", "0644", 4, executionDigestOf("one\n")),
-					executionCraftedEntry("dist/app.js", "file", "0644", 4, executionDigestOf("one\n")),
-				}).set("files", 2).set("bytes", 8)
-			},
-			reason: "duplicate-path",
-		},
-		"a file the tree does not hold": {
-			craft: func(c *executionCraftedOutputs) {
-				c.manifest = c.manifest.set("entries", []any{
-					executionCraftedEntry("dist/app.js", "file", "0644", 4, executionDigestOf("one\n")),
-					executionCraftedEntry("dist/zz.js", "file", "0644", 4, executionDigestOf("one\n")),
-				}).set("files", 2).set("bytes", 8)
-			},
-			reason: "tree-missing",
-		},
-		"a file the manifest does not name": {
-			craft: func(c *executionCraftedOutputs) {
-				c.manifest = c.manifest.remove("entries").set("files", 0).set("bytes", 0)
-			},
-			reason: "tree-extra",
-		},
-		"more files than the run allows": {
-			craft: func(c *executionCraftedOutputs) {
-				c.entries["dist/second.js"] = executionTreeFile{mode: "100644", content: "one\n"}
-				c.manifest = c.manifest.set("entries", []any{
-					executionCraftedEntry("dist/app.js", "file", "0644", 4, executionDigestOf("one\n")),
-					executionCraftedEntry("dist/second.js", "file", "0644", 4, executionDigestOf("one\n")),
-				}).set("files", 2).set("bytes", 8)
-			},
-			limits: &models.ExecutionTransferConfig{MaxFiles: 1},
-			reason: "too-many-files",
-		},
-		"more bytes than the run allows": {
-			craft:  func(c *executionCraftedOutputs) {},
-			limits: &models.ExecutionTransferConfig{MaxBytes: 2},
-			reason: "too-many-bytes",
-		},
-		"a set built for another platform": {
-			craft: func(c *executionCraftedOutputs) {
-				c.manifest = c.manifest.set("platform", executionOrderedJSON{}.with(
-					executionField{"os", "plan9"},
-					executionField{"arch", "mips"},
-					executionField{"dispat", "fake"},
-				))
-			},
-			configure: func(cfg *models.File) {
-				cfg.BuildPlatforms = []string{runtime.GOOS + "/" + runtime.GOARCH}
-			},
-			reason: "platform",
-		},
-		"a set bound to another ownership": {
-			craft: func(c *executionCraftedOutputs) {
-				c.manifest = c.manifest.set("generation", "somebody-elses-lock")
-			},
-			reason: "output-identity",
-		},
-		"a digest nobody could have produced": {
-			craft: func(c *executionCraftedOutputs) {
-				c.manifest = c.manifest.set("manifestDigest", strings.Repeat("a", 64))
-				c.isDigestStale = true
-			},
-			reason: "manifest-digest",
-		},
-		"a manifest of a protocol nobody speaks": {
-			craft: func(c *executionCraftedOutputs) {
-				c.manifest = c.manifest.set("protocol", executionProtocolVersion+1)
-			},
-			reason: "output-protocol",
-		},
-		"a result describing no outputs at all": {
-			craft:  func(c *executionCraftedOutputs) { c.isOutputsOmitted = true },
-			reason: "bytes-missing",
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			rig := newExecutionOutputWorkspace(t, func(cfg *models.File) {
-				executionOneWorker(cfg)
-				if tc.limits != nil {
-					cfg.Execution.Transfer = tc.limits
-				}
-				if tc.configure != nil {
-					tc.configure(cfg)
-				}
-			})
-			worker := newExecutionFakeWorker(t, rig.mailbox, executionNode, tc.craft)
-			worker.serve()
-			defer worker.close()
-
-			res := rig.release()
-
-			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			rejected, isRejected := executionLine(res, "outputs rejected")
-			require.True(t, isRejected, "the orchestrator says which rule was broken\nstdout:\n%s", res.Stdout)
-			assert.Equal(t, tc.reason, rejected.Str("reason"))
-			assert.Equal(t, executionIntegrityCode, rejected.Code())
-			assert.Equal(t, "io-integrity", rejected.Str("category"))
-			assert.True(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, "assets"),
-				"the producing package fails\nstdout:\n%s", res.Stdout)
-			assert.Empty(t, rig.repo.TagList(), "and nothing was published")
-		})
-	}
-}
-
-// TestExecutionUnsignedOutputsNeverReachAConsumer: a result nobody signed is
-// not a result, whatever it describes. A tree holding a document without the
-// signature beside it carries no message at all, so the orchestrator never
-// reads it, the attempt is abandoned at its deadline with E227, and nothing
-// the unsigned answer described is ever admitted.
-func TestExecutionUnsignedOutputsNeverReachAConsumer(t *testing.T) {
+// The retired fake writer pushes a v2 Claim and Result directly to Git. V3
+// takes probe replies over its authenticated return channel, so these bytes
+// cannot make it past preflight. The distinct manifest invalidity cases moved
+// to the real-Git execution manifest validator tests, which the v3 result gate
+// invokes before accepting a Result.
+func TestExecutionRetiredFakeOutputWriterCannotAnswerV3Probe(t *testing.T) {
 	rig := newExecutionOutputWorkspace(t, func(cfg *models.File) {
 		executionOneWorker(cfg)
-		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 5}
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 5}
+	})
+	writer := newExecutionFakeWorker(t, rig.mailbox, executionNode, func(*executionCraftedOutputs) {})
+	writer.serve()
+	defer writer.close()
+
+	res := rig.release()
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
+	assert.Zero(t, buildRuns(rig.repo), "a retired Git-push reply cannot start a command")
+	assert.Empty(t, rig.repo.TagList(), "no old-transport output can be published")
+}
+
+// A retired Git-push reply without a signature cannot answer a v3 probe.
+// The signed v3 input reader separately refuses an unsigned Result carrier.
+func TestExecutionRetiredUnsignedOutputReplyCannotPassV3Probe(t *testing.T) {
+	rig := newExecutionOutputWorkspace(t, func(cfg *models.File) {
+		executionOneWorker(cfg)
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 5}
 	})
 	worker := newExecutionFakeWorker(t, rig.mailbox, executionNode, func(*executionCraftedOutputs) {})
 	worker.isSigned = false
@@ -1661,10 +1495,10 @@ func TestExecutionUnsignedOutputsNeverReachAConsumer(t *testing.T) {
 	res := rig.release()
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode),
-		"the attempt is abandoned rather than believed\nstdout:\n%s", res.Stdout)
+	requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
 	_, isAdmitted := executionLine(res, "outputs admitted")
 	assert.False(t, isAdmitted, "nothing the unsigned answer described was admitted")
+	assert.Zero(t, buildRuns(rig.repo), "no command ran")
 	assert.Empty(t, rig.repo.TagList(), "and nothing was published")
 }
 
@@ -1754,10 +1588,7 @@ func newExecutionAnswerThief(t *testing.T, rig *executionRig, gate string, isRep
 					continue
 				}
 				for _, ref := range executionMailboxBranches(t, rig.mailbox) {
-					name := strings.TrimPrefix(ref, "refs/heads/")
-					task, _ := executionObservedAssignmentCarriers(rig.mailbox, ref)
-					if !strings.HasSuffix(task, ":build") ||
-						!executionCarries(t, rig.mailbox, name, "result") {
+					if !executionCompletedAssetsBuild(rig.mailbox, ref) {
 						continue
 					}
 					taken++

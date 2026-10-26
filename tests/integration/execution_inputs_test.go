@@ -3,20 +3,9 @@
 
 package integration
 
-// Goal 57: what a serving node does with the provider outputs its assignment
-// tells it to install.
-//
-// A reference is not a transfer (§28.5). The assignment carries an exact
-// result commit and the digest of the manifest the run admitted, and both
-// have to turn into bytes this node fetched, read and verified before a
-// single command of the frame starts. So the claims here are all the same
-// claim in different words: the frame did not run, the node said which rule
-// the prerequisite broke, and the run heard it as a failed prerequisite rather
-// than as a failed build.
-//
-// The references are written by hand because a real orchestrator never writes
-// a bad one: what is being fenced is a mailbox somebody else can push to, and
-// an assignment that names an object of their choosing.
+// The old hand-written input messages document retired v2 transport. The v3
+// refusal matrix and two-path installation use the real Git carrier and Worker
+// reader in execution/choreography_input_migration_test.go.
 
 import (
 	"crypto/sha256"
@@ -29,10 +18,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/yohimik/dispat/pkg/models"
-
-	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
 // executionProvidedOutputs is one provider's answer written into a mailbox by
@@ -210,132 +195,14 @@ func executionProvidedInput(provided executionProvidedOutputs, pkg, path string,
 	return input
 }
 
-// TestExecutionCraftedInputsFailThePrerequisite: every way a named output set
-// fails to become bytes this node may build against.
-//
-// One node serves them all, each on a branch of its own, and none of them runs
-// a command: the node reports the rule the prerequisite broke, and the
-// assignment's frame left no line anywhere.
-func TestExecutionCraftedInputsFailThePrerequisite(t *testing.T) {
-	rig := newExecutionRig(t)
-	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	state := orchestrator.prepareCarriedInputState()
-	sound := orchestrator.offerOutputs("sound", "provider:build", "provider", nil)
-
-	rows := map[string]struct {
-		input  func() map[string]any
-		reason string
-	}{
-		"an input named without a manifest digest": {
-			input: func() map[string]any {
-				return executionProvidedInput(sound, "provider", "providers/lib",
-					func(m map[string]any) { m["manifestDigest"] = "" })
-			},
-			reason: "manifest-digest"},
-		"an input naming an object that carries no result": {
-			input: func() map[string]any {
-				return executionProvidedInput(sound, "provider", "providers/lib",
-					func(m map[string]any) { m["commit"] = state.commit })
-			},
-			reason: "output-identity"},
-		"an input whose result describes no outputs": {
-			input: func() map[string]any {
-				empty := orchestrator.offerOutputs("nooutputs", "provider:build", "provider",
-					func(c *executionCraftedOutputs) { c.isOutputsOmitted = true })
-				return executionProvidedInput(empty, "provider", "providers/lib")
-			},
-			reason: "bytes-missing"},
-		"an input whose result has no signature beside it": {
-			// A direct carrier parent without a signed result fails input
-			// identity before the worker reads any output manifest.
-			input: func() map[string]any {
-				unsigned := orchestrator.offerOutputs("unsigned", "provider:build", "provider", nil,
-					func(o *executionMessageOptions) { o.isSigned = false })
-				return executionProvidedInput(unsigned, "provider", "providers/lib")
-			},
-			reason: "output-identity"},
-		"an input whose result was signed with another secret": {
-			input: func() map[string]any {
-				forged := orchestrator.offerOutputs("forged", "provider:build", "provider", nil,
-					func(o *executionMessageOptions) { o.secret = "forged-" + strings.Repeat("z", 16) })
-				return executionProvidedInput(forged, "provider", "providers/lib")
-			},
-			reason: "output-identity"},
-		"an input whose result is not the JSON it claims to be": {
-			input: func() map[string]any {
-				garbled := orchestrator.offerOutputs("garbled", "provider:build", "provider", nil,
-					func(o *executionMessageOptions) { o.document = []byte("not a result") })
-				return executionProvidedInput(garbled, "provider", "providers/lib")
-			},
-			reason: "output-identity"},
-		"an input whose manifest is not the one the run admitted": {
-			input: func() map[string]any {
-				return executionProvidedInput(sound, "provider", "providers/lib",
-					func(m map[string]any) { m["manifestDigest"] = strings.Repeat("b", 64) })
-			},
-			reason: "manifest-digest"},
-		"an input built under another ownership": {
-			input: func() map[string]any {
-				foreign := orchestrator.offerOutputs("foreign", "provider:build", "provider",
-					func(c *executionCraftedOutputs) {
-						c.manifest = c.manifest.set("generation", "somebody-elses-lock")
-					})
-				return executionProvidedInput(foreign, "provider", "providers/lib")
-			},
-			reason: "output-identity"},
-		"an input naming a file its tree does not hold": {
-			input: func() map[string]any {
-				absent := orchestrator.offerOutputs("absent", "provider:build", "provider",
-					func(c *executionCraftedOutputs) {
-						c.manifest = c.manifest.set("entries", []any{
-							executionCraftedEntry("dist/lib.js", "file", "0644",
-								len(executionProvidedBody), executionDigestOf(executionProvidedBody)),
-							executionCraftedEntry("dist/missing.js", "file", "0644",
-								len(executionProvidedBody), executionDigestOf(executionProvidedBody)),
-						}).set("files", 2).set("bytes", 2*len(executionProvidedBody))
-					})
-				return executionProvidedInput(absent, "provider", "providers/lib")
-			},
-			reason: "tree-missing"},
-	}
-
-	branches := map[string]string{}
-	for name, row := range rows {
-		task := executionLabel(name)
-		branch := orchestrator.inputTaskBranch(task)
-		branches[name] = branch
-		inputs := []any{row.input()}
-		orchestrator.offerCarriedInput(branch, orchestrator.consuming(branch, task, state, inputs),
-			state, inputs, false)
-	}
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
-		func(settings *models.ExecutionConfig) {
-			settings.Concurrency = models.Int(len(rows) + 1)
-		}), 0)
-	for name := range rows {
-		executionAwaitMessage(t, rig.mailbox, branches[name], "result")
-	}
-	reply := worker.stop(t)
-
-	assert.Empty(t, executionRecordedTasks(rig, "published"),
-		"no frame ran on a prerequisite that could not be installed: %v", rig.runs())
-	refused := executionRefusedPrerequisites(reply)
-	for name, row := range rows {
-		t.Run(name, func(t *testing.T) {
-			result := executionMessage(t, rig.mailbox, branches[name], "result")
-			assert.Equal(t, "failed", result["status"])
-			assert.Equal(t, "inputs", result["failedPart"],
-				"the run hears a prerequisite rather than a build that went wrong")
-			assert.Equal(t, row.reason, result["reason"])
-			assert.Contains(t, refused, row.reason, "and the node says so in its own log")
-		})
-	}
+func TestExecutionRetiredCraftedInputDoesNotClaim(t *testing.T) {
+	retiredCraftedInputRefusal(t, false)
 }
 
-// An exact object present in the mailbox is not enough to authorize an input:
-// it must be a direct secondary parent of the signed assignment. The worker
-// rejects this malformed envelope before claiming or running its frame.
-func TestExecutionCraftedInputMissingCarrierIsNotClaimed(t *testing.T) {
+// The retired hand-written assignment also omits the direct result parent.
+// It must remain unclaimed; the v3 parent-integrity refusal is checked by
+// TestChoreographyWorkerRefusesMissingDirectInputCarrier in execution.
+func TestExecutionRetiredCraftedInputMissingCarrierIsNotClaimed(t *testing.T) {
 	rig := newExecutionRig(t)
 	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
 	state := orchestrator.prepareCarriedInputState()
@@ -355,54 +222,30 @@ func TestExecutionCraftedInputMissingCarrierIsNotClaimed(t *testing.T) {
 		"the direct-parent integrity gate, rather than another refusal, stopped the worker")
 }
 
-// executionRefusedPrerequisites are the rules a node reported an input set
-// breaking.
-func executionRefusedPrerequisites(res harness.RunResult) []string {
-	var reasons []string
-	for _, event := range executionEvents(res) {
-		if event.Str("message") == "the task's inputs could not be installed" {
-			reasons = append(reasons, event.Str("reason"))
-		}
-	}
-	return reasons
+// The old hand-written assignment uses protocol v2. Current serving nodes
+// refuse it before a Claim or command. The v3 input refusal matrix lives in
+// execution/choreography_input_migration_test.go against real Git carriers.
+func TestExecutionRetiredTwoPathInputDoesNotClaim(t *testing.T) {
+	retiredCraftedInputRefusal(t, true)
 }
 
-// TestExecutionCraftedInputsInstallOnce: the control. Two inputs naming one
-// exact result are carried once and installed into the two folders the
-// assignment names; the frame runs after both are present.
-func TestExecutionCraftedInputsInstallOnce(t *testing.T) {
+func retiredCraftedInputRefusal(t *testing.T, duplicate bool) {
+	t.Helper()
 	rig := newExecutionRig(t)
 	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
 	state := orchestrator.prepareCarriedInputState()
-	provided := orchestrator.offerOutputs("shared", "provider:build", "provider", nil)
-	branch := orchestrator.inputTaskBranch("installed")
-	// The same object named twice: one carrier parent, two installations.
-	inputs := []any{
-		executionProvidedInput(provided, "provider", "providers/first"),
-		executionProvidedInput(provided, "provider", "providers/second"),
+	provided := orchestrator.offerOutputs("retired", "provider:build", "provider", nil)
+	branch := orchestrator.inputTaskBranch("retired-input")
+	inputs := []any{executionProvidedInput(provided, "provider", "providers/first")}
+	if duplicate {
+		inputs = append(inputs, executionProvidedInput(provided, "provider", "providers/second"))
 	}
-	message := orchestrator.consuming(branch, "installed", state, inputs, func(message map[string]any) {
-		message["frame"] = map[string]any{"commands": []any{
-			`test -f providers/first/dist/lib.js && test -f providers/second/dist/lib.js && ` +
-				executionCraftedPublishScript}}
-	})
-	assigned := orchestrator.offerCarriedInput(branch, message, state, inputs, false)
-	parents := strings.Fields(bareGit(t, rig.mailbox, "rev-list", "--parents", "--max-count=1", assigned))
-	assert.Equal(t, 4, len(parents), "assignment, reservation, source and one deduplicated provider result")
+	orchestrator.offerCarriedInput(branch,
+		orchestrator.consuming(branch, "retired-input", state, inputs), state, inputs, false)
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
-
-	result := executionAwaitMessage(t, rig.mailbox, branch, "result")
-	reply := worker.stop(t)
-
-	assert.Equal(t, "succeeded", result["status"],
-		"the frame ran against the bytes it was promised\nstdout:\n%s", reply.Stdout)
-	assert.Equal(t, []string{"installed"}, executionRecordedTasks(rig, "published"),
-		"and ran once: %v", rig.runs())
-	installed := 0
-	for _, event := range executionEvents(reply) {
-		if event.Str("message") == "inputs installed" {
-			installed++
-		}
-	}
-	assert.Equal(t, 2, installed, "both folders were filled from the one answer")
+	time.Sleep(time.Second)
+	worker.stop(t)
+	assert.NotContains(t, executionChain(t, rig.mailbox, branch), "claim",
+		"a retired protocol cannot authorize a command")
+	assert.Empty(t, rig.runs(), "no command ran from the retired assignment")
 }

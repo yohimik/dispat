@@ -1,0 +1,141 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2026 yohimik
+
+package gitx
+
+const (
+	cyclicTransportTagChainErrorFormat          = "gitx: cyclic annotated tag chain at %s"
+	exactObjectSourceTypeMismatchErrorFormat    = "gitx: imported object %s differs from exact source type %s"
+	exactObjectSourceUnavailableErrorFormat     = "gitx: exact source object unavailable: %w"
+	invalidExactObjectImportErrorText           = "gitx: invalid exact object import"
+	invalidObjectClosureExcludeErrorFormat      = "gitx: invalid excluded commit: %w"
+	invalidObjectClosureIncludeErrorFormat      = "gitx: invalid included object closure: %w"
+	invalidObjectClosureRequestErrorText        = "gitx: invalid object closure request"
+	invalidObjectClosureRestoreErrorText        = "gitx: invalid object closure restoration"
+	invalidTransportObjectIDErrorText           = "gitx: invalid object id"
+	invalidTransportTagTargetErrorFormat        = "gitx: tag %s has invalid immediate target"
+	maximumTagObjectHeaderBytes                 = 80
+	missingObjectClosureIncludeErrorText        = "gitx: object closure has no included object"
+	nonCommitClosureExclusionErrorFormat        = "gitx: excluded object %s is not a commit"
+	objectClosureBlobReadErrorFormat            = "gitx: reading object closure blob: %w"
+	objectClosureExclusionRevisionPrefix        = "^"
+	objectClosureExclusionsRequireCommitState   = true
+	objectClosureExportErrorFormat              = "gitx: exporting object closure: %w"
+	objectClosureIncludesRequireCommitState     = false
+	objectClosureIndexErrorFormat               = "gitx: indexing restored object closure: %w"
+	objectClosureInitialObjectCount             = 0
+	objectClosureLimitExceededState             = true
+	objectClosureMissingSourcePath              = ""
+	objectClosureRestoreFilePattern             = "dispat-restore-closure-*"
+	objectClosureRestoreRewindErrorFormat       = "gitx: rewinding restored object closure: %w"
+	objectClosureRestoreStagingErrorFormat      = "gitx: staging restored object closure: %w"
+	objectClosureRestoreStatErrorFormat         = "gitx: stat restored object closure: %w"
+	objectClosureRewindErrorFormat              = "gitx: rewinding object closure: %w"
+	objectClosureSizeLimitErrorFormat           = "gitx: object closure exceeds %d bytes: %w"
+	objectClosureStagingErrorFormat             = "gitx: staging object closure: %w"
+	objectClosureStagingFilePattern             = "dispat-object-closure-*"
+	tagObjectHeaderCompleteState                = true
+	transportAbsentObjectText                   = ""
+	transportBlobObjectTypeName                 = "blob"
+	transportByteCountRadix                     = 10
+	transportCommitObjectTypeName               = "commit"
+	transportDisableReplacementEnvironmentValue = "GIT_NO_REPLACE_OBJECTS=1"
+	transportIndexPackCommandName               = "index-pack"
+	transportInputStreamFlag                    = "--stdin"
+	transportNoObjectBytesCount                 = 0
+	transportObjectHeaderLineDelimiterByte      = '\n'
+	transportObjectLineSeparatorText            = "\n"
+	transportObjectStartOffsetBytes             = 0
+	transportObjectTypeFlag                     = "-t"
+	transportObjectTypeReadErrorFormat          = "gitx: reading type of %s: %w"
+	transportPackInputLimitOptionPrefix         = "--max-input-size="
+	transportPackObjectsCommandName             = "pack-objects"
+	transportPackOutputStreamFlag               = "--stdout"
+	transportPackRevisionsFlag                  = "--revs"
+	transportReadObjectCommandName              = "cat-file"
+	transportSystemTemporaryDirectoryPath       = ""
+	transportTagHeaderLimitErrorFormat          = "gitx: tag object header exceeds limit: %w"
+	transportTagObjectTypeName                  = "tag"
+	transportTagTargetHeaderPrefix              = "object "
+	transportTagTargetReadErrorFormat           = "gitx: reading tag target of %s: %w"
+	transportTreeObjectTypeName                 = "tree"
+	unannotatedTransportTagErrorFormat          = "gitx: object %s is not an annotated tag"
+	unsupportedTransportObjectTypeErrorFormat   = "gitx: unsupported object type %q"
+)
+
+const (
+	transportResolveRevisionCommandName       = "rev-parse"
+	transportVerifyRevisionFlag               = "--verify"
+	transportEndOptionsFlag                   = "--end-of-options"
+	transportCommitTreeSuffixText             = "^{tree}"
+	transportTagRefPrefixText                 = "refs/tags/"
+	transportTagHeaderSeparatorText           = "\n\n"
+	transportTagIdentityHeaderPrefixText      = "tag "
+	transportCommitTagTypeHeaderText          = "type commit"
+	transportBranchRefPrefixText              = "refs/heads/"
+	transportFetchCommandName                 = "fetch"
+	transportNoTagsFlag                       = "--no-tags"
+	transportNoFetchHeadWriteFlag             = "--no-write-fetch-head"
+	transportArgumentSeparatorText            = "--"
+	transportMergeBaseCommandName             = "merge-base"
+	transportIsAncestorFlag                   = "--is-ancestor"
+	transportObjectSizeFlag                   = "-s"
+	transportPinnedTagFilePattern             = "dispat-pinned-tag-*"
+	transportRestoredTagFilePattern           = "dispat-restored-tag-*"
+	transportHashObjectCommandName            = "hash-object"
+	transportWriteObjectFlag                  = "-w"
+	transportRevisionListCommandName          = "rev-list"
+	transportFirstParentFlag                  = "--first-parent"
+	transportOldestFirstFlag                  = "--reverse"
+	transportListRefsCommandName              = "for-each-ref"
+	transportTagSnapshotFormatFlag            = "--format=%(refname:short)\t%(objectname)\t%(*objectname)"
+	transportTagNamespaceText                 = "refs/tags"
+	transportCarriageReturnText               = "\r"
+	transportTagSnapshotFieldSeparatorText    = "\t"
+	invalidSnapshotCommitIDErrorText          = "gitx: invalid commit object id"
+	snapshotObjectUnavailableErrorFormat      = "gitx: snapshot object %s is unavailable: %w"
+	snapshotObjectTypeMismatchErrorFormat     = "gitx: snapshot object %s has type %s, expected commit"
+	snapshotTreeReadErrorFormat               = "gitx: reading snapshot tree: %w"
+	invalidSnapshotTreeIDErrorText            = "gitx: snapshot tree has invalid object id"
+	invalidResultCommitIDErrorText            = "gitx: invalid result commit object id"
+	resultCommitUnavailableErrorFormat        = "gitx: result commit unavailable: %w"
+	resultCommitExportErrorFormat             = "gitx: exporting result commit %s: %w"
+	invalidPackedResultBoundErrorText         = "gitx: invalid packed result bound or commit"
+	resultPackImportErrorFormat               = "gitx: importing result pack: %w"
+	resultPackSizeLimitErrorFormat            = "gitx: result pack exceeds %d bytes: %w"
+	resultPackMissingCommitErrorFormat        = "gitx: pack omitted result commit %s: %w"
+	invalidAnnotatedTagImportErrorText        = "gitx: invalid annotated tag import"
+	pinnedTagUnavailableErrorFormat           = "gitx: pinned tag %s is unavailable: %w"
+	pinnedObjectNotTagErrorFormat             = "gitx: pinned object %s is not an annotated tag"
+	pinnedTagSizeReadErrorFormat              = "gitx: sizing pinned tag %s: %w"
+	invalidPinnedTagByteCountErrorFormat      = "gitx: pinned tag %s has invalid byte count %q: %w"
+	pinnedTagSizeLimitErrorFormat             = "gitx: pinned tag exceeds bootstrap object limit: %w"
+	pinnedTagStagingErrorFormat               = "gitx: staging pinned tag: %w"
+	pinnedTagReadErrorFormat                  = "gitx: reading pinned tag bytes: %w"
+	pinnedTagTruncatedErrorText               = "gitx: pinned tag ended before declared size"
+	pinnedTagRewindErrorFormat                = "gitx: rewinding pinned tag: %w"
+	invalidPinnedTagRestoreErrorText          = "gitx: invalid pinned tag restoration"
+	restoredTagStagingErrorFormat             = "gitx: staging restored tag: %w"
+	restoredTagBlobReadErrorFormat            = "gitx: reading restored tag blob: %w"
+	restoredTagMetadataUnavailableErrorFormat = "gitx: restored tag metadata is unavailable: %w"
+	restoredTagSizeLimitErrorFormat           = "gitx: restored tag exceeds limit: %w"
+	restoredTagRewindErrorFormat              = "gitx: rewinding restored tag: %w"
+	restoredTagWriteErrorFormat               = "gitx: restored tag object could not be written: %w"
+	restoredTagIdentityMismatchErrorText      = "gitx: restored tag object differs from pinned object"
+	restoredTagTargetUnavailableErrorFormat   = "gitx: restored tag target is unavailable: %w"
+	restoredTagTargetMismatchErrorText        = "gitx: restored tag target differs from pinned commit"
+	invalidFirstParentReplayErrorText         = "gitx: invalid first-parent replay request"
+	firstParentReplayErrorFormat              = "gitx: replaying first-parent commits: %w"
+	truncatedFirstParentReplayErrorText       = "gitx: first-parent replay ended mid-OID"
+	oversizedReplayCommitIDErrorText          = "gitx: oversized commit OID in replay"
+	invalidReplayCommitIDErrorText            = "gitx: invalid commit OID in replay"
+	transportNotAncestorExitCode              = 1
+	transportOverflowProbeBytes               = 1
+	transportPackLimitExceededState           = true
+	transportTagTextStartOffsetBytes          = 0
+	transportTagHeaderSeparatorBytes          = 2
+	transportTagHeaderMatchedState            = true
+	transportObjectLineDelimiterBytes         = 1
+	transportObjectIDMaximumBytes             = 64
+	transportObjectSizeIntegerBits            = 64
+)

@@ -315,8 +315,16 @@ func TestValidationRefusesEveryRuleItsOwnWay(t *testing.T) {
 			change: func(m *OutputManifest) { m.Entries[0].Path = "dist//app.js" },
 			want:   ReasonPathComponent,
 		},
+		"a path with a dot component": {
+			change: func(m *OutputManifest) { m.Entries[0].Path = "dist/./app.js" },
+			want:   ReasonPathComponent,
+		},
 		"a path outside every declared root": {
 			change: func(m *OutputManifest) { m.Entries[0].Path = "elsewhere/app.js" },
+			want:   ReasonPathOutsideRoot,
+		},
+		"a sibling of a declared root": {
+			change: func(m *OutputManifest) { m.Entries[0].Path = "dist-old/app.js" },
 			want:   ReasonPathOutsideRoot,
 		},
 		"entries out of order": {
@@ -331,6 +339,13 @@ func TestValidationRefusesEveryRuleItsOwnWay(t *testing.T) {
 			change: func(m *OutputManifest) { m.Entries[0].Mode = "0777" },
 			want:   ReasonMode,
 		},
+		"an executable symlink mode": {
+			change: func(m *OutputManifest) {
+				m.Entries[0].Type, m.Entries[0].Target = EntrySymlink, "app.js"
+				m.Entries[0].Mode = EntryModeExecutable
+			},
+			want: ReasonMode,
+		},
 		"a kind of entry that is neither a file nor a link": {
 			change: func(m *OutputManifest) { m.Entries[0].Type = "device" },
 			want:   ReasonEntryType,
@@ -338,6 +353,10 @@ func TestValidationRefusesEveryRuleItsOwnWay(t *testing.T) {
 		"a totals line that does not count its own entries": {
 			change: func(m *OutputManifest) { m.Files = 7 },
 			want:   ReasonTreeTotals,
+		},
+		"a negative entry size": {
+			change: func(m *OutputManifest) { m.Entries[0].Size, m.Bytes = -1, -1 },
+			want:   ReasonTreeSize,
 		},
 		"more files than the reader allows": {
 			change: func(m *OutputManifest) {
@@ -458,6 +477,7 @@ func TestValidationRefusesALinkThatLeavesItsRoot(t *testing.T) {
 		"a target above the root":   {target: "../../etc/passwd", want: ReasonLinkEscape},
 		"an absolute target":        {target: "/etc/passwd", want: ReasonLinkAbsolute},
 		"a target with no name":     {target: "", want: ReasonLinkTargetEmpty},
+		"a target with a NUL":       {target: "app\x00.js", want: ReasonPathNul},
 		"a target with backslash":   {target: `..\..\x`, want: ReasonPathBackslash},
 		"a target leaving sideways": {target: "../sibling/x", want: ReasonLinkEscape},
 		// Lexically this is dist/x, inside the root; it is refused because a

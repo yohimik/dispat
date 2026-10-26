@@ -214,11 +214,14 @@ func TestExecutionBothUsesTheOrchestratorWhenWorkersAreFull(t *testing.T) {
 	res := rig.release()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	started, isStarted := executionLine(res, "release started")
+	require.True(t, isStarted, "the run reports its first-node identity\nstdout:\n%s", res.Stdout)
+	firstNode := started.Str("node")
 	placed := rig.nodesByPackage()
 	here, away := 0, 0
 	for _, name := range executionPlacementPackages {
 		require.Contains(t, placed, name, "%s built somewhere: %v", name, rig.runs())
-		if placed[name] == executionOrchestratorLabel {
+		if placed[name] == firstNode {
 			here++
 			continue
 		}
@@ -473,7 +476,9 @@ func TestExecutionOrchestratorBuildFailureIsALocalFailure(t *testing.T) {
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, []string{"build"}, executionFailedStages(res),
 		"the package failed at its build stage\nstdout:\n%s", res.Stdout)
-	assert.Equal(t, executionOrchestratorLabel, rig.nodesByPackage()["ui"],
+	started, isStarted := executionLine(res, "release started")
+	require.True(t, isStarted, "the run reports its first-node identity\nstdout:\n%s", res.Stdout)
+	assert.Equal(t, started.Str("node"), rig.nodesByPackage()["ui"],
 		"the pinned build ran here: %v", rig.runs())
 	assert.Equal(t, executionOrchestratorLabel, executionProbeValue(t, rig, "onfail", "ui"),
 		"and its outcome script ran here too")

@@ -46,7 +46,7 @@ func TestExecutionQueuedAssignmentIsReplacedAndThenRefused(t *testing.T) {
 		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(1) }), 0,
 		executionBuildLogEnv+"="+busy.builds)
 
-	occupying := busy.repo.StartReleaseEnv(busy.env(), "release")
+	occupying := busy.repo.StartReleaseEnv(busy.env(), "release", "--return-endpoint", busy.returnURL)
 	// The node is building the first run's package, so the second run's
 	// assignment has nowhere to go for as long as that lasts.
 	executionAwaitProbe(t, busy, executionNode)
@@ -59,7 +59,7 @@ func TestExecutionQueuedAssignmentIsReplacedAndThenRefused(t *testing.T) {
 		"the task was offered again after each revocation and no more\nstdout:\n%s", refused.Stdout)
 	for index, event := range replaced {
 		assert.Equal(t, float64(index+1), event["attempt"], "the attempts are numbered from one")
-		assert.Equal(t, "queued:build", event.Str("task"))
+		assert.Equal(t, "queued:1:", event.Str("task"))
 	}
 	_, isUnhealthy := executionLine(refused, "worker marked unhealthy")
 	assert.False(t, isUnhealthy,

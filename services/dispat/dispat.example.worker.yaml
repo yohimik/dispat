@@ -1,68 +1,29 @@
-# A worker node: the whole file a machine needs to serve release tasks.
+# One peer node in a distributed release. Start it with:
+#   dispat worker --config dispat.example.worker.yaml
 #
-#   export DISPAT_EXECUTION_SECRET=...  # the secret the orchestrator holds
-#   export NPM_TOKEN=...                # whatever the commands it runs need
-#   dispat worker --config dispat.worker.yaml
-#
-# A worker states no spaces, packages, scripts or release policy. The
-# orchestrator's assignment carries the commands, the environment names and
-# the exact source revision, and the worker runs them in a checkout of its own.
-# It needs no checkout of the repository beforehand, and the folder it is
-# started in does not have to be a Git repository.
-#
-#   --state-dir <dir>      where the object cache, the task checkouts and the
-#                          record of answered work live (default: the user
-#                          cache folder). Everything in it can be deleted
-#                          between tasks; it is rebuilt. Two processes may not
-#                          serve one node name from one folder: the second to
-#                          start refuses.
-#   --idle-timeout <sec>   exit 0 after this long with nothing claimed and
-#                          nothing in flight, counted from the last activity,
-#                          which is how a CI job serves one release and ends.
-#                          0 serves until it is signalled. SIGINT and SIGTERM
-#                          stop the node once what it claimed has finished,
-#                          also with exit 0.
-#
-# A worker runs the commands of any assignment that verifies under the signing
-# secret, with this machine's own environment and credentials. Run it on a
-# dedicated machine with least-privilege credentials, and read the security
-# section before deploying one:
-# https://dispat.dev/next/distributed-execution/#security-what-distributed-execution-exposes-and-how-to-contain-it
+# The first node is the orchestrator. It also executes ordinary tasks and is
+# the only node that pushes Git refs, publishes artifacts and writes release
+# records. This node reads exact pinned inputs and sends authenticated claim
+# and result requests through the non-Git return channel. Give it no Git-push
+# or publication credentials. Supply the shared signing secret through the
+# named environment variable, never in this file.
 
 execution:
-  # A worker refuses to start a release, including one a task script tries to
-  # start. A node with role: orchestrator may also run `dispat worker`: for
-  # each task it serves it has a worker's authority and never consults its own
-  # worker list.
-  role: worker
-  # This node's identity. It must match the `name` of the worker link in the
-  # orchestrator's file, and it is how the node finds the coordination
-  # branches addressed to it. Letters, digits, dot, underscore and hyphen,
-  # with no two dots in a row.
+  # Match this identity to one entry of the orchestrator's
+  # execution.workers list.
   name: build-a
-  # The Git repository this node reads assignments from and answers in: the
-  # repository being released, which is what the orchestrator's link reaches
-  # when it states no endpoint of its own, and the link's `endpoint` when it
-  # does. No credentials in the address; Git's own credentials reach it. No
-  # port is opened and nothing connects to this machine: the node polls, so it
-  # runs behind NAT and on hosted CI runners.
+  # Read-only Git access to the repository holding pinned inputs and task
+  # state. With no endpoint, start this node in the repository checkout so
+  # dispat can resolve its release remote.
   endpoint: git@github.com:acme/project.git
-  # The name of the variable holding the signing secret. A message that does
-  # not verify under it is refused with a reason and never run.
   secretEnv: DISPAT_EXECUTION_SECRET
-  # How many assigned tasks this node runs at once, counted across every run
-  # that reaches it. Work it has no free slot for waits in the mailbox.
+  # Local simultaneous task limit, counted across runs.
   concurrency: 2
-  # What this node accepts as one task's build outputs. A run whose own
-  # ceilings are higher than a worker's is refused before dispatch. `timeout`
-  # bounds this node's fetch and install of a task's inputs and its push of a
-  # result that carries outputs; how long a task itself may take is the
-  # orchestrator's `timeouts.task`, and it travels in the assignment for this
-  # node to enforce.
   transfer:
     maxFiles: 20000
     maxBytes: 2147483648
     maxManifestBytes: 8388608
+    maxPackBytes: 4294967296
     timeout: 1800
 
 logLevel: info

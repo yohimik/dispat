@@ -25,12 +25,20 @@ func (a *App) resolveRepositoryRecords(ctx context.Context, pkgs []*model.Packag
 		}
 		raw, seen := remotes[r.Name]
 		if !seen {
-			remote := "origin"
-			if r.Commit != nil && r.Commit.Remote != "" {
-				remote = r.Commit.Remote
+			if a.planningRemotes != nil {
+				identity, exists := a.planningRemotes[r.Name]
+				if !exists {
+					return fmt.Errorf("execution: pinned remote identity of %q is absent", r.Name)
+				}
+				raw = identity.url()
+			} else {
+				remote := "origin"
+				if r.Commit != nil && r.Commit.Remote != "" {
+					remote = r.Commit.Remote
+				}
+				g := &gitx.LocalGitx{Dir: r.Root, Log: a.log}
+				raw, _ = g.RemoteURL(ctx, remote)
 			}
-			g := &gitx.LocalGitx{Dir: r.Root, Log: a.log}
-			raw, _ = g.RemoteURL(ctx, remote)
 			remotes[r.Name] = raw
 		}
 		owner, repo := githubCoordinates(raw, p.GitHub.APIURL)

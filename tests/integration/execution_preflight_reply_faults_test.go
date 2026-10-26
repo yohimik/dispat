@@ -26,7 +26,7 @@ func TestExecutionPreflightRejectsMalformedAndOutOfSequenceReplies(t *testing.T)
 		reason       string
 	}{
 		{name: "malformed signed claim", kind: "claim", isMalformed: true, reason: "unreadable"},
-		{name: "claim for another kind of work", kind: "claim", isWrongKind: true, reason: "replay"},
+		{name: "claim for another kind of work", kind: "claim", isWrongKind: true, reason: "protocol"},
 		{name: "malformed signed report", kind: "result", isMalformed: true, reason: "unreadable"},
 		{name: "report after a publish authorization", kind: "result", isWrongOrder: true, reason: "chain"},
 	} {
@@ -35,7 +35,7 @@ func TestExecutionPreflightRejectsMalformedAndOutOfSequenceReplies(t *testing.T)
 				cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 5}
 			})
 			writer := newExecutionFakeOrchestrator(t, rig.mailbox)
-			started := rig.repo.StartReleaseEnv(rig.env(), "release")
+			started := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
 			branch := executionAwaitBranch(t, rig, "probe")
 			assignment := executionMessage(t, rig.mailbox, branch, "assignment")
 			offered := executionTipOID(t, rig.mailbox, branch)
@@ -91,7 +91,7 @@ func TestExecutionPreflightRefusesAuthenticUnusableNodeReports(t *testing.T) {
 		why    string
 	}{
 		{name: "unsupported node protocol", change: func(report map[string]any) {
-			report["protocol"] = executionProtocolVersion + 1
+			report["protocol"] = report["protocol"].(float64) + 1
 		}, why: "protocol"},
 		{name: "node has no capacity", change: func(report map[string]any) {
 			report["capacity"] = 0
@@ -102,7 +102,7 @@ func TestExecutionPreflightRefusesAuthenticUnusableNodeReports(t *testing.T) {
 				cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 5}
 			})
 			writer := newExecutionFakeOrchestrator(t, rig.mailbox)
-			started := rig.repo.StartReleaseEnv(rig.env(), "release")
+			started := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
 			branch := executionAwaitBranch(t, rig, "probe")
 			assignment := executionMessage(t, rig.mailbox, branch, "assignment")
 			offered := executionTipOID(t, rig.mailbox, branch)

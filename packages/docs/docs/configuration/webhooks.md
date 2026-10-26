@@ -157,8 +157,8 @@ A `package.failed` delivery carries `failedStage` and `error` instead of `tag`; 
 fields. `channel` is absent on a stable release.
 
 A run with an [`execution`](./execution.md) object names the process every delivery was sent from: `role`
-(`orchestrator` or `worker`) and `node`, that process's node name. A stage the run placed on a worker is still
-reported by the orchestrator, which names the node that ran it in `worker`. A run with no `execution` object sends
+(`orchestrator` or `worker`) and `node`, that process's node name. A stage a peer ran may still be
+reported by the orchestrator, which names the executing node in `worker`. A run with no `execution` object sends
 none of the three.
 
 A `release.finished` delivery:

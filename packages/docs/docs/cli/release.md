@@ -106,5 +106,17 @@ Adds a worker node for this run, written `name` or `name=endpoint`, beside the o
 [`execution.workers`](../configuration/execution.md#links-named-on-the-command-line) lists, which is how a pipeline
 names a machine it created a minute before the release. A name alone reaches the repository being released, and an
 endpoint names another mailbox. You can repeat it. The link is held to every rule a configured one is, the file has
-to name `execution.secretEnv`, and a process running under a task's authority or a node whose file says
-`role: worker` refuses the flag with `E226`. See [Distributed execution](../distributed-execution.md).
+to name `execution.secretEnv`; a process running under a task's authority refuses the flag with `E226`.
+See [Distributed execution](../distributed-execution.md).
+
+### `--distribution-mode`
+
+Selects `compilation`, the only supported mode. The orchestrator computes the plan, publishes ready work,
+validates claims, and alone publishes or pushes Git refs. Other values are refused before task effects.
+
+### `--return-endpoint`, `--return-listen`
+
+When remote workers participate, `--return-endpoint` names the orchestrator's advertised authenticated
+HTTPS return channel, such as `https://runner.example:8443`. `--return-listen` optionally selects a different
+local `host:port` to bind; otherwise the listener address is derived from the advertised endpoint. Workers
+send claim and result requests there. They do not push Git refs. A local-only release needs no return listener.

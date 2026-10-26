@@ -47,7 +47,7 @@ func newCacheFixture(t *testing.T) *cacheFixture {
 // same call that repairs it.
 func newCacheWorker(t *testing.T, node *mailboxFixture) *Worker {
 	t.Helper()
-	return &Worker{
+	worker := &Worker{
 		Node: "build-a", Endpoint: node.endpoint, StateDir: t.TempDir(),
 		Report:       FormatNodeReport("1.11.0", "git version 2.43.0", 2, TransferLimits{MaxManifestBytes: 1 << 20}),
 		Mailbox:      NewGitMailbox(node.endpoint, node.git, node.signer, zerolog.Nop()),
@@ -56,6 +56,25 @@ func newCacheWorker(t *testing.T, node *mailboxFixture) *Worker {
 		Log:          zerolog.Nop(),
 		PrepareStore: node.git.InitBareStore,
 	}
+	attachCacheProbeReturn(t, worker)
+	return worker
+}
+
+func attachCacheProbeReturn(t *testing.T, worker *Worker) {
+	t.Helper()
+	signer, err := NewSigner("cache-probe-secret")
+	require.NoError(t, err)
+	worker.ReturnSigner = signer
+	worker.returnChannels = map[string]*workerReturnChannel{"run-1": {
+		binding: ChoreographyRunBinding{Run: "run-1", Generation: "generation",
+			PlanDigest: "digest", GraphDigest: "graph-digest"},
+		endpoint: "https://first.example:8443", certSHA256: "pinned-certificate",
+		client: &fakeWorkerReturn{probe: func(reply ChoreographyProbeReply) (ChoreographyReceipt, error) {
+			return ChoreographyReceipt{Kind: MessageResult, Task: PreflightTask, Node: worker.Node,
+				Branch: reply.Branch, ProposalID: reply.AssignmentOID,
+				OID: "first-probe-oid", Accepted: true}, nil
+		}},
+	}}
 }
 
 // offerTask puts one probe and one input state in the node's mailbox, as a
@@ -68,6 +87,9 @@ func (f *cacheFixture) offerTask(t *testing.T, attempt int) (string, gitx.Branch
 	branch := FormatBranch("build-a", KindProbe, time.Now())
 	probe := probeAssignment("build-a", branch)
 	probe.Attempt = attempt
+	probe.ReturnEndpoint = "https://first.example:8443"
+	probe.ReturnCertSHA256 = "pinned-certificate"
+	probe.GraphDigest = "graph-digest"
 	_, err := assign(ctx, f.orchestrator.mailbox, probe)
 	require.NoError(t, err)
 
@@ -284,7 +306,12 @@ func (m *sleepingMailbox) Observe(ctx context.Context, pattern string, isWanted 
 func TestAWorkerPollEndsAtItsOwnDeadline(t *testing.T) {
 	branch := "dispat-worker-build-a-20260925-probe-abc"
 	tip := ChainTip{Branch: branch, OID: "assignment-oid", Kind: MessageAssignment}
-	worker, fake := newWorkerFixture(t, branch, tip, validProbe(branch))
+	assignment := validProbe(branch)
+	assignment.ReturnEndpoint = "https://first.example:8443"
+	assignment.ReturnCertSHA256 = "pinned-certificate"
+	assignment.GraphDigest = "graph-digest"
+	worker, fake := newWorkerFixture(t, branch, tip, assignment)
+	attachCacheProbeReturn(t, worker)
 	fetched := gitx.RemoteHead{Name: "dispat-worker-build-a-20260925-snapshot-def", OID: "snapshot-oid"}
 	mailbox := &sleepingMailbox{fakeMailbox: fake, fetched: []gitx.RemoteHead{fetched}}
 	worker.Mailbox = mailbox
@@ -302,7 +329,8 @@ func TestAWorkerPollEndsAtItsOwnDeadline(t *testing.T) {
 		"what the cut-off poll had already fetched is offered to the next one")
 
 	require.True(t, worker.tick(t.Context()), "the next poll serves the work")
-	require.Equal(t, []MessageKind{MessageClaim, MessageResult}, fake.written)
+	require.Empty(t, fake.written, "the probe reply uses the authenticated return channel")
+	require.True(t, worker.Seen.IsSeen("run-1", PreflightTask, 1))
 	require.Equal(t, 1, fake.forgotten, "the store was opened once and never reopened")
 	require.Len(t, mailbox.deadlines, 3,
 		"the retry polls the probe and slot prefixes under the same transfer deadline")

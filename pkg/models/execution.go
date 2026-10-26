@@ -1,31 +1,29 @@
 package models
 
-// This file is the `execution` key: which role a node plays when a release is
-// executed across several machines, how much work the node accepts at once,
-// and where the worker nodes an orchestrator may delegate to are reached.
+// This file is the `execution` key: node capacity and the workers
+// available to a distributed run.
 //
 // These are node-startup settings and they are read from the entry
 // configuration alone. A space, a package, a package folder's own file, an
 // imported configuration and a linked peer never state them, because a
 // checkout that travels to another machine would otherwise carry that
-// machine's role, capacity and worker list with it.
+// machine's capacity and peer list with it.
 //
-// The transport is Git alone: there is no listener and no second protocol.
-// The mailbox is the repository being released, which a worker link with no
-// `endpoint` reaches at the push URL of the orchestrator's release remote; an
+// The mailbox is the repository being released, which a worker link with
+// no `endpoint` reaches at the push URL of the start node's release remote; an
 // `endpoint` is a credential-free Git URL naming another mailbox repository.
 // The secret that signs what travels through a mailbox is named by
 // `secretEnv` and read from the environment at run time, so the secret itself
 // never goes in the file, exactly as a webhook's signing secret does not.
 
-// The two roles a node may play. Orchestrator is the default, so a
-// configuration that says nothing about execution is the node a release is
-// started on: it owns the locks, the plan and the finalization. A worker
-// executes the tasks an orchestrator authorized and initiates nothing of its
-// own.
+// DistributionMode selects the release task interpreter. The command line
+// chooses it per run; it is not a static node role.
+type DistributionMode string
+
 const (
-	ExecutionRoleOrchestrator = "orchestrator"
-	ExecutionRoleWorker       = "worker"
+	DistributionModeCompilation    DistributionMode = "compilation"
+	DistributionModeInterpretation DistributionMode = "interpretation"
+	DistributionModeHybrid         DistributionMode = "hybrid"
 )
 
 // What an unstated execution setting means. They are written down rather than
@@ -42,6 +40,13 @@ const (
 	// what it is, in seconds. A node that cannot answer a question this small
 	// in a minute is not one to dispatch work to.
 	DefaultExecutionPreflightTimeout = 60
+	// DefaultExecutionAdmissionTimeoutSeconds bounds late worker admission
+	// after the signed execution-start event. A missing peer cannot keep a run open
+	// indefinitely.
+	DefaultExecutionAdmissionTimeoutSeconds = 600
+	// MaxExecutionAdmissionTimeoutSeconds is the largest late admission window
+	// that can be signed into one compiled run, in seconds (seven days).
+	MaxExecutionAdmissionTimeoutSeconds = 7 * 24 * 60 * 60
 	// DefaultExecutionTaskTimeout bounds one assigned task, in seconds. An
 	// hour is long enough for a real build and short enough that a lost node
 	// does not hold a release open for a shift.
@@ -69,6 +74,9 @@ const (
 	// task may produce, in bytes (8 MiB). It bounds what a consumer reads
 	// into memory before it has verified anything.
 	DefaultExecutionMaxManifestBytes int64 = 8388608
+	// DefaultExecutionMaxPackBytes bounds a result's Git pack on the
+	// authenticated return channel, including objects beyond output files.
+	DefaultExecutionMaxPackBytes int64 = 4294967296
 )
 
 // ExecutionConfig is the top-level `execution` object. It is a pointer on
@@ -77,10 +85,6 @@ const (
 // makes distributed execution an addition rather than a new code path every
 // existing repository travels.
 type ExecutionConfig struct {
-	// Role governs release initiation on this node: "orchestrator" (the
-	// default) or "worker". The value is matched exactly, as logLevel and
-	// commitErrors are, so a misspelling is refused rather than guessed at.
-	Role string `json:"role,omitempty"`
 	// Concurrency bounds the assigned command tasks this node runs at once,
 	// across runs. It is a pointer because a stated 0 is a mistake worth
 	// refusing while an absent key means DefaultExecutionConcurrency, and a
@@ -104,12 +108,15 @@ type ExecutionConfig struct {
 	// states workers, and of a node serving tasks. The variable's name goes
 	// in the file, never the secret itself.
 	SecretEnv string `json:"secretEnv,omitempty"`
-	// Workers are this orchestrator's execution links, each a node name and,
+	// IdentityKeyEnv names the environment variable holding a serving late
+	// worker's base64url Ed25519 private seed. It is never signed into Git.
+	IdentityKeyEnv string `json:"identityKeyEnv,omitempty"`
+	// Workers are this node's execution links, each a node name and,
 	// optionally, the mailbox it is reached at; a link that states none
 	// reaches the repository being released. A list of objects rather than a
 	// map so that node names keep the case the file wrote them in: dispat
 	// folds every map key it decodes. An empty or absent list preserves local
-	// execution. A worker states none, because a worker delegates nothing.
+	// execution.
 	//
 	// A present but empty list is the one state this field cannot round-trip:
 	// omitempty drops it on the way out, and it means what an absent list
@@ -123,8 +130,8 @@ type ExecutionConfig struct {
 	Transfer *ExecutionTransferConfig `json:"transfer,omitempty"`
 }
 
-// ExecutionWorkerConfig is one entry of `execution.workers`: a worker node an
-// orchestrator may delegate tasks to, and the mailbox repository it reads
+// ExecutionWorkerConfig is one entry of `execution.workers`: a
+// node that may execute tasks, and the mailbox repository it reads
 // them from. Name is required; an empty Endpoint reaches the orchestrator's
 // release remote (the push URL its lock is taken on; the entry repository's
 // in a composed workspace).
@@ -139,6 +146,12 @@ type ExecutionWorkerConfig struct {
 	// reaches the release remote's push URL, which is held to those rules
 	// when a run that dispatches starts.
 	Endpoint string `json:"endpoint,omitempty"`
+	// LateJoin authorizes this named worker to join after the run starts.
+	// When false, the worker must pass preflight before any task effect.
+	LateJoin bool `json:"lateJoin,omitempty"`
+	// IdentityPublicKey pins the Ed25519 public key that authenticates a late
+	// join independently of the run's shared message-signing secret.
+	IdentityPublicKey string `json:"identityPublicKey,omitempty"`
 }
 
 // ExecutionTimeoutsConfig is the `execution.timeouts` object: how long a
@@ -149,6 +162,9 @@ type ExecutionTimeoutsConfig struct {
 	// Preflight bounds the probe of one worker before dispatch. Default
 	// DefaultExecutionPreflightTimeout.
 	Preflight int `json:"preflight,omitempty"`
+	// Admission is the finite number of seconds after signed execution-start
+	// during which a preauthorized late worker may join. Zero uses the default.
+	Admission int `json:"admission,omitempty"`
 	// Task bounds one assigned task. Default DefaultExecutionTaskTimeout.
 	Task int `json:"task,omitempty"`
 	// Cancel bounds the wait for a cancelled task to acknowledge, after which
@@ -172,27 +188,17 @@ type ExecutionTransferConfig struct {
 	// MaxManifestBytes is the largest output manifest one task may produce,
 	// in bytes. Default DefaultExecutionMaxManifestBytes.
 	MaxManifestBytes int64 `json:"maxManifestBytes,omitempty"`
+	// MaxPackBytes is the largest Git object pack accepted for one returned
+	// result. It is independent of the declared output byte ceiling.
+	// Default DefaultExecutionMaxPackBytes.
+	MaxPackBytes int64 `json:"maxPackBytes,omitempty"`
 	// Timeout bounds one transfer, in seconds. Default
 	// DefaultExecutionTransferTimeout.
 	Timeout int `json:"timeout,omitempty"`
 }
 
-// ResolveRole returns the role this configuration puts the node in. It is
-// nil-safe and treats an empty role as the default, so every caller asks one
-// question and no caller has to know that an absent key means orchestrator.
-func (c *ExecutionConfig) ResolveRole() string {
-	if c == nil || c.Role == "" {
-		return ExecutionRoleOrchestrator
-	}
-	return c.Role
-}
-
-// IsWorker reports whether this node is configured as a worker, which is the
-// state that refuses release initiation. Nil-safe.
-func (c *ExecutionConfig) IsWorker() bool { return c.ResolveRole() == ExecutionRoleWorker }
-
 // IsDistributed reports whether this configuration delegates work at all: an
-// orchestrator with at least one worker link. It is the one question the
+// node with at least one worker link. It is the one question the
 // release path asks before anything about execution changes, so that a
 // configuration with no workers keeps the local behaviour byte for byte.
 // Nil-safe.
@@ -219,6 +225,7 @@ func (c *ExecutionConfig) ResolveTimeouts() ExecutionTimeoutsConfig {
 	}
 	return ExecutionTimeoutsConfig{
 		Preflight: resolveStatedLimit(stated.Preflight, DefaultExecutionPreflightTimeout),
+		Admission: resolveStatedLimit(stated.Admission, DefaultExecutionAdmissionTimeoutSeconds),
 		Task:      resolveStatedLimit(stated.Task, DefaultExecutionTaskTimeout),
 		Cancel:    resolveStatedLimit(stated.Cancel, DefaultExecutionCancelTimeout),
 	}
@@ -235,6 +242,7 @@ func (c *ExecutionConfig) ResolveTransfer() ExecutionTransferConfig {
 		MaxFiles:         resolveStatedLimit(stated.MaxFiles, DefaultExecutionMaxFiles),
 		MaxBytes:         resolveStatedLimit(stated.MaxBytes, DefaultExecutionMaxBytes),
 		MaxManifestBytes: resolveStatedLimit(stated.MaxManifestBytes, DefaultExecutionMaxManifestBytes),
+		MaxPackBytes:     resolveStatedLimit(stated.MaxPackBytes, DefaultExecutionMaxPackBytes),
 		Timeout:          resolveStatedLimit(stated.Timeout, DefaultExecutionTransferTimeout),
 	}
 }

@@ -38,19 +38,20 @@ import (
 // command may only start once every root of every input is in place.
 func (w *Worker) installTaskInputs(ctx context.Context, assignmentOID string,
 	assignment Assignment, checkout *Checkout,
-	dir string, log zerolog.Logger) ([]ManifestInput, OutputReason, error) {
+	dir string, log zerolog.Logger) ([]ManifestInput, []verifiedTaskInput, OutputReason, error) {
 	if len(assignment.Inputs) == 0 {
-		return nil, "", nil
+		return nil, nil, "", nil
 	}
 	carrier, ok := w.Mailbox.(slotMailboxx)
 	if !ok {
-		return nil, ReasonBytesMissing, fmt.Errorf("execution: this mailbox cannot verify carried results")
+		return nil, nil, ReasonBytesMissing, fmt.Errorf("execution: this mailbox cannot verify carried results")
 	}
 	view, err := carrier.OpenCarriedAssignment(ctx, assignmentOID, assignment.Limits.MaxManifestBytes)
 	if err != nil {
-		return nil, ReasonOutputIdentity, fmt.Errorf("execution: verifying carried results: %w", err)
+		return nil, nil, ReasonOutputIdentity, fmt.Errorf("execution: verifying carried results: %w", err)
 	}
 	installed := make([]ManifestInput, 0, len(assignment.Inputs))
+	proofs := make([]verifiedTaskInput, 0, len(assignment.Inputs))
 	type inputGroup struct {
 		name     string
 		requests []InstallRequest
@@ -60,7 +61,7 @@ func (w *Worker) installTaskInputs(ctx context.Context, assignmentOID string,
 	for _, input := range assignment.Inputs {
 		manifest, validated, reason, err := w.readInputManifest(ctx, view, assignment, input)
 		if err != nil {
-			return nil, reason, err
+			return nil, nil, reason, err
 		}
 		key := input.Package + "\x00" + input.Path
 		group := groups[key]
@@ -76,14 +77,20 @@ func (w *Worker) installTaskInputs(ctx context.Context, assignmentOID string,
 		installed = append(installed, ManifestInput{
 			Package: input.Package, OutputTree: manifest.OutputTree, Digest: manifest.Digest,
 		})
+		proofs = append(proofs, verifiedTaskInput{input: input, manifest: manifest})
 	}
 	for _, group := range ordered {
 		if err := InstallOutputSets(ctx, group.requests); err != nil {
-			return nil, OutputFaultReason(err), err
+			return nil, nil, OutputFaultReason(err), err
 		}
 		log.Debug().Str("package", group.name).Int("sets", len(group.requests)).Msg("inputs installed")
 	}
-	return installed, "", nil
+	return installed, proofs, "", nil
+}
+
+type verifiedTaskInput struct {
+	input    AssignmentInput
+	manifest *OutputManifest
 }
 
 // readInputManifest reads the provider's result at the exact object the

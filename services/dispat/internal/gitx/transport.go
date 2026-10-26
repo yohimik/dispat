@@ -340,6 +340,157 @@ func (c *LocalGitx) CommitParents(ctx context.Context, oid string) ([]string, er
 	return fields[1:], nil
 }
 
+// ImportTagAsBlobFrom copies one exact annotated tag object's raw bytes from
+// a source repository into this store as a blob. The bootstrap tree can then
+// carry that blob without a mutable tag ref; a receiving node recreates the
+// tag object and checks its original OID before planning. Memory use is
+// constant and the temporary file never exceeds maxBytes.
+func (c *LocalGitx) ImportTagAsBlobFrom(ctx context.Context, sourceDir, tagOID string,
+	maxBytes int64) (string, int64, error) {
+	if sourceDir == objectClosureMissingSourcePath || !transportOID(tagOID) || maxBytes <= transportNoObjectBytesCount {
+		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(invalidAnnotatedTagImportErrorText)
+	}
+	source := &LocalGitx{Dir: sourceDir, Log: c.Log}
+	kind, err := source.run(ctx, transportReadObjectCommandName, transportObjectTypeFlag, tagOID)
+	if err != nil {
+		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedTagUnavailableErrorFormat, tagOID, err)
+	}
+	if strings.TrimSpace(kind) != transportTagObjectTypeName {
+		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedObjectNotTagErrorFormat, tagOID)
+	}
+	sizeText, err := source.run(ctx, transportReadObjectCommandName, transportObjectSizeFlag, tagOID)
+	if err != nil {
+		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedTagSizeReadErrorFormat, tagOID, err)
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(sizeText), transportByteCountRadix, transportObjectSizeIntegerBits)
+	if err != nil {
+		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(invalidPinnedTagByteCountErrorFormat, tagOID, strings.TrimSpace(sizeText), err)
+	}
+	if size < transportNoObjectBytesCount || size > maxBytes {
+		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedTagSizeLimitErrorFormat, ErrTransportLimit)
+	}
+	tmp, err := os.CreateTemp(transportSystemTemporaryDirectoryPath, transportPinnedTagFilePattern)
+	if err != nil {
+		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedTagStagingErrorFormat, err)
+	}
+	defer func() { _ = tmp.Close(); _ = os.Remove(tmp.Name()) }()
+	bounded := &blobWriter{to: tmp, remaining: size}
+	if _, err := source.runStream(ctx, gitStream{stdout: bounded}, transportReadObjectCommandName, transportTagObjectTypeName, tagOID); err != nil {
+		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedTagReadErrorFormat, err)
+	}
+	if bounded.remaining != transportNoObjectBytesCount {
+		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedTagTruncatedErrorText)
+	}
+	if _, err := tmp.Seek(transportObjectStartOffsetBytes, io.SeekStart); err != nil {
+		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedTagRewindErrorFormat, err)
+	}
+	plumbing := NewPlumbing(c)
+	blobOID := plumbing.HashObject(ctx, tmp)
+	if err := plumbing.Err(); err != nil {
+		return transportAbsentObjectText, transportNoObjectBytesCount, err
+	}
+	return blobOID, size, nil
+}
+
+type TagBlobRestoreOptions struct {
+	BlobOID   string
+	TagOID    string
+	PeeledOID string
+	MaxBytes  int64
+}
+
+// RestoreTagFromBlob reconstructs one exact annotated tag from the bootstrap
+// blob in this object store. The OID and peeled commit must both match the
+// signed inventory before a private planner may install the tag ref.
+func (c *LocalGitx) RestoreTagFromBlob(ctx context.Context, options TagBlobRestoreOptions) (int64, error) {
+	blobOID, tagOID, peeledOID, maxBytes := options.BlobOID, options.TagOID, options.PeeledOID, options.MaxBytes
+	if !transportOID(blobOID) || !transportOID(tagOID) || !transportOID(peeledOID) || maxBytes <= transportNoObjectBytesCount {
+		return transportNoObjectBytesCount, fmt.Errorf(invalidPinnedTagRestoreErrorText)
+	}
+	tmp, err := os.CreateTemp(transportSystemTemporaryDirectoryPath, transportRestoredTagFilePattern)
+	if err != nil {
+		return transportNoObjectBytesCount, fmt.Errorf(restoredTagStagingErrorFormat, err)
+	}
+	defer func() { _ = tmp.Close(); _ = os.Remove(tmp.Name()) }()
+	plumbing := NewPlumbing(c)
+	plumbing.ReadBlob(ctx, blobOID, tmp, maxBytes)
+	if err := plumbing.Err(); err != nil {
+		return transportNoObjectBytesCount, fmt.Errorf(restoredTagBlobReadErrorFormat, err)
+	}
+	info, err := tmp.Stat()
+	if err != nil {
+		return transportNoObjectBytesCount, fmt.Errorf(restoredTagMetadataUnavailableErrorFormat, err)
+	}
+	if info.Size() > maxBytes {
+		return transportNoObjectBytesCount, fmt.Errorf(restoredTagSizeLimitErrorFormat, ErrTransportLimit)
+	}
+	if _, err := tmp.Seek(transportObjectStartOffsetBytes, io.SeekStart); err != nil {
+		return transportNoObjectBytesCount, fmt.Errorf(restoredTagRewindErrorFormat, err)
+	}
+	actual, err := c.runStream(ctx, gitStream{stdin: tmp}, transportHashObjectCommandName, transportObjectTypeFlag, transportTagObjectTypeName, transportWriteObjectFlag, transportInputStreamFlag)
+	if err != nil {
+		return transportNoObjectBytesCount, fmt.Errorf(restoredTagWriteErrorFormat, err)
+	}
+	if strings.TrimSpace(actual) != tagOID {
+		return transportNoObjectBytesCount, fmt.Errorf(restoredTagIdentityMismatchErrorText)
+	}
+	resolved, err := c.ResolveCommit(ctx, tagOID)
+	if err != nil {
+		return transportNoObjectBytesCount, fmt.Errorf(restoredTagTargetUnavailableErrorFormat, err)
+	}
+	if resolved != peeledOID {
+		return transportNoObjectBytesCount, fmt.Errorf(restoredTagTargetMismatchErrorText)
+	}
+	return info.Size(), nil
+}
+
+// FirstParentOIDs streams the exact new first-parent history once, oldest
+// first. Callers retain an indexed event state after this one-time replay;
+// this operation must not be repeated for each page of a peer's backlog.
+func (c *LocalGitx) FirstParentOIDs(ctx context.Context, tip, after string) ([]string, error) {
+	if !transportOID(tip) || !transportOID(after) {
+		return nil, fmt.Errorf(invalidFirstParentReplayErrorText)
+	}
+	collector := &firstParentOIDCollector{}
+	_, err := c.runStream(ctx, gitStream{stdout: collector},
+		transportRevisionListCommandName, transportFirstParentFlag, transportOldestFirstFlag, tip, objectClosureExclusionRevisionPrefix+after)
+	if err != nil {
+		return nil, fmt.Errorf(firstParentReplayErrorFormat, err)
+	}
+	if len(collector.pending) != transportNoObjectBytesCount {
+		return nil, fmt.Errorf(truncatedFirstParentReplayErrorText)
+	}
+	return collector.oids, nil
+}
+
+type firstParentOIDCollector struct {
+	pending []byte
+	oids    []string
+}
+
+func (c *firstParentOIDCollector) Write(content []byte) (int, error) {
+	consumed := len(content)
+	for len(content) > transportNoObjectBytesCount {
+		end := bytes.IndexByte(content, transportObjectHeaderLineDelimiterByte)
+		if end < transportNoObjectBytesCount {
+			c.pending = append(c.pending, content...)
+			if len(c.pending) > transportObjectIDMaximumBytes {
+				return transportNoObjectBytesCount, fmt.Errorf(oversizedReplayCommitIDErrorText)
+			}
+			break
+		}
+		c.pending = append(c.pending, content[:end]...)
+		oid := string(c.pending)
+		if !transportOID(oid) {
+			return transportNoObjectBytesCount, fmt.Errorf(invalidReplayCommitIDErrorText)
+		}
+		c.oids = append(c.oids, oid)
+		c.pending = c.pending[:transportNoObjectBytesCount]
+		content = content[end+transportObjectLineDelimiterBytes:]
+	}
+	return consumed, nil
+}
+
 // pushLeased is one compare-and-swap push, answered as one of the three
 // outcomes the transport distinguishes: applied (nil), never applied
 // (ErrLeaseRejected or ErrRemoteRefused) and unknown (ErrPushUnknown).

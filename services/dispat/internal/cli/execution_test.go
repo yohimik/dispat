@@ -152,6 +152,34 @@ func TestWorkerFlagBelongsToTheDispatchingCommands(t *testing.T) {
 	}
 }
 
+func TestDistributionModeAcceptsCompilationOnly(t *testing.T) {
+	for _, value := range []string{"orchestration", "choreography", "interpretation", "hybrid", "mixed", "Interpretation", ""} {
+		t.Run(value, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := Run([]string{"status", "--distribution-mode", value, "--root", t.TempDir()}, &stdout, &stderr)
+			assert.Equal(t, 2, code, "stderr:\n%s", stderr.String())
+			assert.Contains(t, stderr.String(), "this build supports compilation")
+		})
+	}
+}
+
+func TestReturnAddressFlagsRejectUnsafeOrIncompleteOriginsBeforeConfig(t *testing.T) {
+	for name, flags := range map[string][]string{
+		"plaintext":     {"--return-endpoint", "http://first.example:8443"},
+		"credentials":   {"--return-endpoint", "https://user:secret@first.example:8443"},
+		"unpaired bind": {"--return-listen", "127.0.0.1:8443"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			args := append([]string{"release", "--root", t.TempDir()}, flags...)
+			var stdout, stderr bytes.Buffer
+			code := Run(args, &stdout, &stderr)
+			assert.Equal(t, 2, code, "stderr:\n%s", stderr.String())
+			assert.Contains(t, stderr.String(), "return")
+			assert.NotContains(t, stderr.String(), "secret")
+		})
+	}
+}
+
 // TestWorkerFlagIsRefusedUnderWorkerAuthority: a task executes what its
 // assignment authorized, so a build script that named a pool of its own is
 // refused with the authority code before any file is read, whichever of the

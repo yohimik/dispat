@@ -1,13 +1,12 @@
 package config
 
-// The `execution` key: this node's role, its capacity, and the worker nodes
-// it may delegate to.
+// The `execution` key: this node's capacity and its linked workers.
 //
 // Two things make the key unlike every other object in the language, and both
 // are enforced here. It is a node-startup setting, so its line lives in
 // fileFields alone: writing it on a space, a package or in a folder file is
 // an unknown key, because a checkout that travels to another machine must not
-// be able to tell that machine what role it plays. And it is read from the
+// be able to assign that machine a static role. And it is read from the
 // entry configuration alone, so an imported or linked peer's own `execution`
 // object is legal to state and is simply never consulted; it is still
 // validated when that file is loaded, because a file that cannot say what it
@@ -18,7 +17,10 @@ package config
 // the log rather than a sentence a CI job has to match on.
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 
@@ -75,6 +77,32 @@ const DiagnosticExecution = "E225"
 // and the two are free to diverge.
 var executionNodeName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
+const invalidLateJoinIdentityPublicKeyErrorFormat = "%s.identityPublicKey must be a canonical base64url Ed25519 public key for lateJoin"
+const invalidExecutionIdentityKeyEnvErrorFormat = "execution.identityKeyEnv %q is not an environment variable name"
+const invalidExecutionAdmissionTimeoutErrorFormat = "execution.timeouts.admission must be <= %d seconds, got %d"
+
+const (
+	executionConcurrencyFieldKey    = "concurrency"
+	executionNameFieldKey           = "name"
+	executionEndpointFieldKey       = "endpoint"
+	executionSecretEnvFieldKey      = "secretenv"
+	executionIdentityKeyEnvFieldKey = "identitykeyenv"
+	executionWorkersFieldKey        = "workers"
+	executionTimeoutsFieldKey       = "timeouts"
+	executionTransferFieldKey       = "transfer"
+	executionLateJoinFieldKey       = "latejoin"
+	executionPublicKeyFieldKey      = "identitypublickey"
+	executionPreflightFieldKey      = "preflight"
+	executionAdmissionFieldKey      = "admission"
+	executionTaskFieldKey           = "task"
+	executionCancelFieldKey         = "cancel"
+	executionMaxFilesFieldKey       = "maxfiles"
+	executionMaxBytesFieldKey       = "maxbytes"
+	executionMaxManifestBytesKey    = "maxmanifestbytes"
+	executionMaxPackBytesKey        = "maxpackbytes"
+	executionTransferTimeoutKey     = "timeout"
+)
+
 // isExecutionNodeName reports whether name can identify a node. The alphabet
 // is not the whole rule: a node's name is written into the coordination
 // branches addressed to it, and git refuses a ref name holding two dots in a
@@ -87,14 +115,14 @@ func isExecutionNodeName(name string) bool {
 // executionFields is the top-level `execution` object.
 func executionFields(dst *ExecutionConfig) fields {
 	return fields{
-		"role":        str(&dst.Role),
-		"concurrency": numPtr(&dst.Concurrency),
-		"name":        str(&dst.Name),
-		"endpoint":    str(&dst.Endpoint),
-		"secretenv":   str(&dst.SecretEnv),
-		"workers":     objList(&dst.Workers, executionWorkerFields),
-		"timeouts":    obj(&dst.Timeouts, executionTimeoutsFields),
-		"transfer":    obj(&dst.Transfer, executionTransferFields),
+		executionConcurrencyFieldKey:    numPtr(&dst.Concurrency),
+		executionNameFieldKey:           str(&dst.Name),
+		executionEndpointFieldKey:       str(&dst.Endpoint),
+		executionSecretEnvFieldKey:      str(&dst.SecretEnv),
+		executionIdentityKeyEnvFieldKey: str(&dst.IdentityKeyEnv),
+		executionWorkersFieldKey:        objList(&dst.Workers, executionWorkerFields),
+		executionTimeoutsFieldKey:       obj(&dst.Timeouts, executionTimeoutsFields),
+		executionTransferFieldKey:       obj(&dst.Transfer, executionTransferFields),
 	}
 }
 
@@ -104,17 +132,20 @@ func executionFields(dst *ExecutionConfig) fields {
 // not.
 func executionWorkerFields(dst *ExecutionWorkerConfig) fields {
 	return fields{
-		"name":     str(&dst.Name),
-		"endpoint": str(&dst.Endpoint),
+		executionNameFieldKey:      str(&dst.Name),
+		executionEndpointFieldKey:  str(&dst.Endpoint),
+		executionLateJoinFieldKey:  flag(&dst.LateJoin),
+		executionPublicKeyFieldKey: str(&dst.IdentityPublicKey),
 	}
 }
 
 // executionTimeoutsFields is `execution.timeouts`: the bounded waits.
 func executionTimeoutsFields(dst *ExecutionTimeoutsConfig) fields {
 	return fields{
-		"preflight": num(&dst.Preflight),
-		"task":      num(&dst.Task),
-		"cancel":    num(&dst.Cancel),
+		executionPreflightFieldKey: num(&dst.Preflight),
+		executionAdmissionFieldKey: num(&dst.Admission),
+		executionTaskFieldKey:      num(&dst.Task),
+		executionCancelFieldKey:    num(&dst.Cancel),
 	}
 }
 
@@ -123,10 +154,11 @@ func executionTimeoutsFields(dst *ExecutionTimeoutsConfig) fields {
 // gigabytes and a 32-bit ceiling would be a bound nobody chose.
 func executionTransferFields(dst *ExecutionTransferConfig) fields {
 	return fields{
-		"maxfiles":         num(&dst.MaxFiles),
-		"maxbytes":         num64(&dst.MaxBytes),
-		"maxmanifestbytes": num64(&dst.MaxManifestBytes),
-		"timeout":          num(&dst.Timeout),
+		executionMaxFilesFieldKey:    num(&dst.MaxFiles),
+		executionMaxBytesFieldKey:    num64(&dst.MaxBytes),
+		executionMaxManifestBytesKey: num64(&dst.MaxManifestBytes),
+		executionMaxPackBytesKey:     num64(&dst.MaxPackBytes),
+		executionTransferTimeoutKey:  num(&dst.Timeout),
 	}
 }
 
@@ -163,13 +195,8 @@ func validateExecution(c *File) error {
 	return nil
 }
 
-// validateExecutionBounds checks the role and the numbers: what this node is,
-// how much it takes on, how long it waits and how much it moves.
+// validateExecutionBounds checks how much this node takes on and moves.
 func validateExecutionBounds(x *ExecutionConfig) error {
-	if role := x.ResolveRole(); role != public.ExecutionRoleOrchestrator && role != public.ExecutionRoleWorker {
-		return fmt.Errorf("execution.role %q is invalid (want %q or %q)",
-			role, public.ExecutionRoleOrchestrator, public.ExecutionRoleWorker)
-	}
 	if capacity := x.ResolveConcurrency(); capacity < 1 {
 		return fmt.Errorf("execution.concurrency must be >= 1, got %d: a node that accepts no task is a node to remove rather than to configure", capacity)
 	}
@@ -187,16 +214,27 @@ func validateExecutionBounds(x *ExecutionConfig) error {
 		value int64
 	}{
 		{"execution.timeouts.preflight", int64(timeouts.Preflight)},
+		{executionAdmissionTimeoutFieldPath, int64(timeouts.Admission)},
 		{"execution.timeouts.task", int64(timeouts.Task)},
 		{"execution.timeouts.cancel", int64(timeouts.Cancel)},
 		{"execution.transfer.maxFiles", int64(transfer.MaxFiles)},
 		{"execution.transfer.maxBytes", transfer.MaxBytes},
 		{"execution.transfer.maxManifestBytes", transfer.MaxManifestBytes},
+		{executionMaxPackBytesFieldPath, transfer.MaxPackBytes},
 		{"execution.transfer.timeout", int64(transfer.Timeout)},
 	} {
 		if bound.value < 0 {
 			return fmt.Errorf("%s must be >= 0, got %d", bound.key, bound.value)
 		}
+	}
+	if timeouts.Admission > public.MaxExecutionAdmissionTimeoutSeconds {
+		return fmt.Errorf(invalidExecutionAdmissionTimeoutErrorFormat,
+			public.MaxExecutionAdmissionTimeoutSeconds, timeouts.Admission)
+	}
+	// The result returner probes one byte beyond this ceiling to distinguish
+	// exact fit from oversize. MaxInt64 cannot be probed without overflow.
+	if transfer.MaxPackBytes == math.MaxInt64 {
+		return fmt.Errorf(executionMaxPackBytesLimitErrorFormat, int64(math.MaxInt64-executionPackLimitProbeBytes))
 	}
 	return nil
 }
@@ -216,8 +254,8 @@ func validateExecutionNode(x *ExecutionConfig) error {
 	if x.SecretEnv != "" && !envname.IsValid(x.SecretEnv) {
 		return fmt.Errorf("execution.secretEnv %q is not an environment variable name: it names the variable holding the signing secret, never the secret itself", x.SecretEnv)
 	}
-	if x.IsWorker() && x.IsDistributed() {
-		return fmt.Errorf("execution.workers is not a worker's to state: a worker executes the tasks it is given and delegates nothing")
+	if x.IdentityKeyEnv != executionIdentityUnsetText && !envname.IsValid(x.IdentityKeyEnv) {
+		return fmt.Errorf(invalidExecutionIdentityKeyEnvErrorFormat, x.IdentityKeyEnv)
 	}
 	if err := validateExecutionWorkers(x.Workers); err != nil {
 		return err
@@ -264,6 +302,13 @@ func validateExecutionWorker(label string, worker ExecutionWorkerConfig, namedBy
 		return fmt.Errorf("%s: name %q is already used by %s", label, worker.Name, previous)
 	}
 	namedBy[folded] = label
+	if worker.LateJoin || worker.IdentityPublicKey != executionIdentityUnsetText {
+		key, err := base64.RawURLEncoding.DecodeString(worker.IdentityPublicKey)
+		if err != nil || len(key) != ed25519.PublicKeySize ||
+			base64.RawURLEncoding.EncodeToString(key) != worker.IdentityPublicKey {
+			return fmt.Errorf(invalidLateJoinIdentityPublicKeyErrorFormat, label)
+		}
+	}
 	if worker.Endpoint == "" {
 		return nil
 	}
@@ -281,10 +326,7 @@ func validateExecutionWorker(label string, worker ExecutionWorkerConfig, namedBy
 // no endpoint does.
 const WorkerFlag = "worker"
 
-// DiagnosticExecutionAuthority reports execution refused because of who asked
-// for it. Its one use in this package is a `--worker` given to a node whose
-// file calls it a worker: a worker never dispatches to a pool, whether the
-// link it would dispatch to is written in a file or on a command line.
+// DiagnosticExecutionAuthority reports a task authority refusal.
 const DiagnosticExecutionAuthority = "E226"
 
 // ParseWorkerLink reads one `--worker` value as the link it names: a node name
@@ -318,20 +360,10 @@ func ParseWorkerLink(value string) (ExecutionWorkerConfig, error) {
 // Each is checked here under the flag's own label first, so that a refusal
 // names the value the operator typed rather than an index into a list they
 // never wrote, and the whole list is validated again with everything else.
-//
-// A node whose file calls it a worker is refused outright, with the authority
-// code: a worker never dispatches to a pool, which is the rule a `workers`
-// list in its file is refused by.
 func appendCommandLineWorkers(c *File, flags *pflag.FlagSet) error {
 	values := readWorkerFlag(flags)
 	if len(values) == 0 {
 		return nil
-	}
-	if c.Execution.IsWorker() {
-		return WithDiagnostic(DiagnosticExecutionAuthority, fmt.Errorf(
-			"--%s names a node this invocation would dispatch to, and execution.role is %q on this node: "+
-				"a worker executes the tasks it is given and dispatches nothing",
-			WorkerFlag, c.Execution.ResolveRole()))
 	}
 	if c.Execution == nil {
 		c.Execution = &ExecutionConfig{}

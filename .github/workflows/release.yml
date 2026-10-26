@@ -235,6 +235,9 @@ jobs:
       # The node's name, this run's own, so the coordination branches of one
       # run are never mistaken for another's.
       DISPAT_CI_WORKER_NODE: ci-worker-${{ github.run_id }}-${{ github.run_attempt }}
+      # Both processes must sign the same exact coordination endpoint bytes.
+      DISPAT_CI_WORKER_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}.git
+      DISPAT_CI_RETURN_PORT: '39017'
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -286,9 +289,16 @@ jobs:
           echo "DISPAT_EXECUTION_SECRET=$secret" >> "$GITHUB_ENV"
           sh scripts/ci-worker.sh create
 
+      # The peer reaches only this runner's loopback TLS listener through an
+      # authenticated SSH reverse tunnel. No public runner port is opened.
+      - name: Start the worker return tunnel
+        if: env.CI_WORKER != ''
+        run: sh scripts/ci-worker.sh tunnel-start
+
       # Minted once the machine exists, so that the token's hour covers the
-      # suite rather than the wait for a machine. The action revokes it when
-      # the job ends.
+      # suite rather than the wait for a machine. The peer only reads Git;
+      # this runner alone holds the repository write credential. The action
+      # revokes the peer token when the job ends.
       - name: Mint the worker's token
         id: worker-token
         if: env.CI_WORKER != ''
@@ -296,7 +306,7 @@ jobs:
         with:
           client-id: ${{ vars.CI_WORKER_APP_CLIENT_ID }}
           private-key: ${{ secrets.CI_WORKER_APP_PRIVATE_KEY }}
-          permission-contents: write
+          permission-contents: read
 
       # The token reaches this step's environment and the machine, over ssh,
       # and nothing else: it is never written to GITHUB_ENV.
@@ -342,7 +352,14 @@ jobs:
       # that produces a complete set of coverage profiles, which is why the
       # badge is computed here and nowhere else.
       - name: Run every package's tests
-        run: dispat run tests --since all ${CI_WORKER:+--worker "$DISPAT_CI_WORKER_NODE"}
+        run: |
+          if [ -n "$CI_WORKER" ]; then
+            dispat run tests --since all --worker "$DISPAT_CI_WORKER_NODE=$DISPAT_CI_WORKER_REPOSITORY" \
+              --return-endpoint "https://127.0.0.1:$DISPAT_CI_RETURN_PORT" \
+              --return-listen "127.0.0.1:$DISPAT_CI_RETURN_PORT"
+          else
+            dispat run tests --since all
+          fi
 
       # always(): the redirects must not outlive the job whatever the suite
       # did, and unlink is idempotent, so closing an already-closed bracket is

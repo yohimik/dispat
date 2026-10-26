@@ -48,11 +48,12 @@ type Pool struct {
 // poolNode is one node as the pool sees it: what it is, what it can take, and
 // how much of that is in use.
 type poolNode struct {
-	name      string
-	platform  string
-	capacity  int
-	inFlight  int
-	isHealthy bool
+	name        string
+	authorityID string
+	platform    string
+	capacity    int
+	inFlight    int
+	isHealthy   bool
 	// isLocal marks the orchestrator's own entry. It is what a placement
 	// filters on, and it is also why the entry is a node here rather than a
 	// mailbox somewhere: this machine runs a frame by running it, so giving
@@ -68,8 +69,9 @@ type poolNode struct {
 // bounds the frames it keeps for itself, because it is one machine and the
 // work does not become cheaper for having been placed rather than delegated.
 type LocalNode struct {
-	Name     string
-	Capacity int
+	Name        string
+	Capacity    int
+	AuthorityID string
 }
 
 // EligibleWorker is a preflighted node that could run one declared task.
@@ -95,6 +97,32 @@ func (p *Pool) EligibleWorkers(platforms []string, placement Placement) []Eligib
 	return eligible
 }
 
+// choreographyRosterNodes snapshots the exact pool accepted at preflight.
+// Node availability may later shrink; the signed root fixes compatibility
+// and capacity, while claims still need the current broker budget.
+func (p *Pool) choreographyRosterNodes() []ChoreographyRuntimeNode {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	nodes := make([]ChoreographyRuntimeNode, 0, len(p.nodes))
+	for _, node := range p.nodes {
+		nodes = append(nodes, ChoreographyRuntimeNode{
+			Name: node.name, Platform: node.platform,
+			Capacity: node.capacity, First: node.isLocal, AuthorityID: node.authorityID,
+		})
+	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].Name < nodes[j].Name })
+	return nodes
+}
+
+// ChoreographyNodes exposes the post-preflight pool identity that the ledger
+// root retains. It never reports a node from ambient peer configuration.
+func (c *Coordinator) ChoreographyNodes() []ChoreographyRuntimeNode {
+	if c == nil || c.Pool == nil {
+		return nil
+	}
+	return c.Pool.choreographyRosterNodes()
+}
+
 // Lease is one node slot held by one attempt.
 //
 // It is a value the holder gives back rather than a counter the holder
@@ -110,7 +138,8 @@ type Lease struct {
 	// that was made, and the pool has moved on by then.
 	IsLocal bool
 
-	pool *Pool
+	pool   *Pool
+	weight int
 	// onSettle releases the matching dispatch-index slot only when a remote
 	// attempt is known to have stopped. A leaked node keeps that slot fenced.
 	onSettle func(reason string)
@@ -132,19 +161,21 @@ func NewPool(links []Link, reports []*NodeReport, local LocalNode, log zerolog.L
 	for index, link := range links {
 		report := reports[index]
 		nodes = append(nodes, &poolNode{
-			name:      link.Name,
-			platform:  report.OS + "/" + report.Arch,
-			capacity:  report.Capacity,
-			isHealthy: true,
+			name:        link.Name,
+			authorityID: report.AuthorityID,
+			platform:    report.OS + "/" + report.Arch,
+			capacity:    report.Capacity,
+			isHealthy:   true,
 		})
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].name < nodes[j].name })
 	return &Pool{log: log, changed: make(chan struct{}), nodes: append(nodes, &poolNode{
-		name:      local.Name,
-		platform:  runtime.GOOS + "/" + runtime.GOARCH,
-		capacity:  max(local.Capacity, 1),
-		isHealthy: true,
-		isLocal:   true,
+		name:        local.Name,
+		authorityID: local.AuthorityID,
+		platform:    runtime.GOOS + "/" + runtime.GOARCH,
+		capacity:    max(local.Capacity, 1),
+		isHealthy:   true,
+		isLocal:     true,
 	})}
 }
 
@@ -158,9 +189,20 @@ func NewPool(links []Link, reports []*NodeReport, local LocalNode, log zerolog.L
 // possible copy. An empty name matches no node and is the plain Acquire.
 func (p *Pool) AcquireNear(ctx context.Context, platforms []string, placement Placement,
 	preferred string) (*Lease, error) {
+	return p.AcquireNearWeight(ctx, platforms, placement, preferred, 1)
+}
+
+// AcquireNearWeight reserves the complete signed v3 task weight before any
+// local physical slot is taken or remote assignment is offered. Legacy
+// callers continue to reserve one unit through AcquireNear.
+func (p *Pool) AcquireNearWeight(ctx context.Context, platforms []string, placement Placement,
+	preferred string, weight int) (*Lease, error) {
+	if p == nil || weight < 1 {
+		return nil, fmt.Errorf("execution: invalid weighted node placement")
+	}
 	for {
 		p.mu.Lock()
-		lease, isPlacementPossible := p.takeSlot(platforms, placement, preferred)
+		lease, isPlacementPossible := p.takeSlotWeight(platforms, placement, preferred, weight)
 		changed := p.changed
 		p.mu.Unlock()
 		if lease != nil {
@@ -179,6 +221,31 @@ func (p *Pool) AcquireNear(ctx context.Context, platforms []string, placement Pl
 	}
 }
 
+// TryAcquireLocalWeight reserves only the first node's free run-local weight.
+// It never selects a peer or waits while another node may claim the task.
+func (p *Pool) TryAcquireLocalWeight(platforms []string, weight int) (*Lease, bool, error) {
+	if p == nil || weight <= 0 {
+		return nil, false, fmt.Errorf("execution: local task weight is invalid")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, node := range p.nodes {
+		if !node.isLocal {
+			continue
+		}
+		if !node.isHealthy || node.capacity < weight ||
+			!isPlatformCompatible(node.platform, platforms) {
+			return nil, false, fmt.Errorf("execution: first node cannot execute this task's platform or weight")
+		}
+		if node.inFlight+weight > node.capacity {
+			return nil, false, nil
+		}
+		node.inFlight += weight
+		return &Lease{Node: node.name, IsLocal: true, pool: p, weight: weight}, true, nil
+	}
+	return nil, false, fmt.Errorf("execution: first node is absent from its execution pool")
+}
+
 // takeSlot answers the slot this task gets, and whether waiting for one could
 // ever help. It runs under the lock.
 //
@@ -193,15 +260,20 @@ func (p *Pool) AcquireNear(ctx context.Context, platforms []string, placement Pl
 // worker could have taken would be a run that queued its own work behind
 // somebody else's.
 func (p *Pool) takeSlot(platforms []string, placement Placement, preferred string) (*Lease, bool) {
+	return p.takeSlotWeight(platforms, placement, preferred, 1)
+}
+
+func (p *Pool) takeSlotWeight(platforms []string, placement Placement, preferred string,
+	weight int) (*Lease, bool) {
 	var chosen *poolNode
 	isPlacementPossible := false
 	for _, node := range p.nodes {
 		if !node.isHealthy || !isNodeAllowed(node, placement) ||
-			!isPlatformCompatible(node.platform, platforms) {
+			!isPlatformCompatible(node.platform, platforms) || node.capacity < weight {
 			continue
 		}
 		isPlacementPossible = true
-		if node.inFlight >= node.capacity {
+		if node.inFlight+weight > node.capacity {
 			continue
 		}
 		if isNodePreferred(chosen, node, preferred) {
@@ -211,8 +283,8 @@ func (p *Pool) takeSlot(platforms []string, placement Placement, preferred strin
 	if chosen == nil {
 		return nil, isPlacementPossible
 	}
-	chosen.inFlight++
-	return &Lease{Node: chosen.name, IsLocal: chosen.isLocal, pool: p}, isPlacementPossible
+	chosen.inFlight += weight
+	return &Lease{Node: chosen.name, IsLocal: chosen.isLocal, pool: p, weight: weight}, isPlacementPossible
 }
 
 // isNodeAllowed reports whether one node is a node this placement may use.
@@ -333,7 +405,7 @@ func (l *Lease) settle(reason string) {
 			node.isHealthy = false
 			break
 		}
-		node.inFlight--
+		node.inFlight -= max(l.weight, 1)
 		break
 	}
 	// Every waiter re-evaluates: a returned slot may be theirs, and a node

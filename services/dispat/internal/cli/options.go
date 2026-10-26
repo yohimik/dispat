@@ -121,7 +121,9 @@ type options struct {
 
 	// release, run and status: the worker links this invocation adds to the
 	// entry configuration's own, for a machine a pipeline has just created.
-	workers *[]string
+	workers                      *[]string
+	distributionMode             *string
+	returnEndpoint, returnListen *string
 
 	// worker: where the node keeps what it may not lose, and how long it
 	// serves with nothing to do.
@@ -393,13 +395,16 @@ func (o *options) declareManifestFlags(fs *pflag.FlagSet) {
 		"turn a tolerated finding into a failure: for release and status, a selection the plan cannot release as it stands (a package waiting for its providers, a split versioning group), refused before anything is published; for scanner, a manifest that failed to parse; for writer, an edit the manifest does not declare; for replacer, a replacement that matched nothing; for autowriter, an edit that matched no manifest anywhere")
 }
 
-// declareReleaseFlags declares the flags of release, run, status and worker:
-// the release gate, the added worker links and the worker node's own settings.
+// declareReleaseFlags declares the flags of release, run, status and
+// worker: the release gate, peer links, mode and return channel.
 func (o *options) declareReleaseFlags(fs *pflag.FlagSet) {
 	o.requireRelease = fs.Bool("require-release", false,
 		"release and status: exit 3 when the plan releases nothing, apart from exit 1's failures, so a CI stage whose point is that this run publishes something fails instead of passing quietly (a held, withheld or unselected package does not count)")
 	o.workers = fs.StringArray(config.WorkerFlag, nil,
-		"release, run and status: add a worker node for this invocation, name[=endpoint] (repeatable); a name alone reaches the repository being released; held to every rule a link in execution.workers is, and never part of the plan digest")
+		linkedWorkerUsageText)
+	o.distributionMode = fs.String(distributionModeFlagName, compiledDistributionModeName, distributionModeUsageText)
+	o.returnEndpoint = fs.String(returnEndpointFlagName, returnAddressDefaultText, returnEndpointUsageText)
+	o.returnListen = fs.String(returnListenFlagName, returnAddressDefaultText, returnListenUsageText)
 	o.workerStateDir = fs.String("state-dir", "",
 		"worker: the folder this node keeps its object cache and its record of answered work in; without it, dispat/worker under the user cache directory")
 	o.workerIdleTimeout = fs.Int("idle-timeout", 0,

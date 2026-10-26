@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	public "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 
 	"github.com/yohimik/dispat/services/dispat/internal/changelog"
@@ -27,10 +28,23 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/webhook"
 )
 
+const releasePlanningSourceSnapshotFailureMessage = "the release has no authenticated planning-source snapshot"
+const releasePlanningRefsFailureMessage = "the release has no verified planning refs"
+const releasePinnedPlanFailureMessage = "the release has no computed plan from its pinned sources"
+const releaseDeferredPublishReadinessErrorFormat = "consumer %s waits for provider %s to be published and recorded, but commit.enabled=true with commit.push=false defers %s's native tag until after all tasks and writes no durable publication receipt"
+
 // ReleaseOptions narrows a release — and the release `status` reports on — to
 // part of the monorepo. The zero value is the whole of it, which is what a bare
 // `dispat release` at the repository root asks for.
 type ReleaseOptions struct {
+	// DistributionMode selects the invocation mode; RC.9 accepts compilation only.
+	// Empty preserves compilation for direct App callers.
+	DistributionMode public.DistributionMode
+	// ReturnEndpoint is the HTTPS address workers use to submit claims
+	// and outcomes to the first node; ReturnListen optionally overrides its
+	// local host:port bind address.
+	ReturnEndpoint string
+	ReturnListen   string
 	// Filter selects the packages to release: --package, --space, or the
 	// package or space folder the command was invoked from. It only ever
 	// narrows the plan, never widens it, and it cannot reorder it: a selected
@@ -63,14 +77,51 @@ type ReleaseOptions struct {
 // the values rather than from the log stream; it is nil when the run never
 // reached execution (a blocked plan, failed verification, a failed gating
 // hook).
-func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*release.Result, error) {
+func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[string]*release.Result, runErr error) {
+	if err := a.checkDistributionMode(opts.DistributionMode); err != nil {
+		return nil, err
+	}
+	if err := a.checkReturnAddress(opts.ReturnEndpoint, opts.ReturnListen); err != nil {
+		return nil, err
+	}
 	a.logReleaseStarted(opts)
 	if err := a.checkReleaseEntry(ctx); err != nil {
 		return nil, err
 	}
+	if err := a.reconcilePriorFirstRun(ctx); err != nil {
+		return nil, a.reportPreflightFailure(err)
+	}
+	if err := a.prepareExplicitLocalSlots(); err != nil {
+		return nil, a.reportPreflightFailure(execution.NewDiagnostic(
+			execution.CodeConfiguration, execution.CategoryConfiguration, "%w", err))
+	}
 	// A distributed run is named here, before the plan is fixed, so that the
 	// line naming the plan also names the run every assignment will carry.
 	a.startExecutionRun()
+	if err := a.prepareFirstRunIdentity(ctx, opts.ReturnEndpoint, opts.ReturnListen); err != nil {
+		return nil, a.reportPreflightFailure(err)
+	}
+	var cleanup *releaseCleanup
+	defer func() {
+		safe := cleanup != nil && cleanup.isUnlocked && cleanup.unlockErr == nil &&
+			a.coordinatorCloseErr == nil &&
+			(a.coordinator == nil || a.isCoordinatorClosed)
+		if cleanup == nil && a.returnJournal != nil {
+			if identity, err := a.returnJournal.read(); err == nil {
+				safe = len(identity.PreparedLocks) == 0 && identity.BootstrapOID == "" &&
+					identity.LedgerRootOID == ""
+			}
+		}
+		// A successful bound v3 Close persists StopClaims and SealRun with no
+		// active claim. Its canonical Git feed remains readable after the
+		// listener and locator retire. An unbound partial initialization has
+		// no such proof, even if legacy cleanup happened to return nil.
+		safe = safe && (!a.choreographyRetained || a.choreographyBound)
+		if finishErr := a.finishFirstRunIdentity(safe); finishErr != nil {
+			a.logError(finishErr).Msg("first-node run identity remains for reconciliation")
+			runErr = errors.Join(runErr, finishErr)
+		}
+	}()
 	fleet, unlock, err := a.acquireReleaseLocks(ctx)
 	if err != nil {
 		return nil, err
@@ -80,10 +131,22 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	// and closing webhook while this defer still protects every earlier return.
 	// Cleanup detaches from cancellation inside: an interrupted run has more
 	// reason to give the lock back than a finished one.
-	cleanup := &releaseCleanup{unlock: unlock}
-	defer func() { _ = cleanup.finish() }()
+	cleanup = &releaseCleanup{unlock: unlock, BeforeUnlock: a.requireChoreographyQuiescent}
+	defer func() {
+		if cleanupErr := cleanup.finish(); cleanupErr != nil {
+			a.logError(cleanupErr).Msg("release cleanup retained its lock and evidence")
+		}
+	}()
+	beforePlanning, err := a.capturePrePlanningSources(ctx)
+	if err != nil {
+		a.logError(err).Msg(releasePlanningSourceSnapshotFailureMessage)
+		return nil, a.reportPreflightFailure(err)
+	}
+	if beforePlanning != nil {
+		defer beforePlanning.Close()
+	}
 
-	pl, err := a.planUnderLock(ctx, opts, fleet)
+	pl, err := a.planUnderLock(ctx, opts, fleet, beforePlanning)
 	if err != nil {
 		return nil, err
 	}
@@ -104,12 +167,84 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if err := a.checkStagePlacements(pl); err != nil {
 		return nil, err
 	}
+	// A publish-readiness edge can release the consumer's first task only after
+	// the provider has a native record or its durable substitute. A single
+	// history's unpushed release commit creates tags only in finalize, after
+	// every task has drained, and has no interim receipt for this edge.
+	if fleet == nil && a.cfg.Commit.IsEnabled() && !a.cfg.Commit.IsPushEnabled() {
+		if provider, consumer, found := release.PublishReadinessDependency(pl); found {
+			err := config.WithDiagnostic(config.DiagnosticExecution,
+				fmt.Errorf(releaseDeferredPublishReadinessErrorFormat, consumer, provider, provider))
+			a.logError(err).Msg("refusing release before task effects")
+			return nil, err
+		}
+	}
+	var compiled *release.CompiledTaskGraph
+	if a.cfg.Execution.IsDistributed() {
+		// The same task graph is authenticated at preflight and later drained.
+		// Publication lanes are graph edges, so the preflight compiler uses
+		// the group policy the final executor will use for this run.
+		graphCompiler := &release.Executor{PublishGroup: publishByRepository}
+		compiled, err = graphCompiler.CompileTaskGraph(pl)
+		if err != nil {
+			return nil, a.reportPreflightFailure(err)
+		}
+		if err := a.includePreparedReleaseGraph(pl, compiled); err != nil {
+			return nil, a.reportPreflightFailure(err)
+		}
+	}
+	pinnedSources, rootRepository, err := a.capturePinnedRunSources(ctx, pl)
+	if err != nil {
+		return nil, a.reportPreflightFailure(err)
+	}
+	if pinnedSources != nil {
+		defer pinnedSources.Close()
+		if !samePinnedPlanningSources(beforePlanning, pinnedSources) {
+			return nil, a.reportPreflightFailure(fmt.Errorf(
+				"execution: source or configuration bytes changed while the release plan was computed"))
+		}
+	}
+	var pinnedInputs *execution.PinnedRunInputs
+	if pinnedSources != nil {
+		selection, options, err := a.pinnedReleaseDocuments(opts)
+		if err != nil {
+			return nil, a.reportPreflightFailure(err)
+		}
+		configFiles, err := a.pinnedConfigFiles()
+		if err != nil {
+			return nil, a.reportPreflightFailure(err)
+		}
+		invocation, err := a.pinnedInvocation()
+		if err != nil {
+			return nil, a.reportPreflightFailure(err)
+		}
+		pinnedInputs = &execution.PinnedRunInputs{
+			Repositories: pinnedSources.Repositories, RepositoryCoordinates: a.pinnedRepositoryCoordinates(),
+			ConfigFiles: configFiles, NativeRefs: a.pinnedNativeRefs, Invocation: invocation,
+			Selection: selection, Options: options, RootRepository: rootRepository,
+		}
+	}
+	returnChannel, err := a.openRunReturnChannel(opts.ReturnEndpoint, opts.ReturnListen)
+	if err != nil {
+		return nil, a.reportPreflightFailure(err)
+	}
+	if returnChannel != nil {
+		defer func() {
+			if closeErr := returnChannel.close(); closeErr != nil {
+				a.log.Warn().Err(closeErr).Msg("return channel did not close cleanly")
+			}
+		}()
+	}
 	// Every configured worker node is asked what it is before anything else
 	// happens: the plan exists, so what would be placed on the pool is known,
 	// and no hook, stage or record has run yet, so a node that cannot take
 	// this run's work costs nothing but the probe. The coordinator owns every
 	// ref this run creates, and closes them before the locks go back.
-	coordinator, err := a.preflightWorkers(ctx, pl, fleet)
+	coordinator, err := a.preflightWorkers(ctx, releasePreflightRequest{
+		plan: pl, mode: effectiveDistributionMode(opts.DistributionMode),
+		fleet: fleet, compiled: compiled, returnChannel: returnChannel,
+		pinnedSources: pinnedSources, pinnedInputs: pinnedInputs,
+	})
 	if coordinator != nil {
 		defer a.closeCoordinator(ctx, coordinator)
 	}
@@ -138,10 +273,10 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	if fleet != nil {
 		fleet.gh = gh
 	}
-	if coordinator != nil {
-		stages := release.CompiledReservationStages(pl)
-		if err := coordinator.InitializeStageTasks(ctx, stages); err != nil {
-			err = taskInitializationFailure(err)
+	var choreographyBroker *execution.FirstNodeBroker
+	if coordinator != nil && len(compiled.TaskShapes()) != 0 {
+		choreographyBroker, err = a.bindReleaseChoreography(ctx, coordinator, pl, compiled, returnChannel)
+		if err != nil {
 			a.logError(err).Msg("execution task branches could not be initialized")
 			return nil, err
 		}
@@ -152,9 +287,14 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	hooks := &runHooks{cfg: a.cfg, runner: runner, root: a.root,
 		env: release.WorkspaceEnv(pl, a.log), log: a.log}
 	if err := a.runGatingHooks(ctx, hooks, fleet); err != nil {
+		if choreographyBroker != nil && coordinator.GraphRootOID != "" {
+			stopCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), release.RecordTimeout)
+			_, stopErr := choreographyBroker.StopClaims(stopCtx)
+			stop()
+			err = errors.Join(err, stopErr)
+		}
 		return nil, err
 	}
-
 	// Webhooks begin once the run is committed to execute: a refused run — a
 	// blocked plan, failed verification, a failed gating hook — emits nothing,
 	// because nothing it planned was ever started. Close is deferred right
@@ -175,8 +315,67 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (map[string]*rel
 	}
 
 	executor := a.newReleaseExecutor(pl, fleet, gh, runner, obs, coordinator)
+	completionCtx := ctx
+	var stopCompiledPicker func() error
+	if coordinator != nil && choreographyBroker != nil {
+		if err := a.bindReleaseExecutorChoreography(executor, pl, compiled, coordinator, choreographyBroker); err != nil {
+			return nil, err
+		}
+		// The effective graph contains each unreleasing prepared provider as
+		// its own vertex. Run the coordinator's one-time preparation before its
+		// consumer acquires a graph budget or node slot.
+		executor.PreparedTask = func(taskCtx context.Context, spec release.PreparedTaskSpec) error {
+			return coordinator.ExecutePreparedTask(taskCtx, spec.Package)
+		}
+		if coordinator.GraphRootOID != "" {
+			if _, startErr := choreographyBroker.StartExecution(ctx); startErr != nil {
+				return nil, startErr
+			}
+			pickerCtx, stopPicker, pickerErr := a.startCompiledLocalPicker(ctx, coordinator, choreographyBroker)
+			if pickerErr != nil {
+				return nil, pickerErr
+			}
+			ctx = pickerCtx
+			stopCompiledPicker = stopPicker
+			defer func() {
+				if stopCompiledPicker != nil {
+					stopErr := stopCompiledPicker()
+					if stopErr != nil {
+						a.log.Error().Err(stopErr).Msg("first-node compiled picker stopped before settlement")
+					}
+				}
+			}()
+		}
+	}
+	if a.localNodeSlots != nil && coordinator == nil {
+		// A stated node capacity also applies to ordinary local releases with
+		// no linked peers. Compile once with this executor's publication lanes
+		// so the durable slot intent names its exact task vertices.
+		compiled, err = executor.CompileTaskGraph(pl)
+		if err != nil {
+			return nil, err
+		}
+		if err := a.installExplicitLocalReleaseSlots(executor, compiled); err != nil {
+			return nil, err
+		}
+	}
 	start := time.Now()
-	results := executor.Run(ctx, pl)
+	var results map[string]*release.Result
+	if compiled != nil {
+		results, err = executor.RunCompiled(ctx, pl, compiled)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		results = executor.Run(ctx, pl)
+	}
+	if stopCompiledPicker != nil {
+		if stopErr := stopCompiledPicker(); stopErr != nil {
+			return nil, stopErr
+		}
+		stopCompiledPicker = nil
+		ctx = completionCtx
+	}
 	if coordinator != nil {
 		a.reportPreparedProviders(coordinator)
 	}
@@ -230,22 +429,74 @@ func (a *App) checkPushBranch(ctx context.Context) error {
 type releaseCleanup struct {
 	unlock     func() error
 	isUnlocked bool
+	unlockErr  error
+	// BeforeUnlock is set by a retained v3 run. A failed seal or unresolved
+	// accepted effect keeps both its lock and prepared fleet pins available
+	// for exact reconciliation; a fresh generation cannot infer cleanup.
+	BeforeUnlock func() error
 	// cleanPins is the fleet's pin cleanup, nil until the fleet prepared.
 	cleanPins    func()
 	arePinsClean bool
 }
 
+// requireChoreographyQuiescent keeps the global release lock and prepared
+// fleet pins while a signed v3 claim may still own an effect. The coordinator
+// closes before releaseCleanup.finish on both the normal and deferred paths.
+const (
+	choreographyUnboundLockErrorText     = "execution: retained choreography has no bound broker; release lock remains held"
+	choreographyOpenLockErrorText        = "execution: choreography has not closed; release lock remains held"
+	choreographyUnsettledLockErrorFormat = "execution: choreography could not prove every accepted claim settled; release lock remains held: %w"
+	deferredTagCleanupTimeout            = 30 * time.Second
+)
+
+func (a *App) requireChoreographyQuiescent() error {
+	if !a.choreographyRetained {
+		return nil
+	}
+	if !a.choreographyBound {
+		return errors.New(choreographyUnboundLockErrorText)
+	}
+	if !a.isCoordinatorClosed {
+		return errors.New(choreographyOpenLockErrorText)
+	}
+	if a.coordinatorCloseErr != nil {
+		return fmt.Errorf(choreographyUnsettledLockErrorFormat, a.coordinatorCloseErr)
+	}
+	if a.returnJournal != nil {
+		identity, err := a.returnJournal.read()
+		if err != nil {
+			return fmt.Errorf("execution: protected deferred release tag intents cannot be read before unlock: %w", err)
+		}
+		if len(identity.DeferredTags) != 0 {
+			checkCtx, cancel := context.WithTimeout(context.Background(), deferredTagCleanupTimeout)
+			defer cancel()
+			if err := a.verifyDeferredTagInventory(checkCtx, deferredTagInventoryCheck{
+				Identity: identity, Push: a.cfg.Commit.IsPushEnabled(),
+				RequireSnapshot: true}); err != nil {
+				return fmt.Errorf("execution: deferred release records are unsettled before unlock: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
 // finish runs the cleanup; a second call does nothing and returns nil.
 func (c *releaseCleanup) finish() error {
+	if c.isUnlocked {
+		return nil
+	}
+	if c.BeforeUnlock != nil {
+		if err := c.BeforeUnlock(); err != nil {
+			return err
+		}
+	}
 	if c.cleanPins != nil && !c.arePinsClean {
 		c.arePinsClean = true
 		c.cleanPins()
 	}
-	if c.isUnlocked {
-		return nil
-	}
 	c.isUnlocked = true
-	return c.unlock()
+	c.unlockErr = c.unlock()
+	return c.unlockErr
 }
 
 // releaseRunner is the runner every script of a release goes through: the
@@ -321,6 +572,11 @@ func (a *App) acquireReleaseLocks(ctx context.Context) (*workspaceRecorder, func
 			fmt.Errorf("resolve release-lock push destination: %w", resolveErr))
 	}
 	lock := &release.Lock{Git: a.git, Remote: lockRemote, Log: a.log, Run: a.runID}
+	if a.returnJournal != nil {
+		lock.OnPrepared = func(_ context.Context, prepared release.PreparedLockIdentity) error {
+			return a.returnJournal.recordPreparedLock("", prepared)
+		}
+	}
 	if err := lock.Acquire(ctx); err != nil {
 		a.log.Error().Err(err).Str("code", "E336").Str("tag", release.LockTagName).
 			Str("remote", gitx.RedactURL(a.pushRemote())).
@@ -341,7 +597,8 @@ func (a *App) acquireReleaseLocks(ctx context.Context) (*workspaceRecorder, func
 // computes the plan every later phase works from. Everything here happens
 // while the locks are held, so no answer can go stale between the check and
 // the release it guards.
-func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *workspaceRecorder) (*plan.Plan, error) {
+func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *workspaceRecorder,
+	beforePlanning *execution.PinnedRunSources) (*plan.Plan, error) {
 	// Verify external access up front, before anything is planned. The order
 	// is the point: a plan is built from the repository's tags, so a checkout
 	// that has fallen behind the remote produces a plan that is wrong rather
@@ -396,16 +653,58 @@ func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *wor
 		a.logError(err).Msg("refusing to release")
 		return nil, err
 	}
-
-	pl, err := a.selectedPlan(ctx, opts)
+	planningRefs, err := a.capturePlanningRefs(ctx, fleet)
 	if err != nil {
+		a.logError(err).Msg(releasePlanningRefsFailureMessage)
+		return nil, a.reportPreflightFailure(err)
+	}
+
+	selected := a.selectedPlan
+	if beforePlanning != nil {
+		selected = func(ctx context.Context, opts ReleaseOptions) (*plan.Plan, error) {
+			private, err := a.openPinnedPlanning(ctx, beforePlanning, planningRefs)
+			if err != nil {
+				return nil, a.reportPreflightFailure(err)
+			}
+			computed, planErr := a.planFromMaterialization(ctx, private, &opts)
+			return computed, errors.Join(planErr, private.close())
+		}
+	}
+	pl, err := selected(ctx, opts)
+	if err != nil {
+		a.logError(err).Msg(releasePinnedPlanFailureMessage)
 		return nil, err
 	}
 	if fleet == nil {
-		if pl, err = a.settleReceipts(ctx, opts, pl); err != nil {
+		beforeSettlement := pl
+		replan := func(ctx context.Context, opts ReleaseOptions) (*plan.Plan, error) {
+			if beforePlanning != nil {
+				planningRefs, err = a.capturePlanningRefs(ctx, nil)
+				if err != nil {
+					return nil, a.reportPreflightFailure(err)
+				}
+			}
+			return selected(ctx, opts)
+		}
+		if pl, err = a.settleReceipts(ctx, opts, pl, replan); err != nil {
 			a.log.Error().Err(err).Msg("publication receipts could not be settled")
 			return nil, err
 		}
+		if pl != beforeSettlement && a.cfg.Execution.IsDistributed() {
+			// Receipt recovery may publish a tag and replan. Pin the final
+			// computation, not the already superseded one.
+			planningRefs, err = a.capturePlanningRefs(ctx, nil)
+			if err != nil {
+				return nil, a.reportPreflightFailure(err)
+			}
+			pl, err = selected(ctx, opts)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := a.finishPlanningRefs(ctx, planningRefs); err != nil {
+		return nil, a.reportPreflightFailure(err)
 	}
 	if fleet != nil {
 		fleet.setLinkPlan(pl)
@@ -571,6 +870,9 @@ func (a *App) newReleaseExecutor(pl *plan.Plan, fleet *workspaceRecorder, gh *gh
 		// one machine, and §28.6 requires those writes to be ordered.
 		executor.Remote = coordinator
 		executor.PublishGroup = publishByRepository
+		if coordinator.GraphRootOID != "" {
+			executor.AfterNativeFrame = a.newRelevantInputs(pl, fleet, coordinator).afterNativeFrame
+		}
 	}
 	if fleet == nil {
 		// A single history asks whether it still holds its lock before every

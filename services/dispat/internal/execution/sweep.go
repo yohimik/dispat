@@ -54,6 +54,9 @@ type SweepTask struct {
 	// Roots are the folders the script's tasks write, relative to the root of
 	// the package's repository, as the entry configuration declared them.
 	Roots []string
+	// ContinueOnError permits a failed v3 task's verified partial outputs to
+	// reach later sweep tasks. It never changes the task's failed status.
+	ContinueOnError bool
 	// Here is the task as this process runs it, in this checkout, answering
 	// what its commands exported.
 	Here func(ctx context.Context) ([]plan.Output, error)
@@ -67,6 +70,9 @@ type SweepTask struct {
 // package that may only run here or only elsewhere is held to that.
 func (c *Coordinator) Sweep(ctx context.Context, sweep SweepTask) (release.StageOutcome, error) {
 	task := formatSweepTaskName(sweep.Request.Release.Pkg.Name)
+	if c.choreographyBroker != nil {
+		return c.runChoreographySweep(ctx, task, sweep)
+	}
 	space := sweep.Request.Release.Pkg.Space
 	placement := ResolveStagePlacement(StageBuild, space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0)
 	return c.placeTask(ctx, task, placement, space.BuildPlatforms, "",
@@ -188,13 +194,46 @@ func cleanSweepRoots(roots []string) []string {
 func (c *Coordinator) readSweepOutcome(ctx context.Context, task string, attempt int,
 	outcome release.StageOutcome, reply taskReply, sweep SweepTask) (release.StageOutcome, error) {
 	result := reply.result
-	outcome, err := c.readReportedOutcome(task, attempt, outcome, result)
+	signedExports := append([]ExportedValue(nil), result.Exports...)
+	owner, err := c.resolveOwnerRepository(sweep.Request)
 	if err != nil {
+		outcome.FailedPart = release.PartInputs
 		return outcome, err
 	}
-	if err := c.admitSweepOutputs(ctx, task, attempt, result, sweep); err != nil {
+	if err := rehomeChoreographyExports(&result, sweep.Request.Release.Pkg.Repository,
+		sweep.Request.Release.Pkg.Name, owner.Dir,
+		cleanSweepRoots(sweep.Roots)); err != nil {
 		outcome.FailedPart = release.PartOutputs
 		return outcome, err
+	}
+	outcome, reportedErr := c.readReportedOutcome(task, attempt, outcome, result)
+	partialContinue := result.Protocol == ChoreographyProtocolVersion &&
+		result.Status == StatusFailed && sweep.ContinueOnError
+	if reportedErr != nil && !partialContinue {
+		return outcome, reportedErr
+	}
+	if partialContinue && result.Outputs == nil {
+		if err := validateSweepCarriedExports(result, signedExports,
+			sweep.Request.Release.Pkg.Repository, sweep.Request.Release.Pkg.Name); err != nil {
+			outcome.Exports = nil
+			return outcome, errors.Join(reportedErr,
+				c.refuseSweepOutputs(task, result.Node, ReasonOutputIdentity, err))
+		}
+	}
+	// A failed frame can have scalar exports without a captured set. A partial
+	// file is portable only after its signed manifest is admitted. A successful
+	// frame still owes a manifest whenever it declared output roots.
+	if result.Outputs != nil || reportedErr == nil {
+		if err := c.admitSweepOutputs(ctx, task, attempt, result, reply.commit, signedExports, sweep); err != nil {
+			outcome.Exports = nil
+			if reportedErr == nil {
+				outcome.FailedPart = release.PartOutputs
+			}
+			return outcome, errors.Join(reportedErr, err)
+		}
+	}
+	if reportedErr != nil {
+		return outcome, reportedErr
 	}
 	c.reportTaskFinished(task, result, outcome)
 	return outcome, nil
@@ -208,7 +247,7 @@ func (c *Coordinator) readSweepOutcome(ctx context.Context, task string, attempt
 // declaration is the entry configuration's, so a set nobody asked for
 // describes files nobody is going to merge.
 func (c *Coordinator) admitSweepOutputs(ctx context.Context, task string, attempt int, result Result,
-	sweep SweepTask) error {
+	resultOID string, signedExports []ExportedValue, sweep SweepTask) error {
 	roots := cleanSweepRoots(sweep.Roots)
 	if len(roots) == 0 {
 		return nil
@@ -228,9 +267,15 @@ func (c *Coordinator) admitSweepOutputs(ctx context.Context, task string, attemp
 	if err != nil {
 		return c.refuseSweepOutputs(task, result.Node, "", err)
 	}
+	if err := validateSweepCarriedExports(result, signedExports,
+		sweep.Request.Release.Pkg.Repository, sweep.Request.Release.Pkg.Name); err != nil {
+		return c.refuseSweepOutputs(task, result.Node, ReasonOutputIdentity, err)
+	}
 	conflict, isConflicting := c.sweepOutputs.admit(&sweepSet{
 		task: task, packageName: sweep.Request.Release.Pkg.Name, node: result.Node,
-		repository: owner, manifest: result.Outputs,
+		repository: owner, repositoryName: sweep.Request.Release.Pkg.Repository,
+		manifest: result.Outputs, resultOID: resultOID,
+		signedExports: signedExports, rehomedExports: result.Exports,
 	})
 	if isConflicting {
 		return c.refuseSweepOutputs(task, result.Node, ReasonPathConflict, fmt.Errorf(
@@ -240,6 +285,24 @@ func (c *Coordinator) admitSweepOutputs(ctx context.Context, task string, attemp
 	c.Log.Info().Str("run", c.Run).Str("task", task).Str("worker", result.Node).
 		Str("package", sweep.Request.Release.Pkg.Name).Int("files", totals.Files).
 		Int64("bytes", totals.Bytes).Msg("outputs admitted")
+	return nil
+}
+
+// validateSweepCarriedExports binds every typed export to a file in this
+// admitted manifest. Declaring a root alone does not prove that the file a
+// later task will read was actually captured by the failed producer.
+func validateSweepCarriedExports(result Result, signed []ExportedValue, repository, packageName string) error {
+	for _, exported := range signed {
+		if exported.DeclaredPath == nil {
+			continue
+		}
+		ref := exported.DeclaredPath
+		if result.Protocol != ChoreographyProtocolVersion || exported.Value != "" ||
+			ref.Repository != repository || ref.Package != packageName ||
+			!manifestContainsDeclaredPath(result.Outputs, ref.Root, ref.Relative) {
+			return fmt.Errorf("typed export %s has no matching admitted file", exported.Name)
+		}
+	}
 	return nil
 }
 
@@ -307,9 +370,13 @@ func (c *Coordinator) mergeSweepSet(ctx context.Context, set *sweepSet) error {
 // sweepSet is one task's admitted set, as the merge at the end of the sweep
 // reads it.
 type sweepSet struct {
-	task        string
-	packageName string
-	node        string
+	task           string
+	packageName    string
+	node           string
+	repositoryName string
+	resultOID      string
+	signedExports  []ExportedValue
+	rehomedExports []ExportedValue
 	// repository is the checkout the set merges into: the repository that owns
 	// the package, whose root the sweep's roots are relative to.
 	repository *gitx.LocalGitx
@@ -344,12 +411,13 @@ type sweepOutputs struct {
 	claims     map[string]sweepPathClaim
 	conflicted map[string]bool
 	outcomes   map[string]string
+	carried    map[sweepExportKey]sweepCarriedExport
 }
 
 // newSweepOutputs opens an empty record.
 func newSweepOutputs() *sweepOutputs {
 	return &sweepOutputs{claims: map[string]sweepPathClaim{}, conflicted: map[string]bool{},
-		outcomes: map[string]string{}}
+		outcomes: map[string]string{}, carried: map[sweepExportKey]sweepCarriedExport{}}
 }
 
 // admit records one set and answers the first path it disagrees about with a
@@ -365,6 +433,17 @@ func (r *sweepOutputs) admit(set *sweepSet) (sweepConflict, bool) {
 	defer r.mu.Unlock()
 	r.sets = append(r.sets, set)
 	r.outcomes[set.task] = OutputsAdmitted
+	for i, signed := range set.signedExports {
+		if signed.DeclaredPath == nil || i >= len(set.rehomedExports) {
+			continue
+		}
+		rehomed := set.rehomedExports[i]
+		key := sweepExportKey{Name: rehomed.Name, Value: rehomed.Value, Source: rehomed.Source}
+		prior, exists := r.carried[key]
+		if !exists || set.task < prior.set.task {
+			r.carried[key] = sweepCarriedExport{signed: signed, set: set}
+		}
+	}
 	var conflict sweepConflict
 	isConflicting := false
 	for _, entry := range set.manifest.Entries {

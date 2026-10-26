@@ -31,6 +31,9 @@ const (
 	BudgetBuild StageBudget = iota
 	BudgetPublish
 	BudgetSyncLock
+	// BudgetPendingExternal counts finite signed-graph observers. They wait for
+	// a peer's claim/result without holding an execution or physical slot.
+	BudgetPendingExternal
 )
 
 // StagePlacement is where a stage's frame may run: on the orchestrator alone,

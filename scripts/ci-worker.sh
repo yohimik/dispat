@@ -8,15 +8,18 @@
 #
 #   sh scripts/ci-worker.sh create          create the instance and wait until it answers
 #   sh scripts/ci-worker.sh start <dispat>  install that binary and start the worker on it
+#   sh scripts/ci-worker.sh tunnel-start    forward the peer's loopback return port to this runner
+#   sh scripts/ci-worker.sh tunnel-stop     close only this run's return tunnel
 #   sh scripts/ci-worker.sh prune           delete this run's coordination branches left on it
 #   sh scripts/ci-worker.sh collect <dir>   copy the worker's log into <dir>
 #   sh scripts/ci-worker.sh delete          delete the instance (a missing one is not an error)
 #
-# The mailbox is the repository being released. The orchestrator names the
-# node alone (`--worker "$DISPAT_CI_WORKER_NODE"`) and reaches the repository
-# with the credential its checkout persisted; the worker polls the same
-# repository over https with a token of its own, DISPAT_CI_WORKER_TOKEN, which
-# the job mints for the run from a GitHub App, never the job's GITHUB_TOKEN.
+# The mailbox is the repository being released. The workflow passes the same
+# DISPAT_CI_WORKER_REPOSITORY to this script and the orchestrator's --worker
+# link. The orchestrator uses its checkout's credential; the worker polls the same
+# repository over https with a read-only token of its own,
+# DISPAT_CI_WORKER_TOKEN, which the job mints from a GitHub App, never the
+# job's GITHUB_TOKEN. Results return through a runner-owned SSH loopback tunnel.
 #
 # Everything the steps share lives in DISPAT_CI_WORKER_DIR: the ephemeral ssh
 # key pair, the instance's address and its host keys. The signing secret
@@ -32,8 +35,50 @@
 # credential to serve tasks, and a task that ran on it could not acquire one.
 set -eu
 
+readonly MINIMUM_RETURN_PORT_NUMBER=1024
+readonly MAXIMUM_RETURN_PORT_NUMBER=65535
+readonly MAXIMUM_RETURN_PORT_DIGITS_COUNT=5
+readonly DEFAULT_RETURN_PORT_NUMBER=39017
+readonly EMPTY_RETURN_PORT_TEXT=''
+readonly NON_DIGIT_RETURN_PORT_PATTERN='*[!0-9]*'
+readonly INVALID_RETURN_PORT_ERROR_TEXT='DISPAT_CI_RETURN_PORT must be a TCP port'
+readonly INVALID_RETURN_PORT_RANGE_ERROR_TEXT="DISPAT_CI_RETURN_PORT must be between $MINIMUM_RETURN_PORT_NUMBER and $MAXIMUM_RETURN_PORT_NUMBER"
+readonly WORKER_COMMAND_USAGE_TEXT='usage: ci-worker.sh create|start|tunnel-start|tunnel-stop|prune|collect|delete'
+readonly USAGE_ERROR_EXIT_CODE=2
+readonly RETURN_TUNNEL_START_COMMAND='tunnel-start'
+readonly RETURN_TUNNEL_STOP_COMMAND='tunnel-stop'
+readonly RETURN_TUNNEL_SOCKET_FILE_NAME='return.sock'
+readonly WORKER_ADDRESS_FILE_NAME='ip'
+readonly RETURN_TUNNEL_LOOPBACK_ADDRESS='127.0.0.1'
+readonly RETURN_TUNNEL_PING_INTERVAL_SECONDS=15
+readonly RETURN_TUNNEL_MISSED_PING_COUNT=3
+readonly RETURN_TUNNEL_FORWARD_FAILURE_OPTION='ExitOnForwardFailure=yes'
+readonly RETURN_TUNNEL_AGENT_FORWARDING_OPTION='ForwardAgent=no'
+readonly RETURN_TUNNEL_PING_INTERVAL_OPTION="ServerAliveInterval=$RETURN_TUNNEL_PING_INTERVAL_SECONDS"
+readonly RETURN_TUNNEL_PING_COUNT_OPTION="ServerAliveCountMax=$RETURN_TUNNEL_MISSED_PING_COUNT"
+readonly RETURN_TUNNEL_ALREADY_ACTIVE_ERROR_TEXT="this run's return tunnel is already active"
+readonly RETURN_TUNNEL_START_ERROR_TEXT='the loopback return tunnel could not start'
+readonly RETURN_TUNNEL_LIFETIME_ERROR_TEXT='the loopback return tunnel did not stay active'
+readonly RETURN_TUNNEL_ACTIVE_MESSAGE_PREFIX='loopback return tunnel active on'
+readonly SSH_CONTROL_CHECK_OPERATION='check'
+readonly SSH_CONTROL_EXIT_OPERATION='exit'
+readonly SSH_CONTROL_SOCKET_FLAG='-S'
+readonly SSH_CONTROL_OPERATION_FLAG='-O'
+readonly SSH_CONTROL_MASTER_FLAG='-M'
+readonly SSH_DISABLE_TERMINAL_FLAG='-T'
+readonly SSH_BACKGROUND_FORWARD_FLAG='-fN'
+readonly SSH_CONFIG_OPTION_FLAG='-o'
+readonly SSH_REMOTE_FORWARD_FLAG='-R'
+readonly REMOVE_FILE_FLAG='-f'
+readonly DISCARDED_OUTPUT_PATH='/dev/null'
+readonly WORKER_TRANSFER_MAXIMUM_FILES_COUNT=200000
+readonly WORKER_TRANSFER_MAXIMUM_BYTES=8589934592
+readonly WORKER_TRANSFER_MAXIMUM_PACK_BYTES=4294967296
+readonly WORKER_TRANSFER_MAXIMUM_MANIFEST_BYTES=67108864
+readonly WORKER_TRANSFER_TIMEOUT_SECONDS=3600
+
 command=${1:-}
-[ -n "$command" ] || { echo "usage: ci-worker.sh create|start|prune|collect|delete" >&2; exit 2; }
+[ -n "$command" ] || { echo "$WORKER_COMMAND_USAGE_TEXT" >&2; exit "$USAGE_ERROR_EXIT_CODE"; }
 shift
 
 dir=${DISPAT_CI_WORKER_DIR:-${RUNNER_TEMP:-/tmp}/dispat-ci-worker}
@@ -56,6 +101,7 @@ lifetime=${DISPAT_CI_WORKER_LIFETIME:-4h}
 # execution.name. A run names it after itself, so the coordination branches of
 # one run are told apart from every other run's by name alone.
 node=${DISPAT_CI_WORKER_NODE:-ci-worker}
+return_port=${DISPAT_CI_RETURN_PORT:-$DEFAULT_RETURN_PORT_NUMBER}
 user=dispat
 ready_marker=/var/lib/dispat-worker-ready
 failed_marker=/var/lib/dispat-worker-failed
@@ -101,6 +147,69 @@ worker_ssh() {
 worker_scp() {
   # shellcheck disable=SC2046
   scp -q $(ssh_options) "$@"
+}
+
+# This is an internal single-peer CI port, not a public workflow input. Both
+# SSH's remote listener and dispat's local TLS listener bind loopback only.
+validate_return_port() {
+  # Quoting this constant would match the glob text instead of invalid digits.
+  # shellcheck disable=SC2254
+  case "$return_port" in
+    "$EMPTY_RETURN_PORT_TEXT"|$NON_DIGIT_RETURN_PORT_PATTERN) fail "$INVALID_RETURN_PORT_ERROR_TEXT" ;;
+  esac
+  if [ "${#return_port}" -gt "$MAXIMUM_RETURN_PORT_DIGITS_COUNT" ]; then
+    fail "$INVALID_RETURN_PORT_RANGE_ERROR_TEXT"
+  fi
+  if [ "$return_port" -lt "$MINIMUM_RETURN_PORT_NUMBER" ] ||
+    [ "$return_port" -gt "$MAXIMUM_RETURN_PORT_NUMBER" ]; then
+    fail "$INVALID_RETURN_PORT_RANGE_ERROR_TEXT"
+  fi
+}
+
+tunnel_start() {
+  require_state
+  validate_return_port
+  socket=$dir/$RETURN_TUNNEL_SOCKET_FILE_NAME
+  if [ -e "$socket" ]; then
+    # SSH control operations expand their arguments locally, with no remote command.
+    # shellcheck disable=SC2046,SC2029
+    if ssh $(ssh_options) "$SSH_CONTROL_SOCKET_FLAG" "$socket" \
+      "$SSH_CONTROL_OPERATION_FLAG" "$SSH_CONTROL_CHECK_OPERATION" \
+      "$user@$(cat "$dir/$WORKER_ADDRESS_FILE_NAME")" >"$DISCARDED_OUTPUT_PATH" 2>&1; then
+      fail "$RETURN_TUNNEL_ALREADY_ACTIVE_ERROR_TEXT"
+    fi
+    rm "$REMOVE_FILE_FLAG" "$socket"
+  fi
+  # The authenticated VM can reach only the runner's loopback TLS listener.
+  # ExitOnForwardFailure refuses the job if remote forwarding is unavailable.
+  # The forwarding arguments expand locally; -N starts no remote command.
+  # shellcheck disable=SC2046,SC2029
+  ssh $(ssh_options) "$SSH_CONTROL_MASTER_FLAG" "$SSH_CONTROL_SOCKET_FLAG" "$socket" \
+    "$SSH_DISABLE_TERMINAL_FLAG" "$SSH_BACKGROUND_FORWARD_FLAG" \
+    "$SSH_CONFIG_OPTION_FLAG" "$RETURN_TUNNEL_FORWARD_FAILURE_OPTION" \
+    "$SSH_CONFIG_OPTION_FLAG" "$RETURN_TUNNEL_AGENT_FORWARDING_OPTION" \
+    "$SSH_CONFIG_OPTION_FLAG" "$RETURN_TUNNEL_PING_INTERVAL_OPTION" \
+    "$SSH_CONFIG_OPTION_FLAG" "$RETURN_TUNNEL_PING_COUNT_OPTION" \
+    "$SSH_REMOTE_FORWARD_FLAG" "$RETURN_TUNNEL_LOOPBACK_ADDRESS:$return_port:$RETURN_TUNNEL_LOOPBACK_ADDRESS:$return_port" \
+    "$user@$(cat "$dir/$WORKER_ADDRESS_FILE_NAME")" || fail "$RETURN_TUNNEL_START_ERROR_TEXT"
+  # shellcheck disable=SC2046,SC2029
+  ssh $(ssh_options) "$SSH_CONTROL_SOCKET_FLAG" "$socket" \
+    "$SSH_CONTROL_OPERATION_FLAG" "$SSH_CONTROL_CHECK_OPERATION" \
+    "$user@$(cat "$dir/$WORKER_ADDRESS_FILE_NAME")" >"$DISCARDED_OUTPUT_PATH" \
+    || fail "$RETURN_TUNNEL_LIFETIME_ERROR_TEXT"
+  log "$RETURN_TUNNEL_ACTIVE_MESSAGE_PREFIX" "$return_port"
+}
+
+tunnel_stop() {
+  socket=$dir/$RETURN_TUNNEL_SOCKET_FILE_NAME
+  if [ -S "$socket" ]; then
+    # A missing/dead master is harmless during cleanup; do not use its PID.
+    # shellcheck disable=SC2046,SC2029
+    ssh $(ssh_options) "$SSH_CONTROL_SOCKET_FLAG" "$socket" \
+      "$SSH_CONTROL_OPERATION_FLAG" "$SSH_CONTROL_EXIT_OPERATION" \
+      "$user@$(cat "$dir/$WORKER_ADDRESS_FILE_NAME")" >"$DISCARDED_OUTPUT_PATH" 2>&1 || true
+    rm "$REMOVE_FILE_FLAG" "$socket"
+  fi
 }
 
 require_state() {
@@ -302,12 +411,11 @@ $name='$value'"
   cat <<EOF | worker_ssh "cat > ~/node/dispat.json"
 {
   "execution": {
-    "role": "worker",
     "name": "$node",
     "endpoint": "$repository",
     "secretEnv": "DISPAT_EXECUTION_SECRET",
     "concurrency": ${DISPAT_CI_WORKER_CONCURRENCY:-2},
-    "transfer": {"maxFiles": 200000, "maxBytes": 8589934592, "maxManifestBytes": 67108864, "timeout": 3600}
+    "transfer": {"maxFiles": $WORKER_TRANSFER_MAXIMUM_FILES_COUNT, "maxBytes": $WORKER_TRANSFER_MAXIMUM_BYTES, "maxPackBytes": $WORKER_TRANSFER_MAXIMUM_PACK_BYTES, "maxManifestBytes": $WORKER_TRANSFER_MAXIMUM_MANIFEST_BYTES, "timeout": $WORKER_TRANSFER_TIMEOUT_SECONDS}
   },
   "logFormat": "json"
 }
@@ -403,6 +511,7 @@ delete_instance() {
 }
 
 delete() {
+  tunnel_stop
   delete_instance
   rm -f "$dir/key" "$dir/key.pub" "$dir/ssh-keys"
 }
@@ -410,6 +519,8 @@ delete() {
 case "$command" in
   create) create ;;
   start) start "$@" ;;
+  "$RETURN_TUNNEL_START_COMMAND") tunnel_start ;;
+  "$RETURN_TUNNEL_STOP_COMMAND") tunnel_stop ;;
   prune) prune ;;
   collect) collect "$@" ;;
   delete) delete ;;

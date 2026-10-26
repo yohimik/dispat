@@ -48,6 +48,7 @@ func TestPublicAPIModelRunOnlyPreservesStagePlacement(t *testing.T) {
 		{`["worker","orchestrator","both"]`, "both stages"},
 		{`["worker",42]`, "runOnly[1]"},
 		{`["Worker","orchestrator"]`, `runOnly[0]`},
+		{`["choreographer","orchestrator"]`, `runOnly[0]`},
 		{`"local"`, "is not a placement"},
 		{`42`, "wants"},
 		{`{`, "unexpected end"},
@@ -66,8 +67,8 @@ func TestPublicAPIModelRunOnlyPreservesStagePlacement(t *testing.T) {
 // remain visible to the loader so it can refuse them with the right field name.
 func TestPublicAPIModelExecutionResolversPreserveExplicitBounds(t *testing.T) {
 	var absent *models.ExecutionConfig
-	if absent.ResolveRole() != models.ExecutionRoleOrchestrator || absent.IsWorker() || absent.IsDistributed() {
-		t.Fatal("absent execution configuration changed local orchestration")
+	if absent.IsDistributed() {
+		t.Fatal("absent execution configuration changed local execution")
 	}
 	if absent.ResolveConcurrency() != models.DefaultExecutionConcurrency {
 		t.Fatal("absent execution concurrency changed its default")
@@ -83,14 +84,13 @@ func TestPublicAPIModelExecutionResolversPreserveExplicitBounds(t *testing.T) {
 	}
 
 	config := &models.ExecutionConfig{
-		Role:        models.ExecutionRoleWorker,
 		Concurrency: models.Int(-2),
 		Workers:     []models.ExecutionWorkerConfig{{Name: "builder"}},
 		Timeouts:    &models.ExecutionTimeoutsConfig{Preflight: 5, Task: -7},
 		Transfer:    &models.ExecutionTransferConfig{MaxFiles: 8, MaxBytes: -9, Timeout: 11},
 	}
-	if !config.IsWorker() || !config.IsDistributed() || config.ResolveConcurrency() != -2 {
-		t.Fatalf("explicit role, workers, or concurrency changed: %+v", config)
+	if !config.IsDistributed() || config.ResolveConcurrency() != -2 {
+		t.Fatalf("explicit workers or concurrency changed: %+v", config)
 	}
 	if got := config.ResolveTimeouts(); got.Preflight != 5 || got.Task != -7 ||
 		got.Cancel != models.DefaultExecutionCancelTimeout {

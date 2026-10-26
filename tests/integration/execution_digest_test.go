@@ -37,7 +37,6 @@ func executionWorkers(concurrency int, names ...string) *models.ExecutionConfig 
 		})
 	}
 	return &models.ExecutionConfig{
-		Role:        models.ExecutionRoleOrchestrator,
 		Name:        "control",
 		Concurrency: models.Int(concurrency),
 		SecretEnv:   "DISPAT_IT_EXECUTION_SECRET",
@@ -91,10 +90,18 @@ func TestExecutionPlanDigestRefusesUnreadableHead(t *testing.T) {
 				Pattern: "*rev-parse HEAD^{commit}", Code: 128,
 			})
 			env := append(fault.Env(), "DISPAT_IT_EXECUTION_SECRET="+executionSecret, "DISPAT_UNSAFE_DISABLE_LOCK=")
-			failed := r.CommandEnv(env, append(args, "--log-format", "json")...)
+			invocation := append(append([]string(nil), args...), "--log-format", "json")
+			if args[0] != "status" {
+				invocation = append(invocation, "--return-endpoint", executionLoopbackReturnURL(t))
+			}
+			failed := r.CommandEnv(env, invocation...)
 			require.NotZero(t, failed.Code, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
 			assert.Equal(t, 1, fault.Matches())
-			assert.Contains(t, failed.Stdout+failed.Stderr, "cannot fix the plan for distributed execution")
+			if args[0] == "status" {
+				assert.Contains(t, failed.Stdout+failed.Stderr, "cannot fix the plan for distributed execution")
+			} else {
+				assert.Contains(t, failed.Stdout+failed.Stderr, "cannot dispatch this")
+			}
 			assert.Contains(t, failed.Stdout+failed.Stderr, harness.GitFaultMarker)
 			for _, event := range failed.Events {
 				assert.NotEqual(t, "plan fixed", event.Str("message"), "unreadable source identity cannot name a plan")

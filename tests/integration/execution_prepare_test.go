@@ -41,6 +41,8 @@ import (
 // "an unrelated package released anyway" a claim this fixture can carry.
 var executionPreparePackages = []string{"assets", "docs", "solo", "ui"}
 
+const executionPreparedProviderSettlementWait = 60 * time.Second
+
 // executionPrepareBaseline is the version every package is tagged at before a
 // scenario commits anything, which is what lets one commit decide what this
 // run releases.
@@ -173,13 +175,13 @@ func executionPlannedPackages(t *testing.T, rig *executionRig) []string {
 	return planned
 }
 
-// executionPrepareTasks are the preparations this run finished, read off the
-// lines that name the work rather than off the branch names: a branch name is
-// a routing hint, and the task is what the run calls the work.
+// executionPrepareTasks are the preparations this run finished, read from
+// the first node's signed completion log. A local worker also reports command
+// completion, so counting both messages would count one task twice.
 func executionPrepareTasks(res harness.RunResult) []string {
 	var tasks []string
 	for _, event := range executionEvents(res) {
-		if event.Str("message") == "task finished" &&
+		if event.Str("message") == "task finished" && event.Str("commit") != "" &&
 			strings.HasSuffix(event.Str("task"), ":"+executionPrepareKind) {
 			tasks = append(tasks, event.Str("task"))
 		}
@@ -265,7 +267,7 @@ func TestExecutionUnselectedProviderIsPreparedNotReleased(t *testing.T) {
 	assert.Equal(t, "completed", reports[0].Str("computation"))
 	assert.Equal(t, "admitted", reports[0].Str("outputs"))
 	assert.Equal(t, "none", reports[0].Str("publication"))
-	assert.Empty(t, rig.branches(), "the run closed every coordination branch it created")
+	assert.NotEmpty(t, rig.branches(), "signed prepared task and ledger refs remain for recovery")
 	stopAll(t, workers)
 }
 
@@ -280,23 +282,29 @@ func TestExecutionPreparedProviderFailureBlocksItsConsumers(t *testing.T) {
 	})
 	rig.commitTo("the page, the manual and the standalone all changed", "docs", "solo", "ui")
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
+	defer func() {
+		for index, reply := range stopAll(t, workers) {
+			if t.Failed() {
+				t.Logf("failed-preparation peer %d stdout:\n%s\nstderr:\n%s", index, reply.Stdout, reply.Stderr)
+			}
+		}
+	}()
 
 	res := rig.release()
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	failedConsumers := make(map[string]string)
+	for _, event := range executionEvents(res) {
+		if event.Str("message") == "summary" && event.Str("status") == "failed" {
+			failedConsumers[event.Package()] = event.Str("error")
+		}
+	}
 	for _, name := range []string{"ui", "docs"} {
-		assert.Truef(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, name),
-			"%s failed with the integrity code\nstdout:\n%s", name, res.Stdout)
+		assert.Containsf(t, failedConsumers[name], "prepared provider assets failed before",
+			"%s failed with the exact missing provider\nstdout:\n%s", name, res.Stdout)
 	}
 	assert.Equal(t, 1, executionBuildCount(rig, "assets"),
 		"the failed preparation was not attempted again for the second consumer: %v", rig.runs())
-	for _, event := range executionEvents(res) {
-		if event.Code() != executionIntegrityCode || event.Package() == "" {
-			continue
-		}
-		assert.Containsf(t, event.Str("error"), "assets",
-			"the failure names the provider that could not be built: %v", event)
-	}
 	assert.ElementsMatch(t, []string{"build", "build"}, executionFailedStages(res),
 		"both consumers failed at their build stage\nstdout:\n%s", res.Stdout)
 	assert.True(t, rig.repo.IsTagged("solo@1.1.0"),
@@ -308,7 +316,6 @@ func TestExecutionPreparedProviderFailureBlocksItsConsumers(t *testing.T) {
 	require.Len(t, reports, 1)
 	assert.Equal(t, "failed", reports[0].Str("computation"))
 	assert.Equal(t, "none", reports[0].Str("outputs"))
-	stopAll(t, workers)
 }
 
 // TestExecutionDevDependencyOutputReachesConsumer is conformance vector 22a: a
@@ -340,11 +347,20 @@ func TestExecutionDevDependencyOutputReachesConsumer(t *testing.T) {
 	assert.Equal(t, []string{"docs"}, executionPlannedPackages(t, rig))
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
 
-	res := rig.release()
+	res := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL).
+		WaitForDiagnostic(executionPreparedProviderSettlementWait, func() {
+			t.Logf("retained signed ledger at stalled provider: %+v",
+				executionLateJoinLedgerEvents(t, rig.mailbox))
+			for index, worker := range workers {
+				stopped := worker.stop(t)
+				t.Logf("worker %d stdout:\n%s\nstderr:\n%s", index, stopped.Stdout, stopped.Stderr)
+			}
+		})
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(res),
-		"the development provider was built although nothing propagates along the edge")
+		"the development provider was built although nothing propagates along the edge; stdout:\n%s\nstderr:\n%s",
+		res.Stdout, res.Stderr)
 	produced := executionProbeValues(rig, "inputs")
 	require.Contains(t, produced, "docs")
 	assert.Equal(t, produced["assets"], produced["docs"],

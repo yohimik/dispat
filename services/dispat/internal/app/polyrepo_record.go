@@ -150,6 +150,11 @@ func (w *workspaceRecorder) acquire(ctx context.Context) (func() error, error) {
 				"E336: repository %s: resolve release-lock push destination: %w", r.repo.Name, resolveErr))
 		}
 		lock := &release.Lock{Git: r.git, Remote: lockRemote, Log: r.git.Log, Run: w.app.runID}
+		if w.app.returnJournal != nil {
+			lock.OnPrepared = func(_ context.Context, prepared release.PreparedLockIdentity) error {
+				return w.app.returnJournal.recordPreparedLock(r.repo.Name, prepared)
+			}
+		}
 		releaseMutation, err := r.git.AcquireMutation(ctx)
 		if err == nil {
 			err = lock.Acquire(ctx)

@@ -246,7 +246,7 @@ type File struct {
 	// field is optional and defaults to the specification value.
 	Parser *ParserConfig `json:"parser,omitempty"`
 
-	// Execution holds this node's own role, capacity and worker links; see
+	// Execution holds this node's capacity and worker links; see
 	// ExecutionConfig. It is a node-startup setting rather than release
 	// policy, so it is read from the entry configuration alone and no space,
 	// package or folder file may state it. Unlike the other optional objects

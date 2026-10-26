@@ -42,6 +42,13 @@ import (
 // default is an hour.
 const executionFaultTaskTimeout = 25
 
+// A worker that cannot read any canonical task ref can only retire through
+// signed Drain and the run's finite admission window, not a task timeout.
+const executionFaultUnclaimedAdmissionSeconds = 8
+
+const executionFaultNoClaimExpiredEventKind = "no-claim-expired"
+const executionFaultNoClaimSettledEventKind = "no-claim-package-settled"
+
 // newExecutionFaultWorkspace is the fixture the fault tables are driven
 // through: the four-package workspace, one node, every build pinned to it.
 //
@@ -97,8 +104,12 @@ type executionGitFault struct {
 	// a pool that could not be reached at all, and the integrity code for a
 	// task that could not be prepared, offered or executed.
 	diagnostic string
+	// errorText identifies an early refusal before a task status exists.
+	errorText string
 	// isRetained expects the transport-cleanup warning rather than a failure.
 	isRetained bool
+	// noClaim expects signed terminal refusal when no task ref could be read.
+	noClaim bool
 	// newRig is the fixture this row needs, for the calls a workspace only
 	// makes when it prepares a provider or captures a declared output.
 	newRig func(*testing.T) *executionRig
@@ -134,7 +145,7 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 		},
 		"the input state cannot be committed": {
 			pattern: "*commit-tree*dispat transport snapshot*", nth: 1, isOnward: true,
-			code: 1, diagnostic: executionIntegrityCode,
+			code: 1, errorText: "the release has no authenticated planning-source snapshot",
 		},
 		"the assignment cannot be described": {
 			// The probe of preflight wrote the first one, so the second is the
@@ -146,6 +157,11 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			pattern: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
 			nth:     1, isOnward: true,
 			code: 1, diagnostic: executionIntegrityCode,
+		},
+		"the accepted claim cannot be committed": {
+			pattern: "*commit-tree*dispat transport choreography-claim*",
+			nth:     1, isOnward: true,
+			code: 1, errorText: "has no durable receipt after persistence error",
 		},
 		"a preparation cannot be offered": {
 			pattern: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
@@ -164,10 +180,6 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			pattern: "*cat-file blob*", nth: 1,
 			armAfter: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
 		},
-		"the chain cannot be walked once": {
-			pattern: "*rev-list --first-parent*", nth: 1,
-			armAfter: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rig := row.rig(t)
@@ -184,11 +196,17 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			assert.Equal(t, 0, reply.Code, "the node carried on serving")
 			if row.code == 0 {
 				assert.NotEmpty(t, rig.repo.TagList(), "a call that is retried costs a tick and nothing else")
-				assert.Empty(t, rig.branches(), "and the run closed the branches it created")
+				assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
+					"the completed run retains its signed ledger for recovery")
 				return
 			}
-			assert.True(t, harness.IsCodePresent(executionEvents(res), row.diagnostic),
-				"the run is refused with %s\nstdout:\n%s", row.diagnostic, res.Stdout)
+			if row.diagnostic != "" {
+				assert.True(t, harness.IsCodePresent(executionEvents(res), row.diagnostic),
+					"the run is refused with %s\nstdout:\n%s", row.diagnostic, res.Stdout)
+			}
+			if row.errorText != "" {
+				assert.Contains(t, res.Stdout, row.errorText)
+			}
 			assert.Empty(t, executionReleasedPackages(res), "nothing was published")
 			if row.diagnostic == executionRefusalCode {
 				assert.Empty(t, rig.runs(), "and no stage of the release ran anywhere")
@@ -224,8 +242,8 @@ func executionReleasedPackages(res harness.RunResult) []string {
 // task it was given, past the calls its poll loop and its checkout are made of.
 //
 // The halves are the same two obligations seen from the other machine. An
-// assigned input that could not be fetched, a package folder that could not be
-// resolved and a claim that could not be written are work that never started,
+// assigned input that could not be fetched and a package folder that could not
+// be resolved are work that never started,
 // so the run is told and the package fails; the administrative record of a
 // checkout that could not be tidied away is disk rather than correctness, so
 // the release is still a release. Either way the node stays up: a failure of
@@ -233,29 +251,17 @@ func executionReleasedPackages(res harness.RunResult) []string {
 func TestExecutionWorkerTransportGitFaults(t *testing.T) {
 	for name, row := range map[string]executionGitFault{
 		"the assignment input cannot be fetched": {
-			pattern: "*fetch*dispat-task-*", nth: 1, isOnward: true, code: 1,
+			pattern: "*fetch*dispat-task-*", nth: 1, isOnward: true, code: 1, noClaim: true,
 			newRig: func(t *testing.T) *executionRig {
 				return newExecutionPushOutcomeRig(t, func(cfg *models.File) {
-					cfg.Execution.Timeouts.Task = 8
+					cfg.Execution.Timeouts.Task = executionFaultUnclaimedAdmissionSeconds
+					cfg.Execution.Timeouts.Admission = executionFaultUnclaimedAdmissionSeconds
 				})
 			},
 		},
 		"the package folder cannot be resolved": {
 			pattern: "*rev-parse --verify --end-of-options*", nth: 1, isOnward: true, code: 1,
 			newRig: newExecutionFaultOutputs,
-		},
-		"the claim cannot be written": {
-			// The probe of preflight wrote the first claim, so the second is
-			// the one that would take a build.
-			pattern: "*commit-tree*dispat transport claim*", nth: 2, isOnward: true, code: 1,
-			newRig: func(t *testing.T) *executionRig {
-				return newExecutionPushOutcomeRig(t, func(cfg *models.File) {
-					cfg.Execution.Timeouts.Task = 8
-				})
-			},
-		},
-		"the chain cannot be resolved once": {
-			pattern: "*rev-list --first-parent*", nth: 1,
 		},
 		"a message cannot be read once": {
 			pattern: "*cat-file blob*", nth: 1,
@@ -281,7 +287,8 @@ func TestExecutionWorkerTransportGitFaults(t *testing.T) {
 			if row.code == 0 && !row.isRetained {
 				assert.NotEmpty(t, rig.repo.TagList(),
 					"a read the node makes again costs a tick and nothing else")
-				assert.Empty(t, rig.branches(), "and the run closed the branches it created")
+				assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
+					"the completed run retains its signed ledger for recovery")
 				return
 			}
 			if row.isRetained {
@@ -290,10 +297,27 @@ func TestExecutionWorkerTransportGitFaults(t *testing.T) {
 				assert.NotEmpty(t, rig.repo.TagList(), "and the release is still a release")
 				return
 			}
+			if row.noClaim {
+				var expired, settled bool
+				for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+					if event.Kind == executionFaultNoClaimExpiredEventKind {
+						expired = true
+						assert.Empty(t, event.PackageOutcome, "task refusal precedes package settlement")
+					}
+					if event.Kind == executionFaultNoClaimSettledEventKind && expired {
+						settled = true
+					}
+				}
+				assert.True(t, expired && settled,
+					"unreadable canonical task refs end with a signed no-claim and package settlement")
+				assert.Empty(t, executionReleasedPackages(res), "nothing was published")
+				return
+			}
 			assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode),
 				"the affected package is refused with the integrity code\nstdout:\n%s", res.Stdout)
 			assert.Empty(t, executionReleasedPackages(res), "nothing was published")
-			assert.Empty(t, rig.branches(), "and the run closed the branches it created")
+			assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
+				"the failed run retains its signed ledger for recovery")
 		})
 	}
 }

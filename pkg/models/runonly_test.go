@@ -59,16 +59,17 @@ func TestRunOnlyRefusesWhatTheKeyDoesNotSay(t *testing.T) {
 		raw  any
 		want string
 	}{
-		"a misspelled value":        {raw: "orchestartor", want: "is not a placement"},
-		"a value of another key":    {raw: "any", want: "is not a placement"},
-		"a list of one":             {raw: []any{"worker"}, want: "states both stages"},
-		"a list of three":           {raw: []any{"worker", "worker", "worker"}, want: "states both stages"},
-		"an empty list":             {raw: []any{}, want: "states both stages"},
-		"a misspelled stage value":  {raw: []any{"worker", "orchestartor"}, want: "is not a placement"},
-		"a number where a word is":  {raw: []any{"worker", 3}, want: "wants"},
-		"an object where a word is": {raw: map[string]any{"build": "worker"}, want: "wants"},
-		"worker for both stages":    {raw: "worker", want: "[worker, orchestrator]"},
-		"worker publish in a pair":  {raw: []any{"both", "worker"}, want: "publication runs on the orchestrator"},
+		"a misspelled value":         {raw: "orchestartor", want: "is not a placement"},
+		"a value of another key":     {raw: "any", want: "is not a placement"},
+		"a list of one":              {raw: []any{"worker"}, want: "states both stages"},
+		"a list of three":            {raw: []any{"worker", "worker", "worker"}, want: "states both stages"},
+		"an empty list":              {raw: []any{}, want: "states both stages"},
+		"a misspelled stage value":   {raw: []any{"worker", "orchestartor"}, want: "is not a placement"},
+		"future choreographer token": {raw: []any{"choreographer", "orchestrator"}, want: "is not a placement"},
+		"a number where a word is":   {raw: []any{"worker", 3}, want: "wants"},
+		"an object where a word is":  {raw: map[string]any{"build": "worker"}, want: "wants"},
+		"worker for both stages":     {raw: "worker", want: "[worker, orchestrator]"},
+		"worker publish in a pair":   {raw: []any{"both", "worker"}, want: "publication runs on the orchestrator"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := NormalizeRunOnly(row.raw, `packages["core"].runOnly`)

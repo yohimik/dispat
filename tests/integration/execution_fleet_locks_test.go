@@ -52,17 +52,19 @@ func TestExecutionFleetPeerLockLossWithholdsLocalPublication(t *testing.T) {
 	worker := startWorker(t, fleet.peer(executionFleetEntry).Repo,
 		executionWorkerConfig(mailbox), 0)
 
-	res := fleet.peer(executionFleetEntry).CommandEnv(append(append(fileProtocolEnv(),
+	res := fleet.peer(executionFleetEntry).CommandEnv(append(append(append(fileProtocolEnv(),
 		harness.LockEnabled...), executionSecretEnv+"="+executionSecret,
 		"DISPAT_IT_FLEET_PEER_REMOTE="+fleet.peer(executionFleetDelegate).remote,
-		"DISPAT_IT_FLEET_PUBLISH_MARKER="+marker),
-		"release", "--package", executionFleetEntry+"-pkg")
+		"DISPAT_IT_FLEET_PUBLISH_MARKER="+marker), executionNodeHomeEnv(t, t.TempDir())...),
+		"release", "--return-endpoint", executionLoopbackReturnURL(t),
+		"--package", executionFleetEntry+"-pkg")
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.True(t, harness.IsCodePresent(executionEvents(res), executionLockCode),
-		"the local publication is refused under the distributed lock code")
+		"the local publication is refused under the distributed lock code\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.NoFileExists(t, marker, "the publish command did not begin")
-	assert.Empty(t, fleet.peer(executionFleetEntry).TagList(), "no local version was recorded")
+	assert.NotContains(t, fleet.peer(executionFleetEntry).TagList(), executionFleetEntry+"-pkg@0.1.0",
+		"no local version was recorded; a retained lock-attempt identity is not a version")
 	assert.False(t, remoteHoldsLock(t, fleet.peer(executionFleetDelegate).remote),
 		"the lost peer lock was not recreated")
 	stopAll(t, []*executionWorker{worker})

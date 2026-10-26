@@ -61,6 +61,10 @@ var transitions = []Transition{
 	{From: MessageClaim, To: MessageResult, By: PartyWorker},
 	{From: MessageAssignment, To: MessageCancel, By: PartyOrchestrator},
 	{From: MessageClaim, To: MessageCancel, By: PartyOrchestrator},
+	// In v3 the accepted claim is persisted by the first node under its own
+	// message kind. A signed cancellation must still be visible to the peer
+	// running that exact claim.
+	{From: choreographyClaimKind, To: MessageCancel, By: PartyOrchestrator},
 	{From: MessageReady, To: MessageCancel, By: PartyOrchestrator},
 	// An authorized publisher may be withdrawn too. The withdrawal does not
 	// fence it, because the command may already have run; what it does is ask
@@ -247,7 +251,22 @@ type Binding struct {
 // differs: the freshness of a claim against a seen-set, and the orchestrator's
 // own binding of a result to the assignment it answers.
 func CheckHeader(header Header, binding Binding, now time.Time) RejectReason {
-	if header.Protocol != ProtocolVersion {
+	return CheckHeaderVersion(HeaderVersionCheck{Header: header, Binding: binding,
+		Now: now, Version: ProtocolVersion})
+}
+
+type HeaderVersionCheck struct {
+	Header  Header
+	Binding Binding
+	Now     time.Time
+	Version int
+}
+
+// CheckHeaderVersion keeps the legacy reader pinned to v2 while a worker
+// verifies a selected run's signed v3 probe, slot, or task explicitly.
+func CheckHeaderVersion(check HeaderVersionCheck) RejectReason {
+	header, binding, now, version := check.Header, check.Binding, check.Now, check.Version
+	if (version != ProtocolVersion && version != ChoreographyProtocolVersion) || header.Protocol != version {
 		return ReasonProtocol
 	}
 	if header.Node != binding.Node {

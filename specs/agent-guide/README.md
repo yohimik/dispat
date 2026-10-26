@@ -32,7 +32,7 @@ Keep the configuration and API references from the installed binary's help pinne
 10. Serialize normal releases, but interrupt a release immediately when an urgent correction invalidates its contents. The lock must not delay cancellation or local repairs. Verify remote outcomes before retrying.
 11. Report what ran, what published, what failed or was skipped, and what remains uncertain.
 12. Release through the repository's CI/CD workflow. Configure the release path instead of publishing by hand.
-13. When a release delegates work to worker nodes, start those nodes through the pipeline and never from your own shell, and read the per-task summary before reporting what a run did.
+13. When a release delegates work to workers, start those nodes through the pipeline and never from your own shell, and read the per-task summary before reporting what a run did.
 
 ## Release through CI/CD
 
@@ -699,60 +699,60 @@ After `publish` succeeds, failure to write a tag, changelog, GitHub record, rele
 
 ## Run a distributed release
 
-A repository whose root configuration carries an `execution` object with a non-empty `workers` list can run eligible build, test and custom stages on other machines. One orchestrator owns the compiled run: it keeps the release locks and plan, runs the publish stage and writes every release record. Read [distributed execution](../../packages/docs/docs/distributed-execution.md) before working on such a repository, and its security section before touching the signing secret or the repository's branch and tag rules. The mailbox is the repository being released: a worker link with no `endpoint` reaches the remote the release takes its lock on, a worker started in a checkout of the repository with no `endpoint` of its own polls the same remote, and an `endpoint` names another mailbox.
+A root `execution` object with a non-empty `workers` list makes eligible build, test and custom stages
+available to other nodes. The first node is the orchestrator. It also runs ordinary tasks, and it alone pushes Git
+refs, publishes artifacts and writes release records. Other workers execute eligible tasks and return signed
+claim and result requests over the authenticated non-Git channel. Keep registry, release-write and Git-push
+credentials on the orchestrator; peers need read access to pinned inputs and whatever credentials their own build
+commands require. Read [distributed execution](../../packages/docs/docs/distributed-execution.md) before setup.
 
-For a distributed release, use one orchestrator release job for its compiled plan and a worker pool for eligible
-build, test, and custom stages before the records. Set root `runOnly: [worker, orchestrator]` when those stages
-should always use workers. Scalar `runOnly: worker` and any worker publish position are refused. Keep worker
-scripts to build or validation work if workers must have no publication credentials. The orchestrator runs the
-publish stage, computes the plan, prepares inputs, checks locks and outputs, and writes native records and Git refs.
-Keep registry and release-write credentials there. Workers still need the shared execution signing secret and
-restricted Git coordination access. Build commands may need separate credentials for private inputs. Run-level hooks
-and stages after the records run on the orchestrator. This layout does not guarantee a faster run. See
-[stage placement](../../packages/docs/docs/distributed-execution.md#where-a-stage-runs).
+Distributed first-node and worker processes currently require Linux or macOS for the persistent weighted
+node-slot journal. Windows distributed execution is refused before task effects. Windows local execution without
+worker links and without explicit shared node capacity remains available.
 
-After preflight and graph compilation, the orchestrator creates signed, inert task-attempt reservations and a fixed
-set of notice slots for each worker before any package frame. It chooses a compatible worker only when a task is
-ready, then atomically activates the reservation and that worker's notice. Workers poll their own slots, verify the
-signed assignment against the fixed plan digest and exact source and predecessor result object IDs, then run the
-assigned commands. They do not compute or revise the release plan. The coordination refs are execution state, not a
-plan file or a second planning process.
+`--distribution-mode=compilation` is the default and only supported mode. The future `interpretation` and `hybrid`
+values are refused before task effects. The orchestrator derives the plan and
+graph and initializes one canonical ref for every executable logical task before work starts. Workers verify the
+signed compiled graph, select compatible ready tasks within their physical capacity, and propose exact claims. The
+orchestrator validates and persists those claims without substituting another task. A mismatch refuses claims. One authoritative claim state and a functioning
+orchestrator are required for publication.
 
-For a custom mailbox, a supported self-hosted Git server in the same data center as the orchestrator and
-workers can reduce transport latency. Set the worker link and worker `endpoint` to that server and measure actual
-transfer time; the mailbox is coordination storage, not a release record.
+Set root `runOnly: [worker, orchestrator]` when eligible build and validation stages may use peers while
+publication stays on the orchestrator. Scalar `runOnly: worker` and any worker publish position are
+refused. The orchestrator also prepares native inputs, checks locks and returned outputs, and runs run-level hooks
+and stages after the records. More nodes help only where the graph has ready work and transport overhead leaves
+room for a gain. See [stage placement](../../packages/docs/docs/distributed-execution.md#where-a-stage-runs).
+
+For a custom coordination repository, a supported self-hosted Git server in the same data center as the nodes can
+reduce latency. Configure each applicable `endpoint` and measure transfer time; the repository holds coordination
+state, not a release record. The orchestrator is the only node that pushes to it.
 
 Before a release:
 
-1. Read the `execution` object of the entry configuration, and the pipeline's `--worker name` or `--worker name=endpoint` flags, which add links for one invocation. It is a node-startup setting, so a space, a package, an imported configuration or a linked repository never contributes one, and a peer's own object is ignored.
-2. Confirm the pipeline starts the worker nodes. `dispat worker` belongs in a CI job or a cluster workload beside the release job, not in your shell: a node you start locally executes the commands of any authentic assignment with your machine's credentials.
-3. Confirm the signing secret reaches every node from the secret store, and never read, print or copy its value. Report a secret written literally in a configuration file rather than fixing it silently.
-4. Run `dispat status`. With workers configured it names the plan it fixed in one `plan fixed` line, which is the plan every assignment of the run states.
-5. Expect the run to refuse rather than proceed when any release-lock bypass is configured, when `commit.verify` is off, when the release remote a link with no endpoint reaches has a push URL carrying a credential, when a node cannot be reached, or when a package's `buildPlatforms` no node satisfies. These are `E225`, and no command runs: the first three are refused before any lock, the last two after the locks and the plan, before any hook or stage, with the locks given back.
+1. Read the entry configuration's `execution.workers` links and any repeatable `--worker name` or
+   `--worker name=endpoint` flags. These add nodes for one invocation and do not change the plan digest.
+2. Start peer nodes with `dispat worker` in CI or a cluster workload. A locally started process executes
+   authorized tasks with the local machine's credentials.
+   A node named in `execution.workers` with `lateJoin: true` may start after tasks are running; other named
+   workers must pass preflight before effects. Set a finite `execution.timeouts.admission` for worker-only work.
+3. Supply the signing secret from a secret store without reading, printing or copying its value. Keep Git-push and
+   publication credentials on the orchestrator.
+4. Run `dispat status --distribution-mode=compilation` to inspect the plan before release. Each worker must verify
+   the signed input and graph identities before claims. A late worker needs a signed membership receipt before
+   it becomes eligible; a missing reply does not prove its command stopped or free its capacity.
+5. Expect `E225` refusal for an unsafe endpoint, absent signing secret, unavailable node, invalid lock bypass or
+   unsatisfied platform requirement. Inspect the reported cause; do not bypass the guard.
 
-After a release, read the per-task summary rather than the last line of the log. One line per task states where it ran, and keeps four outcomes apart: computation, outputs, publication and recording. A completed task is not a released package. The `execution metrics` line beside it is measurement only and is not a claim about speed.
+After a release, read the per-task summary. It separates computation, outputs, publication and recording: a
+completed task is not a released package. A peer result or missing tag does not settle an uncertain publication;
+follow the exact identity reconciliation in §19.4 and the [recovery guide](../../packages/docs/docs/reference/releasing/recovery.md).
 
-If the orchestrator's publication has an uncertain destination outcome, reconcile the exact package, version and
-artifact identity under §19.4 before retrying. A worker task receipt or missing tag cannot settle it. Keep the
-release workflow in control and follow [recovery](../../packages/docs/docs/reference/releasing/recovery.md); do not
-retry a publish by hand.
+Treat leftover `dispat-task-*`, `dispat-slot-*` and preflight coordination refs as run state, not release records.
+Before deletion, verify their current tips still belong to the run's authenticated chain and no process uses them.
+Never write a coordination branch by hand. A task process cannot initiate a nested release (`E226`).
 
-Before deleting a coordination ref, verify that its current tip still belongs to that run's authenticated chain. Investigate a changed or unauthenticated tip instead of treating it as cleanup residue.
-
-`dispat run` uses the same pool when the invocation has links: each package's task runs where its `runOnly` places a build, and the folders the entry configuration's `runOutputs` names for the script are carried back and merged into the orchestrator's checkout. A sweep takes no release lock and records nothing, so it neither waits for a release nor stops one; a sweep with no link runs every task locally, as it always has.
-
-Leftover `dispat-task-*`, `dispat-slot-*` or preflight `dispat-worker-*` branches on the repository, or on a mailbox a
-link names, are coordination state, not release records. A completed run deletes its own. They can carry full source
-and command text, so report other leftovers for cleanup after checking that their current tips still belong to the
-run's authenticated chain and no process uses them. Investigate a changed or unauthenticated tip instead of deleting
-it as residue. Never write a coordination branch yourself, and never run a release from a node whose
-`execution.role` is `worker`: a node refuses a message nobody signed, and a worker refuses the release with `E226`.
-
-A worker state folder has one serving process, and its `worker.lock` holds that process's id. A crashed worker's
-successor takes the folder over from the id of a process that is gone, or from its own id left by an earlier process
-with that id (a container worker is process 1 on every restart), so do not delete or rename `worker.lock` to restart a
-worker; start it normally and investigate an `E225` refusal if another process still owns the folder. A serving worker
-that finds another process's id in the file stops with `E225`.
+`dispat run` uses the same execution pool without release locks or records. Its declared `runOutputs` are returned
+and merged into the orchestrator's checkout. A run with no worker link executes locally.
 
 ## Respect the release lock
 

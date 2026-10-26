@@ -25,6 +25,9 @@ Apply this to the code a change touches. Do not rewrite unrelated code to remove
 code whose comments only narrate it, trim them there.
 
 - Use explicit, descriptive names. The wider a name's scope, the more context its name must carry: package-level and exported names should be more descriptive than names used within a small local block. Avoid unexplained abbreviations and generic names such as `data` or `obj` when a domain name is available.
+- Declare every literal value, including strings, numbers and booleans, as a named constant at package or module scope. Use the constant wherever that value is needed; do not leave anonymous literals in implementation code. Give it a logical domain name rather than a name that merely repeats its value, such as `Five`.
+- Include the value's kind or measurement unit in the constant name. Use names such as `OperationTimeoutMinutes`, `MaximumArtifactBytes`, `ExpectedTaskCount`, and `InvalidReleaseDataErrorFormat`. Follow Go's exported or unexported casing; use `UPPER_SNAKE_CASE` for JavaScript and TypeScript constants, such as `WAIT_TIME_SECONDS`. Preserve the unit in conversions so a reader can distinguish minutes, seconds and bytes at the use site.
+- Error messages must explain what is wrong with the affected value or state, with safe identifying context. Say `release data is invalid: <cause>` or `task result names a different assignment: <cause>`. Messages such as `check failed`, `checking data failed`, or `checking data is error` describe an operation rather than the problem and are not acceptable. Preserve the underlying cause without exposing credentials or secrets.
 - Name variables, parameters, fields, and data types primarily with nouns or noun phrases that describe what they hold or represent, such as `repository`, `packageName`, or `releasePlan`. Use plural nouns for collections, such as `packages`.
 - Name interfaces with an adjective describing their capability or an `x` suffix, such as `Configurable` or `Gitx`. Name implementations logically, such as `LocalGitx`.
 - Parameter and component props interfaces follow their specific naming rules below; the capability naming rule applies to behavioral interfaces.
@@ -48,7 +51,7 @@ code whose comments only narrate it, trim them there.
 - Start constructor names with `New` for exported functions or `new` for unexported functions, such as `NewUser` or `newUser`.
 - Name methods that convert a value to a specific type after the target type, such as `User.Int()` for an integer conversion.
 - Keep positional parameter lists short: prefer at most two parameters, and require a separate, descriptively named parameter struct when there are more than three. An optional `context.Context` does not count toward this limit; keep it as the first parameter, outside the struct. Construct parameter structs with named fields so adding a field does not change argument order at call sites.
-- Return errors with the operation and safe context. Preserve wrapped errors with `%w` when callers need to inspect them. Never ignore cleanup errors that could leave a release lock or published state ambiguous.
+- Return errors that identify the invalid value, unexpected state, or unmet condition, together with safe context. Define error message and format strings as named package-level constants. Preserve wrapped errors with `%w` when callers need to inspect them. Never ignore cleanup errors that could leave a release lock or published state ambiguous.
 - Pass the caller's context through cancellable work. Use a bounded detached context only for documented finalization that must survive cancellation.
 - Format Go with `gofmt`.
 
@@ -72,12 +75,19 @@ declaration may instead carry `//namingcheck:exempt <reason>` in its own doc com
 - When a value depends on branching, extract the decision into a function with early returns and bind its result with `const`. Do not replace reassignment with an object used only as a mutable box.
 - Use `for (const item of items)` or `for (const [index, item] of items.entries())` when iteration needs early `continue` or `break`. Use collection operations such as `map`, `filter`, or `reduce` when they express the transformation clearly.
 - A `const` binding does not make an object or array immutable. Keep any mutation explicit and within the owning component.
-- Use `camelCase` for variables, parameters, functions, and methods, and `PascalCase` for classes, interfaces, and type aliases. Apply the common noun, action, and predicate naming rules.
+- Use `camelCase` for variables, parameters, functions, and methods, `UPPER_SNAKE_CASE` for module-level named constants, and `PascalCase` for classes, interfaces, and type aliases. Constant names include the value kind or measurement unit. Apply the common noun, action, and predicate naming rules.
 - Follow the package's existing formatting, module, and TypeScript conventions.
 
 For example, calculate a retry delay in a focused function, return directly from each branch, and bind the result with `const`. Name this operation `calculateRetryDelay`, not `getRetryDelay`:
 
 ```ts
+const DEFAULT_RETRY_DELAY_MILLISECONDS = 1000;
+const MAXIMUM_RETRY_DELAY_MILLISECONDS = 30000;
+const NO_RETRY_ATTEMPTS_COUNT = 0;
+const FIRST_RETRY_ATTEMPT_COUNT = 1;
+const IMMEDIATE_RETRY_DELAY_MILLISECONDS = 0;
+const RETRY_BACKOFF_MULTIPLIER = 2;
+
 interface RetryDelayOptions {
   attempt: number;
   baseDelayMs?: number;
@@ -85,16 +95,23 @@ interface RetryDelayOptions {
 }
 
 function calculateRetryDelay(options: RetryDelayOptions): number {
-  const { attempt, baseDelayMs = 1000, maxDelayMs = 30000 } = options;
+  const {
+    attempt,
+    baseDelayMs = DEFAULT_RETRY_DELAY_MILLISECONDS,
+    maxDelayMs = MAXIMUM_RETRY_DELAY_MILLISECONDS,
+  } = options;
 
-  if (attempt <= 0) {
-    return 0;
+  if (attempt <= NO_RETRY_ATTEMPTS_COUNT) {
+    return IMMEDIATE_RETRY_DELAY_MILLISECONDS;
   }
 
-  return Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
+  return Math.min(
+    baseDelayMs * RETRY_BACKOFF_MULTIPLIER ** (attempt - FIRST_RETRY_ATTEMPT_COUNT),
+    maxDelayMs,
+  );
 }
 
-const retryDelayMs = calculateRetryDelay({ attempt, baseDelayMs, maxDelayMs });
+const RETRY_DELAY_MILLISECONDS = calculateRetryDelay({ attempt, baseDelayMs, maxDelayMs });
 ```
 
 ### TSX components
@@ -119,8 +136,10 @@ export interface ReleaseSummaryProps extends BaseReleaseSummaryProps {
   children?: ReactNode;
 }
 
+const EMPTY_CHILDREN_NODE: ReactNode = null;
+
 export const ReleaseSummary: FC<ReleaseSummaryProps> = (props) => {
-  const { title, children = null } = props;
+  const { title, children = EMPTY_CHILDREN_NODE } = props;
 
   return (
     <section>

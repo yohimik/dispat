@@ -26,10 +26,13 @@ package execution
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -43,8 +46,9 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
-// mailboxx is what a serving node needs of its mailbox: see what has moved,
-// find out what a tip carries, read it, and write the next step.
+// mailboxx is the read-only Git view a serving node needs: see what moved,
+// inspect a tip and fetch exact carried inputs. Replies use the authenticated
+// first-node return channel, never a peer Git push.
 //
 // Declared at the consumer, so that a fake in a test answers the four
 // operations a worker actually makes rather than the whole protocol, and so
@@ -54,8 +58,6 @@ type mailboxx interface {
 	ObserveManyExact(ctx context.Context, branches []string) ([]gitx.RemoteHead, error)
 	Inspect(ctx context.Context, head gitx.RemoteHead) (ChainTip, error)
 	Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]byte, error)
-	Advance(ctx context.Context, branch, expectedOld string, kind MessageKind, document []byte,
-		carried []gitx.TreeEntry) (string, error)
 	Reread(ctx context.Context, branch string) (gitx.RemoteHead, error)
 	Fetch(ctx context.Context, branches []string) error
 	Reconsider(branch string)
@@ -109,14 +111,21 @@ type Worker struct {
 	// serves until the process is signalled, which is what a long-running
 	// node does.
 	IdleTimeout time.Duration
-	// TransferTimeout bounds the one push that carries a task's build outputs
-	// to the mailbox, the configured `transfer.timeout`. A result that carries
-	// nothing is bounded by taskReportTimeout instead, because writing one
-	// small document should never take that long. It also bounds each poll,
+	// TransferTimeout bounds the streamed result pack sent to the first node,
+	// the configured `transfer.timeout`. A result carrying no output uses the
+	// shorter taskReportTimeout. It also bounds each Git input poll,
 	// which fetches a task's inputs (see observeMailbox).
 	TransferTimeout time.Duration
 	// Mailbox is the endpoint this node serves.
 	Mailbox mailboxx
+	// ReturnSigner authenticates the direct result channel announced in the
+	// signed per-run probe. The app passes the same secret as the mailbox.
+	ReturnSigner *Signer
+	// JoinIdentityKey proves a preauthorized late join's pinned node key.
+	JoinIdentityKey ed25519.PrivateKey
+	// NodeSlots is the stable physical-node capacity authority shared with
+	// first-node work and other serving processes for this logical node.
+	NodeSlots *NodeSlotAuthority
 	// Cache is the object store the task checkouts are materialized from: the
 	// same store the mailbox fetches into, because a worktree can only be made
 	// of objects the repository holds.
@@ -164,35 +173,51 @@ type Worker struct {
 	// entry carries across that boundary.
 	claims  sync.Mutex
 	claimed map[string]*claimedTask
+	// A signed probe fixes one return channel per run. Task goroutines read
+	// this map after the poll goroutine has answered preflight.
+	returnMu       sync.RWMutex
+	returnChannels map[string]*workerReturnChannel
 	// refusal is what stopped this node when neither a signal nor idleness
 	// did: the refusal VerifyOwner answered. Only the poll goroutine writes
 	// it, and Err reads it once Serve has returned.
 	refusal error
-	// pending are the claims this node pushed without learning whether they
-	// landed, by coordination branch. Only the poll goroutine reads and writes
-	// them: a claim is pushed there and adopted there.
-	pending map[string]*pendingClaim
+	// An unanswered return claim retains its local slot and exact proposal.
+	// A missing receipt at one read cannot prove that an in-flight claim will
+	// not be accepted later by the first node.
+	pendingReturn map[string]*pendingReturnClaim
+	parkedReturn  map[string]*parkedReturnRun
+	// The poll sees fixed slot refs, not every inert task ref. Keep an exact
+	// verified offer's slot only while a proposal is pending or parked, so a
+	// signed wake can make that unchanged slot visible again.
+	slotForTask  map[string]string
+	compiledRuns map[string]*workerCompiledRun
+	// compiledUnavailable retains an exact drain proposal when this admitted
+	// node cannot read the complete signed graph before any task claim.
+	compiledUnavailable map[string]*workerCompiledUnavailable
+	// Set by the app only when it can independently reconstruct pinned plans.
+	// A verified bootstrap mode, never local config, selects this callback.
+	PrepareInterpretedRun PrepareInterpretedRun
 }
 
-// pendingClaim is an assignment this node claimed by a push with no known
-// outcome: the assignment as it was read, and every claim commit pushed for it.
-//
-// A claim that landed after all is this node's work, and the orchestrator is
-// waiting for it: a node that forgot it would leave the attempt to wait out
-// the whole task deadline. So it is remembered until the branch shows what
-// became of it: the claim itself on the tip is adopted and run, and a
-// withdrawal on top of it is acknowledged.
-type pendingClaim struct {
-	tip        ChainTip
-	assignment Assignment
-	claims     []string
-	at         time.Time
+type workerReturnChannel struct {
+	binding      ChoreographyRunBinding
+	endpoint     string
+	certSHA256   string
+	bootstrapOID string
+	bootstrap    *RunBootstrap
+	client       workerReturnx
 }
 
-// maxPendingClaimAge is how long a claim with no known outcome is remembered.
-// It is the acceptance horizon of the assignment it answers: past that, no
-// orchestrator is still waiting for it.
-const maxPendingClaimAge = 2 * replayWindow
+// workerReturnx is the signed first-node return path consumed by a serving node.
+type workerReturnx interface {
+	SubmitProbe(context.Context, ChoreographyProbeReply) (ChoreographyReceipt, error)
+	SubmitClaim(context.Context, ChoreographyClaimProposal) (ChoreographyReceipt, error)
+	SubmitResult(context.Context, ChoreographyResultProposal, io.ReadSeeker) (ChoreographyReceipt, error)
+	SubmitAck(context.Context, ChoreographyAckProposal) (ChoreographyReceipt, error)
+	LookupReceipt(context.Context, ChoreographyReceiptQuery) (ChoreographyReceipt, bool, error)
+	PollEvents(context.Context, ChoreographyEventRequest) (ChoreographyEventPage, error)
+	Close()
+}
 
 // Serve polls until the process is signalled or goes idle, and answers the
 // reason it stopped.
@@ -204,6 +229,13 @@ const maxPendingClaimAge = 2 * replayWindow
 // somebody.
 func (w *Worker) Serve(ctx context.Context) string {
 	w.slots = make(chan struct{}, max(w.Report.Capacity, 1))
+	if w.NodeSlots != nil {
+		recoverCtx, stopRecover := context.WithTimeout(ctx, w.resolvePollTimeout())
+		if err := w.RecoverHeldNodeSlots(recoverCtx); err != nil {
+			w.Log.Warn().Err(err).Msg("unsettled node slots retain capacity until signed Git finality is readable")
+		}
+		stopRecover()
+	}
 	// Whatever a killed process left behind: an attempt's checkout, the
 	// folder a transfer was being assembled in, the copy of a root that was
 	// moved aside. Every one of them lives inside a folder this node owns and
@@ -214,10 +246,20 @@ func (w *Worker) Serve(ctx context.Context) string {
 		Int("concurrency", w.Report.Capacity).Str("stateDir", w.StateDir).
 		Msg("worker started")
 	reason := w.poll(ctx)
+	if len(w.compiledRuns) != 0 {
+		drainCtx, stopDrain := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
+		w.refreshSealedCompiledRuns(drainCtx)
+		if err := w.drainCompiledRuns(drainCtx); err != nil {
+			w.refusal = err
+			w.Log.Error().Err(err).Msg("worker could not settle its signed membership drain")
+		}
+		stopDrain()
+	}
 	// A node that stopped claiming still owes a report for everything it took
 	// on: the commands are already dead when the stop reached them, and the
 	// run that dispatched them is waiting to hear so.
 	w.running.Wait()
+	w.closeReturnChannels()
 	w.Log.Info().Str("reason", reason).Msg("worker stopped")
 	return reason
 }
@@ -320,7 +362,7 @@ func (w *Worker) endTask() {
 func (w *Worker) resolveIdleRemainder() time.Duration {
 	w.activity.Lock()
 	defer w.activity.Unlock()
-	if w.inFlight > 0 {
+	if w.inFlight > 0 || len(w.pendingReturn) > 0 || len(w.parkedReturn) > 0 {
 		return w.IdleTimeout
 	}
 	return w.IdleTimeout - time.Since(w.lastActive)
@@ -391,7 +433,10 @@ func resolvePollInterval(current time.Duration, isProgress bool) time.Duration {
 // remembered, and a node whose cache was deleted or whose git failed once
 // carries on serving instead of exiting.
 func (w *Worker) tick(ctx context.Context) bool {
+	settled := w.settlePendingReturnClaims(ctx)
+	settled = w.pollParkedReturnClaims(ctx) || settled
 	isProgress, err := w.inspectMailbox(ctx)
+	isProgress = isProgress || settled
 	if isProgress {
 		// Anything answered is this node having had something to do, which is
 		// what the idle clock counts from. A probe reaches this and nothing
@@ -455,6 +500,11 @@ func (w *Worker) inspectMailbox(ctx context.Context) (bool, error) {
 			return isProgress, nil
 		}
 	}
+	compiledProgress, compiledErr := w.pollCompiledRuns(ctx)
+	isProgress = isProgress || compiledProgress
+	if compiledErr != nil {
+		return isProgress, compiledErr
+	}
 	return isProgress, nil
 }
 
@@ -516,19 +566,29 @@ func (w *Worker) observeMailbox(ctx context.Context) ([]gitx.RemoteHead, error) 
 
 // activeTaskBranches keeps cancellation and uncertain claims visible after a
 // slot notice stops moving. Running claims may finish while the poll is in
-// flight; pending claims belong to this same poll goroutine.
+// flight; pending return proposals belong to this same poll goroutine.
 func (w *Worker) activeTaskBranches() []string {
 	w.claims.Lock()
-	branches := make([]string, 0, len(w.claimed)+len(w.pending))
+	branches := make([]string, 0, len(w.claimed)+len(w.pendingReturn))
 	for branch := range w.claimed {
 		branches = append(branches, branch)
 	}
 	w.claims.Unlock()
-	for branch := range w.pending {
+	for branch := range w.pendingReturn {
 		branches = append(branches, branch)
 	}
 	slices.Sort(branches)
 	return slices.Compact(branches)
+}
+
+// reconsiderOfferedTask rearms the fixed slot that authenticated this task.
+// A task ref alone is not part of the idle poll, so reconsidering only that
+// ref would leave an unchanged signed offer invisible indefinitely.
+func (w *Worker) reconsiderOfferedTask(branch string) {
+	w.Mailbox.Reconsider(branch)
+	if slot := w.slotForTask[branch]; slot != "" {
+		w.Mailbox.Reconsider(slot)
+	}
 }
 
 // handleSlot follows one signed fixed-size index entry to its exact task
@@ -549,22 +609,30 @@ func (w *Worker) handleSlot(ctx context.Context, head gitx.RemoteHead) (bool, er
 	}
 	document, err := w.Mailbox.Read(ctx, tip, w.Report.Limits.MaxManifestBytes)
 	if err != nil {
+		w.Mailbox.Reconsider(head.Name)
 		return false, err
 	}
 	var notice SlotNotice
 	if err := json.Unmarshal(document, &notice); err != nil {
 		return false, err
 	}
+	if notice.GraphRootOID != "" && notice.AssignmentOID == "" {
+		return w.handleCompiledNotice(ctx, head, notice)
+	}
 	if notice.AssignmentOID == "" {
 		return false, nil
 	}
-	if reason := CheckHeader(notice.Header, Binding{Node: w.Node, Branch: head.Name}, time.Now()); reason != "" ||
+	if reason := CheckHeaderVersion(HeaderVersionCheck{Header: notice.Header,
+		Binding: Binding{Node: w.Node, Branch: head.Name}, Now: time.Now(), Version: notice.Protocol}); reason != "" ||
 		notice.Kind != KindSlot || notice.Sequence == 0 || notice.TaskBranch == "" {
 		return false, NewDiagnostic(CodeAuthority, CategoryAuthority,
 			"a dispatch slot did not authenticate its task binding")
 	}
 	branches, err := w.Mailbox.Observe(ctx, "refs/heads/"+notice.TaskBranch, nil)
 	if err != nil || len(branches) == 0 {
+		// An exact task listing can disappear while this already observed slot
+		// still points at it. Keep the slot visible for the next bounded poll.
+		w.Mailbox.Reconsider(head.Name)
 		return false, err
 	}
 	assignment, err := carrier.VerifyAssignmentCarriers(ctx, notice.AssignmentOID,
@@ -572,7 +640,7 @@ func (w *Worker) handleSlot(ctx context.Context, head gitx.RemoteHead) (bool, er
 	if err != nil {
 		return false, err
 	}
-	if assignment.Branch != notice.TaskBranch || assignment.Node != w.Node ||
+	if assignment.Protocol != notice.Protocol || assignment.Branch != notice.TaskBranch || assignment.Node != w.Node ||
 		assignment.Run != notice.Run || assignment.Task != notice.Task ||
 		assignment.Attempt != notice.Attempt || assignment.PlanDigest != notice.PlanDigest ||
 		assignment.Generation != notice.Generation {
@@ -593,8 +661,25 @@ func (w *Worker) handleSlot(ctx context.Context, head gitx.RemoteHead) (bool, er
 				"a dispatch slot's assignment is absent from its branch")
 		}
 		wasFull := cap(w.slots) > 0 && len(w.slots) == cap(w.slots)
+		if w.slotForTask == nil {
+			w.slotForTask = make(map[string]string)
+		}
+		w.slotForTask[branch.Name] = head.Name
 		answered, err := w.handle(ctx, branch)
-		if wasFull && !answered && err == nil {
+		if err != nil {
+			// A validated offer whose local read, capacity epoch, or return
+			// failed still names work. Both memo entries must move together.
+			w.reconsiderOfferedTask(branch.Name)
+		}
+		if w.pendingReturn[branch.Name] == nil {
+			run := w.parkedReturn[assignment.Run]
+			if run == nil || run.entries[branch.Name] == nil {
+				delete(w.slotForTask, branch.Name)
+			}
+		}
+		run := w.parkedReturn[assignment.Run]
+		parked := run != nil && run.entries[branch.Name] != nil
+		if wasFull && !answered && err == nil && !parked && w.pendingReturn[branch.Name] == nil {
 			// A queued task reconsidered only its task ref. The unchanged slot
 			// would otherwise hide that ref forever after capacity returned.
 			w.Mailbox.Reconsider(head.Name)
@@ -668,13 +753,6 @@ func (w *Worker) handle(ctx context.Context, head gitx.RemoteHead) (bool, error)
 		// deadline for an assignment sitting in the mailbox.
 		w.Mailbox.Reconsider(head.Name)
 		return false, err
-	}
-	if tip.Kind == MessageClaim || (tip.Kind == MessageCancel && w.findClaim(tip.Branch) == nil) {
-		// A claim of this node's whose push never said it landed, or a
-		// withdrawal of one, is this node's own work surfacing.
-		if isAdopted, err := w.adoptPendingClaim(ctx, tip); isAdopted || err != nil {
-			return isAdopted, err
-		}
 	}
 	if tip.Kind == MessageCancel {
 		// A withdrawal is the one message of another party this node acts on
@@ -757,14 +835,17 @@ func isFrameKind(kind string) bool {
 	}
 }
 
-// takeTask claims one assignment and starts it, and leaves it alone when this
-// node has no free slot for it.
-//
-// The claim is what says the work is this node's, so it is pushed before the
-// task starts and by the goroutine that owns the poll: an assignment nobody
-// claimed is an assignment another node may still take, which is what makes a
-// full node queue work rather than lose it.
+// takeTask proposes one assignment to the first node and starts it only
+// after an exact signed receipt. A full node leaves the assignment queued;
+// an unanswered proposal keeps its slot and body until the first node settles
+// it, so a transient response failure cannot start duplicate work.
 func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignment) (bool, error) {
+	if w.pendingReturn[tip.Branch] != nil {
+		return false, nil
+	}
+	if run := w.parkedReturn[assignment.Run]; run != nil && run.entries[tip.Branch] != nil {
+		return false, nil
+	}
 	select {
 	case w.slots <- struct{}{}:
 	default:
@@ -776,21 +857,72 @@ func (w *Worker) takeTask(ctx context.Context, tip ChainTip, assignment Assignme
 			Str("task", assignment.Task).Msg("assignment left queued: this node is full")
 		return false, nil
 	}
-	claimed, err := w.advance(ctx, tip, tip.OID, MessageClaim, Claim{
-		Header: w.formatReplyHeader(assignment.Header), Assignment: tip.OID,
-	}, nil)
+	channel, err := w.returnChannelForTask(ctx, tip, assignment)
 	if err != nil {
 		<-w.slots
-		return false, w.settleUnansweredClaim(tip, assignment, err)
+		return false, fmt.Errorf("execution: task lacks its authenticated first-node return: %w", err)
 	}
-	delete(w.pending, tip.Branch)
-	return w.startClaimedTask(ctx, tip, assignment, claimed)
+	if w.ReturnSigner == nil {
+		<-w.slots
+		return false, fmt.Errorf("execution: task lacks its authenticated first-node return signer")
+	}
+	claimCtx, stopClaim := context.WithTimeout(ctx, taskReportTimeout)
+	defer stopClaim()
+	page, err := channel.client.PollEvents(claimCtx, ChoreographyEventRequest{
+		ChoreographyRunBinding: channel.binding, Node: w.Node, MaxEvents: 1})
+	if err != nil {
+		<-w.slots
+		return false, fmt.Errorf("execution: signed capacity epoch is unavailable: %w", err)
+	}
+	if page.Head.OID == "" {
+		<-w.slots
+		return false, fmt.Errorf("execution: signed capacity epoch is empty")
+	}
+	proposal := w.formatReturnClaim(channel.binding, page.Head.OID, tip, assignment)
+	lease, available, err := w.reserveNodeSlot(claimCtx, assignment, channel, proposal)
+	if err != nil {
+		<-w.slots
+		return false, err
+	}
+	if !available {
+		<-w.slots
+		w.reconsiderOfferedTask(tip.Branch)
+		return false, nil
+	}
+	receipt, settled, err := w.submitReturnClaim(claimCtx, channel, proposal)
+	if settled {
+		if receipt.Refused {
+			settleCtx, done := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
+			defer done()
+			if err := w.releaseNodeSlot(settleCtx, lease, receipt.FenceOID); err != nil {
+				return false, err
+			}
+			<-w.slots
+			w.parkRefusedClaim(channel, tip.Branch, assignment, receipt)
+			return false, nil
+		}
+		var done bool
+		var progress bool
+		progress, done, err = w.startReturnedClaim(claimCtx, ctx, tip, assignment, receipt.OID, lease)
+		if done {
+			return progress, err
+		}
+	}
+	if w.pendingReturn == nil {
+		w.pendingReturn = make(map[string]*pendingReturnClaim)
+	}
+	w.pendingReturn[tip.Branch] = &pendingReturnClaim{
+		tip: tip, assignment: assignment, proposal: proposal, lease: lease,
+	}
+	w.Log.Warn().Err(err).Str("branch", tip.Branch).
+		Msg("claim or task ref is unsettled; retaining capacity and exact proposal")
+	return false, nil
 }
 
 // startClaimedTask records a claim this node holds and runs its task, in a
 // slot the caller already took.
 func (w *Worker) startClaimedTask(ctx context.Context, tip ChainTip, assignment Assignment,
-	claimed string) (bool, error) {
+	claimed string, held ...NodeSlotLease) (bool, error) {
 	w.Log.Info().Str("branch", tip.Branch).Str("commit", claimed).
 		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
 		Str("kind", assignment.Kind).Msg("task claimed")
@@ -805,7 +937,10 @@ func (w *Worker) startClaimedTask(ctx context.Context, tip ChainTip, assignment 
 	// the poll, and the cancellation has to be reachable from it.
 	bounded, stop := resolveTaskDeadline(ctx, assignment.DeadlineSeconds)
 	task := &claimedTask{assignment: assignment, tip: tip, claimed: claimed,
-		stop: stop, expectedTip: claimed}
+		stop: stop, expectedTip: claimed, finalityCtx: ctx}
+	if len(held) != 0 {
+		task.slotLease = held[0]
+	}
 	forget := w.registerClaim(task)
 	w.running.Add(1)
 	w.beginTask()
@@ -849,8 +984,8 @@ func (w *Worker) recoverTask(ctx context.Context, task *claimedTask) {
 	}
 	reportCtx, done := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
 	defer done()
-	_, err := w.advance(reportCtx, task.tip, task.readExpectedTip(), MessageResult, Result{
-		Header: w.formatReplyHeader(assignment.Header), Assignment: task.tip.OID,
+	_, err := w.returnTaskResult(reportCtx, task, Result{
+		Header: w.formatReplyHeader(assignment.Header), Assignment: task.claimed,
 		Status: StatusFailed, FailedPart: resolveCancelledPhase(task.readPhase()),
 		Platform: Platform{OS: w.Report.OS, Arch: w.Report.Arch, Dispat: w.Report.Dispat},
 	}, nil)
@@ -858,119 +993,6 @@ func (w *Worker) recoverTask(ctx context.Context, task *claimedTask) {
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
 			Msg("the failed task could not be reported")
 	}
-}
-
-// settleUnansweredClaim decides what a claim push that did not land means.
-//
-// A claim that provably did not land is no work of this node's, and no error
-// either: another node moved the branch first, or the mailbox refused the
-// push, and the second is said once with the server's reason, redacted,
-// because the orchestrator only ever sees a pool with no capacity. A claim
-// whose outcome is unknown is remembered so that it is adopted if it
-// surfaces, and the assignment is offered to the next poll again: if the claim
-// never landed, the next poll simply claims it afresh.
-func (w *Worker) settleUnansweredClaim(tip ChainTip, assignment Assignment, err error) error {
-	var pushed *messagePushError
-	if !errors.As(err, &pushed) {
-		return err
-	}
-	log := w.Log.With().Str("branch", tip.Branch).Str("run", assignment.Run).
-		Str("task", assignment.Task).Int("attempt", assignment.Attempt).Logger()
-	if pushed.resolution == pushNotLanded {
-		if errors.Is(err, gitx.ErrRemoteRefused) {
-			log.Warn().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
-				Msg("the mailbox refused this node's claim")
-			return nil
-		}
-		log.Debug().Err(err).Msg("the assignment was taken before this node could claim it")
-		return nil
-	}
-	w.rememberPendingClaim(tip, assignment, pushed.oid)
-	w.Mailbox.Reconsider(tip.Branch)
-	log.Warn().Err(err).Str("commit", pushed.oid).Str("code", CodeTransport).
-		Str("category", CategoryTransportCleanup).
-		Msg("the claim push has no known outcome; the claim is adopted if it is on the branch")
-	return nil
-}
-
-// rememberPendingClaim adds one claim commit to what this node is waiting to
-// see, and drops what nobody is waiting for any more.
-func (w *Worker) rememberPendingClaim(tip ChainTip, assignment Assignment, claim string) {
-	if w.pending == nil {
-		w.pending = map[string]*pendingClaim{}
-	}
-	now := time.Now()
-	for branch, pending := range w.pending {
-		if now.Sub(pending.at) > maxPendingClaimAge {
-			delete(w.pending, branch)
-		}
-	}
-	pending := w.pending[tip.Branch]
-	if pending == nil {
-		pending = &pendingClaim{tip: tip, assignment: assignment}
-		w.pending[tip.Branch] = pending
-	}
-	pending.claims = append(pending.claims, claim)
-	pending.at = now
-}
-
-// adoptPendingClaim takes on a claim of this node's that landed although its
-// push never said so, and reports whether the tip was one.
-//
-// Two tips are this node's own claim: the claim itself, which is work the
-// orchestrator is now waiting for and is run like any other; and a withdrawal
-// written on top of it, which is answered at once, since nothing of the task
-// has started on this node.
-func (w *Worker) adoptPendingClaim(ctx context.Context, tip ChainTip) (bool, error) {
-	pending := w.pending[tip.Branch]
-	if pending == nil {
-		return false, nil
-	}
-	claim := tip.OID
-	if tip.Kind == MessageCancel {
-		claim = tip.PreviousOID
-	}
-	if !slices.Contains(pending.claims, claim) {
-		return false, nil
-	}
-	if tip.Kind == MessageCancel {
-		delete(w.pending, tip.Branch)
-		return w.acknowledgePendingWithdrawal(ctx, tip, pending, claim)
-	}
-	select {
-	case w.slots <- struct{}{}:
-	default:
-		// The claim is this node's and has to run here; it waits for a slot
-		// rather than being given up.
-		w.Mailbox.Reconsider(tip.Branch)
-		return false, nil
-	}
-	delete(w.pending, tip.Branch)
-	w.Log.Info().Str("branch", tip.Branch).Str("commit", claim).
-		Msg("a claim whose push had no known outcome is on the branch and is adopted")
-	return w.startClaimedTask(ctx, pending.tip, pending.assignment, claim)
-}
-
-// acknowledgePendingWithdrawal answers a withdrawal of a claim this node
-// never knew had landed: nothing of the task ran here, so the acknowledgement
-// says so at once.
-func (w *Worker) acknowledgePendingWithdrawal(ctx context.Context, tip ChainTip, pending *pendingClaim,
-	claim string) (bool, error) {
-	assignment := pending.assignment
-	if reason := w.checkWithdrawal(ctx, tip, pending.tip, claim, assignment); reason != "" {
-		w.reportRejection(tip, reason)
-		return false, nil
-	}
-	if err := w.Seen.Record(assignment.Run, assignment.Task, assignment.Attempt, time.Now()); err != nil {
-		return false, err
-	}
-	task := &claimedTask{assignment: assignment, tip: pending.tip, claimed: claim,
-		stop: func() {}, expectedTip: claim}
-	task.withdraw(tip.OID)
-	log := w.Log.With().Str("run", assignment.Run).Str("task", assignment.Task).
-		Int("attempt", assignment.Attempt).Str("branch", tip.Branch).Logger()
-	w.acknowledgeCancellation(ctx, task, log)
-	return true, nil
 }
 
 // answerTask runs one claimed assignment and reports what became of it.
@@ -1013,15 +1035,19 @@ func (w *Worker) answerTask(ctx context.Context, bounded context.Context, task *
 		log.Warn().Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
 			Msg("the task reached the deadline its assignment stated and was ended here")
 	}
+	exports := outcome.transportExports
+	if exports == nil {
+		exports = formatExports(outcome.exports)
+	}
 	report := Result{
 		Header:      w.formatReplyHeader(assignment.Header),
-		Assignment:  tip.OID,
+		Assignment:  task.claimed,
 		Status:      outcome.status,
 		FailedPart:  outcome.failedPart,
 		Exit:        outcome.exit,
 		Reason:      string(outcome.reason),
 		Platform:    Platform{OS: w.Report.OS, Arch: w.Report.Arch, Dispat: w.Report.Dispat},
-		Exports:     formatExports(outcome.exports),
+		Exports:     exports,
 		Outputs:     outcome.outputs,
 		StrayWrites: outcome.strayWrites,
 	}
@@ -1029,15 +1055,12 @@ func (w *Worker) answerTask(ctx context.Context, bounded context.Context, task *
 	reportCtx, done := context.WithTimeout(context.WithoutCancel(ctx),
 		w.resolveReportTimeout(len(carried) > 0))
 	defer done()
-	lease := resolveResultLease(task.claimed, outcome)
-	reported, err := w.advance(reportCtx, tip, lease, MessageResult, report, carried)
-	if err != nil && resolvePushError(err) == pushNotLanded {
-		if errors.Is(err, gitx.ErrLeaseRejected) && w.acknowledgeResultWithdrawal(reportCtx, task, lease, log) {
-			return
-		}
-		if errors.Is(err, gitx.ErrRemoteRefused) {
-			reported, err = w.reportRefusedResult(reportCtx, task, report, lease, err, log)
-		}
+	reported, err := w.returnTaskResult(reportCtx, task, report, carried)
+	if errors.Is(err, errResultWithdrawn) {
+		return
+	}
+	if err != nil && w.acknowledgeResultWithdrawal(reportCtx, task, task.claimed, log) {
+		return
 	}
 	if err != nil {
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
@@ -1048,34 +1071,15 @@ func (w *Worker) answerTask(ctx context.Context, bounded context.Context, task *
 		Int("strayWrites", outcome.strayWrites).Msg("task finished")
 }
 
-// reportRefusedResult reports once more, without what the mailbox refused,
-// after a server rule, a hook or a size limit declined the result.
-//
-// The orchestrator is waiting for this answer and would otherwise wait out the
-// whole task deadline. A build, a preparation or a sweep task reports a
-// failure that carries no outputs, because the outputs are what could not be
-// delivered; a publication keeps its status, which is the one thing the run
-// must not lose about an effect it authorized, and drops its exports. The
-// server's reason, redacted, is this node's own log line: the result carries
-// only the stable word.
-func (w *Worker) reportRefusedResult(ctx context.Context, task *claimedTask, report Result, lease string,
-	refused error, log zerolog.Logger) (string, error) {
-	log.Warn().Err(refused).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
-		Msg("the mailbox refused the task result; a result without it is reported instead")
-	fallback := report
-	fallback.Outputs, fallback.Exports = nil, nil
-	fallback.Status, fallback.FailedPart = StatusFailed, release.PartOutputs
-	fallback.Reason, fallback.Exit = string(ReasonTransferRefused), 0
-	return w.advance(ctx, task.tip, lease, MessageResult, fallback, nil)
-}
-
-// acknowledgeResultWithdrawal settles the one lease loss a finished task can
-// prove: the run cancelled this exact attempt between the progress check and
-// the Result push. The task's processes have ended, so an authenticated Cancel
-// can be acknowledged immediately. Other moved tips and transport failures
-// remain failed reports; none is a reason to retry the Result or a publish Go.
+// acknowledgeResultWithdrawal recognizes an exact Cancel that arrived after
+// the task's last progress check. The command processes have ended, so the
+// signed Cancel can be acknowledged. A transport error alone proves no such
+// cancellation and never authorizes a different result body.
 func (w *Worker) acknowledgeResultWithdrawal(ctx context.Context, task *claimedTask,
 	resultLease string, log zerolog.Logger) bool {
+	if w == nil || w.Mailbox == nil || task == nil {
+		return false
+	}
 	head, err := w.Mailbox.Reread(ctx, task.tip.Branch)
 	if err != nil || head.OID == "" {
 		return false
@@ -1100,12 +1104,9 @@ func (w *Worker) acknowledgeResultWithdrawal(ctx context.Context, task *claimedT
 	return true
 }
 
-// resolveReportTimeout is how long a finished task may take to report. A
-// result that carries build outputs is a push of those outputs, which is as
-// large as the build made it and travels under the transfer timeout the
-// operator configured for exactly that; a result carrying nothing is one
-// document and gets the short bound, so a node asked to stop is not held for
-// the transfer window by a report that has nothing to transfer.
+// resolveReportTimeout bounds a finished task's return. An output pack can
+// take the configured transfer window; a result without outputs gets the
+// shorter bound.
 func (w *Worker) resolveReportTimeout(isCarryingOutputs bool) time.Duration {
 	if isCarryingOutputs && w.TransferTimeout > taskReportTimeout {
 		return w.TransferTimeout
@@ -1113,23 +1114,11 @@ func (w *Worker) resolveReportTimeout(isCarryingOutputs bool) time.Duration {
 	return taskReportTimeout
 }
 
-// resolveResultLease is the object a result is written on top of: the claim
-// for a task that moved its branch no further, and whatever the publication
-// handshake left there for one that did. A lease over the wrong object is a
-// push the remote refuses, which would turn a finished task into one that
-// never reported.
-func resolveResultLease(claimed string, outcome taskOutcome) string {
-	if outcome.expectedTip == "" {
-		return claimed
-	}
-	return outcome.expectedTip
-}
-
 // checkAssignment applies the acceptance rules to one assignment: the ones
 // every message is held to, and the one that is this node's own memory.
 func (w *Worker) checkAssignment(assignment Assignment, tip ChainTip) RejectReason {
-	if reason := CheckHeader(assignment.Header,
-		Binding{Node: w.Node, Branch: tip.Branch}, time.Now()); reason != "" {
+	if reason := CheckHeaderVersion(HeaderVersionCheck{Header: assignment.Header,
+		Binding: Binding{Node: w.Node, Branch: tip.Branch}, Now: time.Now(), Version: assignment.Protocol}); reason != "" {
 		return reason
 	}
 	if w.Seen.IsSeen(assignment.Run, assignment.Task, assignment.Attempt) {
@@ -1153,47 +1142,206 @@ func (w *Worker) checkAssignment(assignment Assignment, tip ChainTip) RejectReas
 // slot: it is a question about the node rather than work for it, and a node
 // whose capacity was full would otherwise be unable to say so.
 func (w *Worker) answerProbe(ctx context.Context, tip ChainTip, assignment Assignment) error {
-	claimed, err := w.advance(ctx, tip, tip.OID, MessageClaim, Claim{
-		Header: w.formatReplyHeader(assignment.Header), Assignment: tip.OID,
-	}, nil)
+	if w.ReturnSigner == nil {
+		return fmt.Errorf("execution: worker has no authenticated first-node return signer")
+	}
+	return w.answerProbeByReturn(ctx, tip, assignment)
+}
+
+func (w *Worker) answerProbeByReturn(ctx context.Context, tip ChainTip, assignment Assignment) error {
+	var bootstrap *RunBootstrap
+	if assignment.Protocol == ChoreographyProtocolVersion {
+		verified, pinned, err := w.verifyPinnedProbe(ctx, tip.OID)
+		if err != nil {
+			return err
+		}
+		if pinned.CoordinationEndpoint != w.Endpoint {
+			return errors.New(workerProbeMailboxEndpointMismatchError)
+		}
+		assignment, bootstrap = *verified, &pinned
+	}
+	if assignment.ReturnEndpoint == "" || assignment.ReturnCertSHA256 == "" || assignment.GraphDigest == "" {
+		return fmt.Errorf("execution: signed probe lacks its return-channel or graph identity")
+	}
+	binding := ChoreographyRunBinding{Run: assignment.Run, Generation: assignment.Generation,
+		PlanDigest: assignment.PlanDigest, GraphDigest: assignment.GraphDigest}
+	channel, err := w.prepareReturnChannel(binding, assignment.ReturnEndpoint, assignment.ReturnCertSHA256)
 	if err != nil {
 		return err
 	}
-	w.Log.Info().Str("branch", tip.Branch).Str("commit", claimed).
-		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
-		Str("kind", assignment.Kind).Msg("task claimed")
-	// Remembered before the answer is written: the record says what this node
-	// has taken on, so an attempt that was claimed and then failed to report
-	// must not be taken on again.
-	if err := w.Seen.Record(assignment.Run, assignment.Task, assignment.Attempt, time.Now()); err != nil {
-		return err
+	if bootstrap != nil {
+		if channel.bootstrapOID != "" && channel.bootstrapOID != assignment.BootstrapOID {
+			w.closeUnrememberedReturnChannel(channel)
+			return fmt.Errorf("execution: signed preflight changed one run's bootstrap")
+		}
+		channel.bootstrapOID, channel.bootstrap = assignment.BootstrapOID, bootstrap
 	}
+	probeCtx, stopProbe := context.WithTimeout(ctx, taskReportTimeout)
+	defer stopProbe()
 	report := w.Report
-	reported, err := w.advance(ctx, tip, claimed, MessageResult, Result{
-		Header:     w.formatReplyHeader(assignment.Header),
-		Assignment: tip.OID,
-		Status:     StatusSucceeded,
-		Platform:   Platform{OS: report.OS, Arch: report.Arch, Dispat: report.Dispat},
-		Report:     &report,
-	}, nil)
+	report.Protocol = assignment.Protocol
+	receipt, err := channel.client.SubmitProbe(probeCtx, ChoreographyProbeReply{
+		ChoreographyRunBinding: binding, Node: w.Node, Branch: tip.Branch,
+		AssignmentOID: tip.OID, Report: report,
+	})
 	if err != nil {
+		w.closeUnrememberedReturnChannel(channel)
+		w.Mailbox.Reconsider(tip.Branch)
+		return fmt.Errorf("execution: returning signed preflight: %w", err)
+	}
+	if !receipt.Accepted || receipt.OID == "" {
+		w.closeUnrememberedReturnChannel(channel)
+		return fmt.Errorf("execution: first node did not persist the preflight reply")
+	}
+	if err := w.Seen.Record(assignment.Run, assignment.Task, assignment.Attempt, time.Now()); err != nil {
+		w.closeUnrememberedReturnChannel(channel)
 		return err
 	}
-	w.Log.Info().Str("branch", tip.Branch).Str("commit", reported).
+	w.rememberReturnChannel(channel)
+	w.Log.Info().Str("branch", tip.Branch).Str("commit", receipt.OID).
 		Str("run", assignment.Run).Str("task", assignment.Task).Int("attempt", assignment.Attempt).
-		Str("status", StatusSucceeded).Msg("task finished")
+		Str("status", StatusSucceeded).Msg("preflight returned")
 	return nil
 }
 
-// advance writes one reply onto the branch, under a lease over the value this
-// node read.
-func (w *Worker) advance(ctx context.Context, tip ChainTip, expectedOld string, kind MessageKind,
-	message any, carried []gitx.TreeEntry) (string, error) {
-	document, err := json.Marshal(message)
-	if err != nil {
-		return "", fmt.Errorf("execution: writing the %s document: %w", kind, err)
+const workerProbeMailboxEndpointMismatchError = "execution: signed preflight coordination endpoint differs from this node's configured mailbox endpoint"
+
+type pinnedProbeVerifier interface {
+	ReadVerifiedPinnedProbe(context.Context, string, int64, int64) (*Assignment, RunBootstrap, error)
+}
+
+func (w *Worker) verifyPinnedProbe(ctx context.Context, oid string) (*Assignment, RunBootstrap, error) {
+	verifier, ok := w.Mailbox.(pinnedProbeVerifier)
+	if !ok || w.Report.Limits.MaxManifestBytes <= 0 || w.Report.Limits.MaxPackBytes <= 0 {
+		return nil, RunBootstrap{}, fmt.Errorf("execution: signed v3 probe cannot be verified by this node")
 	}
-	return w.Mailbox.Advance(ctx, tip.Branch, expectedOld, kind, document, carried)
+	assignment, bootstrap, err := verifier.ReadVerifiedPinnedProbe(ctx, oid,
+		w.Report.Limits.MaxManifestBytes, w.Report.Limits.MaxPackBytes)
+	if err != nil {
+		return nil, RunBootstrap{}, fmt.Errorf("execution: authenticating retained run bootstrap: %w", err)
+	}
+	return assignment, bootstrap, nil
+}
+
+func (w *Worker) prepareReturnChannel(binding ChoreographyRunBinding, endpoint, certSHA256 string) (*workerReturnChannel, error) {
+	w.returnMu.RLock()
+	prior := w.returnChannels[binding.Run]
+	w.returnMu.RUnlock()
+	if prior != nil && (prior.binding != binding || prior.endpoint != endpoint || prior.certSHA256 != certSHA256) {
+		return nil, fmt.Errorf("execution: signed preflight changed one run's return identity")
+	}
+	if prior != nil {
+		return prior, nil
+	}
+	client, err := NewChoreographyReturnClient(ReturnClientOptions{BaseURL: endpoint,
+		PinnedCertSHA256: certSHA256, Signer: w.ReturnSigner, Binding: binding,
+		MaxResultBytes: w.Report.Limits.MaxPackBytes})
+	if err != nil {
+		return nil, err
+	}
+	return &workerReturnChannel{binding: binding, endpoint: endpoint, certSHA256: certSHA256, client: client}, nil
+}
+
+func (w *Worker) rememberReturnChannel(channel *workerReturnChannel) {
+	w.returnMu.Lock()
+	defer w.returnMu.Unlock()
+	if w.returnChannels == nil {
+		w.returnChannels = make(map[string]*workerReturnChannel)
+	}
+	if prior := w.returnChannels[channel.binding.Run]; prior != nil {
+		if prior == channel {
+			return
+		}
+		prior.client.Close()
+	}
+	w.returnChannels[channel.binding.Run] = channel
+}
+
+func (w *Worker) closeUnrememberedReturnChannel(channel *workerReturnChannel) {
+	w.returnMu.RLock()
+	remembered := w.returnChannels[channel.binding.Run] == channel
+	w.returnMu.RUnlock()
+	if !remembered {
+		channel.client.Close()
+	}
+}
+
+// returnChannelForTask restores a v3 channel after a serving-node restart.
+// The probe may already be in Seen, or its ref may have been retired; neither
+// is authority for an ambient URL. The offered task's signed ancestry keeps
+// the exact bootstrap, endpoint and TLS pin reachable without answering the
+// probe twice or trusting a moving configuration value.
+func (w *Worker) returnChannelForTask(ctx context.Context, tip ChainTip,
+	assignment Assignment) (*workerReturnChannel, error) {
+	w.returnMu.RLock()
+	prior := w.returnChannels[assignment.Run]
+	w.returnMu.RUnlock()
+	if prior != nil || assignment.Protocol != ChoreographyProtocolVersion {
+		return w.returnChannelFor(assignment)
+	}
+	if w.ReturnSigner == nil || w.Report.Limits.MaxManifestBytes <= 0 ||
+		w.Report.Limits.MaxPackBytes <= 0 || assignment.BootstrapOID == "" ||
+		assignment.GraphDigest == "" || assignment.Branch != tip.Branch || tip.OID == "" {
+		return nil, fmt.Errorf("execution: offered v3 task lacks retained return authority")
+	}
+	mailbox, ok := w.Mailbox.(*GitMailbox)
+	if !ok {
+		return nil, fmt.Errorf("execution: offered v3 task has no signed bootstrap reader")
+	}
+	view, err := mailbox.OpenCarriedAssignment(ctx, tip.OID, w.Report.Limits.MaxManifestBytes)
+	if err != nil {
+		return nil, fmt.Errorf("execution: offered v3 task differs from its signed carrier: %w", err)
+	}
+	if view == nil || !reflect.DeepEqual(view.Assignment, assignment) {
+		return nil, fmt.Errorf("execution: offered v3 task differs from its signed carrier")
+	}
+	bootstrap, err := mailbox.ReadChoreographyBootstrap(ctx, assignment.BootstrapOID,
+		w.Report.Limits.MaxManifestBytes, w.Report.Limits.MaxPackBytes)
+	if err != nil {
+		return nil, fmt.Errorf("execution: authenticating retained task bootstrap: %w", err)
+	}
+	binding := ChoreographyRunBinding{Run: assignment.Run, Generation: assignment.Generation,
+		PlanDigest: assignment.PlanDigest, GraphDigest: assignment.GraphDigest}
+	if bootstrap.Mode != "compilation" || bootstrap.ChoreographyRunBinding != binding ||
+		bootstrap.CoordinationEndpoint != w.Endpoint ||
+		bootstrap.ReturnEndpoint == "" || bootstrap.ReturnCertSHA256 == "" {
+		return nil, fmt.Errorf("execution: offered task has a different signed return identity")
+	}
+	channel, err := w.prepareReturnChannel(binding, bootstrap.ReturnEndpoint, bootstrap.ReturnCertSHA256)
+	if err != nil {
+		return nil, err
+	}
+	channel.bootstrapOID, channel.bootstrap = assignment.BootstrapOID, &bootstrap
+	w.rememberReturnChannel(channel)
+	return channel, nil
+}
+
+func (w *Worker) returnChannelFor(assignment Assignment) (*workerReturnChannel, error) {
+	w.returnMu.RLock()
+	channel := w.returnChannels[assignment.Run]
+	w.returnMu.RUnlock()
+	if channel == nil || channel.binding.Generation != assignment.Generation ||
+		channel.binding.PlanDigest != assignment.PlanDigest ||
+		assignment.Protocol == ChoreographyProtocolVersion &&
+			(channel.bootstrap == nil || channel.bootstrap.Protocol != ChoreographyProtocolVersion ||
+				channel.bootstrap.Mode != "compilation" ||
+				channel.bootstrapOID != assignment.BootstrapOID ||
+				assignment.GraphDigest != channel.binding.GraphDigest ||
+				channel.bootstrap.ChoreographyRunBinding != channel.binding ||
+				channel.bootstrap.CoordinationEndpoint != w.Endpoint) ||
+		assignment.Protocol == ProtocolVersion && channel.bootstrap != nil {
+		return nil, fmt.Errorf("execution: task has no matching signed preflight return identity")
+	}
+	return channel, nil
+}
+
+func (w *Worker) closeReturnChannels() {
+	w.returnMu.Lock()
+	defer w.returnMu.Unlock()
+	for _, channel := range w.returnChannels {
+		channel.client.Close()
+	}
+	w.returnChannels = nil
 }
 
 // carriedOutputs is what a result carries beside itself: the tree of the
@@ -1213,7 +1361,7 @@ func carriedOutputs(manifest *OutputManifest) []gitx.TreeEntry {
 // version, and this moment.
 func (w *Worker) formatReplyHeader(assignment Header) Header {
 	return Header{
-		Protocol:   ProtocolVersion,
+		Protocol:   assignment.Protocol,
 		Kind:       assignment.Kind,
 		Run:        assignment.Run,
 		PlanDigest: assignment.PlanDigest,

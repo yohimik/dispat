@@ -56,7 +56,8 @@ func TestExecutionMalformedObjectStreamCannotPublish(t *testing.T) {
 			assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode))
 			assert.Empty(t, executionReleasedPackages(res))
 			assert.Empty(t, executionReleaseTags(rig))
-			assert.Empty(t, rig.branches(), "the rejected transport was cleaned up")
+			assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
+				"the rejected output remains in a signed run history for recovery")
 			for _, run := range rig.runs() {
 				assert.False(t, strings.HasPrefix(run.Node, "probe-publish"))
 			}
@@ -96,8 +97,8 @@ func TestExecutionMalformedMailboxListingCannotStartRelease(t *testing.T) {
 }
 
 // TestExecutionMalformedTreeStreamCannotPublish verifies the tree metadata
-// boundary separately from blob framing: no partial or unbounded listing may
-// describe the output set a worker sends to its consumers.
+// boundary separately from blob framing. The worker reads the bootstrap tree
+// during preflight, so a corrupt listing is refused before any task starts.
 func TestExecutionMalformedTreeStreamCannotPublish(t *testing.T) {
 	for _, tc := range []struct{ name, output, want string }{
 		{"missing path", "100644 blob deadbeef 0\x00", "has no path"},
@@ -116,7 +117,11 @@ func TestExecutionMalformedTreeStreamCannotPublish(t *testing.T) {
 			assert.Contains(t, reply.Stdout+reply.Stderr, tc.want)
 			assert.Empty(t, executionReleasedPackages(res))
 			assert.Empty(t, executionReleaseTags(rig))
-			assert.Empty(t, rig.branches())
+			assert.True(t, harness.IsCodePresent(executionEvents(res), executionRefusalCode),
+				"the invalid bootstrap tree prevents authenticated preflight\nstdout:\n%s", res.Stdout)
+			assert.Zero(t, buildRuns(rig.repo), "no frame ran after a corrupt bootstrap tree")
+			assert.Empty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
+				"the run did not publish a runtime ledger after failed preflight")
 		})
 	}
 }
@@ -126,20 +131,18 @@ func TestExecutionMalformedTreeStreamCannotPublish(t *testing.T) {
 // length also bounds the subsequent streamed read, rather than trusting the
 // earlier measurement to describe the bytes that actually arrive.
 func TestExecutionInvalidMessageSizeCannotStartRelease(t *testing.T) {
-	for _, tc := range []struct{ name, size, want string }{
-		{"not numeric", "unknown", "not a number"},
-		{"negative", "-1", "is negative"},
-		{"above ceiling", "9223372036854775807", "oversize"},
-		{"shorter than content", "0", "oversize"},
-		{"longer than content", "1000000", "ended before its declared size"},
+	for _, tc := range []struct{ name, size string }{
+		{"not numeric", "unknown"},
+		{"negative", "-1"},
+		{"above ceiling", "9223372036854775807"},
+		{"shorter than content", "0"},
+		{"longer than content", "1000000"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// The refusal arrives as soon as the probe's answer is read, so the
-			// preflight bound only has to outlast a loaded machine reaching that
-			// read: a tighter one lets the deadline kill the faulted read first
-			// and report its own error instead of the size.
+			// A corrupt probe read cannot produce an authenticated node
+			// report. The first node refuses at the bounded preflight gate.
 			rig := newExecutionRig(t, func(cfg *models.File) {
-				cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 10}
+				cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 5}
 			})
 			worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 0)
 			fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*cat-file -s*", Output: tc.size})
@@ -147,7 +150,7 @@ func TestExecutionInvalidMessageSizeCannotStartRelease(t *testing.T) {
 			stopAll(t, []*executionWorker{worker})
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.Positive(t, fault.Matches())
-			assert.Contains(t, res.Stdout+res.Stderr, tc.want)
+			assert.True(t, harness.IsCodePresent(executionEvents(res), executionRefusalCode))
 			assert.Zero(t, buildRuns(rig.repo))
 			assert.Empty(t, rig.repo.TagList())
 		})

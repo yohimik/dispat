@@ -4,6 +4,7 @@
 package gitx
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
@@ -48,6 +49,23 @@ func TestTransportAtomicCreateAndAdvanceKeepTheOtherRefOnRejection(t *testing.T)
 	require.Equal(t, f.second, f.remoteOID(t, "refs/heads/"+one))
 	require.Equal(t, f.second, f.remoteOID(t, "refs/heads/"+two),
 		"a stale task lease cannot move its paired slot notice")
+}
+
+func TestImportTagAsBlobFromCarriesExactAnnotatedObjectWithBound(t *testing.T) {
+	f := newTransportFixture(t)
+	runGit(t, f.root, "tag", "-a", "pinned-release", "-m", "pinned annotation", f.second)
+	tagOID := strings.TrimSpace(runGit(t, f.root, "rev-parse", "refs/tags/pinned-release"))
+	destination := &LocalGitx{Dir: f.bare, Log: f.git.Log}
+	blobOID, size, err := destination.ImportTagAsBlobFrom(t.Context(), f.root, tagOID, 1<<20)
+	require.NoError(t, err)
+	require.Positive(t, size)
+	var content bytes.Buffer
+	plumbing := NewPlumbing(destination)
+	plumbing.ReadBlob(t.Context(), blobOID, &content, 1<<20)
+	require.NoError(t, plumbing.Err())
+	require.Contains(t, content.String(), "pinned annotation")
+	_, _, err = destination.ImportTagAsBlobFrom(t.Context(), f.root, tagOID, size-1)
+	require.ErrorIs(t, err, ErrTransportLimit)
 }
 
 func TestTransportAtomicPushRejectsDuplicatesAndOversizedBatchBeforeWriting(t *testing.T) {
@@ -109,4 +127,25 @@ func TestTransportListsOnlyBoundedExactRefs(t *testing.T) {
 	require.Error(t, err)
 	_, err = f.git.ListRemoteHeadsExact(ctx, f.bare, make([]string, MaxTransportBatch+1))
 	require.ErrorIs(t, err, ErrTransportLimit)
+}
+
+func TestFirstParentOIDsReplaysOnlyNewCommitsOldestFirst(t *testing.T) {
+	f := newTransportFixture(t)
+	ctx := t.Context()
+	commits := []string{f.first, f.second}
+	for range 4 {
+		runGit(t, f.root, "commit", "-q", "--allow-empty", "-m", "ledger step")
+		commits = append(commits, strings.TrimSpace(runGit(t, f.root, "rev-parse", "HEAD")))
+	}
+	all, err := f.git.FirstParentOIDs(ctx, commits[5], commits[0])
+	require.NoError(t, err)
+	require.Equal(t, commits[1:], all)
+	newest, err := f.git.FirstParentOIDs(ctx, commits[5], commits[4])
+	require.NoError(t, err)
+	require.Equal(t, commits[5:], newest)
+	empty, err := f.git.FirstParentOIDs(ctx, commits[5], commits[5])
+	require.NoError(t, err)
+	require.Empty(t, empty)
+	_, err = f.git.FirstParentOIDs(ctx, commits[5], strings.Repeat("a", 40))
+	require.Error(t, err)
 }

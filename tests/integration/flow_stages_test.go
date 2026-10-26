@@ -293,10 +293,18 @@ printf '%s %s %s\n' probe-tested "$DISPAT_PACKAGE" "$DISPAT_OUTPUT_TESTED_ON" >>
 			"%s's verify ran on a worker, as its build was pinned to", name)
 		assert.Equal(t, nodes[name], published[name], "%s's verify export reached its publication", name)
 	}
-	assert.Contains(t, res.Stdout, `"task":"assets:verify"`, "the frame travels as a task of its own")
+	assetTasks := map[string]string{}
+	for _, event := range executionEvents(res) {
+		if event.Str("message") == "task outcome" && event.Str("package") == "assets" {
+			assetTasks[event.Str("stage")] = event.Str("task")
+		}
+	}
+	assert.NotEmpty(t, assetTasks["verify"], "the custom stage has a canonical task identity")
+	assert.NotEqual(t, assetTasks["build"], assetTasks["verify"],
+		"the custom stage has a task distinct from its build")
 	assert.Contains(t, res.Stdout, `"label":"Verify the bundle"`, "the orchestrator logs the stage under its label")
 	assert.ElementsMatch(t,
 		[]string{"assets@0.1.0", "ui@0.1.0", "docs@0.1.0", "app@0.1.0"}, rig.repo.TagList())
-	assert.Empty(t, rig.branches(), "the run closed every coordination branch it created")
+	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 	stopAll(t, workers)
 }

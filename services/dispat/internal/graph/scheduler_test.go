@@ -52,6 +52,21 @@ func weighted(t *testing.T, budget int, weights map[string]int) (peakSlots, peak
 	return peakSlots, peakNodes
 }
 
+func TestCloneWithoutPassThroughKeepsDirectCompletion(t *testing.T) {
+	graph := NewScheduler[string]()
+	graph.AddEdge("build", "test")
+	graph.AddEdge("test", "publish")
+	clone := graph.Clone()
+	require.Nil(t, clone.isPassThrough)
+	require.Nil(t, clone.edgeSequences)
+	require.Equal(t, []string{"build"}, clone.Ready())
+	require.Equal(t, []string{"test"}, clone.Done("build"))
+	require.Equal(t, []string{"publish"}, clone.Done("test"))
+	require.Empty(t, clone.Done("publish"))
+	// Draining the copy must leave the compiled graph's frontier intact.
+	require.Equal(t, []string{"build"}, graph.Ready())
+}
+
 func TestDrainWeightedBudget(t *testing.T) {
 	// Four weight-2 nodes in a budget of 3: only one fits at a time, so the
 	// occupied slots never exceed the budget and the nodes serialise.

@@ -19,6 +19,8 @@ package app
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"time"
@@ -41,13 +43,35 @@ type WorkerOptions struct {
 	Version string
 }
 
+const workerIdentitySeedMissingErrorFormat = "execution.identityKeyEnv names %s and it is unset or empty: a late worker cannot authenticate its own join"
+const workerIdentitySeedInvalidErrorFormat = "execution.identityKeyEnv names %s but its value is not a canonical base64url Ed25519 seed"
+
+func (a *App) workerJoinIdentityKey(settings *config.ExecutionConfig) (ed25519.PrivateKey, error) {
+	if settings.IdentityKeyEnv == "" {
+		return nil, nil
+	}
+	encoded := os.Getenv(settings.IdentityKeyEnv)
+	if encoded == "" {
+		return nil, a.refuseToServe(execution.NewDiagnostic(
+			execution.CodeConfiguration, execution.CategoryConfiguration,
+			workerIdentitySeedMissingErrorFormat, settings.IdentityKeyEnv))
+	}
+	seed, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil || len(seed) != ed25519.SeedSize || base64.RawURLEncoding.EncodeToString(seed) != encoded {
+		return nil, a.refuseToServe(execution.NewDiagnostic(
+			execution.CodeConfiguration, execution.CategoryConfiguration,
+			workerIdentitySeedInvalidErrorFormat, settings.IdentityKeyEnv))
+	}
+	return ed25519.NewKeyFromSeed(seed), nil
+}
+
 // ServeTasks runs this node's serving loop until it is signalled or goes
 // idle.
 //
 // It is one method rather than a command of its own because everything it
 // needs is the App's: the configuration that says what this node is, the
-// logger the run reports through, and git. Nothing it does touches a plan, a
-// package or a release record, and that is the whole point of the role.
+// logger the run reports through, and git. The execution mode determines
+// whether it interprets the pinned graph; it never publishes release refs.
 func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 	settings := a.cfg.Execution
 	if settings == nil {
@@ -71,6 +95,10 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 			"execution.secretEnv names %s and it is unset or empty in this environment: a node that cannot authenticate its work cannot serve it",
 			settings.SecretEnv))
 	}
+	joinIdentityKey, err := a.workerJoinIdentityKey(settings)
+	if err != nil {
+		return err
+	}
 	root, err := resolveWorkerStateRoot(opts.StateDir)
 	if err != nil {
 		return a.refuseToServe(err)
@@ -92,7 +120,14 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 	if err != nil {
 		return a.refuseToServe(err)
 	}
+	nodeSlots, err := openSharedNodeSlots(settings.Name, settings.ResolveConcurrency())
+	if err != nil {
+		return a.refuseToServe(err)
+	}
 	git := &gitx.LocalGitx{Dir: state.Cache, Log: a.log}
+	report := execution.FormatNodeReport(opts.Version, git.GitVersion(ctx),
+		settings.ResolveConcurrency(), formatTransferLimits(settings))
+	report.AuthorityID = nodeSlots.AuthorityID()
 	worker := &execution.Worker{
 		Node:        settings.Name,
 		Endpoint:    endpoint,
@@ -102,11 +137,13 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 		// the one report a node makes whose size the node does not choose.
 		TransferTimeout: time.Duration(settings.ResolveTransfer().Timeout) * time.Second,
 		Mailbox:         execution.NewGitMailbox(endpoint, git, signer, a.log),
+		ReturnSigner:    signer,
+		JoinIdentityKey: joinIdentityKey,
+		NodeSlots:       nodeSlots,
 		Cache:           git,
 		Seen:            seen,
 		Log:             a.log,
-		Report: execution.FormatNodeReport(opts.Version, git.GitVersion(ctx),
-			settings.ResolveConcurrency(), formatTransferLimits(settings)),
+		Report:          report,
 		// The cache is dispensable by design, so opening it is the same
 		// operation as repairing it: a node whose folder was deleted under it
 		// makes one again and pays a fetch.
@@ -224,5 +261,6 @@ func formatTransferLimits(settings *config.ExecutionConfig) execution.TransferLi
 		MaxFiles:         transfer.MaxFiles,
 		MaxBytes:         transfer.MaxBytes,
 		MaxManifestBytes: transfer.MaxManifestBytes,
+		MaxPackBytes:     transfer.MaxPackBytes,
 	}
 }

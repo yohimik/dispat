@@ -3,18 +3,15 @@
 
 package integration
 
-// Goal 57: a real worker must acknowledge a withdrawal that wins the Git
-// lease while its already-finished build result is about to be reported.
+// Goal 57: a real worker must acknowledge a first-node Cancel that
+// wins while its already-finished build Result is being prepared for return.
 
 import (
-	"os"
 	"runtime"
-	"strings"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/pkg/models"
@@ -23,68 +20,54 @@ import (
 
 func TestExecutionWorkerAcknowledgesWithdrawalThatBeatsItsResult(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("the Git push rendezvous uses a POSIX shell")
-	}
-	cancelWait := 5
-	if harness.IsTinyGo() {
-		cancelWait = 20
+		t.Skip("the durable distributed backend and Git fault wrapper are unavailable on Windows")
 	}
 	rig := newExecutionRig(t, func(cfg *models.File) {
 		cfg.LogLevel = "debug"
 		cfg.Scripts["build"] = models.Script{executionRecordingScript}
 		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
 		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{
-			Preflight: 30, Task: 45, Cancel: cancelWait,
+			Preflight: 10, Task: 30, Cancel: 5,
 		}
 	})
-	barrier := newTerminalLeaseRendezvous(t)
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 20, barrier.env...)
-	isWorkerDone := false
-	release := rig.repo.StartReleaseEnv(rig.env(), "release")
-	isReleaseDone := false
-	t.Cleanup(func() {
-		_ = os.WriteFile(barrier.proceed, nil, 0o600)
-		if !isReleaseDone {
-			release.Signal(syscall.SIGINT)
-			_ = release.Wait()
+	pushReject, resultGate := harness.NewGitFaultChain(t,
+		harness.GitFault{Pattern: "*push*", Code: 128},
+		harness.GitFault{Pattern: "*commit-tree*dispat transport result*", Nth: 1, Hold: true})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60, pushReject.Env()...)
+	defer func() {
+		resultGate.Resume()
+		served := worker.stop(t)
+		t.Logf("worker stdout:\n%s\nstderr:\n%s", served.Stdout, served.Stderr)
+	}()
+	release := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
+	held := false
+	for until := time.After(30 * time.Second); !held; {
+		held = resultGate.IsHeld()
+		if held {
+			break
 		}
-		if !isWorkerDone {
-			worker.proc.Signal(syscall.SIGINT)
-			_ = worker.proc.Wait()
+		select {
+		case <-until:
+			resultGate.Resume()
+			result := release.Wait()
+			t.Fatalf("the Result preparation was not held; matches=%d stdout:\n%s\nstderr:\n%s",
+				resultGate.Matches(), result.Stdout, result.Stderr)
+		case <-time.After(25 * time.Millisecond):
 		}
-	})
-
-	require.True(t, waitForExecutionFile(barrier.entered, 30*time.Second),
-		"the worker did not reach its second build-branch push; trace: %s", readExecutionFile(barrier.trace))
+	}
 	branch := executionAwaitBranch(t, rig, "build")
-	assert.Equal(t, []string{"reservation", "assignment", "claim"}, executionChain(t, rig.mailbox, branch),
-		"the worker finished the command but its Result has not reached Git")
+	chain := executionChain(t, rig.mailbox, branch)
+	require.Contains(t, chain, "choreography-claim")
+	require.NotContains(t, chain, "choreography-result", "the held Result must not have landed")
 	release.Signal(syscall.SIGINT)
 	executionAwaitMessage(t, rig.mailbox, branch, "cancel")
-	cancelOID := executionTipOID(t, rig.mailbox, branch)
-	require.NotEmpty(t, cancelOID)
-	require.NoError(t, os.WriteFile(barrier.proceed, nil, 0o600))
-
+	resultGate.Resume()
 	result := release.Wait()
-	isReleaseDone = true
-	served := worker.stop(t)
-	isWorkerDone = true
-
-	require.NotEqual(t, 0, result.Code, "the interrupted release cannot publish\nstdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
-	ack, isAcknowledged := executionLine(result, "the withdrawn attempt was acknowledged")
-	require.True(t, isAcknowledged, "the real worker settled the result/cancel lease race\nstdout:\n%s\nworker:\n%s", result.Stdout, served.Stdout)
-	assert.Equal(t, true, ack["commandStarted"])
-	assert.Equal(t, "after", ack["phase"])
-	assert.Contains(t, served.Stdout, `"message":"cancellation acknowledged"`)
-	assert.Empty(t, rig.branches(), "the acknowledged attempt leaves no coordination branch")
-	assert.False(t, remoteHoldsLock(t, rig.origin), "the interrupted run releases its remote lock")
-	assert.Empty(t, executionReleaseTags(rig))
-	assert.Len(t, rig.runs(), 1, "the build ran once; a lost Result was not rerun")
-	assert.Len(t, strings.Fields(readExecutionFile(barrier.trace)), 3,
-		"the worker pushed Claim, lost the Result lease, then pushed Ack")
-}
-
-func readExecutionFile(path string) string {
-	contents, _ := os.ReadFile(path)
-	return string(contents)
+	require.NotEqual(t, 0, result.Code, "the interrupted release cannot publish: %s", result.Stdout)
+	requireChoreographyTaskChain(t, rig.mailbox, rig.branches(),
+		"choreography-claim", "cancel", "ack", "choreography-decision")
+	require.Equal(t, 1, len(rig.runs()), "the build ran once and was not reoffered")
+	require.Empty(t, executionReleaseTags(rig))
+	require.False(t, remoteHoldsLock(t, rig.origin))
+	require.Zero(t, pushReject.Matches(), "a peer attempted an engine Git push")
 }

@@ -12,6 +12,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAllTagSnapshotIncludesUnplannedNamesAndExactObjects(t *testing.T) {
+	raw := "core@1.0.0\taaaa\tbbbb\n" +
+		"unrelated-alpha\tcccc\t\n" +
+		LockTagName + "\tdddd\t\n"
+	got := parseAllTagSnapshot(raw)
+	require.Equal(t, TagSnapshot{
+		"core@1.0.0":      {Object: "aaaa", Peeled: "bbbb"},
+		"unrelated-alpha": {Object: "cccc"},
+	}, got)
+}
+
 func TestRelevantTagSnapshotRetainsExactReleaseAndAliasRefs(t *testing.T) {
 	const raw = "core@1.2.3\t1111111111111111111111111111111111111111\t\n" +
 		"v1\t2222222222222222222222222222222222222222\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +

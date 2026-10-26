@@ -80,28 +80,24 @@ func (w *scriptWork) resolveReachedReleases(covered []string) []*plan.Release {
 // The coordinator is answered even when the probe refused the pool, because it
 // already owns the probe branches it created and the caller's deferred close
 // is what deletes them.
-func (a *App) openSweepDispatch(ctx context.Context, work *scriptWork, covered []string) (*execution.Coordinator, error) {
+type sweepDispatchRequest struct {
+	work          *scriptWork
+	mode          string
+	onError       string
+	covered       []string
+	returnChannel *runReturnChannel
+	pinnedSources *execution.PinnedRunSources
+	pinnedInputs  *execution.PinnedRunInputs
+}
+
+func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchRequest) (*execution.Coordinator, error) {
 	if !a.cfg.Execution.IsDistributed() {
 		return nil, nil
 	}
-	// The digest names the plan every assignment of the sweep carries. A sweep
-	// covers the plan whole and releases nothing of it, so it is named with no
-	// release selection.
-	if err := a.recordFixedPlan(ctx, work.pl, ReleaseOptions{}); err != nil {
-		return nil, err
-	}
-	// A sweep takes no lock, so its links reach the release remote as it was
-	// resolved when the sweep started.
-	coordinator, err := a.newCoordinator(execution.FormatSweepGeneration(a.runID), nil, a.coordination)
-	if err != nil {
-		return nil, a.reportSweepRefusal(err)
-	}
-	if err := coordinator.Preflight(ctx, work.resolvePlatforms(covered)); err != nil {
-		return coordinator, a.reportSweepRefusal(err)
-	}
-	if err := a.openDispatch(ctx, coordinator, work.pl, work.runner); err != nil {
-		return coordinator, a.reportSweepRefusal(err)
-	}
+	work, covered, returnChannel := request.work, request.covered, request.returnChannel
+	work.roots, _ = a.cfg.FindRunOutputs(work.name)
+	// The probe and the reserved task refs name the same fixed sweep. Build the
+	// task list once, before preflight, and reuse it for initialization.
 	var tasks []execution.ReservationTask
 	for _, rel := range work.resolveReachedReleases(covered) {
 		space := rel.Pkg.Space
@@ -112,14 +108,101 @@ func (a *App) openSweepDispatch(ctx context.Context, work *scriptWork, covered [
 				space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0),
 		})
 	}
-	if err := coordinator.InitializeTasks(ctx, tasks); err != nil {
-		return coordinator, a.reportSweepRefusal(taskInitializationFailure(err))
+	if len(tasks) == 0 {
+		return nil, nil
+	}
+	graphDigest, err := execution.DigestSweepTasks(a.planDigest, work.name, tasks)
+	if err != nil {
+		return nil, a.reportSweepRefusal(err)
+	}
+	// A sweep takes no lock, so its links reach the release remote as it was
+	// resolved when the sweep started.
+	coordinator, err := a.newCoordinator(execution.FormatSweepGeneration(a.runID), nil, a.coordination)
+	if err != nil {
+		return nil, a.reportSweepRefusal(err)
+	}
+	_, _, _, completeGraphDigest, err := a.sweepChoreographyInventory(coordinator,
+		work, covered, tasks, request.onError, graphDigest)
+	if err != nil {
+		return coordinator, a.reportSweepRefusal(err)
+	}
+	coordinator.GraphDigest = completeGraphDigest
+	coordinator.Mode = request.mode
+	if returnChannel == nil {
+		return coordinator, a.reportSweepRefusal(execution.NewDiagnostic(
+			execution.CodeConfiguration, execution.CategoryConfiguration,
+			"distributed sweep has no return channel"))
+	}
+	coordinator.ReturnEndpoint = returnChannel.endpoint
+	coordinator.ReturnCertSHA256 = returnChannel.certPin
+	coordinator.PinnedSources = request.pinnedSources
+	coordinator.PinnedInputs = request.pinnedInputs
+	if err := a.prepareRunChoreographyBootstrap(ctx, coordinator); err != nil {
+		return coordinator, a.reportSweepRefusal(err)
+	}
+	if err := a.bindProbeReturnHandler(coordinator, returnChannel); err != nil {
+		return coordinator, a.reportSweepRefusal(err)
+	}
+	if err := coordinator.Preflight(ctx, work.resolvePlatforms(covered)); err != nil {
+		return coordinator, a.reportSweepRefusal(err)
+	}
+	if err := a.openDispatch(ctx, coordinator, work.pl, work.runner); err != nil {
+		return coordinator, a.reportSweepRefusal(err)
+	}
+	if len(covered) > 0 {
+		specs, budgets, err := sweepChoreographySpecs(work.pl, covered, tasks,
+			coordinator.ChoreographyNodes(), a.cfg.BuildConcurrency)
+		if err != nil {
+			return coordinator, a.reportSweepRefusal(err)
+		}
+		templates, err := compileSweepChoreographyTemplates(coordinator, work, specs)
+		if err != nil {
+			return coordinator, a.reportSweepRefusal(err)
+		}
+		onError := request.onError
+		if onError == "" {
+			onError = OnErrorSkip
+		}
+		policies := sweepChoreographyPackagePolicies(work.pl, covered, onError)
+		binding := execution.ChoreographyRunBinding{Run: coordinator.Run,
+			Generation: coordinator.Generation, PlanDigest: coordinator.PlanDigest}
+		digest, err := execution.DigestChoreographyLogicalGraph(execution.ChoreographyLogicalGraphInventory{
+			Binding: binding, AlgorithmVersion: coordinator.AlgorithmVersion,
+			SemanticGraphDigest: graphDigest, Tasks: specs,
+			Templates: templates, PackagePolicies: policies})
+		if err != nil {
+			return coordinator, a.reportSweepRefusal(err)
+		}
+		if digest != coordinator.GraphDigest {
+			return coordinator, a.reportSweepRefusal(execution.NewDiagnostic(
+				execution.CodeIntegrity, execution.CategoryIntegrity,
+				"sweep descriptors differ from signed complete logical graph"))
+		}
+		policy, err := newSweepOutcomeEvaluator(work.pl, covered, onError)
+		if err != nil {
+			return coordinator, a.reportSweepRefusal(err)
+		}
+		broker, err := a.initializeAndBindChoreography(ctx, choreographyBindOptions{
+			Coordinator: coordinator, ReturnChannel: returnChannel,
+			Tasks: specs, Templates: templates, PackagePolicies: policies,
+			SemanticGraphDigest: graphDigest, Budgets: budgets,
+			OutcomePolicy: policy,
+			ResolveBindingsFactory: func(persist *execution.GitChoreographyPersist,
+				ledgerRootOID string) (func(context.Context, string, string) (execution.ChoreographyTaskBindings, error), error) {
+				return a.newSweepChoreographyBindingCache(sweepChoreographyBindingCacheOptions{
+					Coordinator: coordinator, Work: work, Tasks: specs,
+					Persist: persist, LedgerRootOID: ledgerRootOID})
+			},
+		})
+		if err != nil {
+			return coordinator, a.reportSweepRefusal(err)
+		}
+		work.broker = broker
 	}
 	work.coordinator = coordinator
 	// Read from the entry configuration alone, as §28.10 requires: an imported
 	// or linked repository's own declaration is validated where its file is
 	// read and never consulted.
-	work.roots, _ = a.cfg.FindRunOutputs(work.name)
 	return coordinator, nil
 }
 

@@ -34,6 +34,7 @@ func TestEveryTransitionHasOneWriter(t *testing.T) {
 		{From: MessageClaim, To: MessageResult, By: PartyWorker},
 		{From: MessageAssignment, To: MessageCancel, By: PartyOrchestrator},
 		{From: MessageClaim, To: MessageCancel, By: PartyOrchestrator},
+		{From: choreographyClaimKind, To: MessageCancel, By: PartyOrchestrator},
 		{From: MessageReady, To: MessageCancel, By: PartyOrchestrator},
 		{From: MessageCancel, To: MessageAck, By: PartyWorker},
 	}

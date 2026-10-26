@@ -131,17 +131,69 @@ func (c *Coordinator) prepareProviderOutputs(ctx context.Context, task string,
 	return nil
 }
 
+// requirePreparedProviderOutputs only observes graph-predecessor preparation.
+// A v3 consumer must never start a provider recursively while holding its own
+// graph budget or physical placement; the effective graph runs providers as
+// separate vertices before this stage is admitted.
+func (c *Coordinator) requirePreparedProviderOutputs(task string,
+	request release.StageRequest) error {
+	consumer := request.Release.Pkg.Name
+	for _, provider := range c.dispatch.Inputs(consumer) {
+		if !provider.IsPrepared {
+			continue
+		}
+		c.preparing.Lock()
+		pending := c.preparations[provider.Package]
+		c.preparing.Unlock()
+		if pending == nil {
+			return fmt.Errorf("execution: prepared provider %s did not run before %s", provider.Package, task)
+		}
+		select {
+		case <-pending.done:
+			if pending.err != nil {
+				return fmt.Errorf("execution: prepared provider %s failed before %s: %w", provider.Package, task, pending.err)
+			}
+		default:
+			return fmt.Errorf("execution: prepared provider %s is still running when %s became ready", provider.Package, task)
+		}
+	}
+	return nil
+}
+
 // ensurePrepared builds one provider this run does not release, once, however
 // many consumers ask for it and however many ask at the same moment.
-func (c *Coordinator) ensurePrepared(ctx context.Context, packageName string) error {
+func (c *Coordinator) ensurePrepared(ctx context.Context, packageName string) (err error) {
 	pending, isOwned := c.claimPreparation(packageName)
 	if !isOwned {
 		return pending.await(ctx, packageName)
 	}
+	defer func() {
+		if value := recover(); value != nil {
+			pending.err = fmt.Errorf("preparing provider %s panicked: %v", packageName, value)
+		}
+		if pending.err != nil && c.choreographyBroker != nil {
+			settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), release.RecordTimeout)
+			if blockErr := c.BlockPreparedTask(settleCtx, packageName); blockErr != nil {
+				pending.err = fmt.Errorf("%w; signed prepared finality: %v", pending.err, blockErr)
+			}
+			cancel()
+		}
+		c.rememberPreparation(packageName, pending)
+		close(pending.done)
+		err = pending.err
+	}()
 	pending.node, pending.err = c.prepareProvider(ctx, packageName)
-	c.rememberPreparation(packageName, pending)
-	close(pending.done)
 	return pending.err
+}
+
+// ExecutePreparedTask is the effective graph's explicit provider vertex. It
+// uses the same once-future as every consumer, so a prepared provider is
+// executed and settled exactly once before its consumer can reserve capacity.
+func (c *Coordinator) ExecutePreparedTask(ctx context.Context, packageName string) error {
+	if c == nil || packageName == "" {
+		return fmt.Errorf("execution: prepared task has no coordinator or package")
+	}
+	return c.ensurePrepared(ctx, packageName)
 }
 
 // claimPreparation answers the future for one provider, and whether this
@@ -227,10 +279,29 @@ func (c *Coordinator) prepareProvider(ctx context.Context, packageName string) (
 	// A preparation is the provider's build frame, so it reads, produces and
 	// is placed as the build does.
 	prepared.Request.Descriptor = release.BuildStage()
-	if err := c.prepareProviderOutputs(ctx, task, prepared.Request); err != nil {
-		return "", err
+	var prerequisiteErr error
+	if c.choreographyBroker != nil {
+		prerequisiteErr = c.requirePreparedProviderOutputs(task, prepared.Request)
+	} else {
+		prerequisiteErr = c.prepareProviderOutputs(ctx, task, prepared.Request)
+	}
+	if prerequisiteErr != nil {
+		return "", prerequisiteErr
 	}
 	space := prepared.Request.Release.Pkg.Space
+	if c.choreographyBroker != nil {
+		_, runErr := c.runChoreographyPrepared(ctx, task, prepared.Request)
+		if _, accepted := c.choreographyPending.Load(task); accepted {
+			// An unreleasing provider has task finality but no release-package
+			// outcome. Its failed terminal is a required-input blocker in the
+			// shared broker/frontier graph.
+			settleErr := c.SettleChoreographyTask(ctx, task, "")
+			if settleErr != nil {
+				return c.Local.Name, fmt.Errorf("settling prepared provider %s: %w", packageName, settleErr)
+			}
+		}
+		return c.Local.Name, runErr
+	}
 	node := ""
 	_, err = c.placeTask(ctx, task,
 		ResolveStagePlacement(StageBuild, space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0),

@@ -8,6 +8,7 @@ package release
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"maps"
@@ -24,6 +25,19 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/graph"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/script"
+)
+
+const (
+	delegatedNoClaimProofErrorFormat    = "proving no claim for task %s: %w"
+	delegatedNoClaimAbsentErrorFormat   = "delegated task %s has no proven no-claim finality"
+	delegatedFailureEvidenceErrorFormat = "release: failed no-claim task %s lacks typed first-node failure evidence"
+	delegatedBlockedRecorderErrorFormat = "release: externally blocked task %s has no blocked-task recorder"
+	delegatedNoClaimPersistErrorFormat  = "persisting no-claim task %s: %w"
+	delegatedOriginalFailureErrorFormat = "%w; original task failure: %w"
+	delegatedCausalFinalityErrorFormat  = "release: failed no-claim task %s has no settled causal sibling"
+	acceptedCausalFinalityErrorFormat   = "release: failed accepted task %s has no settled causal sibling"
+	unresolvedStageOfferErrorFormat     = "release: delegated task %s may still have an accepted claim; its package and release lock remain unsettled: %w"
+	unresolvedStageMissingErrorText     = "delegated stage returned without verified finality"
 )
 
 // Status is the terminal state of a package release.
@@ -207,6 +221,59 @@ type Reverterx interface {
 type Executor struct {
 	BuildConcurrency   int
 	PublishConcurrency int
+	// LocalTaskLifecycle is optional shared physical-node capacity. In a
+	// no-links run it covers every command task; with distributed placement it
+	// covers only first-node native, publish and record work. Begin happens
+	// before admission effects and Finish after package outcome settlement.
+	LocalTaskLifecycle func(context.Context, string) (func(context.Context, string) error, error)
+	// LocalOutcomeHookLifecycle holds first-node physical capacity only for a
+	// revert/onFail/onSkip tail whose package has no first-node task lease left.
+	// A delegated frame never holds a first-node slot while its peer runs.
+	LocalOutcomeHookLifecycle func(context.Context, string, string) (func(context.Context, string) error, error)
+	// LocalOutcomeLeaseReusable proves a stopped first-local Stage still holds
+	// its physical slot after accepted Result. It is queried only at a rare
+	// package outcome tail, after all same-package commands have stopped.
+	LocalOutcomeLeaseReusable func(context.Context, string) (bool, error)
+	// BeginFirstOnlyTask claims an admitted branch-bearing native task before
+	// its first hook or source effect. Its settlement runs after sibling and
+	// package settlement while the physical LocalTaskLifecycle lease is held.
+	BeginFirstOnlyTask func(context.Context, string) (func(context.Context, bool, PackageOutcome) error, error)
+	// BeginLocalAuthorityTask claims publish and record on their precreated
+	// task refs before any hook, registry call, tag, commit or Git push.
+	BeginLocalAuthorityTask func(context.Context, string) error
+	// ReserveFirstOnlyTask charges first-node placement before physical node
+	// capacity for native and branchless publish/record work. Its release
+	// follows exact ticket, local-authority or Blocked finality.
+	ReserveFirstOnlyTask func(context.Context, string) (func(), error)
+	// BlockFirstOnlyTask records a denied native task after its skip effects.
+	BlockFirstOnlyTask func(context.Context, string, string, PackageOutcome) error
+	// BlockDelegatedTask records a placed Stage denied before it could offer a
+	// frame. It has no accepted Result for TaskOutcomeSettled to decide.
+	BlockDelegatedTask func(context.Context, string, string, PackageOutcome) error
+	// BlockDelegatedFailure signs first-node failed preclaim work only after
+	// an exact inert reservation is proven, using a typed part and error digest.
+	BlockDelegatedFailure func(context.Context, string, DelegatedFailureEvidence, PackageOutcome) error
+	// ProveDelegatedNoClaim authenticates an inert task reservation when a
+	// first-node prelude failed before Stage could return an outcome. False
+	// leaves an accepted or ambiguous claim fenced for exact settlement.
+	ProveDelegatedNoClaim func(context.Context, string) (string, bool, error)
+	// LocalAuthoritySettled records a first-node publish or record task only
+	// after its native effect, source records, hooks and package settlement.
+	// The callback must bind exact publication/record identities; a status
+	// string alone is not proof of an external effect.
+	LocalAuthoritySettled func(context.Context, string, *plan.Release, bool, PackageOutcome) error
+	// BlockLocalAuthorityTask records a branchless publish or record vertex
+	// denied before publication, when no effect identity exists to attest.
+	BlockLocalAuthorityTask func(context.Context, string, string, PackageOutcome) error
+	// PackageOutcomeSettled persists the actual package result before the
+	// task's outgoing graph edges become ready. It runs outside the result
+	// mutex; a failure cancels further task dispatch rather than letting a
+	// consumer infer success from an unrecorded provider outcome.
+	PackageOutcomeSettled func(context.Context, string, string, PackageOutcome) error
+	// TaskOutcomeSettled completes each task after sibling effects and any
+	// package result are durable. The outcome is empty until this task actually
+	// settles its package; outgoing graph edges wait for this callback.
+	TaskOutcomeSettled func(context.Context, string, PackageOutcome) error
 	Runner             script.Runnerx
 	Tagger             Taggerx
 	Recorders          []ReleaseRecorderx // run in order after each successful publish
@@ -214,6 +281,9 @@ type Executor struct {
 	// before its publish command. Composed workspaces use it to revalidate the
 	// fixed fleet snapshot after arbitrary user hook code has run.
 	BeforePublish func(context.Context, *plan.Release) error
+	// AfterNativeFrame checks prepared inputs while the native writer's
+	// repository and snapshot guards are still held.
+	AfterNativeFrame func(context.Context, string, string) error
 	// AcquirePublish serializes publish and recording for packages which share
 	// mutable repository state. Its release function is held through the
 	// publish tail and called on every success or failure path.
@@ -260,7 +330,11 @@ type Executor struct {
 	// task graph, the budgets and the order are the same either way, and the
 	// only thing it decides is where one frame's commands run. See remote.go.
 	Remote Remotex
-	Log    zerolog.Logger
+	// PreparedTask executes one explicit unreleasing-provider vertex in a
+	// compiled distributed graph. Its outcome is retained by the coordinator
+	// for the consumer's later admission; unrelated packages still progress.
+	PreparedTask func(context.Context, PreparedTaskSpec) error
+	Log          zerolog.Logger
 }
 
 type taskKind uint8
@@ -307,6 +381,8 @@ const (
 	taskPassBuild
 	taskPassPublish
 	taskPassBlock
+	// taskPrepared builds an unreleasing provider before its consumers.
+	taskPrepared
 )
 
 func (k taskKind) String() string {
@@ -319,6 +395,8 @@ func (k taskKind) String() string {
 		return "record"
 	case taskPassBuild, taskPassPublish, taskPassBlock:
 		return "pass"
+	case taskPrepared:
+		return "prepare"
 	}
 	return stageOf(k).Name
 }
@@ -424,9 +502,24 @@ func (s Sequence) Run(ctx context.Context) error {
 // packages are skipped (unless they have a release reason of their own) and
 // independent packages continue.
 func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
+	results, _ := e.runWithCompiledGraph(ctx, p, nil)
+	return results
+}
+
+// RunCompiled drains exactly the graph authenticated during preflight. The
+// plan pointer and digest belong to that compilation, so a caller cannot
+// substitute a later plan after remote nodes accepted its graph identity.
+func (e *Executor) RunCompiled(ctx context.Context, p *plan.Plan, compiled *CompiledTaskGraph) (map[string]*Result, error) {
+	if compiled == nil || compiled.plan != p {
+		return nil, fmt.Errorf("release: compiled task graph does not belong to this plan")
+	}
+	return e.runWithCompiledGraph(ctx, p, compiled)
+}
+
+func (e *Executor) runWithCompiledGraph(ctx context.Context, p *plan.Plan, compiled *CompiledTaskGraph) (map[string]*Result, error) {
 	results, changed := newReleasingResults(p)
 	if len(results) == 0 {
-		return results
+		return results, nil
 	}
 
 	// The workspace listing depends only on the plan, never on how the run
@@ -434,8 +527,15 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 	// environment.
 	wsVars := WorkspaceEnv(p, e.Log)
 	logins := newSpaceLogins(p)
-	plans := newStagePlans(p, changed)
-	sched, publishReach := e.buildTaskGraph(p, changed, plans)
+	var plans map[string]*stagePlan
+	var sched *graph.Scheduler[task]
+	var publishReach *stageReach
+	if compiled != nil {
+		plans, sched, publishReach = compiled.plans, compiled.scheduler.Clone(), compiled.blocking
+	} else {
+		plans = newStagePlans(p, changed)
+		sched, publishReach = e.buildTaskGraph(p, changed, plans)
+	}
 
 	// The tasks run under a context of their own, so that a task that
 	// panicked can stop the rest of the graph without cancelling the run that
@@ -453,13 +553,26 @@ func (e *Executor) Run(ctx context.Context, p *plan.Plan) map[string]*Result {
 		exports:             make(map[task][]plan.Output),
 		failedTasks:         make(map[task]bool),
 		inFlight:            make(map[string]int, len(changed)),
-		outcomes:            make(map[string]*pendingOutcome)}
+		outcomes:            make(map[string]*pendingOutcome),
+		emittedOutcomes:     make(map[string]PackageOutcome),
+		settledAt:           make(map[string]task),
+		outcomeFlight:       make(map[string]chan struct{}),
+		deadWait:            make(map[string]chan struct{})}
+	if compiled != nil {
+		r.prepared = compiled.prepared
+	}
 
 	r.prepareNativeWrites(ctx, changed)
 	if err := r.drain(tasks, sched, changed); err != nil {
 		r.reportStopped(ctx, tasks, err)
 	}
-	return results
+	r.mu.Lock()
+	outcomeErr := r.outcomeErr
+	r.mu.Unlock()
+	if outcomeErr != nil {
+		return results, outcomeErr
+	}
+	return results, nil
 }
 
 // newReleasingResults starts one Result for every package the plan releases
@@ -629,18 +742,42 @@ func (r *run) drain(tasks context.Context, sched *graph.Scheduler[task], changed
 	// budget — almost always 1 — because its whole reason to exist is
 	// serialising lock file regeneration. Draining per class keeps the budgets independent, so
 	// a stalled stage never blocks another's.
-	budgets := map[StageBudget]int{
-		BudgetBuild:    r.BuildConcurrency,
-		BudgetPublish:  r.PublishConcurrency,
-		BudgetSyncLock: syncLockBudget(r.plan, changed),
+	budgets := executionBudgetCapacities(r.plan, changed, r.BuildConcurrency, r.PublishConcurrency)
+	// A compiled delegated task owns no node or run execution budget while it
+	// observes its signed task ref. Bound observers by the finite graph size.
+	budgets[BudgetPendingExternal] = sched.Len()
+	stageBudget := func(t task) StageBudget {
+		if t.kind == taskPrepared {
+			if r.Remote != nil {
+				if pending, ok := r.Remote.(interface{ IsPendingExternalStage(string) bool }); ok &&
+					pending.IsPendingExternalStage(taskGraphID(t)) {
+					return BudgetPendingExternal
+				}
+			}
+			return BudgetBuild
+		}
+		stage := r.plans[t.pkg].stage(t)
+		if stage.Placement == PlacementByBuild && !stage.IsObserving && r.Remote != nil {
+			if pending, ok := r.Remote.(interface{ IsPendingExternalStage(string) bool }); ok &&
+				pending.IsPendingExternalStage(taskGraphID(t)) {
+				return BudgetPendingExternal
+			}
+		}
+		return stage.Budget
 	}
 	return graph.Drain(tasks, sched,
-		func(t task) StageBudget { return r.plans[t.pkg].stage(t).Budget },
+		stageBudget,
 		func(b StageBudget) int { return budgets[b] },
 		// A package's configured weight is how many stage slots its tasks
 		// occupy. syncLock keeps the ordinary cost: its budget exists to
 		// serialise lock-file writers, not to price packages.
 		func(t task) int {
+			if stageBudget(t) == BudgetPendingExternal {
+				return 1
+			}
+			if t.kind == taskPrepared {
+				return r.prepared[t].Weight
+			}
 			pkg := r.plan.Releases[t.pkg].Pkg
 			switch r.plans[t.pkg].stage(t).Budget {
 			case BudgetPublish:
@@ -674,7 +811,7 @@ func (r *run) reportStopped(ctx, tasks context.Context, err error) {
 	case ctx.Err() != nil:
 		r.Log.Warn().Msg("run interrupted: remaining packages cancelled; completed releases keep their records")
 	default:
-		r.Log.Error().Err(err).Msg("task graph stalled")
+		r.Log.Error().Err(err).AnErr("stopCause", context.Cause(tasks)).Msg("task graph stalled")
 	}
 }
 
@@ -753,8 +890,20 @@ type run struct {
 	// nothing to act on, and an admission asks no closure at all.
 	isAnyDead bool
 	results   map[string]*Result
-	mu        sync.Mutex
-	started   map[string]time.Time
+	// emittedOutcomes deduplicates package settlements when multiple stages
+	// of one release finish concurrently. A raw task failure is not emitted
+	// until Result actually changes to a settled status.
+	emittedOutcomes map[string]PackageOutcome
+	settledAt       map[string]task
+	causalTaskDone  map[string]chan struct{}
+	prepared        map[task]PreparedTaskSpec
+	// An outgoing edge cannot leave a task whose package settlement is still
+	// being persisted, or whose in-flight sibling still owns its checkout.
+	outcomeFlight map[string]chan struct{}
+	deadWait      map[string]chan struct{}
+	outcomeErr    error
+	mu            sync.Mutex
+	started       map[string]time.Time
 	// The native auto-versioning inputs, built once in Run when any releasing
 	// package's space enables it: the manifest scanner and the workspace's
 	// manifest-name and folder indexes (see workspaceNames).
@@ -786,7 +935,10 @@ type run struct {
 	// package owes once its last running task has ended, so a folder is never
 	// restored under a stage that is still writing it.
 	inFlight map[string]int
-	outcomes map[string]*pendingOutcome
+	// activePhysical counts leases already held on this first node. A package
+	// outcome tail reuses one instead of waiting for its own capacity-1 slot.
+	activePhysical map[string]int
+	outcomes       map[string]*pendingOutcome
 	// touched (guarded by mu) records the packages a hook, a command or a
 	// native step ran for, which is what a skip restores the folder of: a
 	// task that ran nothing wrote nothing.
@@ -837,21 +989,367 @@ func (r *run) enter(pkg string) {
 	r.inFlight[pkg]++
 }
 
+// recordSettlement is called with mu held at the Result status transition,
+// not at the later last-sibling callback. That distinction preserves the
+// exact task which caused an early failure beside a still-running stage.
+func (r *run) recordSettlement(t task) {
+	if r.settledAt == nil {
+		r.settledAt = make(map[string]task)
+	}
+	r.settledAt[t.pkg] = t
+}
+
 // finishTask ends one task: it remembers what the task could see and
 // exported, and, as the package's last running task, settles the outcome the
 // package owes.
 func (tc *taskCtx) finishTask(ctx context.Context, res *Result) {
+	if tc.unresolvedEffect {
+		// A signed offer may still own a running command, or a native ticket's
+		// Claim outcome may be unknown. Neither package cleanup nor task finality
+		// can be inferred from the local call returning. Retain its capacity and
+		// let the first node reconcile exact signed history before another run.
+		tc.mu.Lock()
+		tc.inFlight[tc.t.pkg]--
+		tc.mu.Unlock()
+		return
+	}
 	tc.mu.Lock()
 	tc.exports[tc.t] = tc.rel.Outputs
 	tc.inFlight[tc.t.pkg]--
 	owed := tc.outcomes[tc.t.pkg]
-	if tc.inFlight[tc.t.pkg] > 0 || owed == nil {
-		tc.mu.Unlock()
+	status := resultPackageOutcome(res)
+	cause := tc.settledAt[tc.t.pkg]
+	if cause.pkg == "" {
+		cause = tc.t
+	}
+	var causalDone chan struct{}
+	if status == OutcomeFailed && tc.TaskOutcomeSettled != nil {
+		if tc.causalTaskDone == nil {
+			tc.causalTaskDone = make(map[string]chan struct{})
+		}
+		causalDone = tc.causalTaskDone[tc.t.pkg]
+		if causalDone == nil {
+			causalDone = make(chan struct{})
+			tc.causalTaskDone[tc.t.pkg] = causalDone
+		}
+	}
+	var emit PackageOutcome
+	var waitFor, closeDead, closeFlight chan struct{}
+	if tc.outcomeFlight != nil {
+		waitFor = tc.outcomeFlight[tc.t.pkg]
+	}
+	// A dead/cancelled package still owes any in-flight sibling a chance to
+	// stop before its checkout is restored. Publication is already durable at
+	// its status flip and can be observed while warn-only stages continue.
+	settledHere := status == OutcomePublished || tc.inFlight[tc.t.pkg] == 0
+	if status != OutcomePending && status != OutcomePublished && tc.inFlight[tc.t.pkg] > 0 {
+		if tc.deadWait == nil {
+			tc.deadWait = make(map[string]chan struct{})
+		}
+		if tc.deadWait[tc.t.pkg] == nil {
+			tc.deadWait[tc.t.pkg] = make(chan struct{})
+		}
+		waitFor = tc.deadWait[tc.t.pkg]
+	}
+	if tc.inFlight[tc.t.pkg] == 0 && tc.deadWait != nil {
+		closeDead = tc.deadWait[tc.t.pkg]
+		delete(tc.deadWait, tc.t.pkg)
+	}
+	if (tc.PackageOutcomeSettled != nil || tc.TaskOutcomeSettled != nil) &&
+		status != OutcomePending && settledHere &&
+		tc.emittedOutcomes[tc.t.pkg] != status {
+		if tc.emittedOutcomes == nil {
+			tc.emittedOutcomes = make(map[string]PackageOutcome)
+		}
+		tc.emittedOutcomes[tc.t.pkg] = status
+		emit = status
+		if tc.outcomeFlight == nil {
+			tc.outcomeFlight = make(map[string]chan struct{})
+		}
+		closeFlight = make(chan struct{})
+		tc.outcomeFlight[tc.t.pkg] = closeFlight
+		waitFor = nil
+	}
+	settleOwed := tc.inFlight[tc.t.pkg] == 0 && owed != nil
+	if settleOwed {
+		delete(tc.outcomes, tc.t.pkg)
+	}
+	tc.mu.Unlock()
+	if causalDone != nil && cause == tc.t {
+		defer close(causalDone)
+	}
+	defer func() {
+		if closeFlight != nil {
+			close(closeFlight)
+		}
+		if closeDead != nil {
+			close(closeDead)
+		}
+	}()
+	if settleOwed {
+		tc.run.settleOutcome(ctx, owed)
+	}
+	if emit != "" && tc.PackageOutcomeSettled != nil {
+		// Revert and the outcome hook finish before a remote peer can observe
+		// settlement and begin work that reads this package's checkout.
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecordTimeout)
+		defer cancel()
+		if err := persistPackageOutcome(settleCtx, tc.PackageOutcomeSettled,
+			tc.t.pkg, taskGraphID(cause), emit); err != nil {
+			tc.Log.Error().Err(err).Str("package", tc.t.pkg).Msg("package outcome could not be persisted")
+			wrapped := fmt.Errorf("persisting package %s outcome: %w", tc.t.pkg, err)
+			tc.mu.Lock()
+			if tc.outcomeErr == nil {
+				tc.outcomeErr = wrapped
+			}
+			tc.mu.Unlock()
+			tc.stop(wrapped)
+			return
+		}
+	}
+	// Package cleanup and its signed outcome precede task finality. Wake a
+	// causal failed sibling now: the last sibling may itself need to wait for
+	// that sibling's terminal before signing its own noncausal Blocked event.
+	if closeFlight != nil {
+		close(closeFlight)
+		closeFlight = nil
+	}
+	if closeDead != nil {
+		close(closeDead)
+		closeDead = nil
+	}
+	if waitFor != nil {
+		select {
+		case <-waitFor:
+		case <-ctx.Done():
+			// A cancelled wait does not establish that a parallel sibling has
+			// stopped. Keep the task claim unresolved for recovery.
+			return
+		}
+	}
+	if tc.firstOnlyFinish != nil || tc.firstOnlyBlocked != "" {
+		var taskOutcome PackageOutcome
+		if status != OutcomePending && cause == tc.t {
+			taskOutcome = status
+		}
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecordTimeout)
+		defer cancel()
+		var err error
+		if tc.firstOnlyFinish != nil {
+			tc.mu.Lock()
+			failed := tc.failedTasks[tc.t]
+			tc.mu.Unlock()
+			err = persistFirstOnlyTask(func() error {
+				return tc.firstOnlyFinish(settleCtx, !tc.firstOnlyFailed && !failed && ctx.Err() == nil, taskOutcome)
+			})
+		} else if tc.blockUnadmittedTask != nil {
+			err = persistFirstOnlyTask(func() error {
+				return tc.blockUnadmittedTask(settleCtx, taskGraphID(tc.t), tc.firstOnlyBlocked, taskOutcome)
+			})
+		}
+		if err != nil {
+			wrapped := fmt.Errorf("persisting first-only task %s: %w", taskGraphID(tc.t), err)
+			tc.Log.Error().Err(wrapped).Str("task", taskGraphID(tc.t)).
+				Msg("first-only task finality could not be persisted")
+			tc.mu.Lock()
+			if tc.outcomeErr == nil {
+				tc.outcomeErr = wrapped
+			}
+			tc.mu.Unlock()
+			tc.stop(wrapped)
+		} else {
+			tc.firstOnlySettled = true
+		}
 		return
 	}
-	delete(tc.outcomes, tc.t.pkg)
-	tc.mu.Unlock()
-	tc.run.settleOutcome(ctx, owed)
+	if tc.localAuthorityAdmitted && tc.LocalAuthoritySettled != nil {
+		var taskOutcome PackageOutcome
+		if status != OutcomePending && cause == tc.t {
+			taskOutcome = status
+		}
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecordTimeout)
+		defer cancel()
+		tc.mu.Lock()
+		failed := tc.failedTasks[tc.t]
+		recordBlocked := res.RecordBlocked
+		tc.mu.Unlock()
+		err := persistFirstOnlyTask(func() error {
+			return tc.LocalAuthoritySettled(settleCtx, taskGraphID(tc.t), tc.rel,
+				!tc.firstOnlyFailed && !failed && !recordBlocked && ctx.Err() == nil, taskOutcome)
+		})
+		if err != nil {
+			wrapped := fmt.Errorf("persisting local authority task %s: %w", taskGraphID(tc.t), err)
+			tc.Log.Error().Err(wrapped).Str("task", taskGraphID(tc.t)).
+				Msg("local authority finality could not be persisted")
+			tc.mu.Lock()
+			if tc.outcomeErr == nil {
+				tc.outcomeErr = wrapped
+			}
+			tc.mu.Unlock()
+			tc.stop(wrapped)
+		} else {
+			tc.localAuthoritySettled = true
+		}
+		return
+	}
+	if tc.noClaim == nil && tc.firstOnlyFailed && tc.TaskOutcomeSettled != nil &&
+		tc.ProveDelegatedNoClaim != nil && tc.Remote != nil &&
+		tc.stage.Placement == PlacementByBuild && !tc.stage.IsObserving {
+		proveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecordTimeout)
+		blocker, proven, err := tc.ProveDelegatedNoClaim(proveCtx, taskGraphID(tc.t))
+		cancel()
+		if err != nil {
+			wrapped := fmt.Errorf(delegatedNoClaimProofErrorFormat, taskGraphID(tc.t), err)
+			tc.Log.Error().Err(wrapped).Str("task", taskGraphID(tc.t)).
+				Msg("task finality could not be persisted")
+			tc.stop(wrapped)
+			return
+		}
+		if proven {
+			tc.noClaim = &NoClaimFinality{Blocker: blocker}
+		}
+	}
+	if tc.noClaim != nil {
+		if tc.noClaim.Blocker == "" {
+			err := fmt.Errorf(delegatedNoClaimAbsentErrorFormat, taskGraphID(tc.t))
+			tc.Log.Error().Err(err).Str("task", taskGraphID(tc.t)).
+				Msg("task finality could not be persisted")
+			tc.stop(err)
+			return
+		}
+		var taskOutcome PackageOutcome
+		if status != OutcomePending && cause == tc.t {
+			taskOutcome = status
+		}
+		if tc.noClaim.Blocker == tc.t.pkg && taskOutcome == "" && status == OutcomeFailed {
+			if causalDone == nil {
+				tc.stop(fmt.Errorf(delegatedCausalFinalityErrorFormat, taskGraphID(tc.t)))
+				return
+			}
+			select {
+			case <-causalDone:
+			case <-ctx.Done():
+				return
+			}
+			tc.mu.Lock()
+			outcomeErr := tc.outcomeErr
+			tc.mu.Unlock()
+			if outcomeErr != nil || ctx.Err() != nil {
+				return
+			}
+		}
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecordTimeout)
+		defer cancel()
+		if tc.noClaim.SignedTerminal {
+			if tc.TaskOutcomeSettled == nil {
+				tc.stop(fmt.Errorf(delegatedBlockedRecorderErrorFormat, taskGraphID(tc.t)))
+				return
+			}
+			if err := persistTaskOutcome(settleCtx, tc.TaskOutcomeSettled,
+				taskGraphID(tc.t), taskOutcome); err != nil {
+				tc.stop(fmt.Errorf(delegatedNoClaimPersistErrorFormat, taskGraphID(tc.t), err))
+			}
+			return
+		}
+		write := func() error {
+			if tc.noClaim.Blocker == tc.t.pkg {
+				if status != OutcomeFailed || tc.BlockDelegatedFailure == nil ||
+					tc.delegatedFailure.Part == "" || tc.delegatedFailure.ErrorSHA256 == "" {
+					return fmt.Errorf(delegatedFailureEvidenceErrorFormat, taskGraphID(tc.t))
+				}
+				return tc.BlockDelegatedFailure(settleCtx, taskGraphID(tc.t), tc.delegatedFailure, taskOutcome)
+			}
+			if tc.BlockDelegatedTask == nil {
+				return fmt.Errorf(delegatedBlockedRecorderErrorFormat, taskGraphID(tc.t))
+			}
+			return tc.BlockDelegatedTask(settleCtx, taskGraphID(tc.t), tc.noClaim.Blocker, taskOutcome)
+		}
+		if err := persistFirstOnlyTask(write); err != nil {
+			wrapped := fmt.Errorf(delegatedNoClaimPersistErrorFormat, taskGraphID(tc.t), err)
+			if res.Err != nil {
+				wrapped = fmt.Errorf(delegatedOriginalFailureErrorFormat, wrapped, res.Err)
+			}
+			tc.Log.Error().Err(wrapped).Str("task", taskGraphID(tc.t)).
+				Msg("task finality could not be persisted")
+			tc.mu.Lock()
+			if tc.outcomeErr == nil {
+				tc.outcomeErr = wrapped
+			}
+			tc.mu.Unlock()
+			tc.stop(wrapped)
+		}
+		return
+	}
+	if tc.TaskOutcomeSettled != nil {
+		// The last sibling may persist the package result, but the terminal
+		// carrying that result belongs to the task that caused it. A failed
+		// cause waits above until every sibling has stopped.
+		if status == OutcomeFailed && cause != tc.t {
+			if causalDone == nil {
+				tc.stop(fmt.Errorf(acceptedCausalFinalityErrorFormat, taskGraphID(tc.t)))
+				return
+			}
+			select {
+			case <-causalDone:
+			case <-ctx.Done():
+				return
+			}
+			tc.mu.Lock()
+			outcomeErr := tc.outcomeErr
+			tc.mu.Unlock()
+			if outcomeErr != nil || ctx.Err() != nil {
+				return
+			}
+		}
+		var taskOutcome PackageOutcome
+		if status != OutcomePending && cause == tc.t {
+			taskOutcome = status
+		}
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecordTimeout)
+		defer cancel()
+		if err := persistTaskOutcome(settleCtx, tc.TaskOutcomeSettled, taskGraphID(tc.t), taskOutcome); err != nil {
+			wrapped := fmt.Errorf("persisting task %s outcome: %w", taskGraphID(tc.t), err)
+			tc.Log.Error().Err(wrapped).Str("task", taskGraphID(tc.t)).
+				Msg("task finality could not be persisted")
+			tc.mu.Lock()
+			if tc.outcomeErr == nil {
+				tc.outcomeErr = wrapped
+			}
+			tc.mu.Unlock()
+			tc.stop(wrapped)
+		}
+	}
+}
+
+func persistTaskOutcome(ctx context.Context,
+	write func(context.Context, string, PackageOutcome) error,
+	taskID string, outcome PackageOutcome) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = fmt.Errorf("task outcome persistence panicked: %v", value)
+		}
+	}()
+	return write(ctx, taskID, outcome)
+}
+
+func persistFirstOnlyTask(write func() error) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = fmt.Errorf("first-only task persistence panicked: %v", value)
+		}
+	}()
+	return write()
+}
+
+func persistPackageOutcome(ctx context.Context,
+	write func(context.Context, string, string, PackageOutcome) error,
+	pkg, taskID string, outcome PackageOutcome) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = fmt.Errorf("package outcome persistence panicked: %v", value)
+		}
+	}()
+	return write(ctx, pkg, taskID, outcome)
 }
 
 // owe records the outcome a package owes, keeping the first: a package fails
@@ -882,6 +1380,48 @@ func (r *run) owe(pkg string, outcome *pendingOutcome) {
 // nothing is running for any more. The hook observes an outcome that has
 // already settled, so it only warns.
 func (r *run) settleOutcome(ctx context.Context, owed *pendingOutcome) {
+	needsLocalEffect := owed.isReverted ||
+		(owed.hook != "" && len(owed.commands) != 0 && !owed.isInterrupted)
+	var finishLocal func(context.Context, string) error
+	if needsLocalEffect && r.LocalOutcomeHookLifecycle != nil {
+		r.mu.Lock()
+		held := r.activePhysical[owed.rel.Pkg.Name] > 0
+		r.mu.Unlock()
+		if !held && r.LocalOutcomeLeaseReusable != nil {
+			var err error
+			held, err = r.LocalOutcomeLeaseReusable(ctx, owed.rel.Pkg.Name)
+			if err != nil {
+				r.failLocalLifecycle(fmt.Errorf("checking package %s stopped local stage: %w",
+					owed.rel.Pkg.Name, err))
+				return
+			}
+		}
+		if !held {
+			var err error
+			finishLocal, err = beginOutcomeHook(ctx, r.LocalOutcomeHookLifecycle,
+				owed.rel.Pkg.Name, owed.hook)
+			if err != nil || finishLocal == nil {
+				if err == nil {
+					err = fmt.Errorf("local outcome hook returned no settlement")
+				}
+				r.failLocalLifecycle(fmt.Errorf("reserving package %s outcome capacity: %w",
+					owed.rel.Pkg.Name, err))
+				return
+			}
+		}
+	}
+	completion := "succeeded"
+	defer func() {
+		if finishLocal == nil {
+			return
+		}
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecordTimeout)
+		defer cancel()
+		if err := finishLocal(settleCtx, completion); err != nil {
+			r.failLocalLifecycle(fmt.Errorf("settling package %s outcome capacity: %w",
+				owed.rel.Pkg.Name, err))
+		}
+	}()
 	if owed.isReverted {
 		revertCtx := ctx
 		if owed.isInterrupted {
@@ -894,7 +1434,21 @@ func (r *run) settleOutcome(ctx context.Context, owed *pendingOutcome) {
 	}
 	tc := &taskCtx{run: r, t: task{owed.rel.Pkg.Name, taskBuild, ""}, rel: owed.rel, log: owed.log}
 	tc.updates = liveProviderUpdates(owed.rel.Pkg.Name, r.plan, r.results)
-	_ = tc.hook(ctx, owed.hook, owed.commands, false, owed.extra...)
+	if err := tc.hook(ctx, owed.hook, owed.commands, false, owed.extra...); err != nil {
+		completion = "failed"
+	}
+}
+
+func beginOutcomeHook(ctx context.Context,
+	begin func(context.Context, string, string) (func(context.Context, string) error, error),
+	pkg, hook string) (finish func(context.Context, string) error, err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			finish = nil
+			err = fmt.Errorf("local outcome capacity acquisition panicked: %v", value)
+		}
+	}()
+	return begin(ctx, pkg, hook)
 }
 
 // visibleRelease is the release as one task sees it: a copy whose outputs are
@@ -958,13 +1512,31 @@ func syncLockBudget(p *plan.Plan, changed map[string]bool) int {
 	return budget
 }
 
+func executionBudgetCapacities(p *plan.Plan, changed map[string]bool, build, publish int) map[StageBudget]int {
+	return map[StageBudget]int{
+		BudgetBuild: build, BudgetPublish: publish, BudgetSyncLock: syncLockBudget(p, changed),
+	}
+}
+
 // taskCtx is one task's execution context: the task, the release it belongs
 // to, its live provider updates and its logger — the values every hook and
 // environment of the task shares.
 type taskCtx struct {
 	*run
-	t   task
-	rel *plan.Release
+	t                      task
+	rel                    *plan.Release
+	stageReservation       StageReservationx
+	noClaim                *NoClaimFinality
+	delegatedFailure       DelegatedFailureEvidence
+	placementFailedPart    string
+	firstOnlyFinish        func(context.Context, bool, PackageOutcome) error
+	firstOnlyBlocked       string
+	blockUnadmittedTask    func(context.Context, string, string, PackageOutcome) error
+	firstOnlyFailed        bool
+	unresolvedEffect       bool
+	firstOnlySettled       bool
+	localAuthorityAdmitted bool
+	localAuthoritySettled  bool
 	// stage is the descriptor this task's stage runs and reports under,
 	// resolved once when the task starts (see resolveStage).
 	stage   Stage
@@ -1127,10 +1699,12 @@ func (r *run) settleAdmission(ctx context.Context, tc *taskCtx, res *Result) adm
 	if ctx.Err() != nil {
 		// Interrupted between scheduling and start: no scripts, no hooks.
 		res.Status = StatusCancelled
+		r.recordSettlement(t)
 		return admission{isCancelled: true}
 	}
 	if t.kind == taskPublish && r.isPublicationRefused {
 		res.Status = StatusCancelled
+		r.recordSettlement(t)
 		tc.log.Warn().Str("code", plan.CodeAdoptionRefused).
 			Msg("publish not started: this run met an artefact it may not adopt, and starts no further publication")
 		return admission{isCancelled: true}
@@ -1201,6 +1775,7 @@ func (r *run) resolveReachedProviders(pkg string) []string {
 // the event, the hook and the revert is how the two would drift apart.
 func (r *run) markBlocked(tc *taskCtx, res *Result, blocker, reason string) admission {
 	res.Status = StatusSkipped
+	r.recordSettlement(tc.t)
 	res.Blocked, res.BlockedBy = true, blocker
 	r.isAnyDead = true
 	res.RecordBlocked = r.results[blocker].RecordBlocked
@@ -1379,6 +1954,22 @@ func (tc *taskCtx) stageFor() stage {
 // execute runs a single task to completion: a stage of the package, its
 // beforeAll hook, or the records of a package with no publish.
 func (r *run) execute(ctx context.Context, t task) {
+	if t.kind == taskPrepared {
+		defer func() {
+			if value := recover(); value != nil {
+				r.failLocalLifecycle(fmt.Errorf("prepared task %s stopped by an internal error: %v", taskGraphID(t), value))
+			}
+		}()
+		if r.PreparedTask == nil {
+			r.failLocalLifecycle(fmt.Errorf("prepared task %s has no execution authority", taskGraphID(t)))
+			return
+		}
+		if err := r.PreparedTask(ctx, r.prepared[t]); err != nil {
+			r.Log.Warn().Err(err).Str("task", taskGraphID(t)).
+				Msg("unreleasing provider preparation failed; its consumers will refuse the missing input")
+		}
+		return
+	}
 	rel := r.plan.Releases[t.pkg]
 	res := r.results[t.pkg]
 	descriptor := r.plans[t.pkg].stage(t)
@@ -1390,18 +1981,156 @@ func (r *run) execute(ctx context.Context, t task) {
 	if descriptor.Label != "" {
 		log = log.With().Str("label", descriptor.Label).Logger()
 	}
+	var reserved StageReservationx
+	firstOnly := r.BeginFirstOnlyTask != nil &&
+		(r.Remote == nil && t.kind != taskPublish && t.kind != taskRecord ||
+			firstOnlyTask(t, descriptor))
+	localAuthority := r.BeginFirstOnlyTask != nil &&
+		(t.kind == taskPublish || t.kind == taskRecord)
+	if firstOnly && r.BlockFirstOnlyTask == nil {
+		r.failLocalLifecycle(fmt.Errorf("first-only task %s has no denied-admission recorder", taskGraphID(t)))
+		return
+	}
+	if localAuthority && (r.BeginLocalAuthorityTask == nil ||
+		r.LocalAuthoritySettled == nil || r.BlockLocalAuthorityTask == nil) {
+		r.failLocalLifecycle(fmt.Errorf("local authority task %s lacks exact settlement callbacks", taskGraphID(t)))
+		return
+	}
+	var releaseFirstPool func()
+	if (firstOnly || localAuthority) && r.ReserveFirstOnlyTask != nil {
+		var err error
+		releaseFirstPool, err = r.ReserveFirstOnlyTask(ctx, taskGraphID(t))
+		if err != nil || releaseFirstPool == nil {
+			if err == nil {
+				err = fmt.Errorf("first-only placement returned no release")
+			}
+			r.failLocalLifecycle(fmt.Errorf("reserving first-only task %s placement: %w", taskGraphID(t), err))
+			return
+		}
+	}
+	var tc *taskCtx
+	defer func() {
+		if releaseFirstPool != nil &&
+			(tc == nil || tc.firstOnlySettled || tc.localAuthoritySettled) {
+			releaseFirstPool()
+		}
+	}()
+	if r.Remote != nil && descriptor.Placement == PlacementByBuild && !descriptor.IsObserving {
+		if reserver, ok := r.Remote.(StageReserverx); ok {
+			var err error
+			reserved, err = reserver.ReserveStage(ctx, StageReservationRequest{
+				TaskID: taskGraphID(t), Release: r.visibleRelease(t, rel), Descriptor: descriptor})
+			if err != nil {
+				r.failLocalLifecycle(fmt.Errorf("reserving distributed task %s capacity: %w", taskGraphID(t), err))
+				return
+			}
+		}
+	}
+	if reserved != nil {
+		defer func() {
+			if err := reserved.Close(); err != nil {
+				r.failLocalLifecycle(fmt.Errorf("closing distributed task %s capacity: %w", taskGraphID(t), err))
+			}
+		}()
+	}
+	var finishLocal func(context.Context, string) error
+	if r.LocalTaskLifecycle != nil && (r.Remote == nil || firstOnly || localAuthority) {
+		finish, err := beginLocalTask(ctx, r.LocalTaskLifecycle, taskGraphID(t))
+		if err != nil || finish == nil {
+			if err == nil {
+				err = fmt.Errorf("local task lifecycle returned no settlement")
+			}
+			r.failLocalLifecycle(fmt.Errorf("reserving local task %s capacity: %w", taskGraphID(t), err))
+			return
+		}
+		finishLocal = finish
+		r.mu.Lock()
+		if r.activePhysical == nil {
+			r.activePhysical = make(map[string]int)
+		}
+		r.activePhysical[t.pkg]++
+		r.mu.Unlock()
+	}
+	// A task waiting for cross-process capacity is not yet in flight. A
+	// failing sibling may need its last-running callback to release that
+	// same slot before this task can begin.
 	r.enter(t.pkg)
-	tc := &taskCtx{run: r, t: t, rel: r.visibleRelease(t, rel), stage: descriptor, log: log}
-	// The first defer, so it runs last: once the panic container has settled
-	// a task that panicked, the package's last task settles what it owes.
+	tc = &taskCtx{run: r, t: t, rel: r.visibleRelease(t, rel), stage: descriptor,
+		stageReservation: reserved, log: log}
+	// This first defer runs after finishTask and panic containment. The lease
+	// also covers onSkip/onFail hooks, which can launch commands even when the
+	// main stage was denied or failed.
+	defer func() {
+		if finishLocal == nil {
+			return
+		}
+		if (firstOnly || localAuthority) && !tc.firstOnlySettled && !tc.localAuthoritySettled {
+			return // unresolved canonical claim retains physical capacity
+		}
+		status := "succeeded"
+		r.mu.Lock()
+		if ctx.Err() != nil || res.Status == StatusCancelled {
+			status = "confirmed-stop"
+		} else if res.Status == StatusFailed || res.Status == StatusSkipped || r.failedTasks[t] {
+			status = "failed"
+		}
+		r.mu.Unlock()
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecordTimeout)
+		defer cancel()
+		if err := finishLocal(settleCtx, status); err != nil {
+			r.failLocalLifecycle(fmt.Errorf("settling local task %s capacity: %w", taskGraphID(t), err))
+		} else {
+			r.mu.Lock()
+			r.activePhysical[t.pkg]--
+			r.mu.Unlock()
+		}
+	}()
+	// This runs after panic containment and before the local lease releases:
+	// the package's last task settles what it owes while it still owns capacity.
 	defer tc.finishTask(ctx, res)
 	// After it, so it runs before it: after the publish guard and the
 	// snapshot guard have been given back by their own defers, which a
 	// panic unwinds through like any other return.
 	defer tc.containPanic(ctx, res)
-
 	if !r.admit(ctx, tc, res) {
+		if firstOnly || reserved != nil || localAuthority {
+			tc.firstOnlyBlocked = res.BlockedBy
+			if tc.firstOnlyBlocked == "" {
+				tc.firstOnlyBlocked = t.pkg
+			}
+			if firstOnly {
+				tc.blockUnadmittedTask = r.BlockFirstOnlyTask
+			} else if localAuthority {
+				tc.blockUnadmittedTask = r.BlockLocalAuthorityTask
+			} else {
+				tc.blockUnadmittedTask = r.BlockDelegatedTask
+				if tc.blockUnadmittedTask == nil {
+					tc.unresolvedEffect = true
+					r.failLocalLifecycle(fmt.Errorf("delegated task %s has no denied-admission recorder", taskGraphID(t)))
+				}
+			}
+		}
 		return
+	}
+	if localAuthority {
+		if err := r.BeginLocalAuthorityTask(ctx, taskGraphID(t)); err != nil {
+			tc.unresolvedEffect = true
+			r.failLocalLifecycle(fmt.Errorf("claiming local authority task %s: %w", taskGraphID(t), err))
+			return
+		}
+		tc.localAuthorityAdmitted = true
+	}
+	if firstOnly {
+		finish, err := beginFirstOnlyTask(ctx, r.BeginFirstOnlyTask, taskGraphID(t))
+		if err != nil || finish == nil {
+			if err == nil {
+				err = fmt.Errorf("first-only task claim returned no settlement")
+			}
+			tc.unresolvedEffect = true
+			r.failLocalLifecycle(fmt.Errorf("claiming first-only task %s: %w", taskGraphID(t), err))
+			return
+		}
+		tc.firstOnlyFinish = finish
 	}
 
 	switch t.kind {
@@ -1476,6 +2205,13 @@ func (r *run) execute(ctx context.Context, t task) {
 	}
 
 	what, err := tc.runStage(ctx, frame)
+	if tc.unresolvedEffect {
+		if err == nil {
+			err = errors.New(unresolvedStageMissingErrorText)
+		}
+		r.failLocalLifecycle(fmt.Errorf(unresolvedStageOfferErrorFormat, taskGraphID(t), err))
+		return
+	}
 	if err != nil && t.kind == taskPublish && what == tc.stage.Name+" script failed" {
 		what, err = tc.reconcilePublication(ctx, what, err)
 	}
@@ -1500,6 +2236,39 @@ func (r *run) execute(ctx context.Context, t task) {
 		return
 	}
 	tc.publishTail(ctx, res)
+}
+
+func beginLocalTask(ctx context.Context, begin func(context.Context, string) (func(context.Context, string) error, error),
+	taskID string) (finish func(context.Context, string) error, err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			finish = nil
+			err = fmt.Errorf("local task capacity acquisition panicked: %v", value)
+		}
+	}()
+	return begin(ctx, taskID)
+}
+
+func beginFirstOnlyTask(ctx context.Context,
+	begin func(context.Context, string) (func(context.Context, bool, PackageOutcome) error, error),
+	taskID string) (finish func(context.Context, bool, PackageOutcome) error, err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			finish = nil
+			err = fmt.Errorf("first-only task claim panicked: %v", value)
+		}
+	}()
+	return begin(ctx, taskID)
+}
+
+func (r *run) failLocalLifecycle(err error) {
+	r.Log.Error().Err(err).Msg("local task capacity or authority failed")
+	r.mu.Lock()
+	if r.outcomeErr == nil {
+		r.outcomeErr = err
+	}
+	r.mu.Unlock()
+	r.stop(err)
 }
 
 // guardPublish takes the repository guard the publish and the records run
@@ -1567,6 +2336,18 @@ func (tc *taskCtx) observe(ctx context.Context, s stage) bool {
 // the log reports as having failed: the status, the event, the revert and
 // the onFail hook.
 func (tc *taskCtx) failTask(ctx context.Context, res *Result, err error, msg string) {
+	tc.firstOnlyFailed = true
+	if err != nil {
+		part := DelegatedFailurePreludePart
+		if tc.placementFailedPart == PartInputs {
+			part = DelegatedFailureInputsPart
+		} else if tc.placementFailedPart != "" {
+			part = DelegatedFailureFramePart
+		}
+		sum := sha256.Sum256([]byte(err.Error()))
+		tc.delegatedFailure = DelegatedFailureEvidence{Part: part,
+			ErrorSHA256: fmt.Sprintf("%x", sum[:])}
+	}
 	// A task dying while the context is cancelled died *of* the
 	// cancellation (its script was killed mid-run): that is an
 	// interruption, not a package failure, and it must not spawn more
@@ -1628,9 +2409,11 @@ func (tc *taskCtx) settleFailure(res *Result, err error, isInterrupted bool) boo
 	}
 	if isInterrupted {
 		res.Status = StatusCancelled
+		tc.recordSettlement(tc.t)
 		res.Err = err
 	} else {
 		res.Status = StatusFailed
+		tc.recordSettlement(tc.t)
 		res.FailedStage, res.FailedStageLabel = tc.stage.Name, tc.stage.Label
 		res.Err = fmt.Errorf("%s: %w", tc.stage.Name, err)
 		tc.isAnyDead = true
@@ -1754,6 +2537,7 @@ func (tc *taskCtx) markPublished(res *Result) {
 	defer tc.mu.Unlock()
 	tc.plan.Releases[tc.t.pkg].Outputs = tc.rel.Outputs
 	res.Status = StatusPublished
+	tc.recordSettlement(tc.t)
 	res.RecordBlocked = tc.requiredRecordFailed || (tc.BlockOnRecordFailure && len(res.Critical) > 0)
 	if res.RecordBlocked {
 		tc.isAnyDead = true
@@ -2105,64 +2889,42 @@ func (e *Executor) revert(ctx context.Context, rel *plan.Release, log zerolog.Lo
 // the key's `false` has always done.
 func shouldSkip(pkg string, p *plan.Plan, results map[string]*Result, reached []string) (bool, string) {
 	rel := p.Releases[pkg]
-	badProvider := ""
-	blockingProvider := ""
-	// Made on the first dead provider: an admission with none, which is
-	// nearly every admission, then allocates nothing.
-	var bad map[string]bool
-	// Failure blocking is narrower than cause accounting: an optional edge
-	// does not block a consumer with its own cause, but a propagated release
-	// owed only to that failed provider has no surviving cause to publish.
-	markDead := func(prov string) {
-		r, ok := results[prov]
-		if !ok || (!r.RecordBlocked && r.Status != StatusFailed && r.Status != StatusSkipped) {
-			return
+	if rel != nil {
+		dead := func(name string) bool { return resultPackageOutcome(results[name]).dead() }
+		anyDead := false
+		direct := p.BlockingProviders[pkg]
+		if p.BlockingProviders == nil {
+			direct = p.Providers[pkg]
 		}
-		if bad == nil {
-			bad = make(map[string]bool)
-		}
-		bad[prov] = true
-		badProvider = prov
-	}
-	for _, providers := range [...][]string{p.Providers[pkg], reached, rel.DueTo} {
-		for _, prov := range providers {
-			markDead(prov)
-		}
-	}
-	for _, update := range rel.Updates {
-		markDead(update.Name)
-	}
-	if rel.ChannelFrom != "" {
-		markDead(rel.ChannelFrom)
-	}
-	if badProvider == "" {
-		return false, ""
-	}
-	direct := p.BlockingProviders
-	if direct == nil {
-		direct = p.Providers
-	}
-	for _, providers := range [...][]string{direct[pkg], reached} {
-		for _, prov := range providers {
-			if !bad[prov] {
-				continue
+		for _, providers := range [][]string{p.Providers[pkg], direct, reached, rel.DueTo} {
+			for _, provider := range providers {
+				if dead(provider) {
+					anyDead = true
+					break
+				}
 			}
-			if results[prov].RecordBlocked {
-				return true, prov
-			}
-			pr := p.Releases[prov]
-			if pr != nil && pr.Pkg.Space.ProviderRelation.IsBlocking {
-				blockingProvider = prov
+			if anyDead {
+				break
 			}
 		}
+		if !anyDead {
+			for _, update := range rel.Updates {
+				if dead(update.Name) {
+					anyDead = true
+					break
+				}
+			}
+		}
+		if !anyDead && rel.ChannelFrom != "" {
+			anyDead = dead(rel.ChannelFrom)
+		}
+		if !anyDead {
+			return false, ""
+		}
 	}
-	if blockingProvider != "" {
-		return true, blockingProvider
-	}
-	if hasCauseOfItsOwn(rel, bad) {
-		return false, ""
-	}
-	return true, badProvider
+	return newSkipPolicy(pkg, p, reached).Evaluate(func(provider string) PackageOutcome {
+		return resultPackageOutcome(results[provider])
+	})
 }
 
 // hasCauseOfItsOwn reports whether any admitted cause of the release comes

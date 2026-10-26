@@ -7,6 +7,7 @@ package execution
 // run a package's commands.
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -148,6 +149,22 @@ func TestSingleHistoryPackageDir(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "packages/core", dir)
+}
+
+func TestPackageDirResolvesRelativeSweepFolderAgainstAbsoluteSource(t *testing.T) {
+	root := t.TempDir()
+	current, err := os.Getwd()
+	require.NoError(t, err)
+	relativeRoot, err := filepath.Rel(current, root)
+	require.NoError(t, err)
+	request := release.StageRequest{Release: &plan.Release{Pkg: &model.Package{Name: "alpha"}},
+		Dir: filepath.Join(relativeRoot, "packages", "alpha")}
+	dir, err := resolvePackageDir([]Source{{Path: ".", Dir: root}}, request)
+	require.NoError(t, err)
+	require.Equal(t, "packages/alpha", dir)
+	request.Dir = filepath.Join(relativeRoot, "..", "outside")
+	_, err = resolvePackageDir([]Source{{Path: ".", Dir: root}}, request)
+	require.ErrorContains(t, err, packageDirEscapesSourceError)
 }
 
 // TestOutputsOfAPlacedAgainTaskAreAdmittedUnderItsOwnAttempt: a task whose

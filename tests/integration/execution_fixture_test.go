@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,10 +55,12 @@ const (
 // executionRig is one distributed run's world: a repository to release, the
 // remote its release lock lives on, and the mailbox a worker is reached at.
 type executionRig struct {
-	t       *testing.T
-	repo    *harness.Repo
-	origin  string
-	mailbox string
+	t         *testing.T
+	repo      *harness.Repo
+	origin    string
+	mailbox   string
+	returnURL string
+	firstHome string
 	// builds is the file every build script of the fixture appends a line to,
 	// outside every checkout, so that what ran where survives the folder a
 	// node built in being removed.
@@ -110,7 +113,8 @@ func newExecutionRigOnOrigin(t *testing.T, adjust ...func(*models.File)) *execut
 	repo.Commit("feat(core): bootstrap")
 	origin := repo.AddBareRemote()
 	return &executionRig{t: t, repo: repo, origin: origin, mailbox: origin,
-		builds: filepath.Join(t.TempDir(), "builds.log")}
+		builds: filepath.Join(t.TempDir(), "builds.log"), returnURL: executionLoopbackReturnURL(t),
+		firstHome: t.TempDir()}
 }
 
 // newExecutionRigOver wraps an already-seeded repository as a rig: a remote to
@@ -119,7 +123,28 @@ func newExecutionRigOnOrigin(t *testing.T, adjust ...func(*models.File)) *execut
 func newExecutionRigOver(t *testing.T, repo *harness.Repo, mailbox string) *executionRig {
 	t.Helper()
 	return &executionRig{t: t, repo: repo, origin: repo.AddBareRemote(), mailbox: mailbox,
-		builds: filepath.Join(t.TempDir(), "builds.log")}
+		builds: filepath.Join(t.TempDir(), "builds.log"), returnURL: executionLoopbackReturnURL(t),
+		firstHome: t.TempDir()}
+}
+
+// Each rig advertises a distinct loopback return address for its orchestrator.
+func executionLoopbackReturnURL(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	address := listener.Addr().String()
+	require.NoError(t, listener.Close())
+	return "https://" + address
+}
+
+// executionNodeHomeEnv keeps a fixture node's durable physical-slot state
+// under the same private account root across a deliberate restart. The
+// --state-dir cache is separate and may be removed without freeing leases.
+func executionNodeHomeEnv(t *testing.T, state string) []string {
+	t.Helper()
+	home := filepath.Join(state, "home")
+	require.NoError(t, os.MkdirAll(home, 0o700))
+	return []string{"HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, "config")}
 }
 
 // env is what every invocation of a distributed scenario needs: the release
@@ -127,7 +152,8 @@ func newExecutionRigOver(t *testing.T, repo *harness.Repo, mailbox string) *exec
 // in wherever it runs.
 func (r *executionRig) env(extra ...string) []string {
 	return append(append(append([]string{}, harness.LockEnabled...),
-		executionSecretEnv+"="+executionSecret, executionBuildLogEnv+"="+r.builds), extra...)
+		executionSecretEnv+"="+executionSecret, executionBuildLogEnv+"="+r.builds,
+		"HOME="+r.firstHome, "XDG_CONFIG_HOME="+filepath.Join(r.firstHome, "config")), extra...)
 }
 
 // executionBuildLogEnv names the file the fixture's build scripts append to.
@@ -199,7 +225,7 @@ func (r *executionRig) startWorker(cfg models.File, idleSeconds int, extraEnv ..
 // wants in the environment.
 func (r *executionRig) release(extra ...string) harness.RunResult {
 	r.t.Helper()
-	return r.repo.CommandEnv(r.env(extra...))
+	return r.repo.CommandEnv(r.env(extra...), "release", "--return-endpoint", r.returnURL)
 }
 
 // branches lists the coordination branches the mailbox holds.
@@ -261,7 +287,11 @@ func startWorker(t *testing.T, repo *harness.Repo, cfg models.File, idleSeconds 
 	t.Helper()
 	root := writeNodeConfig(t, cfg)
 	state := t.TempDir()
-	env := append([]string{executionSecretEnv + "=" + executionSecret}, extraEnv...)
+	// Node slots live under UserConfigDir, not --state-dir. Use one private
+	// account root per fixture node so unrelated tests cannot share leases;
+	// explicit env overrides still let a test model a shared account.
+	env := append([]string{executionSecretEnv + "=" + executionSecret}, executionNodeHomeEnv(t, state)...)
+	env = append(env, extraEnv...)
 	proc := repo.StartCommandEnv(env, "worker",
 		"--root", root, "--state-dir", state,
 		"--idle-timeout", fmt.Sprint(resolveWorkerIdleBackstop(idleSeconds)))
@@ -296,14 +326,15 @@ func resolveWorkerIdleBackstop(stated int) int {
 // repository being released.
 func runWorker(t *testing.T, rig *executionRig, env []string, args ...string) harness.RunResult {
 	t.Helper()
-	return rig.repo.StartCommandEnv(env, args...).Wait()
+	return rig.repo.StartCommandEnv(append(executionNodeHomeEnv(t, t.TempDir()), env...), args...).Wait()
 }
 
 // restart starts a second process on the same state folder, which is how a
 // scenario proves that what a node remembers outlives it.
 func (w *executionWorker) restart(t *testing.T, repo *harness.Repo, idleSeconds int, extraEnv ...string) *executionWorker {
 	t.Helper()
-	env := append([]string{executionSecretEnv + "=" + executionSecret}, extraEnv...)
+	env := append([]string{executionSecretEnv + "=" + executionSecret}, executionNodeHomeEnv(t, w.stateDir)...)
+	env = append(env, extraEnv...)
 	proc := repo.StartCommandEnv(env, "worker",
 		"--root", w.root, "--state-dir", w.stateDir,
 		"--idle-timeout", fmt.Sprint(resolveWorkerIdleBackstop(idleSeconds)))
@@ -522,23 +553,30 @@ func executionChain(t *testing.T, mailbox, branch string) []string {
 	return kinds
 }
 
-// executionTaskAssignment reads the first assignment on a v2 task ref. A bare
-// reservation is inert, so it answers nil until activation.
+// executionTaskAssignment reads the first assignment after a reservation on a
+// task ref. V3 task roots first-parent a retained bootstrap and snapshot, so
+// the reservation need not be the first commit in that history. A bare
+// reservation remains inert until activation.
 func executionTaskAssignment(t *testing.T, mailbox, branch string) map[string]any {
 	t.Helper()
 	if !strings.HasPrefix(branch, "dispat-task-") {
 		return nil
 	}
-	chain := executionChain(t, mailbox, branch)
-	if len(chain) < 2 || chain[0] != "reservation" || chain[1] != "assignment" {
-		return nil
-	}
 	commits := strings.Fields(bareGit(t, mailbox, "rev-list", "--first-parent", "--reverse", "refs/heads/"+branch))
-	require.GreaterOrEqual(t, len(commits), 2)
-	document := bareGit(t, mailbox, "cat-file", "blob", commits[1]+":dispat/assignment.json")
-	var assignment map[string]any
-	require.NoError(t, json.Unmarshal([]byte(document), &assignment))
-	return assignment
+	reserved := false
+	for _, commit := range commits {
+		entries := bareGit(t, mailbox, "ls-tree", "-r", "--name-only", commit)
+		if strings.Contains("\n"+entries+"\n", "\ndispat/reservation.json\n") {
+			reserved = true
+		}
+		if reserved && strings.Contains("\n"+entries+"\n", "\ndispat/assignment.json\n") {
+			document := bareGit(t, mailbox, "cat-file", "blob", commit+":dispat/assignment.json")
+			var assignment map[string]any
+			require.NoError(t, json.Unmarshal([]byte(document), &assignment))
+			return assignment
+		}
+	}
+	return nil
 }
 
 // executionAssignedTaskKind identifies active work whose ref name has no

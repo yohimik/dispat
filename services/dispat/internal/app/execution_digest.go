@@ -69,6 +69,13 @@ func (a *App) startExecutionRun() {
 	if !a.cfg.Execution.IsDistributed() {
 		return
 	}
+	a.coordinator = nil
+	a.isCoordinatorClosed = false
+	a.coordinatorCloseErr = nil
+	a.localNodeSlots = nil
+	a.localSlotRunID = ""
+	a.choreographyRetained = false
+	a.choreographyBound = false
 	a.runID = execution.FormatRunID()
 }
 
@@ -91,9 +98,13 @@ func (a *App) calculatePlanDigest(ctx context.Context, computed *plan.Plan, opts
 		},
 	}
 	if len(computed.RepositoryHeads) == 0 {
-		head, err := a.git.HeadSHA(ctx)
-		if err != nil {
-			return "", err
+		head := a.plannedHeads[""]
+		if head == "" {
+			var err error
+			head, err = a.git.HeadSHA(ctx)
+			if err != nil {
+				return "", err
+			}
 		}
 		input.Heads = map[string]string{"": head}
 	}

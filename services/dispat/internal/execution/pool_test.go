@@ -97,6 +97,27 @@ func TestPoolWaitsForACapacitySlot(t *testing.T) {
 	}
 }
 
+func TestPoolWeightedLocalLeaseFencesOrdinaryPlacement(t *testing.T) {
+	pool := NewPool(nil, nil, LocalNode{Name: "first", Capacity: 2}, zerolog.Nop())
+	held, err := pool.AcquireNearWeight(t.Context(), nil, PlacementOrchestrator, "", 2)
+	require.NoError(t, err)
+	require.Equal(t, "first", held.Node)
+
+	waitCtx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	_, err = pool.AcquireNear(waitCtx, nil, PlacementOrchestrator, "")
+	require.ErrorIs(t, err, context.DeadlineExceeded,
+		"an ordinary task must not overlap a full-weight native lease")
+
+	held.Release()
+	ordinary, err := pool.AcquireNear(t.Context(), nil, PlacementOrchestrator, "")
+	require.NoError(t, err)
+	ordinary.Release()
+
+	_, err = pool.AcquireNearWeight(t.Context(), nil, PlacementOrchestrator, "", 3)
+	require.Error(t, err, "a task heavier than the physical node must be refused")
+}
+
 func TestPoolReturnsDispatchSlotBeforeWakingPlacement(t *testing.T) {
 	pool := newTestPool(linuxNode(1))
 	held, err := pool.AcquireNear(t.Context(), nil, PlacementWorker, "")

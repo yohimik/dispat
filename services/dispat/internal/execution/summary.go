@@ -373,7 +373,11 @@ func (c *Coordinator) TaskRecords() []TaskRecord {
 	records := append([]TaskRecord(nil), c.taskRecords...)
 	c.mu.Unlock()
 	for index := range records {
-		if records[index].Stage != KindRun || c.sweepOutputs == nil {
+		// A sweep summary prints the configured script as Stage (for example
+		// run:tests), while the signed task identity remains package:run.
+		// Use that exact kind-bearing identity so a custom release stage with
+		// a similar display name cannot consume a sweep output verdict.
+		if records[index].Task != records[index].Package+":"+KindRun || c.sweepOutputs == nil {
 			continue
 		}
 		outcome, manifest := c.sweepOutputs.resolveOutcome(records[index].Task)

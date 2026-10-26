@@ -37,30 +37,38 @@ const executionLockMessageEnv = "DISPAT_IT_LOCK_MESSAGE"
 // which polls that remote; the release tag names the planned head and its
 // history holds no transport commit; the lock taken on that remote names the
 // run the plan was fixed for; one debug line says where the link reaches; and
-// afterwards the remote holds neither a coordination branch nor the lock.
+// afterwards the remote retains signed task/ledger history and no lock.
 func TestExecutionReleaseUsesItsOwnRemoteAsTheMailbox(t *testing.T) {
 	rig := newExecutionRigOnOrigin(t, func(cfg *models.File) {
 		cfg.LogLevel = "debug"
 		cfg.Scripts["build"] = models.Script{executionRecordingScript}
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
 		cfg.Scripts["read-lock"] = models.Script{`git --git-dir="$` + executionOriginEnv + `" cat-file tag ` +
 			lockTag + ` > "$` + executionLockMessageEnv + `"`}
 		cfg.Run = &models.RunConfig{BeforeAll: []string{"read-lock"}}
 	})
 	plannedHead := rig.repo.Git("rev-parse", "HEAD")
 	lockMessage := filepath.Join(t.TempDir(), "lock.message")
-	worker := rig.startWorker(executionWorkerConfig(rig.origin), 0)
+	worker := rig.startWorker(executionWorkerConfig(rig.origin, func(settings *models.ExecutionConfig) {
+		settings.Endpoint = rig.origin
+	}), 0)
 
 	res := rig.release(executionOriginEnv+"="+rig.origin, executionLockMessageEnv+"="+lockMessage)
-	stopAll(t, []*executionWorker{worker})
+	workerReply := stopAll(t, []*executionWorker{worker})[0]
 
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s\nworker:\n%s\nworker stderr:\n%s",
+		res.Stdout, res.Stderr, workerReply.Stdout, workerReply.Stderr)
 	assert.Equal(t, executionNode, rig.nodesByPackage()["core"], "the build ran on the worker: %v", rig.runs())
 	require.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
 	assert.Equal(t, plannedHead, rig.repo.Git("rev-list", "-1", "core@0.1.0"),
 		"the release tag names the planned head")
 	assert.NotContains(t, rig.repo.Git("log", "--format=%s", "core@0.1.0"), "dispat transport",
 		"no transport commit is in the release tag's history")
-	assert.Empty(t, executionCoordinationBranches(t, rig.origin), "the remote keeps no coordination branch")
+	assert.NotEmpty(t, executionProtocolRefs(t, rig.origin, "dispat-task-"),
+		"the canonical task history remains readable on the release remote")
+	assert.Len(t, executionProtocolRefs(t, rig.origin, "dispat-ledger-"), 1)
+	assert.Empty(t, executionProtocolRefs(t, rig.origin, "dispat-worker-"),
+		"ephemeral probe refs are removed after the sealed run")
 	assert.False(t, remoteHoldsLock(t, rig.origin), "and no lock")
 
 	fixed, isFixed := executionLine(res, "plan fixed")
@@ -80,8 +88,8 @@ func TestExecutionReleaseUsesItsOwnRemoteAsTheMailbox(t *testing.T) {
 // link with no endpoint reaches the entry repository's remote, the one the
 // release is started in and takes its first lock on. A worker polling only
 // that remote builds the other peer's package, whose history the run pushed
-// there for it, and the fleet releases both peers with no coordination branch
-// left on the entry remote and no lock anywhere.
+// there for it, and the fleet releases both peers with retained signed task
+// history on the entry remote and no lock anywhere.
 func TestExecutionFleetLinkReachesTheEntryRepository(t *testing.T) {
 	builds := filepath.Join(t.TempDir(), "builds.log")
 	fleet := newChoreographyFleet(t, executionFleetEntry, executionFleetDelegate)
@@ -103,11 +111,15 @@ func TestExecutionFleetLinkReachesTheEntryRepository(t *testing.T) {
 	fleet.push(executionFleetEntry)
 	fleet.link(executionFleetEntry, executionFleetDelegate)
 	entry := fleet.peer(executionFleetEntry)
-	worker := startWorker(t, entry.Repo, executionWorkerConfig(entry.remote), 0,
+	worker := startWorker(t, entry.Repo, executionWorkerConfig(entry.remote, func(settings *models.ExecutionConfig) {
+		settings.Endpoint = entry.remote
+	}), 0,
 		append(fileProtocolEnv(), executionBuildLogEnv+"="+builds)...)
 
-	res := entry.CommandEnv(append(append(fileProtocolEnv(), harness.LockEnabled...),
-		executionSecretEnv+"="+executionSecret, executionBuildLogEnv+"="+builds), "--package", "*")
+	res := entry.CommandEnv(append(append(append(fileProtocolEnv(), harness.LockEnabled...),
+		executionSecretEnv+"="+executionSecret, executionBuildLogEnv+"="+builds),
+		executionNodeHomeEnv(t, t.TempDir())...),
+		"release", "--return-endpoint", executionLoopbackReturnURL(t), "--package", "*")
 	stopAll(t, []*executionWorker{worker})
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -119,7 +131,9 @@ func TestExecutionFleetLinkReachesTheEntryRepository(t *testing.T) {
 		"the other peer's package was built on the node: %s", record)
 	assert.Equal(t, []string{executionFleetEntry + "-pkg@0.1.0"}, entry.TagList())
 	assert.Contains(t, tagsIn(entry.Repo, ".links/"+executionFleetDelegate), executionFleetDelegate+"-pkg@0.1.0")
-	assert.Empty(t, executionCoordinationBranches(t, entry.remote), "the entry remote keeps no coordination branch")
+	assert.NotEmpty(t, executionProtocolRefs(t, entry.remote, "dispat-task-"),
+		"the entry remote retains the exact delegated task history")
+	assert.Len(t, executionProtocolRefs(t, entry.remote, "dispat-ledger-"), 1)
 	for _, name := range []string{executionFleetEntry, executionFleetDelegate} {
 		assert.False(t, remoteHoldsLock(t, fleet.peer(name).remote), "%s holds no lock", name)
 	}
@@ -128,8 +142,8 @@ func TestExecutionFleetLinkReachesTheEntryRepository(t *testing.T) {
 // TestExecutionSweepUsesItsOwnRemoteAsTheMailbox: a sweep reaches the same
 // remote and takes no lock there. A lock another release holds on that remote
 // neither stops the sweep nor is touched by it; the task runs on the worker,
-// its declared output comes back and is merged here, and no coordination
-// branch is left behind.
+// its declared output comes back and is merged here, with signed task
+// history retained for recovery.
 func TestExecutionSweepUsesItsOwnRemoteAsTheMailbox(t *testing.T) {
 	rig := newExecutionRigOnOrigin(t, func(cfg *models.File) {
 		cfg.Scripts["tests"] = models.Script{executionCoverageScript}
@@ -142,7 +156,9 @@ func TestExecutionSweepUsesItsOwnRemoteAsTheMailbox(t *testing.T) {
 	rig.repo.Git("push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
 	bareGit(t, rig.origin, "tag", "-a", lockTag, "-m", "a release is running", head)
 	held := lockObject(t, rig.origin)
-	worker := rig.startWorker(executionWorkerConfig(rig.origin), 0)
+	worker := rig.startWorker(executionWorkerConfig(rig.origin, func(settings *models.ExecutionConfig) {
+		settings.Endpoint = rig.origin
+	}), 0)
 
 	res := rig.sweep(nil)
 	stopAll(t, []*executionWorker{worker})
@@ -152,7 +168,8 @@ func TestExecutionSweepUsesItsOwnRemoteAsTheMailbox(t *testing.T) {
 	assert.Equal(t, "core from "+executionNode+"\n", readRepoFile(t, rig.repo, "coverage/core.out"),
 		"the task's run output was merged into this checkout")
 	assert.Equal(t, held, lockObject(t, rig.origin), "the other release's lock is the one that was there")
-	assert.Empty(t, executionCoordinationBranches(t, rig.origin), "no coordination branch is left behind")
+	assert.NotEmpty(t, executionProtocolRefs(t, rig.origin, "dispat-task-"))
+	assert.Len(t, executionProtocolRefs(t, rig.origin, "dispat-ledger-"), 1)
 }
 
 // TestExecutionDefaultMailboxRefusesACredentialCarryingRemote: a push URL that
@@ -283,9 +300,11 @@ func TestExecutionWorkerFindsItsMailboxInItsCheckout(t *testing.T) {
 	document, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(checkout, "dispat.json"), document, 0o644))
-	proc := rig.repo.StartCommandEnv([]string{executionSecretEnv + "=" + executionSecret,
-		executionBuildLogEnv + "=" + rig.builds}, "worker", "--root", checkout,
-		"--state-dir", t.TempDir(), "--idle-timeout", fmt.Sprint(resolveWorkerIdleBackstop(0)))
+	workerStateDir := t.TempDir()
+	proc := rig.repo.StartCommandEnv(append(executionNodeHomeEnv(t, workerStateDir),
+		executionSecretEnv+"="+executionSecret, executionBuildLogEnv+"="+rig.builds),
+		"worker", "--root", checkout, "--state-dir", workerStateDir,
+		"--idle-timeout", fmt.Sprint(resolveWorkerIdleBackstop(0)))
 	worker := &executionWorker{t: t, proc: proc}
 
 	res := rig.release()
@@ -298,5 +317,6 @@ func TestExecutionWorkerFindsItsMailboxInItsCheckout(t *testing.T) {
 	require.True(t, isReached, "stdout:\n%s", reply.Stdout)
 	assert.Equal(t, "origin", reached.Str("remote"))
 	assert.Equal(t, rig.origin, reached.Str("endpoint"))
-	assert.Empty(t, executionCoordinationBranches(t, rig.origin))
+	assert.NotEmpty(t, executionProtocolRefs(t, rig.origin, "dispat-task-"))
+	assert.Len(t, executionProtocolRefs(t, rig.origin, "dispat-ledger-"), 1)
 }

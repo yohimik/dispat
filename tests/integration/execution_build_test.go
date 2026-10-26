@@ -165,6 +165,14 @@ func TestExecutionBuildsRunOnWorkersFromThePreparedSnapshot(t *testing.T) {
 	headBefore := rig.repo.Git("rev-parse", "HEAD")
 	branchesBefore := rig.repo.Git("for-each-ref", "--format=%(refname)", "refs/heads/")
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
+	defer func() {
+		for index, reply := range stopAll(t, workers) {
+			if t.Failed() {
+				t.Logf("worker %d stdout:\n%s\nstderr:\n%s", index, reply.Stdout, reply.Stderr)
+			}
+			assert.NotContains(t, reply.Stdout, executionSecret, "the secret never reaches a node's log")
+		}
+	}()
 
 	res := rig.release()
 
@@ -185,11 +193,12 @@ func TestExecutionBuildsRunOnWorkersFromThePreparedSnapshot(t *testing.T) {
 		"and wrote no branch of its own")
 	assert.Empty(t, rig.repo.Git("diff", "--cached", "--name-only"),
 		"and staged nothing in the repository's own index")
-	assert.Empty(t, rig.branches(), "a finished run closes the branches it created")
-
-	for _, reply := range stopAll(t, workers) {
-		assert.NotContains(t, reply.Stdout, executionSecret, "the secret never reaches a node's log")
+	retained := rig.branches()
+	assert.NotEmpty(t, retained, "the sealed canonical feed remains readable to peers")
+	for _, branch := range retained {
+		assert.NotContains(t, branch, "dispat-worker-", "preflight probe refs are cleaned")
 	}
+
 }
 
 // executionManifestProbe records the version the package's own manifest
@@ -248,7 +257,10 @@ func TestExecutionTasksSharingARepositoryUseSeparateBranches(t *testing.T) {
 	for _, run := range rig.runs() {
 		assert.False(t, dirs[run.Dir], "%s ran in a checkout another task had used", run.Package)
 		dirs[run.Dir] = true
-		assert.NotContains(t, run.Dir, rig.repo.Root, "and never in the orchestrator's own checkout")
+		if relative, err := filepath.Rel(rig.repo.Root, run.Dir); err == nil && filepath.IsLocal(relative) {
+			assert.True(t, strings.HasPrefix(relative, filepath.Join(".git", "dispat", "return-runs")+string(filepath.Separator)),
+				"first-node work uses a private task checkout under Git state, not the source checkout: %s", run.Dir)
+		}
 	}
 	stopAll(t, workers)
 }
@@ -259,12 +271,23 @@ func TestExecutionTasksSharingARepositoryUseSeparateBranches(t *testing.T) {
 func TestExecutionTransportCommitsStayOutsideReleaseHistory(t *testing.T) {
 	rig := newExecutionWorkspace(t, recordingBuild, executionOneWorker)
 	workers := rig.startWorkers([]string{executionNode}, 4)
+	defer func() {
+		for _, reply := range stopAll(t, workers) {
+			if t.Failed() {
+				t.Logf("worker stdout:\n%s\nstderr:\n%s", reply.Stdout, reply.Stderr)
+			}
+		}
+	}()
 	plannedHead := rig.repo.Git("rev-parse", "HEAD")
 
 	res := rig.release()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Empty(t, rig.branches(), "the run closed every branch it created")
+	retained := rig.branches()
+	assert.NotEmpty(t, retained, "the sealed canonical feed remains available for exact receipt recovery")
+	for _, branch := range retained {
+		assert.NotContains(t, branch, "dispat-worker-", "ephemeral preflight refs are cleaned")
+	}
 	require.NotEmpty(t, rig.repo.TagList())
 	for _, tag := range rig.repo.TagList() {
 		assert.Equal(t, plannedHead, rig.repo.Git("rev-list", "-1", tag),
@@ -272,7 +295,6 @@ func TestExecutionTransportCommitsStayOutsideReleaseHistory(t *testing.T) {
 	}
 	assert.NotContains(t, rig.repo.Git("log", "--format=%s", harness.DefaultBranch),
 		"dispat transport", "no transport commit is on the release branch")
-	stopAll(t, workers)
 }
 
 // TestExecutionBudgetsHoldAcrossNodes: the run's build budget is the run's,
@@ -307,17 +329,24 @@ func TestExecutionWorkerCapacityHoldsAcrossRuns(t *testing.T) {
 		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(1) }), 0,
 		executionBuildLogEnv+"="+first.builds)
 
-	started := first.repo.StartReleaseEnv(first.env(), "release")
-	require.Eventually(t, func() bool { return len(first.runs()) == 1 }, 60*time.Second, 50*time.Millisecond,
-		"the first build did not take the worker's only capacity slot")
-	otherStarted := second.repo.StartReleaseEnv(second.env(), "release")
+	started := first.repo.StartReleaseEnv(first.env(), "release", "--return-endpoint", first.returnURL)
+	if !assert.Eventually(t, func() bool { return len(first.runs()) == 1 }, 60*time.Second, 50*time.Millisecond,
+		"the first build did not take the worker's only capacity slot") {
+		started.Signal(syscall.SIGINT)
+		firstResult := started.Wait()
+		worker.proc.Signal(syscall.SIGINT)
+		workerResult := worker.proc.Wait()
+		t.Fatalf("first release never started its command; stdout:\n%s\nstderr:\n%s\nworker stdout:\n%s\nworker stderr:\n%s",
+			firstResult.Stdout, firstResult.Stderr, workerResult.Stdout, workerResult.Stderr)
+	}
+	otherStarted := second.repo.StartReleaseEnv(second.env(), "release", "--return-endpoint", second.returnURL)
 	var waitingSlot string
 	require.Eventually(t, func() bool {
-		waitingSlot = executionActiveSlotForTask(t, mailbox, "second:build")
+		waitingSlot = executionActiveSlotForTask(t, mailbox, "second")
 		return waitingSlot != ""
 	}, 60*time.Second, 50*time.Millisecond, "the second run did not activate its slot notice")
 	require.Never(t, func() bool {
-		return len(second.runs()) != 0 || executionActiveSlotForTask(t, mailbox, "second:build") != waitingSlot
+		return len(second.runs()) != 0 || executionActiveSlotForTask(t, mailbox, "second") != waitingSlot
 	}, 700*time.Millisecond, 50*time.Millisecond,
 		"a full worker must leave the second notice unchanged and the task unclaimed")
 	require.NoError(t, os.WriteFile(gate, nil, 0o600))
@@ -333,10 +362,10 @@ func TestExecutionWorkerCapacityHoldsAcrossRuns(t *testing.T) {
 	require.Equal(t, 0, worker.proc.Wait().Code)
 }
 
-// executionActiveSlotForTask returns the notice object a worker may repeatedly
-// inspect while full. It reads the signed task identity rather than inferring
-// one from the node-neutral branch name.
-func executionActiveSlotForTask(t *testing.T, mailbox, task string) string {
+// executionActiveSlotForTask returns the build notice for a package while a
+// node is full. The signed assignment supplies the package and task kind;
+// graph task IDs are deliberately opaque here.
+func executionActiveSlotForTask(t *testing.T, mailbox, packageName string) string {
 	t.Helper()
 	for _, branch := range executionProtocolRefs(t, mailbox, "dispat-slot-") {
 		notice := executionMessage(t, mailbox, branch, "slot")
@@ -345,7 +374,8 @@ func executionActiveSlotForTask(t *testing.T, mailbox, task string) string {
 			continue
 		}
 		assignment := executionTaskAssignment(t, mailbox, taskBranch)
-		if assignment["task"] == task {
+		pkg, _ := assignment["package"].(map[string]any)
+		if assignment["kind"] == "build" && pkg["name"] == packageName {
 			return strings.TrimSpace(bareGit(t, mailbox, "rev-parse", "refs/heads/"+branch))
 		}
 	}
@@ -439,7 +469,6 @@ func TestExecutionOrchestratorRoleNodeServesDelegatedTask(t *testing.T) {
 	unused := executionMailbox(t)
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
 		func(settings *models.ExecutionConfig) {
-			settings.Role = models.ExecutionRoleOrchestrator
 			settings.Workers = []models.ExecutionWorkerConfig{
 				{Name: "somebody-else", Endpoint: "file://" + unused},
 			}
@@ -572,11 +601,11 @@ func TestExecutionStrayWritesAreReported(t *testing.T) {
 	stopAll(t, []*executionWorker{worker})
 }
 
-// TestExecutionTaskTimeoutLeaksTheSlot: a node that stops answering within the
-// task deadline keeps its slot and leaves the pool, so the package fails and
-// every later task that needed a node is failed at once rather than waiting
-// for a machine that will not come back.
-func TestExecutionTaskTimeoutLeaksTheSlot(t *testing.T) {
+// TestExecutionTaskTimeoutCancelsAndSettlesAttempt: a timed-out command is
+// stopped by a signed Cancel and Ack before its terminal decision. The
+// capacity-one node does not start a duplicate command while later tasks may
+// use the released slot and fail independently without publishing anything.
+func TestExecutionTaskTimeoutCancelsAndSettlesAttempt(t *testing.T) {
 	rig := newExecutionWorkspace(t, func(*harness.Repo) string {
 		return executionRecordingScript + " && sleep 60"
 	}, func(cfg *models.File) {
@@ -590,25 +619,24 @@ func TestExecutionTaskTimeoutLeaksTheSlot(t *testing.T) {
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode),
-		"the abandoned attempt is reported\nstdout:\n%s", res.Stdout)
-	unhealthy, isUnhealthy := executionLine(res, "worker marked unhealthy")
-	require.True(t, isUnhealthy, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, executionNode, unhealthy.Str("worker"),
-		"the orchestrator names the node it is reporting on in worker, never in node")
-	assert.Equal(t, "task-deadline", unhealthy.Str("reason"),
-		"and says which of the ways of stopping to answer this was")
+		"the timed-out attempt is reported\nstdout:\n%s", res.Stdout)
+	requireChoreographyTaskChain(t, rig.mailbox, rig.branches(),
+		"choreography-claim", "cancel", "ack", "choreography-decision")
+	assert.Equal(t, 1, executionBuildsOf(rig, "assets"),
+		"the cancelled command started once")
+	for _, name := range []string{"docs", "ui", "app"} {
+		assert.LessOrEqual(t, executionBuildsOf(rig, name), 1,
+			"a later task may use the settled slot, but its command cannot run twice")
+	}
 	assert.Empty(t, rig.repo.TagList(), "nothing was published")
 	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock was given back")
 
 	reply := stopAll(t, []*executionWorker{worker})[0]
 	assert.Equal(t, 0, reply.Code, "stdout:\n%s\nstderr:\n%s", reply.Stdout, reply.Stderr)
-	assert.NotContains(t, reply.Stdout, "assignment rejected",
-		"the prepared input states this run pushed are not rejected messages")
 }
 
-// executionBranchWatch records every coordination branch that appears in a
-// mailbox while a run is going on, because the run deletes them all at the end
-// and the names are the claim.
+// executionBranchWatch records every activated build task ref while a run is
+// going on. Retained refs remain as signed recovery evidence after the run.
 type executionBranchWatch struct {
 	t     *testing.T
 	done  chan struct{}
@@ -703,30 +731,36 @@ func observedBuildBranches(mailbox string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		chain := strings.Fields(commits)
-		if len(chain) < 2 {
-			continue // The reservation has not been activated.
-		}
-		encoded, err := git("cat-file", "blob", chain[1]+":dispat/assignment.json")
-		if err != nil {
-			return nil, err
-		}
-		var assignment struct {
-			Kind string `json:"kind"`
-		}
-		if err := json.Unmarshal([]byte(encoded), &assignment); err != nil {
-			return nil, fmt.Errorf("decode assignment on %s: %w", fields[0], err)
-		}
-		if assignment.Kind == "build" {
-			observed = append(observed, fields[0])
+		for _, commit := range strings.Fields(commits) {
+			entries, err := git("ls-tree", "-r", "--name-only", commit)
+			if err != nil {
+				return nil, err
+			}
+			if !strings.Contains("\n"+entries+"\n", "\ndispat/assignment.json\n") {
+				continue // Bootstrap and inert reservation precede activation.
+			}
+			encoded, err := git("cat-file", "blob", commit+":dispat/assignment.json")
+			if err != nil {
+				return nil, err
+			}
+			var assignment struct {
+				Kind string `json:"kind"`
+			}
+			if err := json.Unmarshal([]byte(encoded), &assignment); err != nil {
+				return nil, fmt.Errorf("decode assignment on %s: %w", fields[0], err)
+			}
+			if assignment.Kind == "build" {
+				observed = append(observed, fields[0])
+			}
+			break // This task's later commits retain the same assignment.
 		}
 	}
 	return observed, nil
 }
 
-// TestExecutionSnapshotGitFaults: the orchestrator's own git failing while
-// the pinned input baseline is captured refuses the run before a task is
-// dispatched from a state nobody could describe, and publishes nothing.
+// TestExecutionSnapshotGitFaults: the first node's own Git failing while
+// the pinned input baseline is captured refuses the run before it dispatches
+// a task from a state it cannot describe, and publishes nothing.
 func TestExecutionSnapshotGitFaults(t *testing.T) {
 	for name, pattern := range map[string]string{
 		"the index cannot be located": "*rev-parse*--git-path*index*",
@@ -742,9 +776,11 @@ func TestExecutionSnapshotGitFaults(t *testing.T) {
 
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.Positive(t, fault.Matches(), "the fault reached the invocation it names")
-			assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode),
-				"the task is refused with the integrity code\nstdout:\n%s", res.Stdout)
+			assert.Contains(t, res.Stdout, "cannot dispatch this release",
+				"the first node names the failed source capture before task dispatch")
+			assert.Empty(t, rig.runs(), "no command started from an uncaptured source")
 			assert.Empty(t, rig.repo.TagList(), "nothing was published")
+			assert.False(t, remoteHoldsLock(t, rig.origin), "the exact release lock was returned")
 			stopAll(t, []*executionWorker{worker})
 		})
 	}
@@ -778,34 +814,35 @@ func TestExecutionWorkerTaskGitFaults(t *testing.T) {
 	}
 }
 
-// TestExecutionLostClaimPushIsRecognized: a node whose claim push applied and
-// whose answer was lost re-reads the branch, finds the claim it meant to put
-// there, and carries on to one result rather than failing the work it had
-// already taken. The lost result push is the recovery goal's
-// TestExecutionLostResultPushIsRecognizedNotRepeated.
-func TestExecutionLostClaimPushIsRecognized(t *testing.T) {
-	rig := newExecutionRig(t)
-	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	branch := executionBranchName("lostreply")
-	orchestrator.offer(branch, orchestrator.probe(branch, "preflight"))
-	// The first push on the branch is the claim. It applies and is then
-	// reported as a rejected lease, which is what a lost response looks like
-	// from inside the process: the porcelain line says the ref was refused
-	// while the remote already holds the object.
-	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*push*" + branch + "*", Nth: 1, After: true,
-		Output: "!\trefs/heads/" + branch + ":refs/heads/" + branch + "\t[rejected]\n",
+// TestExecutionFirstNodeOwnsClaimAndSettlesOneAttempt: the serving node can
+// read work and return a Result while all of its Git pushes are refused. The
+// first node alone advances the canonical task through one Claim and Result.
+// Lost HTTPS replies are exercised by the exact-proposal Worker receipt tests.
+func TestExecutionFirstNodeOwnsClaimAndSettlesOneAttempt(t *testing.T) {
+	rig := newExecutionRig(t, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+		cfg.Scripts["build"] = models.Script{executionRecordingScript}
 	})
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 4, fault.Env()...)
+	peerPush := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60, peerPush.Env()...)
+	defer worker.stop(t)
 
-	executionAwaitMessage(t, rig.mailbox, branch, "result")
-	res := worker.proc.Wait()
+	res := rig.release()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Positive(t, fault.Matches())
-	resolved, isResolved := executionLine(res, "the update landed although its push did not say so")
-	require.True(t, isResolved, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, branch, resolved.Str("branch"))
-	assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, branch),
-		"the attempt produced exactly one of each message")
+	require.Zero(t, peerPush.Matches(), "the serving node never pushes a coordination ref")
+	require.Equal(t, 1, executionBuildsOf(rig, "core"), "one build executed")
+	buildBranches := 0
+	for _, branch := range executionProtocolRefs(t, rig.mailbox, "dispat-task-") {
+		if executionAssignedTaskKind(t, rig.mailbox, branch) != "build" {
+			continue
+		}
+		buildBranches++
+		chain := strings.Split(strings.TrimSpace(bareGit(t, rig.mailbox, "log", "--first-parent",
+			"--reverse", "--format=%s", "refs/heads/"+branch)), "\n")
+		for _, kind := range []string{"choreography-claim", "choreography-result", "choreography-decision"} {
+			assert.Equal(t, 1, strings.Count(strings.Join(chain, "\n"), "dispat transport "+kind), kind)
+		}
+	}
+	require.Equal(t, 1, buildBranches, "one canonical build task ref remains for recovery")
 }

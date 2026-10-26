@@ -614,23 +614,41 @@ const waitLimit = 3 * time.Minute
 // A process that outlives waitLimit is killed and fails the test, with what it
 // had printed when the kill let its output be collected.
 func (p *Proc) Wait() RunResult {
+	return p.WaitFor(waitLimit)
+}
+
+// WaitFor bounds one scenario more tightly while preserving the same process
+// cleanup and captured diagnostic output as Wait.
+func (p *Proc) WaitFor(limit time.Duration) RunResult {
+	return p.WaitForDiagnostic(limit, nil)
+}
+
+// WaitForDiagnostic observes retained state after a bounded child is killed
+// and before the test fails with its captured process output.
+func (p *Proc) WaitForDiagnostic(limit time.Duration, onTimeout func()) RunResult {
 	p.repo.T.Helper()
+	if limit <= 0 {
+		p.repo.T.Fatal("process wait limit must be positive")
+	}
 	exited := make(chan error, 1)
 	go func() { exited <- p.cmd.Wait() }()
 	var err error
 	select {
 	case err = <-exited:
-	case <-time.After(waitLimit):
+	case <-time.After(limit):
 		_ = p.cmd.Process.Kill()
 		select {
 		case <-exited:
+			if onTimeout != nil {
+				onTimeout()
+			}
 			p.repo.T.Fatalf("dispat was still running %s after the test began waiting for it, and was killed\nstdout:\n%s\nstderr:\n%s",
-				waitLimit, p.stdout.String(), p.stderr.String())
+				limit, p.stdout.String(), p.stderr.String())
 		case <-time.After(10 * time.Second):
 			// A descendant still holds the output pipes, so the buffers are
 			// still being written and must not be read.
 			p.repo.T.Fatalf("dispat was still running %s after the test began waiting for it, and was killed; "+
-				"a descendant kept its output open", waitLimit)
+				"a descendant kept its output open", limit)
 		}
 	}
 	code := 0

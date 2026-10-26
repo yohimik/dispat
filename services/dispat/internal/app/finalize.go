@@ -214,6 +214,10 @@ func (a *App) commitAndTag(ctx context.Context, fin finalizer, rc releaseCommit)
 		fin.crit.record(a.log, plan.CodeTagFailed, err, "release tags could not be prepared", nil)
 		return false
 	}
+	if err := a.prepareDeferredTagIntents(ctx, rc.rels); err != nil {
+		fin.crit.record(a.log, plan.CodeTagFailed, err, "deferred release tag targets could not be durably prepared", nil)
+		return false
+	}
 	isTagged := true
 	for _, rel := range rc.rels {
 		// A package whose scripts exported PACKAGE_<KEY>=<commitHash> pins
@@ -225,6 +229,9 @@ func (a *App) commitAndTag(ctx context.Context, fin finalizer, rc releaseCommit)
 				func(e *zerolog.Event) *zerolog.Event {
 					return e.Str("package", rel.Pkg.Name).Str("tag", rel.TagName())
 				})
+		} else if err := a.recordDeferredTagObject(ctx, rel); err != nil {
+			isTagged = false
+			fin.crit.record(a.log, plan.CodeTagFailed, err, "deferred release tag object could not be durably recorded", nil)
 		}
 	}
 	if isTagged {

@@ -103,6 +103,10 @@ type Lock struct {
 	Git    LockGitx
 	Remote string
 	Log    zerolog.Logger
+	// OnPrepared writes this immutable attempt identity to protected local
+	// recovery state before the first remote push. A failed write refuses the
+	// acquisition, so a landed lock never lacks its write-ahead locator.
+	OnPrepared func(context.Context, PreparedLockIdentity) error
 	// Run names the distributed run taking the lock, and is empty for a run
 	// that delegates nothing. It is written into the tag message, because a
 	// run that ends holding its lock has to be findable from it (CCME §28.6):
@@ -117,6 +121,13 @@ type Lock struct {
 	held     bool
 	localTag string
 	oid      string
+}
+
+type PreparedLockIdentity struct {
+	Run      string
+	Remote   string
+	LocalTag string
+	Object   string
 }
 
 // Acquire claims the lock, or reports why it could not.
@@ -159,6 +170,14 @@ func (l *Lock) Acquire(ctx context.Context) error {
 		return fmt.Errorf("resolving the release lock object: %w", err)
 	}
 	l.oid = oid
+	if l.OnPrepared != nil {
+		if err := l.OnPrepared(ctx, PreparedLockIdentity{
+			Run: l.Run, Remote: l.Remote, LocalTag: l.localTag, Object: oid,
+		}); err != nil {
+			l.dropAttempt(ctx)
+			return fmt.Errorf("recording the release lock attempt before its remote push: %w", err)
+		}
+	}
 	l.Log.Trace().Str("tag", LockTagName).Str("attempt", l.localTag).
 		Str("remote", gitx.RedactURL(l.Remote)).Msg("pushing the release lock tag")
 	if err := l.Git.PushObjectToTag(ctx, l.Remote, oid, LockTagName); err != nil {

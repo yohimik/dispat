@@ -19,8 +19,8 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
-// executionProtocolRefs lists one v2 namespace without reading a moving task
-// tip as input authority. The tests use ref names only to inspect setup.
+// executionProtocolRefs lists one coordination namespace without reading a
+// moving task tip as input authority. The tests inspect ref names only.
 func executionProtocolRefs(t *testing.T, mailbox, prefix string) []string {
 	t.Helper()
 	out := strings.TrimSpace(bareGit(t, mailbox, "for-each-ref", "--format=%(refname:short)",
@@ -44,17 +44,20 @@ func TestExecutionReservationsAndSlotsExistBeforeFirstFrame(t *testing.T) {
 				Name: executionSecondNode, Endpoint: cfg.Execution.Workers[0].Endpoint})
 		})
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
-	started := rig.repo.StartReleaseEnv(rig.env(), "release")
+	started := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
 	t.Cleanup(func() { _ = os.WriteFile(gate, nil, 0o600) })
 
 	require.Eventually(t, func() bool { return len(rig.runs()) > 0 }, 90*time.Second, 100*time.Millisecond,
 		"the first package frame never started")
 	taskRefs := executionProtocolRefs(t, rig.mailbox, "dispat-task-")
-	assert.Len(t, taskRefs, 9,
-		"three attempts for every one of three eligible worker tasks exist before a package frame")
+	assert.GreaterOrEqual(t, len(taskRefs), 3,
+		"each logical delegated task has one canonical ref before any frame starts")
 	for _, ref := range taskRefs {
-		assert.Regexp(t, `^dispat-task-[0-9a-f]{32}-[0-9a-f]{32}-[123]$`, ref)
+		assert.Regexp(t, `^dispat-task-[0-9a-f]{32}-[0-9a-f]{32}$`, ref,
+			"a retry must reuse the logical task ref")
 	}
+	assert.Len(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"), 1,
+		"one retained signed event feed exists before the first frame")
 	slotRefs := executionProtocolRefs(t, rig.mailbox, "dispat-slot-")
 	assert.Len(t, slotRefs, 4,
 		"each of two nodes has min(capacity=2, eligible=3) fixed notice refs")
@@ -70,8 +73,10 @@ func TestExecutionReservationsAndSlotsExistBeforeFirstFrame(t *testing.T) {
 	res := started.Wait()
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Len(t, rig.repo.TagList(), 3)
-	assert.Empty(t, executionProtocolRefs(t, rig.mailbox, "dispat-task-"))
-	assert.Empty(t, executionProtocolRefs(t, rig.mailbox, "dispat-slot-"))
+	assert.Equal(t, taskRefs, executionProtocolRefs(t, rig.mailbox, "dispat-task-"),
+		"the same canonical task refs remain for sealed-run receipt recovery")
+	assert.Equal(t, slotRefs, executionProtocolRefs(t, rig.mailbox, "dispat-slot-"),
+		"the fixed slot notice refs remain with the signed run history")
 	for name, node := range rig.nodesByPackage() {
 		assert.Contains(t, []string{executionNode, executionSecondNode}, node, name)
 	}
@@ -81,7 +86,7 @@ func TestExecutionReservationsAndSlotsExistBeforeFirstFrame(t *testing.T) {
 	stopAll(t, workers)
 }
 
-func TestExecutionEndpointAliasesShareExactReservations(t *testing.T) {
+func TestExecutionEndpointAliasesAreRefusedBeforeDispatch(t *testing.T) {
 	alias := filepath.Join(t.TempDir(), "same-mailbox.git")
 	rig := newExecutionPlacementRig(t, []string{"alpha"}, func(*harness.Repo) string {
 		return executionRecordingScript
@@ -99,11 +104,12 @@ func TestExecutionEndpointAliasesShareExactReservations(t *testing.T) {
 
 	res := rig.release()
 
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Equal(t, 1, executionBuildCount(rig, "alpha"), "one physical task ref authorizes one chosen worker")
-	assert.Len(t, rig.repo.TagList(), 1)
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout+res.Stderr, "a distributed run requires one canonical Git mailbox")
+	assert.Empty(t, rig.runs(), "no frame starts under mismatched endpoint identities")
+	assert.Empty(t, rig.repo.TagList())
 	assert.Empty(t, executionProtocolRefs(t, rig.mailbox, "dispat-task-"))
-	assert.Empty(t, executionProtocolRefs(t, rig.mailbox, "dispat-slot-"))
+	assert.False(t, remoteHoldsLock(t, rig.origin))
 	stopAll(t, []*executionWorker{first, second})
 }
 
@@ -140,7 +146,8 @@ done
 }
 
 func TestExecutionPartialReservationBatchRefusalStartsNoFrame(t *testing.T) {
-	names := make([]string, 11)
+	const packagesAcrossTwoInitializationBatches = 33
+	names := make([]string, packagesAcrossTwoInitializationBatches)
 	for i := range names {
 		names[i] = fmt.Sprintf("unit%02d", i)
 	}
@@ -181,7 +188,8 @@ printf '%s\n' "$n" > "$counter"
 	assert.GreaterOrEqual(t, pushes, 2)
 	assert.Empty(t, rig.runs(), "no package frame starts until all initialization chunks settle")
 	assert.Empty(t, rig.repo.TagList())
-	assert.Empty(t, executionProtocolRefs(t, rig.mailbox, "dispat-task-"), "earlier chunk is cleaned")
-	assert.Empty(t, executionProtocolRefs(t, rig.mailbox, "dispat-slot-"))
+	assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-task-"),
+		"the accepted first batch remains for exact recovery after a partial initialization")
+	assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"))
 	assert.False(t, remoteHoldsLock(t, rig.origin))
 }

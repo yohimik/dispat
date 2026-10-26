@@ -107,6 +107,51 @@ func TestLockRoundTrip(t *testing.T) {
 	assert.True(t, git.deleteDeadline, "unlock is bounded even with an unbounded caller context")
 }
 
+func TestLockPreparedIdentityIsDurableBeforeAnyRemotePush(t *testing.T) {
+	git := &fakeLockGit{}
+	lock := newLock(git, &bytes.Buffer{})
+	lock.Run = "run-1"
+	lock.OnPrepared = func(_ context.Context, prepared PreparedLockIdentity) error {
+		require.Equal(t, []string{"create", "resolve"}, git.calls)
+		require.Equal(t, lock.Run, prepared.Run)
+		require.Equal(t, lock.Remote, prepared.Remote)
+		require.Equal(t, "object-id", prepared.Object)
+		require.NotEmpty(t, prepared.LocalTag)
+		git.calls = append(git.calls, "durable-journal")
+		return nil
+	}
+	require.NoError(t, lock.Acquire(t.Context()))
+	require.Equal(t, []string{"create", "resolve", "durable-journal", "push"}, git.calls)
+	require.NoError(t, lock.Release(t.Context()))
+
+	refused := &fakeLockGit{}
+	other := newLock(refused, &bytes.Buffer{})
+	other.OnPrepared = func(context.Context, PreparedLockIdentity) error {
+		return errors.New("journal unavailable")
+	}
+	err := other.Acquire(t.Context())
+	require.ErrorContains(t, err, "journal unavailable")
+	require.Equal(t, []string{"create", "resolve", "delete"}, refused.calls,
+		"a failed write-ahead record cannot be followed by a remote lock push")
+}
+
+func TestLockAdoptsOnlyTheExactPreparedRemoteObject(t *testing.T) {
+	git := &fakeLockGit{remote: &lockRead{object: "object-id"}}
+	lock := newLock(git, &bytes.Buffer{})
+	lock.Run = "run-1"
+	prepared := PreparedLockIdentity{Run: "run-1", Remote: "origin",
+		LocalTag: gitx.LockAttemptTagPrefix + "attempt", Object: "object-id"}
+	require.NoError(t, lock.AdoptPrepared(t.Context(), prepared))
+	require.Equal(t, []string{"resolve"}, git.calls, "adoption only reads exact local and remote identities")
+	require.NoError(t, lock.Release(t.Context()))
+	require.Equal(t, []string{"resolve", "deleteRemote", "delete"}, git.calls)
+
+	foreign := newLock(&fakeLockGit{remote: &lockRead{object: "another-object"}}, &bytes.Buffer{})
+	foreign.Run = prepared.Run
+	require.ErrorIs(t, foreign.AdoptPrepared(t.Context(), prepared), ErrLockLost)
+	require.NoError(t, foreign.Release(t.Context()))
+}
+
 // TestLockRejectedPushLeavesNothingBehind: the case the whole feature exists
 // for. A refused push is a lock somebody else holds, and this run has to end
 // up owning nothing — including the local tag it just wrote, which anyone

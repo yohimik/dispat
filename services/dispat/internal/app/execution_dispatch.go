@@ -29,6 +29,9 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/script"
 )
 
+const dispatchInputSourcePathErrorFormat = "execution: resolving input source of %s: %w"
+const dispatchOutputRootPathErrorFormat = "execution: resolving output root %s: %w"
+
 // openDispatch starts the coordinator's pollers and gives it the run's own
 // answers about repositories, folders and shells.
 //
@@ -38,10 +41,33 @@ import (
 // it would see in any other script of the same repository.
 func (a *App) openDispatch(ctx context.Context, coordinator *execution.Coordinator,
 	pl *plan.Plan, runner script.Runnerx) error {
-	coordinatorSources := a.resolveInputSources(pl)
-	coordinatorRoots, packageRoots, err := a.dispatchOutputRoots(pl, coordinatorSources)
+	rawSources := a.resolveInputSources(pl)
+	coordinatorRoots, packageRoots, err := a.dispatchOutputRoots(pl, rawSources)
 	if err != nil {
 		return err
+	}
+	byPackage := make(map[string][]execution.Source, len(pl.Releases))
+	for name := range pl.Releases {
+		sources := slices.Clone(rawSources(name))
+		for index := range sources {
+			absolute, pathErr := filepath.Abs(sources[index].Dir)
+			if pathErr != nil {
+				return fmt.Errorf(dispatchInputSourcePathErrorFormat, name, pathErr)
+			}
+			sources[index].Dir = absolute
+		}
+		byPackage[name] = sources
+	}
+	coordinatorSources := func(name string) []execution.Source {
+		return slices.Clone(byPackage[name])
+	}
+	absoluteRoots := make(map[string][]string, len(coordinatorRoots))
+	for root, paths := range coordinatorRoots {
+		absolute, pathErr := filepath.Abs(root)
+		if pathErr != nil {
+			return fmt.Errorf(dispatchOutputRootPathErrorFormat, root, pathErr)
+		}
+		absoluteRoots[absolute] = paths
 	}
 	packageRepositories := make(map[string]string, len(pl.Releases))
 	for name, rel := range pl.Releases {
@@ -51,7 +77,7 @@ func (a *App) openDispatch(ctx context.Context, coordinator *execution.Coordinat
 		Concurrency:         a.cfg.Execution.ResolveConcurrency(),
 		Sources:             coordinatorSources,
 		InitialSources:      a.dispatchInitialSources(pl, coordinatorSources),
-		OutputRoots:         coordinatorRoots,
+		OutputRoots:         absoluteRoots,
 		PackageOutputRoots:  packageRoots,
 		PackageRepositories: packageRepositories,
 		Inputs:              a.resolveOutputProviders(pl),

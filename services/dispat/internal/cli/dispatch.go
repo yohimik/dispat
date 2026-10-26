@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/pflag"
 	configlib "github.com/yohimik/dispat/pkg/config"
+	public "github.com/yohimik/dispat/pkg/models"
 
 	"github.com/yohimik/dispat/pkg/manifest"
 	"github.com/yohimik/dispat/pkg/writer"
@@ -259,6 +260,15 @@ func (r *runner) validateFlags() (int, bool) {
 	cmd := r.inv.cmd
 	if code, done := r.validateWorkerLinks(); done {
 		return code, true
+	}
+	if mode := public.DistributionMode(*r.o.distributionMode); mode != public.DistributionModeCompilation {
+		r.boot.Error().Str(distributionModeFlagName, *r.o.distributionMode).
+			Msg(unsupportedDistributionModeErrorText)
+		return invalidInvocationExitCode, invocationValidationCompleteState
+	}
+	if _, err := app.ValidateReturnAddress(*r.o.returnEndpoint, *r.o.returnListen); err != nil {
+		r.boot.Error().Err(err).Msg(invalidReturnChannelAddressErrorText)
+		return invalidInvocationExitCode, invocationValidationCompleteState
 	}
 	if cmd == cmdCompute && *r.o.computeTopology != "minimal" && *r.o.computeTopology != "star" {
 		r.boot.Error().Str("topology", *r.o.computeTopology).Msg("unknown --topology value (want minimal or star)")
@@ -1171,6 +1181,22 @@ func (r *runner) dispatch(ctx context.Context, command configuredCommand) int {
 	window := app.WindowOptions{Filter: sel, Since: *o.since, Consumers: *o.consumers}
 
 	a := app.NewWorkspace(root, cfg, r.workspace, log)
+	if r.inv.cmd == cmdRelease || r.inv.cmd == cmdRun {
+		concurrency, err := r.fs.GetIntSlice(planningConcurrencyFlagName)
+		if err != nil {
+			log.Error().Err(err).Msg(invalidPlanningConcurrencyErrorText)
+			return invalidInvocationExitCode
+		}
+		a.SetPlanningConfigInvocation(app.PlanningConfigInvocation{
+			Concurrency: concurrency, ConcurrencySet: r.fs.Changed(planningConcurrencyFlagName),
+			LogLevel: *o.logLevel, LogLevelSet: r.fs.Changed(planningLogLevelFlagName),
+			LogFormat: *o.logFormat, LogFormatSet: r.fs.Changed(planningLogFormatFlagName),
+			Polyrepo: *o.polyrepo, PolyrepoSet: r.fs.Changed(planningPolyrepoFlagName),
+			QuietParser: *o.quietParser, QuietParserSet: r.fs.Changed(planningQuietParserFlagName),
+			Workers:         append([]string(nil), (*o.workers)...),
+			ImportedConfigs: append([]string(nil), (*o.configs)...),
+		})
+	}
 	if r.inv.cmd == cmdCommit && r.gitAuthoring {
 		gitDir, err := filepath.Abs(*o.root)
 		if err != nil {
@@ -1185,7 +1211,9 @@ func (r *runner) dispatch(ctx context.Context, command configuredCommand) int {
 	}
 	// The release's own options, shared by the command that performs it and
 	// the command that shows it in advance.
-	relOpts := app.ReleaseOptions{Filter: sel, Strict: *o.strict, RequireRelease: *o.requireRelease}
+	relOpts := app.ReleaseOptions{Filter: sel, Strict: *o.strict, RequireRelease: *o.requireRelease,
+		DistributionMode: public.DistributionMode(*o.distributionMode), ReturnEndpoint: *o.returnEndpoint,
+		ReturnListen: *o.returnListen}
 	switch r.inv.cmd {
 	case cmdStatus:
 		// A clean plan that releases nothing is exit 3, apart from exit 1's
@@ -1198,7 +1226,9 @@ func (r *runner) dispatch(ctx context.Context, command configuredCommand) int {
 			return 1
 		}
 	case cmdRun:
-		if a.RunScript(ctx, r.inv.script, app.RunOptions{OnError: *o.onError, Window: window, Args: r.inv.args}) != nil {
+		if a.RunScript(ctx, r.inv.script, app.RunOptions{OnError: *o.onError, Window: window, Args: r.inv.args,
+			DistributionMode: public.DistributionMode(*o.distributionMode), ReturnEndpoint: *o.returnEndpoint,
+			ReturnListen: *o.returnListen}) != nil {
 			return 1
 		}
 	case cmdPreview:

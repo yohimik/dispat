@@ -101,6 +101,10 @@ func (twin *executionParityTwin) setGate(t *testing.T, isOpen bool) {
 // run is one invocation against the twin, with the lock, the secret, the
 // script log and the gate in its environment.
 func (twin *executionParityTwin) run(args ...string) harness.RunResult {
+	if len(twin.workers) != 0 && (len(args) == 0 || args[0] != "status") {
+		args = append([]string{"release"}, args...)
+		args = append(args, "--return-endpoint", twin.rig.returnURL)
+	}
 	return twin.rig.repo.CommandEnv(twin.rig.env(executionParityGateEnv+"="+twin.gate), args...)
 }
 
@@ -151,16 +155,22 @@ func (twin *executionParityTwin) release(t *testing.T) []string {
 	twin.setGate(t, true)
 	record("bootstrap", twin.run())
 
+	repo.WriteFile("packages/libs/core/work.txt", "streaming\n")
+	repo.WriteFile("packages/apps/cli/work.txt", "own flag\n")
 	repo.Commit("feat(core)^: streaming\n\n---\n\nfeat(cli): own flag")
 	twin.setGate(t, false)
-	record("provider fails, consumer proceeds", twin.run())
-	require.Equal(t, 1, repo.TagCount("cli@0.2.0"), "the consumer proceeded; tags: %v", repo.TagList())
+	providerFailed := record("provider fails, consumer proceeds", twin.run())
+	require.Equal(t, 1, repo.TagCount("cli@0.2.0"),
+		"the consumer proceeded; tags: %v; stdout:\n%s; stderr:\n%s",
+		repo.TagList(), providerFailed.Stdout, providerFailed.Stderr)
 
 	twin.setGate(t, true)
 	scripted := len(twin.rig.runs())
+	retainedBeforeRefusal := twin.rig.branches()
 	refused := record("provider alone at the consumer's commit", twin.run("--package", "core"))
 	snapshot = append(snapshot, fmt.Sprintf("scripts run by the refused release: %d", len(twin.rig.runs())-scripted))
-	assert.Empty(t, twin.rig.branches(), "nothing was dispatched; stdout:\n%s", refused.Stdout)
+	assert.ElementsMatch(t, retainedBeforeRefusal, twin.rig.branches(),
+		"the refused plan added no task or ledger ref; stdout:\n%s", refused.Stdout)
 
 	repo.CommitEmpty("chore(core): retry the provider")
 	record("provider alone after a new commit", twin.run("--package", "core"))
@@ -214,5 +224,5 @@ func TestExecutionPickUpMatchesALocalRelease(t *testing.T) {
 		local.publishedOn(), "the local twin publishes here")
 	assert.Equal(t, map[string]string{"core": executionOrchestratorLabel, "cli": executionOrchestratorLabel},
 		distributed.publishedOn(), "the delegating twin also publishes locally, including catch-up")
-	assert.Empty(t, distributed.rig.branches(), "the run closed every coordination branch it created")
+	assert.NotEmpty(t, distributed.rig.branches(), "signed task and ledger refs remain for recovery")
 }

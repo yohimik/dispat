@@ -91,8 +91,12 @@ type InputPackage struct {
 // them.
 func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) error {
 	c.dispatch = dispatch
-	c.snapshots = newSnapshots()
-	if len(dispatch.InitialSources) > 0 {
+	if c.PinnedSources != nil {
+		c.snapshots = c.PinnedSources.snapshots
+	} else {
+		c.snapshots = newSnapshots()
+	}
+	if c.PinnedSources == nil && len(dispatch.InitialSources) > 0 {
 		if err := c.snapshots.captureBaselines(ctx, baselineCapture{sources: dispatch.InitialSources,
 			roots: dispatch.OutputRoots, open: dispatch.OpenRepository, log: c.Log}); err != nil {
 			c.snapshots.closeBaselines()
@@ -134,11 +138,26 @@ func (c *Coordinator) Guard(ctx context.Context, stage, packageName string) (fun
 	case <-ctx.Done():
 		return nil, fmt.Errorf("waiting for a local slot to run the %s stage: %w", stage, ctx.Err())
 	}
+	repository := c.dispatch.PackageRepositories[packageName]
+	if repository == "" && c.dispatch.Sources != nil {
+		if sources := c.dispatch.Sources(packageName); len(sources) > 0 {
+			repository = sources[0].Dir
+		}
+	}
+	var nativeLane *sync.Mutex
+	if repository != "" {
+		value, _ := c.nativeWriterLanes.LoadOrStore(repository, &sync.Mutex{})
+		nativeLane = value.(*sync.Mutex)
+		nativeLane.Lock()
+	}
 	if packageName != "" && stage != "revert" {
 		c.guard.Lock()
 		err := c.cleanPreparationRoots(ctx, packageName)
 		c.guard.Unlock()
 		if err != nil {
+			if nativeLane != nil {
+				nativeLane.Unlock()
+			}
 			<-c.local
 			return nil, err
 		}
@@ -147,6 +166,9 @@ func (c *Coordinator) Guard(ctx context.Context, stage, packageName string) (fun
 	c.Log.Trace().Str("stage", stage).Str("run", c.Run).Msg("stage holds the shared snapshot guard")
 	return func() {
 		c.guard.RUnlock()
+		if nativeLane != nil {
+			nativeLane.Unlock()
+		}
 		<-c.local
 	}, nil
 }
@@ -182,13 +204,26 @@ func (c *Coordinator) Stage(ctx context.Context, request release.StageRequest,
 	here release.LocalFrame, _ func(context.Context) error) (release.StageOutcome, error) {
 	descriptor := request.Descriptor
 	task := request.Release.Pkg.Name + ":" + request.Stage
+	if c.choreographyBroker != nil {
+		if request.TaskID == "" {
+			return release.StageOutcome{FailedPart: release.PartInputs},
+				fmt.Errorf("execution: compiled choreography stage has no canonical task ID")
+		}
+		task = request.TaskID
+	}
 	if !descriptor.IsPreparing {
 		if err := c.refreshPreparedOutputRoots(ctx, request); err != nil {
 			return release.StageOutcome{FailedPart: release.PartInputs}, err
 		}
 	}
 	if descriptor.Inputs == release.InputsProviderOutputs {
-		if err := c.prepareProviderOutputs(ctx, task, request); err != nil {
+		var err error
+		if c.choreographyBroker != nil {
+			err = c.requirePreparedProviderOutputs(task, request)
+		} else {
+			err = c.prepareProviderOutputs(ctx, task, request)
+		}
+		if err != nil {
 			return release.StageOutcome{FailedPart: release.PartInputs}, err
 		}
 	}
@@ -201,6 +236,9 @@ func (c *Coordinator) Stage(ctx context.Context, request release.StageRequest,
 			}
 		}
 		return c.publishHere(ctx, here)
+	}
+	if c.choreographyBroker != nil {
+		return release.StageOutcome{}, fmt.Errorf("execution: compiled choreography stage %s requires a pre-admission reservation", task)
 	}
 	preferred := ""
 	if descriptor.Inputs == release.InputsOwnOutputs {
@@ -280,7 +318,18 @@ func (c *Coordinator) placeTask(ctx context.Context, task string, placement Plac
 	// Every attempt of this task runs under a context a lost lock can end, so
 	// that a loss noticed by any other task of the run reaches this one too.
 	ctx, settled := c.watchOwnership(ctx)
-	defer settled()
+	defer func() {
+		if c.choreographyBroker != nil {
+			if value, ok := c.choreographyPending.Load(task); ok {
+				pending := value.(*choreographyPendingDecision)
+				pending.mu.Lock()
+				pending.watchSettled = settled
+				pending.mu.Unlock()
+				return
+			}
+		}
+		settled()
+	}()
 	for attempt := 1; ; attempt++ {
 		lease, err := c.Pool.AcquireNear(ctx, platforms, placement, preferred)
 		if err != nil {
@@ -330,6 +379,12 @@ type placedOutcome struct {
 // §28.9 requires: the work, where it ran, and the four outcomes told apart.
 func (c *Coordinator) rememberPlacedTask(task string, lease *Lease, attempt int, placed placedOutcome) {
 	packageName, stage := splitTaskName(task)
+	if c.choreographyBroker != nil {
+		if value, ok := c.choreographySummary.Load(task); ok {
+			identity := value.(choreographyTaskSummary)
+			packageName, stage = identity.Package, identity.Stage
+		}
+	}
 	computation, publication := c.resolveTaskOutcome(task, stage, placed.err)
 	c.rememberTaskOutcome(TaskRecord{
 		Package: packageName, Stage: stage, Task: task, Node: lease.Node, Attempt: attempt,
@@ -627,6 +682,12 @@ func (c *Coordinator) settleQueuedAttempt(ctx context.Context, lease *Lease, tas
 func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, attempt int,
 	outcome release.StageOutcome, result Result, commit, branch string,
 	request release.StageRequest) (release.StageOutcome, error) {
+	if err := rehomeChoreographyExports(&result, request.Release.Pkg.Repository,
+		request.Release.Pkg.Name, request.Release.Pkg.Dir,
+		request.Release.Pkg.Space.BuildOutputs); err != nil {
+		outcome.FailedPart = release.PartOutputs
+		return outcome, err
+	}
 	outcome, err := c.readReportedOutcome(task, attempt, outcome, result)
 	if err != nil {
 		return outcome, err
@@ -737,6 +798,9 @@ func (c *Coordinator) captureInputs(ctx context.Context, sources []Source) ([]st
 
 // endpointOf is where one node reads its work, as the configuration named it.
 func (c *Coordinator) endpointOf(node string) string {
+	if node == c.Local.Name && c.CanonicalEndpoint != "" {
+		return c.CanonicalEndpoint
+	}
 	for _, link := range c.Links {
 		if link.Name == node {
 			return link.Endpoint
@@ -747,15 +811,28 @@ func (c *Coordinator) endpointOf(node string) string {
 
 // resolvePackageDir is where the package's commands run inside the checkout a
 // node materializes: its folder relative to the repository that owns it.
+const packageDirOutsideSourceErrorFormat = "the package folder %s is not inside its repository %s: %w"
+const packageDirEscapesSourceError = "path escapes repository"
+
 func resolvePackageDir(sources []Source, request release.StageRequest) (string, error) {
 	for _, source := range sources {
 		if source.Name != request.Release.Pkg.Repository {
 			continue
 		}
-		relative, err := filepath.Rel(source.Dir, request.Dir)
+		absoluteSource, err := filepath.Abs(source.Dir)
 		if err != nil {
-			return "", fmt.Errorf("the package folder %s is not inside its repository %s: %w",
-				request.Dir, source.Dir, err)
+			return "", fmt.Errorf(packageDirOutsideSourceErrorFormat, request.Dir, source.Dir, err)
+		}
+		absoluteTask, err := filepath.Abs(request.Dir)
+		if err != nil {
+			return "", fmt.Errorf(packageDirOutsideSourceErrorFormat, request.Dir, source.Dir, err)
+		}
+		relative, err := filepath.Rel(absoluteSource, absoluteTask)
+		if err == nil && !filepath.IsLocal(relative) {
+			err = errors.New(packageDirEscapesSourceError)
+		}
+		if err != nil {
+			return "", fmt.Errorf(packageDirOutsideSourceErrorFormat, request.Dir, source.Dir, err)
 		}
 		return filepath.ToSlash(relative), nil
 	}
@@ -791,7 +868,7 @@ func (c *Coordinator) formatAssignment(node, kind, task string, attempt int, dir
 		Shell:           c.dispatch.Shell(request.Dir),
 		Platforms:       request.Release.Pkg.Space.BuildPlatforms,
 		Inputs:          inputs,
-		Outputs:         resolveDeclaredOutputs(kind, request),
+		Outputs:         resolveDeclaredOutputs(request),
 		Permits:         AssignmentPermits{},
 		DeadlineSeconds: resolveTaskDeadlineSeconds(c.Timeouts.Task),
 		Limits:          c.Limits,
@@ -820,8 +897,8 @@ func resolveAssignmentStage(kind string, request release.StageRequest) string {
 // produces no output set, which consume the bytes a build already produced
 // and capture none of their own. A node asked for them would be describing a
 // second, later version of an output set this run has already admitted.
-func resolveDeclaredOutputs(kind string, request release.StageRequest) []string {
-	if kind == KindPublish || (kind == KindStage && !request.Descriptor.IsProducingOutputs) {
+func resolveDeclaredOutputs(request release.StageRequest) []string {
+	if !request.Descriptor.IsProducingOutputs {
 		return nil
 	}
 	return request.Release.Pkg.Space.BuildOutputs

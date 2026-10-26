@@ -35,9 +35,13 @@ type fakeRunner struct {
 	delay   time.Duration
 	current map[string]int
 	maxCur  map[string]int
+	guard   func(dir, command string)
 }
 
 func (r *fakeRunner) Run(_ context.Context, dir, command string, env []string, _, _ io.Writer) error {
+	if r.guard != nil {
+		r.guard(dir, command)
+	}
 	key := command + " " + dir
 	r.mu.Lock()
 	if r.current == nil {
@@ -1746,6 +1750,190 @@ func TestRunOnSkipScript(t *testing.T) {
 	assert.Equal(t, "onSkip", envValue(t, env, "DISPAT_STAGE"))
 	assert.Equal(t, "a", envValue(t, env, "DISPAT_BLOCKED_BY"))
 	assert.Equal(t, "b", envValue(t, env, "DISPAT_PACKAGE"))
+}
+
+func TestLocalTaskLifecycleCoversFailureAndSkipHooks(t *testing.T) {
+	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
+	space := p.Releases["a"].Pkg.Space
+	space.OnFailScript = []string{"on-fail"}
+	space.OnSkipScript = []string{"on-skip"}
+	var mu sync.Mutex
+	active := make(map[string]int)
+	completed := make(map[string]string)
+	runner := &fakeRunner{fail: map[string]bool{"publish a": true}}
+	runner.guard = func(dir, command string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if active[dir] == 0 {
+			t.Errorf("command %s for %s ran without its local task lease", command, dir)
+		}
+	}
+	executor := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{},
+		Changelog: &fakeChangelog{}, Build: 4, Publish: 4})
+	executor.LocalTaskLifecycle = func(_ context.Context, taskID string) (func(context.Context, string) error, error) {
+		pkg := strings.SplitN(taskID, ":", 2)[0]
+		mu.Lock()
+		active[pkg]++
+		mu.Unlock()
+		return func(_ context.Context, status string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			active[pkg]--
+			completed[taskID] = status
+			return nil
+		}, nil
+	}
+	results := executor.Run(t.Context(), p)
+	require.Equal(t, StatusFailed, results["a"].Status)
+	require.Equal(t, StatusSkipped, results["b"].Status)
+	require.Equal(t, 1, runner.countPrefix("on-fail"))
+	require.Equal(t, 1, runner.countPrefix("on-skip"))
+	mu.Lock()
+	defer mu.Unlock()
+	for pkg, count := range active {
+		require.Zero(t, count, "unfinished local task lease for %s", pkg)
+	}
+	require.NotEmpty(t, completed)
+}
+
+func TestFirstOnlyClaimPrecedesEffectsAndFinishesAfterFailureHook(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Pkg.Space.OnFailScript = []string{"on-fail"}
+	runner := &fakeRunner{fail: map[string]bool{"build a": true}}
+	var mu sync.Mutex
+	active := make(map[string]bool)
+	finished := make(map[string]bool)
+	pool := make(map[string]bool)
+	physical := make(map[string]bool)
+	runner.guard = func(_ string, command string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if strings.HasPrefix(command, "build") || strings.HasPrefix(command, "on-fail") {
+			id := taskGraphID(task{pkg: "a", kind: taskBuild})
+			if !active[id] || finished[id] {
+				t.Errorf("%s ran outside the accepted first-only claim", command)
+			}
+		}
+	}
+	e := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{},
+		Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
+	e.ReserveFirstOnlyTask = func(_ context.Context, taskID string) (func(), error) {
+		mu.Lock()
+		pool[taskID] = true
+		mu.Unlock()
+		return func() {
+			mu.Lock()
+			defer mu.Unlock()
+			require.False(t, physical[taskID], "placement released before physical capacity")
+			if taskID != taskGraphID(task{pkg: "a", kind: taskPublish}) {
+				require.True(t, finished[taskID], "placement released before ticket finality")
+			}
+			pool[taskID] = false
+		}, nil
+	}
+	e.LocalTaskLifecycle = func(_ context.Context, taskID string) (func(context.Context, string) error, error) {
+		first := taskID != taskGraphID(task{pkg: "a", kind: taskPublish}) &&
+			taskID != taskGraphID(task{pkg: "a", kind: taskRecord})
+		mu.Lock()
+		if first && !pool[taskID] {
+			mu.Unlock()
+			t.Fatalf("physical capacity reserved before first-only placement for %s", taskID)
+		}
+		physical[taskID] = true
+		mu.Unlock()
+		return func(context.Context, string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if first {
+				require.True(t, finished[taskID], "physical capacity released before ticket finality")
+			}
+			physical[taskID] = false
+			return nil
+		}, nil
+	}
+	e.BeginFirstOnlyTask = func(_ context.Context, taskID string) (func(context.Context, bool, PackageOutcome) error, error) {
+		mu.Lock()
+		if !physical[taskID] {
+			mu.Unlock()
+			t.Fatalf("ticket started without physical capacity for %s", taskID)
+		}
+		active[taskID] = true
+		mu.Unlock()
+		return func(_ context.Context, succeeded bool, outcome PackageOutcome) error {
+			mu.Lock()
+			defer mu.Unlock()
+			if taskID == taskGraphID(task{pkg: "a", kind: taskBuild}) {
+				require.False(t, succeeded)
+				require.Equal(t, OutcomeFailed, outcome)
+				require.Equal(t, 1, runner.countPrefix("on-fail"))
+			}
+			finished[taskID] = true
+			active[taskID] = false
+			return nil
+		}, nil
+	}
+	e.BlockFirstOnlyTask = func(context.Context, string, string, PackageOutcome) error { return nil }
+	e.BlockLocalAuthorityTask = func(context.Context, string, string, PackageOutcome) error { return nil }
+	e.LocalAuthoritySettled = func(context.Context, string, *plan.Release, bool, PackageOutcome) error {
+		t.Error("failed build admitted publication")
+		return nil
+	}
+	e.TaskOutcomeSettled = func(_ context.Context, taskID string, _ PackageOutcome) error {
+		if taskID == taskGraphID(task{pkg: "a", kind: taskBuild}) {
+			t.Error("first-only task used delegated Stage settlement as well as its ticket")
+		}
+		return nil
+	}
+	results := e.Run(t.Context(), p)
+	require.Equal(t, StatusFailed, results["a"].Status)
+	mu.Lock()
+	defer mu.Unlock()
+	require.True(t, finished[taskGraphID(task{pkg: "a", kind: taskBuild})])
+}
+
+func TestLocalAuthoritySettlesPublishedRecordAfterEffects(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	runner := &fakeRunner{}
+	e := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{},
+		Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
+	var publishedTask string
+	e.ReserveFirstOnlyTask = func(_ context.Context, taskID string) (func(), error) {
+		return func() {
+			if taskID == taskGraphID(task{pkg: "a", kind: taskPublish}) {
+				require.Equal(t, taskID, publishedTask,
+					"publication placement released before exact local outcome")
+			}
+		}, nil
+	}
+	e.BeginFirstOnlyTask = func(context.Context, string) (func(context.Context, bool, PackageOutcome) error, error) {
+		return func(context.Context, bool, PackageOutcome) error { return nil }, nil
+	}
+	e.BeginLocalAuthorityTask = func(_ context.Context, taskID string) error {
+		require.Equal(t, taskGraphID(task{pkg: "a", kind: taskPublish}), taskID)
+		require.Equal(t, -1, runner.indexOf("publish a"),
+			"the exact local authority claim must precede publication")
+		return nil
+	}
+	e.BlockFirstOnlyTask = func(context.Context, string, string, PackageOutcome) error { return nil }
+	e.BlockLocalAuthorityTask = func(context.Context, string, string, PackageOutcome) error { return nil }
+	e.LocalAuthoritySettled = func(_ context.Context, taskID string, rel *plan.Release,
+		succeeded bool, outcome PackageOutcome) error {
+		require.Equal(t, "a", rel.Pkg.Name)
+		require.True(t, succeeded)
+		require.Equal(t, OutcomePublished, outcome)
+		require.NotEqual(t, -1, runner.indexOf("publish a"), "publication effect must precede durable outcome")
+		publishedTask = taskID
+		return nil
+	}
+	e.TaskOutcomeSettled = func(_ context.Context, taskID string, _ PackageOutcome) error {
+		if taskID == taskGraphID(task{pkg: "a", kind: taskPublish}) {
+			t.Error("branchless publication used Stage terminal callback")
+		}
+		return nil
+	}
+	results := e.Run(t.Context(), p)
+	require.Equal(t, StatusPublished, results["a"].Status)
+	require.Equal(t, taskGraphID(task{pkg: "a", kind: taskPublish}), publishedTask)
 }
 
 func TestRunOutcomeScriptsSilentOnSuccess(t *testing.T) {

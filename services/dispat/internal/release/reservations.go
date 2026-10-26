@@ -8,6 +8,7 @@ import "github.com/yohimik/dispat/services/dispat/internal/plan"
 // ReservationStage is a compiled task that may need a worker attempt. Its
 // execution inputs are intentionally absent until predecessors finish.
 type ReservationStage struct {
+	TaskID     string
 	Release    *plan.Release
 	Descriptor Stage
 }
@@ -29,7 +30,8 @@ func CompiledReservationStages(p *plan.Plan) []ReservationStage {
 		if stage.Placement != PlacementByBuild {
 			continue
 		}
-		stages = append(stages, ReservationStage{Release: p.Releases[task.pkg], Descriptor: stage})
+		stages = append(stages, ReservationStage{TaskID: taskGraphID(task),
+			Release: p.Releases[task.pkg], Descriptor: stage})
 	}
 	return stages
 }

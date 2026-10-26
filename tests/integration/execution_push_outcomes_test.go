@@ -65,109 +65,74 @@ func executionBuildsOf(rig *executionRig, name string) int {
 	return count
 }
 
-// TestExecutionLostClaimResponseRunsTheTaskOnce: the node's claim push applies
-// and its answer is lost. The
-// node reads the branch, finds its own claim there and runs the build exactly once.
-func TestExecutionLostClaimResponseRunsTheTaskOnce(t *testing.T) {
-	for _, row := range []struct {
-		name    string
-		adjust  func(*models.File)
-		pattern string
-		ranOnce func(*executionRig) bool
-	}{
-		{
-			name:    "a build claim",
-			pattern: "*push*dispat-task-*",
-			ranOnce: func(rig *executionRig) bool { return executionBuildsOf(rig, "core") == 1 },
-		},
-	} {
-		t.Run(row.name, func(t *testing.T) {
-			var adjust []func(*models.File)
-			if row.adjust != nil {
-				adjust = append(adjust, row.adjust)
-			}
-			rig := newExecutionPushOutcomeRig(t, adjust...)
-			fault := harness.NewGitFault(t, harness.GitFault{
-				Pattern: row.pattern, Nth: 1, After: true, Output: executionLostPushReply})
-			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
+// TestExecutionPeerNeverPushesClaimRef is the live v3 transport control. A
+// stand-in Git would lose any peer task-ref push reply; no such push occurs.
+// The first node still records one claim and the build runs exactly once.
+func TestExecutionPeerNeverPushesClaimRef(t *testing.T) {
+	rig := newExecutionPushOutcomeRig(t)
+	fault := harness.NewGitFault(t, harness.GitFault{
+		Pattern: "*push*dispat-task-*", Nth: 1, After: true, Output: executionLostPushReply})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
+	started := time.Now()
+	res := rig.release()
+	stopAll(t, []*executionWorker{worker})
 
-			started := time.Now()
-			res := rig.release()
-			stopAll(t, []*executionWorker{worker})
-
-			require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.Positive(t, fault.Matches(), "the fault reached the claim push")
-			assert.True(t, row.ranOnce(rig), "the task ran exactly once: %v", rig.runs())
-			assert.Less(t, time.Since(started), 150*time.Second, "and nobody waited out the task deadline")
-			assert.False(t, harness.IsCodePresent(executionEvents(res), executionPublicationUnknownCode),
-				"a claim that landed leaves nothing unknown\nstdout:\n%s", res.Stdout)
-			assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
-			assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")
-			assert.Empty(t, rig.branches(), "the run closed the branches it created")
-		})
-	}
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Zero(t, fault.Matches(), "a v3 peer must return Claim over HTTPS without pushing a task ref")
+	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the task ran once: %v", rig.runs())
+	assert.Less(t, time.Since(started), 150*time.Second, "the first node settled the return without waiting out the task deadline")
+	assert.False(t, harness.IsCodePresent(executionEvents(res), executionPublicationUnknownCode),
+		"the accepted Claim leaves nothing unknown\nstdout:\n%s", res.Stdout)
+	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
+	assert.False(t, remoteHoldsLock(t, rig.origin), "the completed run released its lock")
+	assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
+		"the first node retains the signed settlement feed")
 }
 
-// TestExecutionUnreadableClaimIsAdoptedWhenItSurfaces: the node's claim push
-// applies and its answer is lost. Bounded exact reads that would settle it
-// fail as well, so the node cannot tell whether the claim landed. It neither
-// claims the work a second time nor gives it up: it remembers the claim, and
-// the next poll, with the remote readable again, finds that claim on the
-// branch and runs the build under it. The package is built exactly once and
-// the release succeeds well inside the task deadline with nothing unknown.
-func TestExecutionUnreadableClaimIsAdoptedWhenItSurfaces(t *testing.T) {
+// TestExecutionUnreadableTaskRefWaitsWithoutDuplicateClaim makes the peer's
+// read-only view of an offered v3 task temporarily unavailable. Once the
+// exact ref is readable, it claims once through the return channel and builds
+// once; no timeout authorizes a second command.
+func TestExecutionUnreadableTaskRefWaitsWithoutDuplicateClaim(t *testing.T) {
 	rig := newExecutionPushOutcomeRig(t)
-	// The task push is selected independently of the worker's concurrent
-	// exact-ref polls. After that push begins, bounded read failures hide the
-	// landed claim until a later poll can adopt it.
-	push, reads := harness.NewGitFaultChain(t,
-		harness.GitFault{Pattern: "*push*--force-with-lease=refs/heads/dispat-task-*",
-			Nth: 1, After: true, Output: executionLostPushReply},
-		harness.GitFault{Pattern: "*ls-remote*refs/heads/dispat-task-*",
-			ArmAfter: "*push*--force-with-lease=refs/heads/dispat-task-*",
-			Nth:      1, Onward: true, Through: 12, Output: executionLostPushReply})
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, push.Env()...)
+	reads := harness.NewGitFault(t, harness.GitFault{
+		Pattern: "*ls-remote*refs/heads/dispat-task-*",
+		Nth:     1, Onward: true, Through: 12, Output: executionLostPushReply})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, reads.Env()...)
 
 	started := time.Now()
 	res := rig.release()
 	served := worker.stop(t)
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Positive(t, push.Matches(), "the claim push lost its response")
-	assert.GreaterOrEqual(t, reads.Matches(), 3, "the claim's exact settlement reads failed")
-	assert.Contains(t, served.Stdout, "the claim push has no known outcome",
-		"the node could not settle its claim\nworker:\n%s", served.Stdout)
-	assert.Contains(t, served.Stdout, "a claim whose push had no known outcome is on the branch and is adopted",
-		"and adopted it once it surfaced\nworker:\n%s", served.Stdout)
+	assert.GreaterOrEqual(t, reads.Matches(), 3, "the exact task-ref reads were unavailable")
+	assert.Equal(t, 1, strings.Count(served.Stdout, `"message":"task claimed"`),
+		"recovery of a temporarily unreadable task ref must not duplicate the Claim")
 	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the build ran once: %v", rig.runs())
 	assert.Less(t, time.Since(started), 150*time.Second, "and nobody waited out the task deadline")
 	assert.False(t, harness.IsCodePresent(executionEvents(res), executionPublicationUnknownCode),
-		"an adopted claim leaves nothing unknown\nstdout:\n%s", res.Stdout)
+		"one accepted Claim leaves nothing unknown\nstdout:\n%s", res.Stdout)
 	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
 	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")
-	assert.Empty(t, rig.branches(), "the run closed the branches it created")
+	assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
+		"the first node retains signed finality after the read fault")
 }
 
-// TestExecutionLostAcknowledgementResponseSettlesTheWithdrawal: the release
-// is interrupted while a node builds, the node stops the build and pushes its
-// acknowledgement, and the push applies while its answer is lost. The node
-// reads the branch instead of pushing again, so the run hears the
-// acknowledgement it wrote: the withdrawn attempt is settled as acknowledged,
-// with the phase the frame had reached, nothing is reported unknown, nothing is
-// recorded and the lock goes back.
-func TestExecutionLostAcknowledgementResponseSettlesTheWithdrawal(t *testing.T) {
+// TestExecutionPeerAcknowledgesWithdrawalWithoutGitPush: the first node
+// cancels a claimed task; the peer stops it and returns a signed Ack without
+// pushing a task ref. A lost Ack return reply is tested against the exact
+// receipt lookup in TestWorkerLostAcknowledgementReplyUsesExactReceipt.
+func TestExecutionPeerAcknowledgesWithdrawalWithoutGitPush(t *testing.T) {
 	rig := newExecutionRig(t, func(cfg *models.File) {
 		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
 		cfg.Scripts["build"] = models.Script{executionRecordingScript + " && sleep 600"}
 		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 600, Cancel: 60}
 		cfg.LogLevel = "debug"
 	})
-	// The node's second push onto the build branch: the first is its claim,
-	// and the build never finishes, so the second is its acknowledgement.
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*push*dispat-task-*", Nth: 2, After: true, Output: executionLostPushReply})
+		Pattern: "*push*dispat-task-*", Nth: 1, After: true, Output: executionLostPushReply})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
-	started := rig.repo.StartReleaseEnv(rig.env(), "release")
+	started := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
 
 	require.Eventually(t, func() bool { return len(rig.runs()) == 1 }, 60*time.Second, 50*time.Millisecond,
 		"the build did not start before the interruption")
@@ -176,23 +141,21 @@ func TestExecutionLostAcknowledgementResponseSettlesTheWithdrawal(t *testing.T) 
 	served := worker.stop(t)
 
 	assert.NotEqual(t, 0, res.Code, "an interrupted release exits non-zero")
-	assert.Equal(t, 2, fault.Matches(), "the fault reached the acknowledgement push, and nothing pushed it again")
-	settled, isSettled := executionLine(res, "the withdrawn attempt was acknowledged")
-	require.True(t, isSettled, "the run heard the acknowledgement whose answer was lost\nstdout:\n%s", res.Stdout)
-	assert.Equal(t, "commands", settled.Str("phase"))
+	assert.Zero(t, fault.Matches(), "the peer returns Ack through HTTPS, not a Git task push")
+	requireChoreographyTaskChain(t, rig.mailbox, rig.branches(),
+		"choreography-claim", "cancel", "ack", "choreography-decision")
 	assert.False(t, harness.IsCodePresent(executionEvents(res), executionPublicationUnknownCode),
 		"an acknowledged withdrawal leaves nothing unknown\nstdout:\n%s", res.Stdout)
-	assert.Contains(t, served.Stdout, `"message":"cancellation acknowledged"`)
+	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "one command started before Cancel")
 	assert.Empty(t, executionReleaseTags(rig), "nothing was recorded")
-	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock went back")
+	assert.False(t, remoteHoldsLock(t, rig.origin), "the settled cancellation releases the lock")
+	assert.Equal(t, 0, served.Code, "the peer remains healthy after returning Ack")
 }
 
-// TestExecutionRefusedResultFailsTheTaskPromptly: the mailbox refuses the
-// node's result the way a hook or a size limit does, with a porcelain
-// `[remote rejected]` line. The node reports once more without the outputs, as
-// a failure naming the stable reason, so the run fails the package with the
-// integrity code long before its task deadline instead of waiting it out.
-func TestExecutionRefusedResultFailsTheTaskPromptly(t *testing.T) {
+// TestExecutionPeerNeverPushesResultRef makes every attempted peer task-ref
+// push fail. The v3 Result travels as a bounded pack through the return
+// channel, so the build and release still complete once.
+func TestExecutionPeerNeverPushesResultRef(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the refused-result fixture uses a POSIX shell")
 	}
@@ -206,21 +169,18 @@ func TestExecutionRefusedResultFailsTheTaskPromptly(t *testing.T) {
 		"PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"DISPAT_IT_REFUSED_GIT="+realGit, "DISPAT_IT_REFUSED_DIR="+shim)
 
-	started := time.Now()
 	res := rig.release()
 	replies := stopAll(t, []*executionWorker{worker})
 
-	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Less(t, time.Since(started), 150*time.Second, "the run heard an answer rather than waiting 300 s")
-	assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode),
-		"the package failed with the integrity code\nstdout:\n%s", res.Stdout)
-	assert.Contains(t, res.Stdout, "transfer-refused", "naming why the node could not report its outputs")
-	refused, isRefused := executionLine(replies[0], "the mailbox refused the task result; a result without it is reported instead")
-	require.True(t, isRefused, "the node said so\nstdout:\n%s", replies[0].Stdout)
-	assert.Contains(t, refused.Str("error"), "hook declined", "with the server's reason")
-	assert.Empty(t, executionReleaseTags(rig), "nothing was recorded")
-	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock went back")
-	assert.Empty(t, rig.branches())
+	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Empty(t, replies[0].Stderr)
+	_, err = os.Stat(filepath.Join(shim, "refused"))
+	require.True(t, os.IsNotExist(err), "the peer must not attempt any task-ref push")
+	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "one result was admitted")
+	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "the first node recorded the release")
+	assert.False(t, remoteHoldsLock(t, rig.origin), "the completed run released its lock")
+	assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
+		"the first node retains the signed result and decision feed")
 }
 
 // The node's second update of a task ref is its result, after its claim.
@@ -249,10 +209,9 @@ exec "$DISPAT_IT_REFUSED_GIT" "$@"
 `
 
 // TestExecutionRefusedAssignmentIsOfferedAgain: the mailbox refuses the run's
-// first assignment push outright, the way a server rule does, with a porcelain
-// `[remote rejected]` line. The assignment provably never landed, so it is
-// no attempt anybody can be working on: the run revokes the queued attempt,
-// offers the task again, and builds and releases the package once.
+// first atomic task, slot and ledger update outright. Exact unchanged tips
+// prove the transaction never landed, so the first node retries the same
+// signed attempt once and builds and releases the package once.
 func TestExecutionRefusedAssignmentIsOfferedAgain(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the refusing fixture uses a POSIX shell")
@@ -274,62 +233,23 @@ func TestExecutionRefusedAssignmentIsOfferedAgain(t *testing.T) {
 	require.NoError(t, err, "the shim refused an activation update")
 	assert.Contains(t, string(refused), "push --atomic")
 	assert.Contains(t, string(refused), "--force-with-lease=refs/heads/dispat-task-")
-	revoked, isRevoked := executionLine(res, "the queued assignment was revoked and the task is placed again")
-	require.True(t, isRevoked, "the refused attempt was not placed before retry\nstdout:\n%s", res.Stdout)
-	assert.Equal(t, float64(1), revoked["attempt"])
-	assigned, isAssigned := executionLine(res, "task assigned")
-	require.True(t, isAssigned, "the task was assigned on its next attempt\nstdout:\n%s", res.Stdout)
-	assert.Equal(t, float64(2), assigned["attempt"])
+	_, isRevoked := executionLine(res, "the queued assignment was revoked and the task is placed again")
+	assert.False(t, isRevoked, "an offer that never landed must not consume an attempt")
+	settled, isSettled := executionLine(res, "task outcome")
+	require.True(t, isSettled, "the exact offer was retried and settled\nstdout:\n%s", res.Stdout)
+	assert.Equal(t, float64(1), settled["attempt"])
 	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the package was built once: %v", rig.runs())
 	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
 	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")
-	assert.Empty(t, rig.branches(), "no coordination branch outlives the run")
+	assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
+		"the first node retains signed finality for the one admitted attempt")
 }
 
-// TestExecutionRefusedClaimIsOfferedAgain: the mailbox refuses the node's
-// claim outright with a porcelain `[remote rejected]` line. The claim provably
-// never landed, so the node says the mailbox refused it, with the server's
-// reason, and leaves the work alone; the run, hearing no claim within its task
-// deadline, revokes the assignment and offers the task again, which the node
-// claims. The package is built once and released.
-func TestExecutionRefusedClaimIsOfferedAgain(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the refusing fixture uses a POSIX shell")
-	}
-	wait := 8
-	if harness.IsTinyGo() {
-		wait = 40
-	}
-	rig := newExecutionPushOutcomeRig(t, func(cfg *models.File) {
-		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: wait, Cancel: 20}
-	})
-	shim := t.TempDir()
-	realGit, err := exec.LookPath("git")
-	require.NoError(t, err)
-	require.NoError(t, os.Mkdir(filepath.Join(shim, "pushes"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(shim, "git"), []byte(executionRefusedResultScript), 0o755))
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0,
-		"PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"DISPAT_IT_REFUSED_GIT="+realGit, "DISPAT_IT_REFUSED_DIR="+shim, "DISPAT_IT_REFUSED_ORDINAL=1")
-
-	res := rig.release()
-	replies := stopAll(t, []*executionWorker{worker})
-
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	refused, isRefused := executionLine(replies[0], "the mailbox refused this node's claim")
-	require.True(t, isRefused, "the node said so\nworker:\n%s", replies[0].Stdout)
-	assert.Contains(t, refused.Str("error"), "hook declined", "with the server's reason")
-	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the package was built once: %v", rig.runs())
-	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
-	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock goes back")
-	assert.Empty(t, rig.branches(), "no coordination branch outlives the run")
-}
-
-// TestExecutionLostActivationReplySettlesOrFailsClosed: an atomic task and
-// notice activation whose reply is lost can continue when both exact updates
+// TestExecutionLostActivationReplySettlesOrFailsClosed: an atomic task, slot
+// and ledger offer whose reply is lost can continue when all exact updates
 // landed. A reply with no applied update remains uncertain: an in-flight
-// request may still land after bounded reads, so the run fails closed without
-// authorizing another attempt. Both paths clean their owned refs.
+// request may still land after bounded reads, so the run retains its lock and
+// canonical evidence without authorizing another attempt.
 func TestExecutionLostActivationReplySettlesOrFailsClosed(t *testing.T) {
 	for name, isApplied := range map[string]bool{"applied": true, "never applied": false} {
 		t.Run(name, func(t *testing.T) {
@@ -347,24 +267,26 @@ func TestExecutionLostActivationReplySettlesOrFailsClosed(t *testing.T) {
 				require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 				assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the package was built once: %v", rig.runs())
 				assert.True(t, rig.repo.IsTagged("core@0.1.0"), "tags: %v", rig.repo.TagList())
+				assert.False(t, remoteHoldsLock(t, rig.origin), "the settled run releases its lock")
 			} else {
 				require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-				assert.Contains(t, res.Stdout, "the atomic task activation has no known outcome")
+				assert.Contains(t, res.Stdout, "task and capacity CAS is unresolved")
 				assert.Zero(t, executionBuildsOf(rig, "core"), "uncertain placement starts no task")
-				assert.Empty(t, rig.repo.TagList(), "uncertain placement records no release")
+				assert.Empty(t, executionReleaseTags(rig), "uncertain placement records no release")
+				assert.True(t, remoteHoldsLock(t, rig.origin),
+					"an unknown in-flight offer keeps native authority fenced")
 			}
-			assert.Empty(t, rig.branches(), "no coordination branch outlives the run")
-			assert.Empty(t, executionMailboxBranches(t, rig.mailbox))
+			assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
+				"the canonical feed remains for either finality or reconciliation")
 		})
 	}
 }
 
-// TestExecutionHungMailboxStillGivesTheLockBack: the mailbox stops answering
-// after preflight, while a node is building, and the release is interrupted.
-// The withdrawal is bounded by the cancel wait and the run's close by its own
-// bound, so the release ends and gives its lock back instead of waiting on a
-// remote that will never answer.
-func TestExecutionHungMailboxStillGivesTheLockBack(t *testing.T) {
+// TestExecutionHungMailboxKeepsActiveClaimFenced: the mailbox stops answering
+// after an accepted Claim, while a node is building, and the release is
+// interrupted. Bounded cleanup returns, but cannot prove the claim stopped;
+// it retains the release lock and exact refs for same-generation recovery.
+func TestExecutionHungMailboxKeepsActiveClaimFenced(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the hung-mailbox fixture uses a POSIX shell")
 	}
@@ -381,7 +303,7 @@ func TestExecutionHungMailboxStillGivesTheLockBack(t *testing.T) {
 	started := rig.repo.StartReleaseEnv(rig.env(
 		"PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"DISPAT_IT_HANG_GIT="+realGit, "DISPAT_IT_HANG_DIR="+shim,
-		"DISPAT_IT_HANG_MAILBOX="+rig.mailbox), "release")
+		"DISPAT_IT_HANG_MAILBOX="+rig.mailbox), "release", "--return-endpoint", rig.returnURL)
 
 	executionAwaitProbe(t, rig, executionNode)
 	require.NoError(t, os.WriteFile(filepath.Join(shim, "hang"), nil, 0o600))
@@ -393,10 +315,13 @@ func TestExecutionHungMailboxStillGivesTheLockBack(t *testing.T) {
 
 	require.NotEqual(t, 0, res.Code, "an interrupted release exits non-zero\nstdout:\n%s", res.Stdout)
 	assert.Less(t, elapsed, 150*time.Second, "the withdrawal and the close ended within their bounds")
-	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock went back\nstdout:\n%s", res.Stdout)
+	assert.True(t, remoteHoldsLock(t, rig.origin),
+		"an unsettled accepted Claim keeps native authority fenced\nstdout:\n%s", res.Stdout)
 	assert.True(t, harness.IsCodePresent(executionEvents(res), executionRetainedCode),
-		"the branch the hung mailbox kept is reported\nstdout:\n%s", res.Stdout)
-	assert.Empty(t, executionTransportRefs(t, rig.repo.Root), "no fetched transport ref is left behind")
+		"the unavailable canonical ledger is reported\nstdout:\n%s", res.Stdout)
+	assert.NotEmpty(t, executionTransportRefs(t, rig.repo.Root),
+		"the exact fetched task evidence remains available for reconciliation")
+	assert.Empty(t, executionReleaseTags(rig), "an unresolved build cannot publish")
 }
 
 // executionTransportRefs are the fetched coordination refs a repository holds.

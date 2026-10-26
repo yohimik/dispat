@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -34,8 +35,10 @@ import (
 // Link is one configured worker node: what it is called, and the mailbox it
 // reads its work from.
 type Link struct {
-	Name     string
-	Endpoint string
+	Name              string
+	Endpoint          string
+	LateJoin          bool
+	IdentityPublicKey string
 }
 
 // PackagePlatforms is one releasing package, the node platforms its build may
@@ -57,6 +60,23 @@ type Coordinator struct {
 	// Generation names the ownership the run holds, derived from the release
 	// locks it acquired.
 	Generation string
+	// Set before preflight when remote workers participate. These
+	// fields enter the signed probe and bind its HTTPS return destination.
+	ReturnEndpoint    string
+	ReturnCertSHA256  string
+	GraphDigest       string
+	Mode              string
+	AlgorithmVersion  string
+	JoinPolicy        ChoreographyJoinPolicy
+	GraphRootOID      string
+	CanonicalEndpoint string
+	canonicalMailbox  *GitMailbox
+	// PinnedSources are captured before signed preflight. PinnedInputs adds
+	// exact ref and planner-option evidence to those source commitments.
+	PinnedSources *PinnedRunSources
+	PinnedInputs  *PinnedRunInputs
+	// BootstrapOID is retained by v3 task and ledger roots after probe cleanup.
+	BootstrapOID string
 	// Links are the configured worker nodes.
 	Links []Link
 	// Local is this machine's own place in the pool: what it calls itself,
@@ -79,6 +99,20 @@ type Coordinator struct {
 	Pool *Pool
 	// reservations are created after preflight and before any task frame.
 	reservations *reservationState
+	// choreographyInitialized fences a second v3 initial batch after a
+	// partial or ambiguous create. Close settles any refs the run owns.
+	choreographyInitialized bool
+	choreographySlots       *reservationState
+	choreographyBroker      *FirstNodeBroker
+	choreographyPersist     *GitChoreographyPersist
+	choreographyRequests    sync.Map // task name -> choreographyResultExpectation
+	choreographyPending     sync.Map // task name -> *choreographyPendingDecision
+	choreographySummary     sync.Map // task name -> choreographyTaskSummary
+	choreographyReadyFrames sync.Map // task name -> first-node compiled ready frame
+	nativeWriterLanes       sync.Map // repository name -> *sync.Mutex
+	// LocalChoreographer executes one already durable v3 assignment through
+	// the same signed claim/result return path as a remote peer.
+	LocalChoreographer func(context.Context, string, ChoreographyEventCursor) error
 
 	// mailboxes is one open mailbox per link, opened by the caller so that
 	// this type never decides what a local object store is.
@@ -87,8 +121,9 @@ type Coordinator struct {
 	// owned are the refs this run created, with the value it last wrote, and
 	// the mutex that lets several probes record theirs at once. One owner:
 	// nothing else in the process knows what this run put on a mailbox.
-	mu    sync.Mutex
-	owned map[string][]gitx.BranchLease
+	mu           sync.Mutex
+	probeReplies sync.Mutex
+	owned        map[string][]gitx.BranchLease
 	// ownership is what this run asks before every new assignment, and the
 	// cancellations a lost lock has to reach. It is the release's own gate,
 	// borrowed through UseOwnership, and nil for a run that holds no lock.
@@ -156,6 +191,30 @@ func NewCoordinator(run, planDigest, generation string, local LocalNode, links [
 	}
 }
 
+// SetCanonicalChoreographyMailbox fixes the one Git CAS authority independently
+// of the initially admitted peers. A run with only late joiners still needs
+// this store before it creates its signed bootstrap and task roots.
+func (c *Coordinator) SetCanonicalChoreographyMailbox(endpoint string, mailbox *GitMailbox) error {
+	if c == nil || mailbox == nil || c.BootstrapOID != "" || c.choreographyInitialized ||
+		endpoint == "" || mailbox.endpoint != endpoint {
+		return fmt.Errorf("execution: canonical choreography mailbox is unavailable or was set after bootstrap")
+	}
+	for _, link := range c.Links {
+		if link.Endpoint != endpoint {
+			return fmt.Errorf("execution: worker %q names a different coordination endpoint", link.Name)
+		}
+	}
+	c.CanonicalEndpoint, c.canonicalMailbox = endpoint, mailbox
+	if c.mailboxes == nil {
+		c.mailboxes = make(map[string]*GitMailbox)
+	}
+	if existing := c.mailboxes[c.Local.Name]; existing != nil && existing != mailbox {
+		return fmt.Errorf("execution: first-node mailbox identity collides with a peer link")
+	}
+	c.mailboxes[c.Local.Name] = mailbox
+	return nil
+}
+
 // Preflight asks every configured node what it is, and refuses the run when
 // any of them cannot take the work this plan would place on it.
 //
@@ -174,10 +233,16 @@ func (c *Coordinator) Preflight(ctx context.Context, packages []PackagePlatforms
 	if err := c.checkOwnership(ctx); err != nil {
 		return err
 	}
-	reports := make([]*NodeReport, len(c.Links))
-	failures := make([]error, len(c.Links))
+	activeLinks := make([]Link, 0, len(c.Links))
+	for _, link := range c.Links {
+		if !link.LateJoin {
+			activeLinks = append(activeLinks, link)
+		}
+	}
+	reports := make([]*NodeReport, len(activeLinks))
+	failures := make([]error, len(activeLinks))
 	var waiting sync.WaitGroup
-	for index, link := range c.Links {
+	for index, link := range activeLinks {
 		waiting.Add(1)
 		go func() {
 			defer waiting.Done()
@@ -198,7 +263,7 @@ func (c *Coordinator) Preflight(ctx context.Context, packages []PackagePlatforms
 		}()
 	}
 	waiting.Wait()
-	for index, link := range c.Links {
+	for index, link := range activeLinks {
 		if failures[index] != nil {
 			return c.refuse(link.Name, failures[index])
 		}
@@ -215,7 +280,7 @@ func (c *Coordinator) Preflight(ctx context.Context, packages []PackagePlatforms
 	// The pool is what the reports were collected for: a node's capacity and
 	// its platform are the node's own statements about itself, and the only
 	// moment this run hears them is here.
-	c.Pool = NewPool(c.Links, reports, c.Local, c.Log)
+	c.Pool = NewPool(activeLinks, reports, c.Local, c.Log)
 	return nil
 }
 
@@ -225,14 +290,29 @@ func (c *Coordinator) probe(ctx context.Context, link Link) (*NodeReport, error)
 	branch := FormatBranch(link.Name, KindProbe, time.Now())
 	assignment := &Assignment{
 		Header: Header{
-			Protocol: ProtocolVersion, Kind: KindProbe, Run: c.Run,
+			Protocol: c.probeProtocol(), Kind: KindProbe, Run: c.Run,
 			PlanDigest: c.PlanDigest, Task: PreflightTask, Attempt: 1,
 			Generation: c.Generation, Node: link.Name, Branch: branch,
 			IssuedAt: time.Now().UTC().Format(time.RFC3339),
 		},
-		Limits: c.Limits,
+		Limits: c.Limits, ReturnEndpoint: c.ReturnEndpoint,
+		ReturnCertSHA256: c.ReturnCertSHA256, GraphDigest: c.GraphDigest,
+		DistributionMode: c.Mode,
+		BootstrapOID:     c.BootstrapOID,
+		PinnedInputs:     c.PinnedInputs,
 	}
-	offered, err := mailbox.PrepareAssignment(ctx, assignment)
+	var offered string
+	var err error
+	if c.PinnedSources != nil {
+		assignment.Repositories = append([]AssignmentRepository(nil), c.PinnedSources.Repositories...)
+		parents := c.PinnedSources.CommitOIDs()
+		if c.BootstrapOID != "" {
+			parents = append(parents, c.BootstrapOID)
+		}
+		offered, err = mailbox.PreparePinnedProbe(ctx, assignment, parents)
+	} else {
+		offered, err = mailbox.PrepareAssignment(ctx, assignment)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -284,11 +364,18 @@ func (c *Coordinator) awaitReport(ctx context.Context, link Link, branch, offere
 // node's report when it is there.
 func (c *Coordinator) readReport(ctx context.Context, link Link, branch, offered string) (*NodeReport, error) {
 	mailbox := c.mailboxes[link.Name]
-	heads, err := mailbox.Observe(ctx, "refs/heads/"+branch, nil)
+	// The authenticated HTTPS probe return handler may already have reread
+	// this tip to settle an unknown reply. Observe would suppress that same
+	// unchanged OID from the preflight waiter, so use an exact fresh read.
+	head, err := mailbox.Reread(ctx, branch)
 	if err != nil {
 		return nil, err
 	}
+	heads := []gitx.RemoteHead{head}
 	for _, head := range heads {
+		if head.OID == "" {
+			continue
+		}
 		tip, err := mailbox.Inspect(ctx, head)
 		if err != nil {
 			return nil, err
@@ -359,8 +446,8 @@ func (c *Coordinator) readResult(ctx context.Context, link Link, tip ChainTip, o
 // answers the assignment this run offered, and that it describes the node at
 // all.
 func (c *Coordinator) checkResult(result Result, link Link, tip ChainTip, offered string) RejectReason {
-	if reason := CheckHeader(result.Header,
-		Binding{Node: link.Name, Branch: tip.Branch}, time.Now()); reason != "" {
+	if reason := CheckHeaderVersion(HeaderVersionCheck{Header: result.Header,
+		Binding: Binding{Node: link.Name, Branch: tip.Branch}, Now: time.Now(), Version: c.probeProtocol()}); reason != "" {
 		return reason
 	}
 	if tip.Previous != MessageClaim {
@@ -380,12 +467,15 @@ func (c *Coordinator) checkResult(result Result, link Link, tip ChainTip, offere
 
 // checkReport is what a node has to be for this run to place work on it.
 func (c *Coordinator) checkReport(report *NodeReport) error {
-	if report.Protocol != ProtocolVersion {
+	if report.Protocol != c.probeProtocol() {
 		return fmt.Errorf("the node speaks protocol %d and this run speaks %d: a node that does not implement the same protocol cannot be sent work",
-			report.Protocol, ProtocolVersion)
+			report.Protocol, c.probeProtocol())
 	}
 	if report.Capacity < 1 {
 		return fmt.Errorf("the node reports a capacity of %d: a node that accepts no task cannot be sent work", report.Capacity)
+	}
+	if c.Mode != "" && !validSlotHex(report.AuthorityID, 32) {
+		return fmt.Errorf("the worker has no persistent shared slot authority identity")
 	}
 	for _, ceiling := range []struct {
 		key     string
@@ -395,11 +485,24 @@ func (c *Coordinator) checkReport(report *NodeReport) error {
 		{"transfer.maxFiles", int64(report.Limits.MaxFiles), int64(c.Limits.MaxFiles)},
 		{"transfer.maxBytes", report.Limits.MaxBytes, c.Limits.MaxBytes},
 		{"transfer.maxManifestBytes", report.Limits.MaxManifestBytes, c.Limits.MaxManifestBytes},
+		{"transfer.maxPackBytes", report.Limits.MaxPackBytes, c.Limits.MaxPackBytes},
 	} {
 		if ceiling.node < ceiling.orderer {
 			return fmt.Errorf("the node's %s is %d and this run's is %d: a node that would refuse what this run transfers cannot be sent work",
 				ceiling.key, ceiling.node, ceiling.orderer)
 		}
+	}
+	return nil
+}
+
+// CheckChoreographyJoinReport applies the same capability floor as eager
+// preflight before a late node may enter the signed membership ledger.
+func (c *Coordinator) CheckChoreographyJoinReport(report *NodeReport) error {
+	if c == nil || report == nil || report.OS == "" || report.Arch == "" {
+		return fmt.Errorf("execution: joining node has no toolchain or platform identity")
+	}
+	if err := c.checkReport(report); err != nil {
+		return err
 	}
 	return nil
 }
@@ -418,6 +521,21 @@ func (c *Coordinator) checkPlatforms(packages []PackagePlatforms, reports []*Nod
 		}
 		if c.isPlacementPossible(wanted.Platforms, reports) {
 			continue
+		}
+		if wanted.Placement == PlacementAnyNode &&
+			isPlatformCompatible(runtime.GOOS+nodePlatformSeparator+runtime.GOARCH, wanted.Platforms) {
+			continue
+		}
+		// A choreographer-only task may remain inert until an authorized
+		// future node proves its platform at signed admission.
+		if wanted.Placement == PlacementWorker {
+			lateAllowed := false
+			for _, link := range c.Links {
+				lateAllowed = lateAllowed || link.LateJoin
+			}
+			if lateAllowed {
+				continue
+			}
 		}
 		return NewIdentifiedDiagnostic(Identity{Run: c.Run, Task: wanted.Package},
 			CodeConfiguration, CategoryConfiguration,
@@ -576,6 +694,15 @@ func (c *Coordinator) Close(ctx context.Context) error {
 	// removed on a bound of their own.
 	ctx, done := context.WithTimeout(ctx, c.resolveCloseBound())
 	defer done()
+	if c.choreographyBroker != nil {
+		return c.closeChoreography(ctx)
+	}
+	if c.choreographyInitialized {
+		// The v3 roots may already be visible remotely. Without an attached
+		// broker there is no signed stop/seal decision, so v2 cleanup cannot
+		// certify that deleting those refs is safe.
+		return fmt.Errorf("execution: initialized choreography has no attached broker; canonical refs are retained")
+	}
 	if c.stopWatching != nil {
 		// The pollers go first: a poll that ran while the refs were being
 		// deleted would be fetching objects nobody owns any more.

@@ -1,163 +1,75 @@
-# A monorepo whose builds and publishes run on worker nodes.
+# Entry configuration for one distributed release. The first node is the
+# orchestrator. It also runs eligible work and is the only node that pushes
+# Git refs, publishes artifacts, and writes canonical release records.
 #
-# This is the node a release is started on. It keeps everything that decides
-# and records the release: the release locks, the plan, the version edits and
-# lock-file regeneration, the tags, the changelog, the release commit and the
-# run-level hooks. Worker nodes run the build stages it assigns and hand their
-# declared build outputs to the packages that consume them. Publishing stays
-# here unless a package's `runOnly` names `worker` for its publish stage, and
-# a space with a login script publishes here whatever that key says, so its
-# credentials stay on this one machine.
-# The matching worker file is dispat.example.worker.yaml.
-#
-# Adding worker nodes widens the set of machines and repositories that can
-# affect what is published. Read the security section before deploying one:
-# https://dispat.dev/next/distributed-execution/#security-what-distributed-execution-exposes-and-how-to-contain-it
-#
-#   dispat --config dispat.yaml status    # the plan and its `plan fixed` line
-#   dispat --config dispat.yaml release   # locks, plans, probes every worker,
-#                                         # then dispatches
-#
-# Leave `execution` out, or leave `workers` empty, and the same file releases
-# locally exactly as it always did.
+# Start with `dispat release --distribution-mode=compilation` (the default) to
+# plan and assign ready work here. Other modes are not available in this build.
+# Start peers with dispat.example.worker.yaml and `dispat worker`.
+# Supply DISPAT_EXECUTION_SECRET and publication credentials outside this file.
 
-# Node-startup settings. They exist in the root file only and are read from
-# the configuration a run is started with: a space, a package, an imported
-# configuration or a linked repository can neither set nor change them.
 execution:
-  # orchestrator (the default) starts releases. A node with role: worker
-  # refuses to start one.
-  role: orchestrator
-  # How many command tasks this node itself runs at once: the version and
-  # lock-file stages stay here. It is the node's capacity, not the run's
-  # budget: the stage budgets of `concurrency` below bound the whole run and
-  # are never multiplied by the number of workers.
   concurrency: 2
-  # The name of the environment variable holding the secret every message
-  # between the nodes is signed with. The name goes in the file, the secret
-  # never does. Every worker reads the same secret from its own environment.
   secretEnv: DISPAT_EXECUTION_SECRET
-  # The worker nodes this run may delegate to. `name` is the node's identity:
-  # coordination branches addressed to it are named
-  # dispat-worker-<name>-<date>-<kind>-<random>. With no `endpoint` a link
-  # reaches the repository being released, at the push URL of the remote the
-  # release takes its lock on (`commit.remote`, or origin), and every worker
-  # names that same repository as its own endpoint. That push URL carries no
-  # credentials; Git's own credentials reach it. Whatever travels, source,
-  # command text and build outputs, is readable by whoever can read the
-  # repository, and the host's branch and tag rules keep the credentials that
-  # write dispat-worker-* branches away from release branches, release tags
-  # and the lock tag. A link may state an `endpoint` (an https, ssh or file
-  # URL, an absolute path, or host:path) for coordination that has to live
-  # somewhere else.
-  # A pipeline that creates a worker for the run names it on the command
-  # line instead, `--worker name`, held to the same rules.
   workers:
     - name: build-a
     - name: build-b
     - name: build-arm
-  # How long the run waits at the three points where a node can stop
-  # answering, in seconds. 0 or absent keeps the default shown.
   timeouts:
-    preflight: 60     # one worker's answer to the probe sent before dispatch
-    task: 3600        # one assigned task, the wait for a node included. An
-                      # assignment nobody claims is withdrawn and placed again
-                      # up to three times; a claimed attempt is measured from
-                      # the claim, and the node enforces the same deadline
-    cancel: 60        # a cancelled task's acknowledgement; its capacity stays
-                      # held until then
-  # What one task's declared build outputs may weigh. An output set over a
-  # ceiling is refused where it is captured and again where it is installed.
+    preflight: 60
+    task: 3600
+    cancel: 60
   transfer:
     maxFiles: 20000
-    maxBytes: 2147483648          # 2 GiB
-    maxManifestBytes: 8388608     # 8 MiB, and it bounds every document of the
-                                  # protocol, not only an output manifest
-    timeout: 1800                 # fetching and installing a task's inputs,
-                                  # and pushing a result that carries outputs
+    maxBytes: 2147483648
+    maxManifestBytes: 8388608
+    maxPackBytes: 4294967296
+    timeout: 1800
 
 scripts:
   install: "npm ci"
   build: "npm run build"
-  # `env` values travel to a worker unresolved and expand there, from the
-  # worker's own environment, so a secret is never written to a mailbox.
   publish: "npm publish --access public"
   npm-login: "npm config set //registry.npmjs.org/:_authToken $NPM_TOKEN"
   npm-lock: "npm install --package-lock-only"
   smoke-test: "npm run smoke"
 
-# What a build leaves behind for its consumers and for its own publish stage:
-# literal paths relative to the package folder, slash-separated, ignored files
-# included on purpose (a `dist` folder is normally git-ignored, which is why a
-# checkout alone cannot supply it). A level replaces the inherited list whole,
-# and an explicit empty list opts out. A root is captured, verified and
-# installed whole, so it may not be the package folder itself, may not sit
-# inside another root, and may not hold another package's folder.
+# Explicit build outputs are captured and verified for consumers, including
+# ignored products such as dist. A root replaces the inherited list whole.
 buildOutputs: [dist]
 
 spaces:
   web:
     path: packages
-    # The shared manifest and lock-file preparation runs on this node, once
-    # per package that changed, serialized; a worker never regenerates the
-    # lock file. Each build binds the prepared state it consumed.
     autoVersion:
       range: caret
       syncLock: [npm-lock]
       syncLockConcurrency: 1
     flow:
-      build: [install, build]     # delegated to a worker that has room, and
-                                  # run here when none has
-      postBuild: smoke-test       # a hook travels with its stage
-      # Publishing stays on this node unless a package asks otherwise: the
-      # login, the beforePublish hook and the publish command run here, in
-      # the checkout the package's verified build outputs were installed
-      # into, and nothing about the login ever reaches a mailbox. A publish
-      # runs on a worker only where `runOnly` says `worker` for the publish
-      # stage, which a space with a login script may not say; the token that
-      # publish needs must then be in the worker's own environment.
+      build: [install, build]
+      postBuild: smoke-test
       login: npm-login
-      publish: publish
+      publish: publish  # publication always stays on the orchestrator
 
 packages:
   assets:
     buildOutputs: [dist, generated/types]
   ui:
-    # Where this package's two delegable stages may run: `both` (the
-    # default), `worker` or `orchestrator`, as a [build, publish] pair when
-    # the stages differ. Build anywhere there is room, publish here.
     runOnly: [both, orchestrator]
   docs:
-    # Which nodes may run this package's tasks, as os/arch in Go's spelling.
-    # Empty or absent means any node. A platform no configured worker reports
-    # refuses the run before anything is dispatched, unless the package is
-    # pinned to this node with `runOnly`.
     buildPlatforms: [linux/amd64, linux/arm64]
   app:
     buildOutputs: [dist, bin]
-    # This build signs the artefact it produces, so it never leaves the
-    # machine that holds the key. Pinning costs the run a worker: the frame
-    # waits for one of this node's own `execution.concurrency` slots.
     runOnly: orchestrator
 
-# `assets` is built once. `ui` and `docs` receive its verified output on
-# whichever nodes they were placed and may build at the same time; `app`
-# receives both. A provider that is not releasing in this run is still built
-# once so its consumer has its output, and is neither tagged nor published.
 dependencies:
   ui: [assets]
   docs:
     - provider: assets
-      kind: devDependencies       # a build-only edge still supplies outputs
+      kind: devDependencies
   app: [ui, docs]
 
-# The run-wide stage budgets: at most four builds and one publish at a time
-# across every node. Publication and recording are also serialized per
-# repository whenever workers are configured.
+# Run-wide build and publish budgets; node concurrency above is separate.
 concurrency: [4, 1]
-
-# Distributed execution refuses to run without the release lock, in either
-# spelling: this key and DISPAT_UNSAFE_DISABLE_LOCK.
 unsafeDisableLock: false
 
 commit:

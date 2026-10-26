@@ -62,9 +62,9 @@ from, with the item described by `DISPAT_*` variables. Use `dispat run` when eac
 
 ## Running on worker nodes
 
-With worker links, from [`execution.workers`](../configuration/execution.md#workers) or from `--worker`, a sweep runs
-on the pool the way a release runs its builds: each package's task is placed by the package's own `runOnly`, workers
-first and this machine last under the default, and runs the script's commands in the package folder with
+With worker links, from [`execution.workers`](../configuration/execution.md#workers) or from
+`--worker`, a sweep runs on the pool the way a release runs its builds: each package's task is placed by
+its `runOnly`, with peer nodes and the orchestrator both able to execute eligible work, and runs the script with
 `DISPAT_STAGE=run:<script>`. A provider's exports still reach its consumers, whichever machines they ran on. The sweep
 takes no release lock, so it neither waits for nor excludes a release of the same repositories, and it ends with one
 `task outcome` line per task naming the node it ran on, its computation, its outputs and how many values it exported,
@@ -78,8 +78,11 @@ What a delegated task writes stays on its node unless the script declares it.
 [`runOutputs`](../distributed-execution.md#running-scripts-on-workers) in the root file names the folders a script
 writes, relative to each package's repository root; after every task has answered, dispat merges the files the
 delegated tasks wrote there into this checkout, keeping every file no task wrote. Two tasks writing one path with
-different bytes fail the run with `E227` and neither file is merged. Without worker links nothing here applies: every
+different bytes fail the run with `E227` and neither file is merged. Without worker links every
 task runs in this checkout, as it always has.
+
+`--distribution-mode=compilation` is the only supported mode. The orchestrator derives the plan, publishes ready
+tasks, persists claims, and receives results. A sweep does not acquire a release lock or publish release artifacts.
 
 ## Choosing the packages
 
@@ -223,3 +226,14 @@ Adds a worker node for this sweep, written `name` or `name=endpoint`, beside the
 repository being released, whose remote is resolved when the sweep starts, and an endpoint names another mailbox. You
 can repeat it. The link is held to every rule a configured one is, and the file has to name `execution.secretEnv`. See
 [Running on worker nodes](#running-on-worker-nodes).
+
+### `--distribution-mode`
+
+Selects `compilation`, the only supported mode. Other values are refused before task effects. See [Running on worker nodes](#running-on-worker-nodes).
+
+### `--return-endpoint`, `--return-listen`
+
+When remote workers participate, `--return-endpoint` names the first node's advertised authenticated HTTPS
+return channel, such as `https://runner.example:8443`. `--return-listen` optionally selects a different local
+`host:port` to bind; otherwise the listener address is derived from the advertised endpoint. Workers send
+claim and result requests there. They do not push Git refs. A local-only sweep needs no return listener.

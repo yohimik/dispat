@@ -17,6 +17,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -148,6 +149,22 @@ func FormatBranch(node, kind string, at time.Time) string {
 
 const reservationBranchPrefix = "dispat-task-"
 const slotBranchPrefix = "dispat-slot-"
+
+// FormatChoreographyTaskBranch names the one authoritative ref of a logical
+// task across every attempt. No node or attempt is in the ref name: competing
+// workers must race on one CAS domain rather than different replicas.
+func FormatChoreographyTaskBranch(run, task string) string {
+	sum := sha256.Sum256([]byte(task))
+	return reservationBranchPrefix + run + "-" + hex.EncodeToString(sum[:16])
+}
+
+// CompiledClaimInputDigest binds a compilation-mode claim to the complete
+// signed Assignment commit, including its exact source and provider inputs.
+// Interpretation mode derives its input digest from accepted input events.
+func CompiledClaimInputDigest(assignmentOID string) string {
+	sum := sha256.Sum256([]byte("assignment:" + assignmentOID))
+	return hex.EncodeToString(sum[:])
+}
 
 // FormatReservationBranch names one inert attempt without choosing a node.
 // The task digest keeps arbitrary package names out of a Git ref. Its signed
@@ -288,6 +305,10 @@ type Header struct {
 // it has no source snapshot, commands or publication authority.
 type Reservation struct {
 	Header
+	// V3 has one branch per logical task. The retained signed bootstrap is
+	// its exact parent, and attempts advance this branch up to the bound.
+	BootstrapOID string `json:"bootstrapOid,omitempty"`
+	MaxAttempts  int    `json:"maxAttempts,omitempty"`
 }
 
 // SlotNotice points one worker's reusable dispatch slot at an activated
@@ -296,6 +317,8 @@ type Reservation struct {
 // the exact task the orchestrator selected for this node.
 type SlotNotice struct {
 	Header
+	BootstrapOID  string `json:"bootstrapOid,omitempty"`
+	GraphRootOID  string `json:"graphRootOid,omitempty"`
 	Sequence      uint64 `json:"sequence"`
 	TaskBranch    string `json:"taskBranch,omitempty"`
 	AssignmentOID string `json:"assignment,omitempty"`
@@ -311,6 +334,22 @@ type SlotNotice struct {
 // that the document one gate writes is the document every gate reads.
 type Assignment struct {
 	Header
+	// Weight is the exact signed physical slot demand for a v3 command task.
+	Weight int `json:"weight,omitempty"`
+	// A signed probe announces the first node's direct return channel and
+	// independently compiled graph. Ordinary assignments leave these empty.
+	ReturnEndpoint   string `json:"returnEndpoint,omitempty"`
+	ReturnCertSHA256 string `json:"returnCertSha256,omitempty"`
+	GraphDigest      string `json:"graphDigest,omitempty"`
+	GraphRootOID     string `json:"graphRootOid,omitempty"`
+	InputsDigest     string `json:"inputsDigest,omitempty"`
+	TemplateDigest   string `json:"templateDigest,omitempty"`
+	BindingsDigest   string `json:"bindingsDigest,omitempty"`
+	DistributionMode string `json:"distributionMode,omitempty"`
+	// BootstrapOID is the signed, retained run identity. Probe carriers
+	// include it directly; later task and ledger roots keep it reachable.
+	BootstrapOID string           `json:"bootstrapOid,omitempty"`
+	PinnedInputs *PinnedRunInputs `json:"pinnedInputs,omitempty"`
 	// Repositories are the checkouts the task needs, each with the exact
 	// object id of the prepared input state it is to be materialized at.
 	Repositories []AssignmentRepository `json:"repositories,omitempty"`
@@ -378,10 +417,63 @@ type Assignment struct {
 // what decides what is checked out, so a branch somebody moved cannot change
 // what a task builds.
 type AssignmentRepository struct {
-	Name     string `json:"name"`
-	Path     string `json:"path,omitempty"`
-	Snapshot string `json:"snapshot"`
-	Branch   string `json:"branch,omitempty"`
+	Name        string `json:"name"`
+	Path        string `json:"path,omitempty"`
+	Snapshot    string `json:"snapshot"`
+	Branch      string `json:"branch,omitempty"`
+	PlannedHead string `json:"plannedHead,omitempty"`
+}
+
+// PinnedNativeRef is one exact tag or other planning ref read before the
+// first task. A peer compares these to its read-only repository view before
+// interpreting; a matching source commit alone cannot pin tag-based history.
+type PinnedNativeRef struct {
+	Repository string `json:"repository"`
+	Name       string `json:"name"`
+	Object     string `json:"object"`
+	Peeled     string `json:"peeled,omitempty"`
+}
+
+// PinnedRunInputs is a signed probe's complete planning input envelope.
+// Selection and Options are canonical, secret-free JSON from the existing
+// planner inputs. Repository snapshots are direct parents of the probe
+// commit, so the one probe ref transports the same exact bytes to peers.
+type PinnedRunInputs struct {
+	Repositories          []AssignmentRepository       `json:"repositories"`
+	RepositoryCoordinates []PinnedRepositoryCoordinate `json:"repositoryCoordinates,omitempty"`
+	ConfigFiles           []PinnedConfigFile           `json:"configFiles,omitempty"`
+	NativeRefs            []PinnedNativeRef            `json:"nativeRefs,omitempty"`
+	SinceAnchor           *PinnedSinceAnchor           `json:"sinceAnchor,omitempty"`
+	// Invocation is the explicit, path-independent CLI policy overlay. Peers
+	// apply it to captured config bytes before independently planning.
+	Invocation     json.RawMessage `json:"invocation,omitempty"`
+	Selection      json.RawMessage `json:"selection"`
+	Options        json.RawMessage `json:"options"`
+	RootRepository string          `json:"rootRepository,omitempty"`
+}
+
+// PinnedSinceAnchor is the exact entry-history commit selected by a sweep's
+// --since spelling. Peers use this OID, never a moving branch or tag name.
+type PinnedSinceAnchor struct {
+	Repository string `json:"repository"`
+	OID        string `json:"oid"`
+}
+
+// PinnedConfigFile locates a selected entry or import inside one exact
+// repository snapshot. Path is relative to that repository's root.
+type PinnedConfigFile struct {
+	Repository string `json:"repository"`
+	Path       string `json:"path"`
+}
+
+// PinnedRepositoryCoordinate is the credential-free repository identity the
+// first node derived before planning. It replaces a peer's live remote URL
+// lookup when the private planning checkout has no configured Git remote.
+type PinnedRepositoryCoordinate struct {
+	Repository string `json:"repository"`
+	Host       string `json:"host"`
+	Owner      string `json:"owner"`
+	Repo       string `json:"repo"`
 }
 
 // AssignmentPackage names the package a task belongs to: the package's name
@@ -461,6 +553,9 @@ type TransferLimits struct {
 	MaxFiles         int   `json:"maxFiles"`
 	MaxBytes         int64 `json:"maxBytes"`
 	MaxManifestBytes int64 `json:"maxManifestBytes"`
+	// MaxPackBytes limits the Git object pack on the non-Git return channel;
+	// it includes signed result, manifest and tree overhead beyond outputs.
+	MaxPackBytes int64 `json:"maxPackBytes,omitempty"`
 }
 
 // Every message after the first names the exact object it answers, and that
@@ -515,8 +610,10 @@ type Withdrawal struct {
 // inferring anything from the silence it would otherwise have had.
 type Ack struct {
 	Header
-	Assignment string `json:"assignment"`
-	Cancel     string `json:"cancel"`
+	ProposalID     string `json:"proposalId,omitempty"`
+	ProposalDigest string `json:"proposalDigest,omitempty"`
+	Assignment     string `json:"assignment"`
+	Cancel         string `json:"cancel"`
 	// Phase is the part of the frame the attempt was in when it was
 	// withdrawn, in the vocabulary of the parts a node reports a failure
 	// against, plus PhaseAuthorizationWait for a publication that had not been
@@ -586,6 +683,17 @@ type ExportedValue struct {
 	Name   string `json:"name"`
 	Value  string `json:"value"`
 	Source string `json:"source,omitempty"`
+	// DeclaredPath is a typed v3 reference to a verified declared output
+	// root. It is mutually exclusive with a literal Value; a string that
+	// happens to resemble a path token remains a literal string.
+	DeclaredPath *ExportedDeclaredPath `json:"declaredPath,omitempty"`
+}
+
+type ExportedDeclaredPath struct {
+	Repository string `json:"repository"`
+	Package    string `json:"package"`
+	Root       string `json:"root"`
+	Relative   string `json:"relative,omitempty"`
 }
 
 // Platform is where work ran: the operating system and architecture in Go's
@@ -718,6 +826,8 @@ type NodeReport struct {
 	Arch string `json:"arch"`
 	// Capacity is how many assigned command tasks the node runs at once.
 	Capacity int `json:"capacity"`
+	// AuthorityID binds this node to its persistent shared slot ledger.
+	AuthorityID string `json:"authorityId,omitempty"`
 	// GitVersion is the git the node would move objects with.
 	GitVersion string `json:"gitVersion,omitempty"`
 	// Limits are the node's own transfer ceilings, which must not be below

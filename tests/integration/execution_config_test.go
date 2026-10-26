@@ -14,6 +14,7 @@ package integration
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,6 +43,68 @@ func executionLocalRepo(t *testing.T, writeConfig func(*harness.Repo)) *harness.
 	r.Commit("feat(core): bootstrap")
 	r.AddBareRemote()
 	return r
+}
+
+// The worker serving command cannot be mistaken for a script of the same
+// name. The script remains available through the explicit run command.
+func TestExecutionWorkerCommandDoesNotRunScript(t *testing.T) {
+	r := harness.New(t)
+	r.SeedPackage("packages", "core")
+	cfg := libsConfig(echoBuild, 1)
+	cfg.Scripts["worker"] = models.Script{"printf ready > worker-script-ran"}
+	r.WriteConfigModel(cfg)
+	r.Commit("feat(core): bootstrap")
+
+	serving := r.CommandEnv(nil, "worker")
+	require.NotEqual(t, 0, serving.Code, "stdout:\n%s\nstderr:\n%s", serving.Stdout, serving.Stderr)
+	requireExecutionRefusal(t, serving, executionRefusalCode, executionConfigurationCategory)
+	assert.Contains(t, diagnosticText(serving), "execution.name", "the command reached worker startup")
+	assert.NoFileExists(t, r.Path("packages", "core", "worker-script-ran"))
+
+	explicit := r.CommandEnv(nil, "run", "worker", "--since", "all")
+	require.Equal(t, 0, explicit.Code, "stdout:\n%s\nstderr:\n%s", explicit.Stdout, explicit.Stderr)
+	_, err := os.ReadFile(r.Path("packages", "core", "worker-script-ran"))
+	require.NoError(t, err)
+}
+
+// The RC.9 CLI keeps the worker spelling and only the compiled runtime.
+// Future names and modes are refused by the real executable before a hook
+// can run, even when the repository would otherwise be releasable.
+func TestExecutionFutureNamesAndModesRefuseBeforeEffects(t *testing.T) {
+	r := executionLocalRepo(t, func(r *harness.Repo) {
+		cfg := libsConfig("printf built > future-mode-build-ran", 1)
+		r.WriteConfigModel(cfg)
+	})
+	for _, args := range [][]string{
+		{"release", "--choreographer", "future"},
+		{"release", "--distribution-mode", "interpretation"},
+		{"release", "--distribution-mode", "hybrid"},
+		{"release", "--distribution-mode", "mixed"},
+		{"run", "build", "--since", "all", "--distribution-mode", "interpretation"},
+	} {
+		res := r.CommandEnv(nil, args...)
+		require.NotEqual(t, 0, res.Code, "args: %v\nstdout:\n%s\nstderr:\n%s", args, res.Stdout, res.Stderr)
+		assert.NoFileExists(t, r.Path("packages", "core", "future-mode-build-ran"))
+		assert.Empty(t, r.TagList(), "a refused future CLI form cannot publish")
+	}
+}
+
+func TestExecutionAdmissionAboveSignedMaximumRefusesBeforeEffects(t *testing.T) {
+	r := executionLocalRepo(t, func(r *harness.Repo) {
+		cfg := libsConfig("printf built > admission-build-ran", 1)
+		cfg.Execution = &models.ExecutionConfig{Timeouts: &models.ExecutionTimeoutsConfig{
+			Admission: models.MaxExecutionAdmissionTimeoutSeconds + 1,
+		}}
+		r.WriteConfigModel(cfg)
+	})
+	result := r.CommandEnv(nil, "release", "--log-format", "json")
+	require.NotEqual(t, 0, result.Code)
+	require.True(t, harness.IsCodePresent(executionEvents(result), executionRefusalCode),
+		"the configuration refusal carries E225: %s", result.Stderr)
+	require.Contains(t, diagnosticText(result), "execution.timeouts.admission")
+	require.NoFileExists(t, r.Path("packages", "core", "admission-build-ran"))
+	require.Empty(t, r.TagList())
+	require.Empty(t, executionRemoteBranches(r))
 }
 
 // executionRunShape is what "the release is unchanged" is compared on: every
@@ -79,8 +142,8 @@ func executionRemoteBranches(r *harness.Repo) []string {
 }
 
 // TestExecutionAbsentKeepsLocalReleaseUnchanged: the same repository released
-// with no execution key, with an empty worker list, and with an orchestrator
-// role and a capacity of its own produces the same tags and the same run, and
+// with no execution key, with an empty worker list, and with an entry
+// node capacity produces the same tags and the same run, and
 // none of the three reaches a mailbox or needs a signing secret. This is the
 // fence every later gate is measured against: worker nodes are an addition,
 // not a second path every existing repository travels.
@@ -111,12 +174,20 @@ func TestExecutionAbsentKeepsLocalReleaseUnchanged(t *testing.T) {
 			r.WriteConfigRaw(raw)
 		}},
 		{"an orchestrator with a capacity", writeTyped(&models.ExecutionConfig{
-			Role: models.ExecutionRoleOrchestrator, Concurrency: models.Int(2),
+			Concurrency: models.Int(2),
 		})},
 	} {
 		t.Run(row.name, func(t *testing.T) {
 			r := executionLocalRepo(t, row.write)
-			res := r.ReleaseOK()
+			// Node slots are durable per local identity. Give each independent
+			// release fixture its own identity store so a prior row cannot leave
+			// a different capacity or unresolved slot state behind.
+			home := t.TempDir()
+			res := r.CommandEnv([]string{
+				"HOME=" + home,
+				"XDG_CONFIG_HOME=" + filepath.Join(home, "config"),
+			}, "release")
+			require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			tags := r.TagList()
 			shape := executionRunShape(res)
 			require.Equal(t, []string{"core@0.1.0"}, tags)
@@ -145,7 +216,6 @@ func TestExecutionAcceptsEveryMailboxForm(t *testing.T) {
 	r.SeedPackage("packages", "core")
 	cfg := libsConfig(echoBuild, 1)
 	cfg.Execution = &models.ExecutionConfig{
-		Role:      models.ExecutionRoleOrchestrator,
 		Name:      "control",
 		Endpoint:  "ssh://git.example.test/srv/control.git",
 		SecretEnv: "DISPAT_IT_EXECUTION_SECRET",
@@ -225,10 +295,6 @@ func TestExecutionConfigRefusals(t *testing.T) {
 	r.WriteConfigModel(libsConfig(echoBuild, 1))
 	r.Commit("feat(core): bootstrap")
 	for name, row := range map[string]executionRefusal{
-		"an unknown role": executionStated(
-			&models.ExecutionConfig{Role: "coordinator"}, "execution.role"),
-		"a role spelled with the wrong case": executionStated(
-			&models.ExecutionConfig{Role: "Orchestrator"}, "execution.role"),
 		"a capacity of zero": executionStated(
 			&models.ExecutionConfig{Concurrency: models.Int(0)}, "execution.concurrency"),
 		"a negative capacity": executionStated(
@@ -247,10 +313,6 @@ func TestExecutionConfigRefusals(t *testing.T) {
 			&models.ExecutionConfig{Endpoint: "../mailbox.git"}, "execution.endpoint"),
 		"a secret variable that is not a variable name": executionStated(
 			&models.ExecutionConfig{SecretEnv: "2secret"}, "execution.secretEnv"),
-		"a worker that delegates": executionStated(&models.ExecutionConfig{
-			Role: models.ExecutionRoleWorker, SecretEnv: "DISPAT_IT_EXECUTION_SECRET",
-			Workers: []models.ExecutionWorkerConfig{{Name: "build-a", Endpoint: "/srv/a.git"}},
-		}, "execution.workers"),
 		"a link with no name": executionStated(&models.ExecutionConfig{
 			SecretEnv: "DISPAT_IT_EXECUTION_SECRET",
 			Workers:   []models.ExecutionWorkerConfig{{Endpoint: "/srv/a.git"}},
@@ -314,6 +376,33 @@ func TestExecutionConfigRefusals(t *testing.T) {
 	}
 }
 
+// A static role cannot silently remove first-node authority.
+func TestExecutionStaticRoleIsRefused(t *testing.T) {
+	for name, legacy := range map[string]map[string]any{
+		"static role": {"role": "worker"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := harness.New(t)
+			r.SeedPackage("packages", "core")
+			cfg := libsConfig(echoBuild, 1)
+			raw := map[string]any{}
+			data, err := json.Marshal(cfg)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(data, &raw))
+			raw["execution"] = legacy
+			r.WriteConfigRaw(raw)
+			r.Commit("feat(core): bootstrap")
+			res := r.Status("--log-format", "json")
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			assert.Contains(t, res.Stderr, "unknown key")
+			for key := range legacy {
+				assert.Contains(t, res.Stderr, "execution."+key)
+			}
+			assert.Empty(t, r.TagList())
+		})
+	}
+}
+
 // TestExecutionRefusalNeverPrintsACredential: a mailbox address is refused
 // because of what it carries, so the refusal is the one place a credential in
 // it would otherwise be written into a CI log. The address is still named,
@@ -346,9 +435,9 @@ func TestExecutionRefusalNeverPrintsACredential(t *testing.T) {
 // TestExecutionIsRefusedOutsideTheRootFile: the key is a node-startup setting,
 // so a space, a package entry and a package folder's own file each refuse it
 // as an unknown key. A checkout that travels to another machine must not be
-// able to tell that machine what role it plays.
+// able to replace the entry node's execution settings.
 func TestExecutionIsRefusedOutsideTheRootFile(t *testing.T) {
-	stated := map[string]any{"role": "worker"}
+	stated := map[string]any{"concurrency": 2}
 	for name, write := range map[string]func(*harness.Repo, map[string]any){
 		"in a space": func(r *harness.Repo, raw map[string]any) {
 			spaces := raw["spaces"].(map[string]any)
@@ -419,11 +508,10 @@ func TestExecutionInAnImportedConfigIsValidatedNotConsulted(t *testing.T) {
 		return control
 	}
 
-	t.Run("a worker role an imported peer states is ignored", func(t *testing.T) {
-		// The peer calls itself a worker; the run is started here, so the run
-		// is an orchestrator's and the peer's own settings are never read.
+	t.Run("a valid imported peer setting is ignored", func(t *testing.T) {
+		// The peer's own execution settings do not alter the entry run.
 		control := newFleet(t, &models.ExecutionConfig{
-			Role: models.ExecutionRoleWorker, Name: "build-a", Endpoint: "/srv/mailboxes/a.git",
+			Name: "build-a", Endpoint: "/srv/mailboxes/a.git",
 		})
 		res := control.Status("--log-format", "json")
 		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -431,10 +519,10 @@ func TestExecutionInAnImportedConfigIsValidatedNotConsulted(t *testing.T) {
 	})
 
 	t.Run("a malformed object still fails its own file's load", func(t *testing.T) {
-		control := newFleet(t, &models.ExecutionConfig{Role: "coordinator"})
+		control := newFleet(t, &models.ExecutionConfig{Concurrency: models.Int(0)})
 		res := control.Status("--log-format", "json")
 		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Contains(t, diagnosticText(res), "execution.role")
+		assert.Contains(t, diagnosticText(res), "execution.concurrency")
 		assert.True(t, harness.IsCodePresent(executionEvents(res), executionRefusalCode),
 			"no %s diagnostic\nstdout:\n%s\nstderr:\n%s", executionRefusalCode, res.Stdout, res.Stderr)
 	})

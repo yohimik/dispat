@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
@@ -38,6 +39,11 @@ type fakeRemote struct {
 	exports []plan.Output
 	// failBuild fails the build of this package, at this part.
 	failBuild, failPart string
+	// noClaimBuild fails before an assignment could be offered, with an
+	// authenticated no-claim blocker supplied by the placement.
+	noClaimBuild string
+	// unresolvedBuild has an offered frame whose Claim may still be running.
+	unresolvedBuild string
 	// guardErr fails every guard.
 	guardErr error
 	// beforeBuild runs inside Build, before it answers, which is how a
@@ -135,6 +141,15 @@ func (f *fakeRemote) Build(ctx context.Context, request StageRequest, here Local
 		outcome.FailedPart = f.failPart
 		return outcome, errors.New("the node reported a failure")
 	}
+	if f.unresolvedBuild == request.Release.Pkg.Name {
+		outcome.UnresolvedOffer = true
+		return outcome, errors.New("the accepted claim has no verified stop or result")
+	}
+	if f.noClaimBuild == request.Release.Pkg.Name {
+		outcome.FailedPart = PartInputs
+		outcome.NoClaim = &NoClaimFinality{Blocker: request.Release.Pkg.Name}
+		return outcome, errors.New("inputs failed before any assignment")
+	}
 	return outcome, nil
 }
 
@@ -153,6 +168,159 @@ func (f *fakeRemote) Stage(ctx context.Context, request StageRequest, here Local
 	default:
 		return f.Tests(ctx, request, here)
 	}
+}
+
+func TestDelegatedNoClaimFailureBlocksAfterOutcomeHookWithoutSettlingResult(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Pkg.Space.OnFailScript = []string{"on-fail"}
+	runner := &fakeRunner{}
+	e := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{},
+		Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
+	e.Remote = &fakeRemote{noClaimBuild: "a"}
+	buildTask := taskGraphID(task{pkg: "a", kind: taskBuild})
+	var blocked bool
+	e.BlockDelegatedFailure = func(_ context.Context, taskID string, evidence DelegatedFailureEvidence, status PackageOutcome) error {
+		if taskID != buildTask {
+			return nil
+		}
+		require.Equal(t, OutcomeFailed, status)
+		require.Equal(t, "inputs", evidence.Part)
+		require.Regexp(t, `^[0-9a-f]{64}$`, evidence.ErrorSHA256)
+		require.Equal(t, 1, runner.countPrefix("on-fail"), "failure hook must finish before signed Blocked")
+		blocked = true
+		return nil
+	}
+	e.TaskOutcomeSettled = func(_ context.Context, taskID string, _ PackageOutcome) error {
+		if taskID == buildTask {
+			t.Error("a task with proven no claim tried to settle a nonexistent Result")
+		}
+		return nil
+	}
+	results := e.Run(t.Context(), p)
+	require.Equal(t, StatusFailed, results["a"].Status)
+	require.True(t, blocked)
+}
+
+func TestDelegatedPreludeFailureUsesExactNoClaimProof(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	e := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{},
+		Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
+	e.Remote = &fakeRemote{failBuild: "a", failPart: PartInputs}
+	buildTask := taskGraphID(task{pkg: "a", kind: taskBuild})
+	var proved, blocked bool
+	e.ProveDelegatedNoClaim = func(_ context.Context, taskID string) (string, bool, error) {
+		if taskID != buildTask {
+			return "", false, nil
+		}
+		proved = true
+		return "a", true, nil
+	}
+	e.BlockDelegatedFailure = func(_ context.Context, taskID string, evidence DelegatedFailureEvidence, status PackageOutcome) error {
+		if taskID == buildTask {
+			require.True(t, proved)
+			require.Equal(t, OutcomeFailed, status)
+			require.Equal(t, "inputs", evidence.Part)
+			require.Regexp(t, `^[0-9a-f]{64}$`, evidence.ErrorSHA256)
+			blocked = true
+		}
+		return nil
+	}
+	e.TaskOutcomeSettled = func(_ context.Context, taskID string, _ PackageOutcome) error {
+		if taskID == buildTask {
+			t.Error("a proven inert task tried to settle an absent Result")
+		}
+		return nil
+	}
+	results := e.Run(t.Context(), p)
+	require.Equal(t, StatusFailed, results["a"].Status)
+	require.True(t, blocked)
+}
+
+func TestUnresolvedDelegatedClaimDoesNotRunFailureHooksOrSettleTask(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Pkg.Space.OnFailScript = []string{"on-fail"}
+	runner := &fakeRunner{}
+	e := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{},
+		Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
+	e.Remote = &fakeRemote{unresolvedBuild: "a"}
+	var settled int
+	e.TaskOutcomeSettled = func(context.Context, string, PackageOutcome) error {
+		settled++
+		return nil
+	}
+	compiled, err := e.CompileTaskGraph(p)
+	require.NoError(t, err)
+	results, err := e.RunCompiled(t.Context(), p, compiled)
+	require.ErrorContains(t, err, "accepted claim")
+	require.Zero(t, settled, "an unknown effect has no terminal decision")
+	require.Zero(t, runner.countPrefix("on-fail"), "a possibly running command cannot race cleanup hooks")
+	require.NotEqual(t, StatusFailed, results["a"].Status,
+		"an unknown command must not become a settled package failure")
+}
+
+func TestParallelNoncausalNoClaimFailureWaitsForCausalTerminal(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	build := task{pkg: "a", kind: taskBuild}
+	hold := task{pkg: "a", kind: taskUser, name: "hold"}
+	var mu sync.Mutex
+	var events []string
+	e := newExecutor(execSpec{Runner: &fakeRunner{}, Tagger: &fakeTagger{}, Build: 2, Publish: 1})
+	e.PackageOutcomeSettled = func(_ context.Context, pkg, cause string, status PackageOutcome) error {
+		mu.Lock()
+		events = append(events, "package")
+		mu.Unlock()
+		assert.Equal(t, "a", pkg)
+		assert.Equal(t, taskGraphID(build), cause)
+		assert.Equal(t, OutcomeFailed, status)
+		return nil
+	}
+	e.TaskOutcomeSettled = func(_ context.Context, taskID string, status PackageOutcome) error {
+		mu.Lock()
+		events = append(events, "causal")
+		mu.Unlock()
+		assert.Equal(t, taskGraphID(build), taskID)
+		assert.Equal(t, OutcomeFailed, status)
+		return nil
+	}
+	e.BlockDelegatedFailure = func(_ context.Context, taskID string, evidence DelegatedFailureEvidence, status PackageOutcome) error {
+		mu.Lock()
+		events = append(events, "blocked")
+		mu.Unlock()
+		assert.Equal(t, taskGraphID(hold), taskID)
+		assert.Empty(t, status, "the sibling must not claim the package's causal outcome")
+		assert.Equal(t, DelegatedFailureInputsPart, evidence.Part)
+		return nil
+	}
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	r := &run{Executor: e, plan: p, stop: cancel,
+		results:  map[string]*Result{"a": {Status: StatusFailed}},
+		inFlight: map[string]int{"a": 2}, settledAt: map[string]task{"a": build},
+		exports: map[task][]plan.Output{}}
+	causal := &taskCtx{run: r, t: build, rel: p.Releases["a"]}
+	noncausal := &taskCtx{run: r, t: hold, rel: p.Releases["a"],
+		firstOnlyFailed: true, noClaim: &NoClaimFinality{Blocker: "a"},
+		delegatedFailure: DelegatedFailureEvidence{Part: DelegatedFailureInputsPart,
+			ErrorSHA256: strings.Repeat("a", 64)}}
+	done := make(chan struct{}, 2)
+	go func() { causal.finishTask(ctx, r.results["a"]); done <- struct{}{} }()
+	require.Eventually(t, func() bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.inFlight["a"] == 1 && r.deadWait["a"] != nil
+	}, time.Second, time.Millisecond)
+	go func() { noncausal.finishTask(ctx, r.results["a"]); done <- struct{}{} }()
+	for range 2 {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("parallel finality did not settle after both siblings stopped")
+		}
+	}
+	require.NoError(t, context.Cause(ctx))
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"package", "causal", "blocked"}, events)
 }
 
 func (f *fakeRemote) Tests(ctx context.Context, request StageRequest, here LocalFrame) (StageOutcome, error) {
@@ -696,4 +864,85 @@ func TestRemotePublishFailureIsALocalFailure(t *testing.T) {
 			assert.Equal(t, tc.what, formatRemoteFailure(stageOf(taskPublish), tc.part))
 		})
 	}
+}
+
+func TestDelegatedFailureHookTakesFirstNodeCapacityOnlyForOutcome(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Pkg.Space.OnFailScript = []string{"on-fail"}
+	var mu sync.Mutex
+	physical := 0
+	hookLease := 0
+	runner := &fakeRunner{}
+	runner.guard = func(_ string, command string) {
+		if command != "on-fail a" {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		require.Equal(t, 1, hookLease, "onFail needs a first-node physical lease")
+		require.Equal(t, 0, physical, "the peer frame must not hold a first-node lease")
+	}
+	e := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{},
+		Changelog: &fakeChangelog{}, Build: 2, Publish: 1})
+	e.Remote = &fakeRemote{failBuild: "a", failPart: PartCommands}
+	e.BeginFirstOnlyTask = func(context.Context, string) (func(context.Context, bool, PackageOutcome) error, error) {
+		return func(context.Context, bool, PackageOutcome) error { return nil }, nil
+	}
+	e.BlockFirstOnlyTask = func(context.Context, string, string, PackageOutcome) error { return nil }
+	e.BlockLocalAuthorityTask = func(context.Context, string, string, PackageOutcome) error { return nil }
+	e.LocalAuthoritySettled = func(context.Context, string, *plan.Release, bool, PackageOutcome) error { return nil }
+	e.LocalTaskLifecycle = func(_ context.Context, _ string) (func(context.Context, string) error, error) {
+		mu.Lock()
+		physical++
+		mu.Unlock()
+		return func(context.Context, string) error {
+			mu.Lock()
+			physical--
+			mu.Unlock()
+			return nil
+		}, nil
+	}
+	e.LocalOutcomeHookLifecycle = func(_ context.Context, pkg, hook string) (func(context.Context, string) error, error) {
+		require.Equal(t, "a", pkg)
+		require.Equal(t, "onFail", hook)
+		mu.Lock()
+		hookLease++
+		mu.Unlock()
+		return func(context.Context, string) error {
+			mu.Lock()
+			hookLease--
+			mu.Unlock()
+			return nil
+		}, nil
+	}
+	results := e.Run(t.Context(), p)
+	require.Equal(t, StatusFailed, results["a"].Status)
+	require.Equal(t, 1, runner.countPrefix("on-fail"))
+	mu.Lock()
+	defer mu.Unlock()
+	require.Zero(t, physical)
+	require.Zero(t, hookLease)
+}
+
+func TestOutcomeHookReusesProvenStoppedFirstLocalStageLease(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Pkg.Space.OnFailScript = []string{"on-fail"}
+	runner := &fakeRunner{}
+	e := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{},
+		Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
+	e.Remote = &fakeRemote{failBuild: "a", failPart: PartCommands}
+	queries := 0
+	e.LocalOutcomeLeaseReusable = func(_ context.Context, pkg string) (bool, error) {
+		require.Equal(t, "a", pkg)
+		queries++
+		return true, nil // a signed ResultAccepted and held local slot, verified by the adapter
+	}
+	e.LocalOutcomeHookLifecycle = func(context.Context, string, string) (func(context.Context, string) error, error) {
+		t.Error("outcome hook tried to take a second capacity-1 slot")
+		return nil, errors.New("duplicate slot")
+	}
+	results := e.Run(t.Context(), p)
+	require.Equal(t, StatusFailed, results["a"].Status)
+	require.Equal(t, 1, queries)
+	require.Equal(t, 1, runner.countPrefix("on-fail"))
 }

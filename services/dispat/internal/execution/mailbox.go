@@ -148,6 +148,49 @@ func (m *GitMailbox) PrepareAssignment(ctx context.Context, message *Assignment)
 	return m.commitMessage(ctx, MessageAssignment, document, nil, nil)
 }
 
+// PreparePinnedProbe makes the initial planning snapshots direct parents of
+// the signed probe. A v3 probe also carries its signed bootstrap as the last
+// parent. The first parent remains a source commit for the probe chain.
+func (m *GitMailbox) PreparePinnedProbe(ctx context.Context, message *Assignment, parents []string) (string, error) {
+	if message == nil || message.Kind != KindProbe || message.PinnedInputs == nil || len(parents) == 0 {
+		return "", fmt.Errorf("execution: pinned probe needs source carriers")
+	}
+	want := make(map[string]bool, len(message.PinnedInputs.Repositories))
+	for _, repo := range message.PinnedInputs.Repositories {
+		if repo.Snapshot == "" || want[repo.Snapshot] {
+			return "", fmt.Errorf("execution: repeated or missing probe carrier")
+		}
+		want[repo.Snapshot] = true
+	}
+	if message.BootstrapOID != "" {
+		if want[message.BootstrapOID] {
+			return "", fmt.Errorf("execution: bootstrap duplicates a source snapshot")
+		}
+		want[message.BootstrapOID] = true
+	}
+	if len(want) != len(parents) {
+		return "", fmt.Errorf("execution: probe carriers differ from signed snapshots")
+	}
+	for index, repo := range message.PinnedInputs.Repositories {
+		if parents[index] != repo.Snapshot {
+			return "", fmt.Errorf("execution: probe source parents are out of order")
+		}
+	}
+	if message.BootstrapOID != "" && parents[len(parents)-1] != message.BootstrapOID {
+		return "", fmt.Errorf("execution: probe bootstrap parent is out of order")
+	}
+	for _, oid := range parents {
+		if !want[oid] {
+			return "", fmt.Errorf("execution: probe carrier is unsigned")
+		}
+	}
+	document, err := json.Marshal(message)
+	if err != nil {
+		return "", err
+	}
+	return m.commitMessage(ctx, MessageAssignment, document, parents, nil)
+}
+
 // PrepareReservation writes an inert, signed root commit for one logical
 // attempt. The coordinator creates every eligible endpoint's branch at this
 // object before any task starts; a worker cannot execute a reservation.
@@ -319,18 +362,58 @@ func (m *GitMailbox) OpenCarriedAssignment(ctx context.Context, assignmentOID st
 			return nil, &Rejection{Reason: ReasonChain}
 		}
 	}
-	reservationTree, err := m.readTree(ctx, parents[0])
+	reservationOID := parents[0]
+	if assignment.Protocol == ChoreographyProtocolVersion {
+		// A retry offer extends the same logical task branch after its signed
+		// decision. Follow only the bounded first-parent attempt history.
+		for steps := 0; steps < maxPlacementAttempts*4; steps++ {
+			prior, err := m.readTree(ctx, reservationOID)
+			if err != nil {
+				return nil, err
+			}
+			if prior.kind == MessageReservation {
+				break
+			}
+			if prior.kind != choreographyDecisionKind && prior.kind != choreographyClaimKind &&
+				prior.kind != choreographyResultKind && prior.kind != MessageAck && prior.kind != MessageAssignment {
+				return nil, &Rejection{Reason: ReasonChain}
+			}
+			priorBytes, err := m.Read(ctx, ChainTip{OID: reservationOID, Kind: prior.kind,
+				document: prior.document, signature: prior.signature}, maxBytes)
+			if err != nil {
+				return nil, err
+			}
+			var identity struct {
+				Run, Generation, PlanDigest, Task, Branch string
+				Attempt                                   int
+			}
+			if json.Unmarshal(priorBytes, &identity) != nil ||
+				identity.Run != assignment.Run || identity.Generation != assignment.Generation ||
+				identity.PlanDigest != assignment.PlanDigest || identity.Task != assignment.Task ||
+				identity.Branch != assignment.Branch || identity.Attempt < 1 ||
+				identity.Attempt > assignment.Attempt {
+				return nil, &Rejection{Reason: ReasonChain}
+			}
+			ancestors, err := m.plumbing.CommitParents(ctx, reservationOID)
+			if err != nil || len(ancestors) == 0 {
+				return nil, &Rejection{Reason: ReasonChain}
+			}
+			reservationOID = ancestors[0]
+		}
+	}
+	reservationTree, err := m.readTree(ctx, reservationOID)
 	if err != nil {
 		return nil, err
 	}
 	if reservationTree.kind != MessageReservation {
 		return nil, &Rejection{Reason: ReasonChain}
 	}
-	reservationParents, err := m.plumbing.CommitParents(ctx, parents[0])
-	if err != nil || len(reservationParents) != 0 {
+	reservationParents, err := m.plumbing.CommitParents(ctx, reservationOID)
+	if err != nil || assignment.Protocol != ChoreographyProtocolVersion && len(reservationParents) != 0 ||
+		assignment.Protocol == ChoreographyProtocolVersion && len(reservationParents) != 1 {
 		return nil, &Rejection{Reason: ReasonChain}
 	}
-	reservationBytes, err := m.Read(ctx, ChainTip{OID: parents[0], Kind: reservationTree.kind, document: reservationTree.document, signature: reservationTree.signature}, maxBytes)
+	reservationBytes, err := m.Read(ctx, ChainTip{OID: reservationOID, Kind: reservationTree.kind, document: reservationTree.document, signature: reservationTree.signature}, maxBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -341,12 +424,26 @@ func (m *GitMailbox) OpenCarriedAssignment(ctx context.Context, assignmentOID st
 	if reservation.Header.Run != assignment.Header.Run ||
 		reservation.Header.PlanDigest != assignment.Header.PlanDigest ||
 		reservation.Header.Task != assignment.Header.Task ||
-		reservation.Header.Attempt != assignment.Header.Attempt ||
+		(assignment.Protocol != ChoreographyProtocolVersion && reservation.Header.Attempt != assignment.Header.Attempt) ||
 		reservation.Header.Kind != assignment.Header.Kind ||
 		reservation.Header.Protocol != assignment.Header.Protocol ||
 		reservation.Header.Generation != assignment.Header.Generation ||
 		reservation.Header.Branch != assignment.Header.Branch || reservation.Header.Node != "" {
 		return nil, &Rejection{Reason: ReasonChain}
+	}
+	if assignment.Protocol == ChoreographyProtocolVersion {
+		if reservation.BootstrapOID == "" || reservationParents[0] != reservation.BootstrapOID ||
+			reservation.MaxAttempts != maxPlacementAttempts || assignment.Attempt > reservation.MaxAttempts {
+			return nil, &Rejection{Reason: ReasonChain}
+		}
+		bootstrap, err := m.readTree(ctx, reservation.BootstrapOID)
+		if err != nil || bootstrap.kind != choreographyBootstrapKind {
+			return nil, &Rejection{Reason: ReasonChain}
+		}
+		if assignment.BootstrapOID != reservation.BootstrapOID || assignment.GraphDigest == "" ||
+			assignment.Weight <= 0 {
+			return nil, &Rejection{Reason: ReasonChain}
+		}
 	}
 	inputs := make(map[string]struct{}, len(assignment.Inputs))
 	for _, input := range assignment.Inputs {

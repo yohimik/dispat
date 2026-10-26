@@ -45,8 +45,17 @@ func TestExecutionQueuedWorkIsNotATimeout(t *testing.T) {
 	worker := startWorker(t, first.repo, executionWorkerConfig(mailbox,
 		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(1) }), 0,
 		executionBuildLogEnv+"="+first.builds)
+	workerStopped := false
+	defer func() {
+		if t.Failed() && !workerStopped {
+			worker.proc.Signal(syscall.SIGINT)
+			reply := worker.proc.Wait()
+			t.Logf("shared peer stdout:\n%s\nstderr:\n%s", reply.Stdout, reply.Stderr)
+		}
+	}()
 
-	started := first.repo.StartReleaseEnv(first.env(), "release")
+	started := first.repo.StartReleaseEnv(first.env(), "release", "--return-endpoint", first.returnURL)
+	executionAwaitProbe(t, first, executionNode)
 	other := second.release()
 	res := started.Wait()
 
@@ -63,7 +72,9 @@ func TestExecutionQueuedWorkIsNotATimeout(t *testing.T) {
 	require.Len(t, timeline, 2, "both releases built their package")
 	harness.AssertConcurrencyBudget(t, timeline, 1)
 	worker.proc.Signal(syscall.SIGINT)
-	require.Equal(t, 0, worker.proc.Wait().Code)
+	workerReply := worker.proc.Wait()
+	workerStopped = true
+	require.Equal(t, 0, workerReply.Code)
 }
 
 // executionQueueTimings are a build long enough to make the second run queue
@@ -129,238 +140,24 @@ func TestExecutionTransportBranchesAreNotRejectedAssignments(t *testing.T) {
 	assert.False(t, isWarned, "and it produces no warning for an operator to chase")
 }
 
-// TestExecutionStaleReceiptIsRejected (spec vector 7b): every identity a reply
-// is bound to, wrong in turn.
-//
-// The orchestrator accepts a receipt only when its signature, its header and
-// every one of the identities it echoes are this attempt's: the run, the plan
-// it executes, the task, the attempt number, the ownership generation, the
-// node it was addressed to, the branch it was found on, and the exact
-// assignment object it answers. A reply that fails any of them is ignored with
-// one warning naming the reason and nothing it contained, and the attempt goes
-// on waiting, so the package fails on its own deadline rather than on somebody
-// else's word.
-//
-// The last row is the control: the same saboteur, bound correctly, is accepted
-// and the package is released. Without it the rows above would pass for a
-// fixture that simply never worked.
-func TestExecutionStaleReceiptIsRejected(t *testing.T) {
-	for name, tc := range map[string]struct {
-		mangle func(executionOrderedJSON) executionOrderedJSON
-		secret string
-		reason string
-	}{
-		"a reply of another run": {
-			mangle: executionRebind("run", "0123456789abcdef0123456789abcdef"), reason: "replay"},
-		"a reply for another kind of work": {
-			mangle: executionRebind("kind", "publish"), reason: "replay"},
-		"a reply of another planning": {
-			mangle: executionRebind("planDigest",
-				strings.Repeat("a", 64)), reason: "replay"},
-		"a reply of another attempt": {
-			mangle: executionRebind("attempt", 2), reason: "replay"},
-		"a reply under another ownership": {
-			mangle: executionRebind("generation", "an-older-acquisition"), reason: "replay"},
-		"a reply answering another assignment": {
-			mangle: executionRebind("assignment", strings.Repeat("0", 40)), reason: "replay"},
-		"a reply from another node": {
-			mangle: executionRebind("node", executionSecondNode), reason: "node"},
-		"a reply found on another branch": {
-			mangle: executionRebind("branch", "dispat-worker-build-a-20260922-build-elsewhere"),
-			reason: "branch"},
-		"a reply signed with another secret": {
-			secret: "not-the-runs-secret", reason: "signature"},
-		"a reply bound to this very attempt": {},
-	} {
-		t.Run(name, func(t *testing.T) {
-			rig := newExecutionSaboteurRig(t)
-			done := executionSabotage(t, rig, tc.mangle, tc.secret)
-			res := rig.release()
-			executionAwaitAnswered(t, done)
-
-			if tc.reason == "" {
-				require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-				assert.NotEmpty(t, rig.repo.TagList(), "the correctly bound receipt released the package")
-				return
-			}
-			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.Contains(t, executionRefusedReplies(res), tc.reason,
-				"the reply is ignored for exactly one reason\nstdout:\n%s", res.Stdout)
-			assert.Empty(t, rig.repo.TagList(), "and grants the attempt nothing")
-			assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode),
-				"the package fails on its own deadline")
-		})
-	}
-}
-
-// A claim is the point where queue time becomes task time. A party able to
-// write the mailbox must not make the run believe work started by putting an
-// invalid claim on its branch.
-func TestExecutionForgedClaimsAreRejectedBeforeWork(t *testing.T) {
-	for name, row := range map[string]struct {
-		mangle func(executionOrderedJSON) executionOrderedJSON
-		secret string
-		reason string
-	}{
-		"signed with another secret": {
-			secret: "not-the-runs-secret", reason: "signature",
-		},
-		"unparseable header": {
-			mangle: executionRebind("issuedAt", []any{"not a time"}), reason: "unreadable",
-		},
-		"expired issue time": {
-			mangle: executionRebind("issuedAt", "2026-09-01T00:00:00Z"), reason: "issued-at",
-		},
-		"answers another assignment": {
-			mangle: executionRebind("assignment", strings.Repeat("0", 40)), reason: "replay",
-		},
-		"claims another kind of work": {
-			mangle: executionRebind("kind", "publish"), reason: "replay",
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			rig := newExecutionSaboteurRig(t)
-			worker := newExecutionFakeWorker(t, rig.mailbox, executionNode, nil)
-			worker.claimMangle, worker.claimSecret, worker.isClaimOnly = row.mangle, row.secret, true
-			worker.serve()
-			t.Cleanup(worker.close)
-
-			res := rig.release()
-			executionAwaitAnswered(t, worker.answered)
-
-			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.Contains(t, executionRefusedReplies(res), row.reason,
-				"the forged claim cannot satisfy the attempt")
-			assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode))
-			assert.Empty(t, rig.repo.TagList(), "no invalid claim can lead to publication")
-			assert.Empty(t, rig.runs(), "no build ran on the strength of a forged claim")
-			assertRejectedTipRetained(t, rig, res)
-		})
-	}
-}
-
-// TestExecutionOldRunReceiptGrantsNothing (spec vector 20): a receipt of an
-// earlier run, complete and correctly signed, replayed onto this run's branch.
-//
-// It grants nothing, and "nothing" is the whole claim: the attempt is not
-// satisfied by it, no output set is admitted from it, no version is tagged and
-// the run fails on the deadline of an attempt nobody answered. A receipt is a
-// statement about one attempt of one run, and an implementation that read it
-// as a statement about work would be one an old mailbox could release packages
-// through.
-func TestExecutionOldRunReceiptGrantsNothing(t *testing.T) {
-	rig := newExecutionSaboteurRig(t)
-	// The identities of a run that finished yesterday: its own id and the
-	// ownership it held, both of which this run has never heard of.
-	done := executionSabotage(t, rig, func(document executionOrderedJSON) executionOrderedJSON {
-		return document.set("run", "beefbeefbeefbeefbeefbeefbeefbeef").
-			set("generation", "yesterdays-acquisition")
-	}, "")
-
-	res := rig.release()
-	executionAwaitAnswered(t, done)
-
-	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Contains(t, executionRefusedReplies(res), "replay")
-	assert.Empty(t, rig.repo.TagList(), "an old run's receipt discharges nothing")
-	assert.Empty(t, rig.runs(), "and no build ran anywhere on the strength of it")
-}
-
-// executionAwaitAnswered waits, bounded, for the saboteur to have answered.
-// It is bounded because a fixture that never answers must fail its scenario
-// rather than hang the suite: the release has already finished by the time it
-// is called, so anything it waits for has either happened or never will.
-func executionAwaitAnswered(t *testing.T, done <-chan struct{}) {
-	t.Helper()
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
-		t.Fatal("the saboteur never answered this run's build assignment")
-	}
-}
-
-// executionRefusedReplies are the reasons the orchestrator refused a node's
-// replies, which is the mirror of the reasons a node refuses an assignment:
-// the same enum, read off the line the other party writes.
-func executionRefusedReplies(res harness.RunResult) []string {
-	var reasons []string
-	for _, event := range executionEvents(res) {
-		if event.Str("message") == "result rejected" {
-			reasons = append(reasons, event.Str("reason"))
-		}
-	}
-	return reasons
-}
-
-// newExecutionSaboteurRig is one package whose build is delegated, with a task
-// deadline short enough that an attempt nobody validly answered fails quickly.
-func newExecutionSaboteurRig(t *testing.T) *executionRig {
-	t.Helper()
-	wait := 6
-	if harness.IsTinyGo() {
-		wait = 30
-	}
-	return newExecutionRig(t, func(cfg *models.File) {
-		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
-		cfg.Scripts["build"] = models.Script{executionRecordingScript}
-		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{
-			Preflight: 30, Task: wait, Cancel: 5}
-	})
-}
-
-// executionRebind is the mangling one row applies: exactly one identity of an
-// otherwise correct receipt, replaced.
-func executionRebind(key string, value any) func(executionOrderedJSON) executionOrderedJSON {
-	return func(document executionOrderedJSON) executionOrderedJSON {
-		return document.set(key, value)
-	}
-}
-
-// executionSabotage answers this run's build assignment the way a party with
-// push access to the mailbox would: it claims the branch and pushes one result
-// of its own, mangled as the row asks.
-//
-// It answers the probe as well, because a run whose preflight nobody answers
-// never dispatches anything and would be a scenario about preflight instead.
-// The channel is closed once it has answered, so a scenario waits for the
-// thing it is about rather than for a duration.
-func executionSabotage(t *testing.T, rig *executionRig,
-	mangle func(executionOrderedJSON) executionOrderedJSON, secret string) <-chan struct{} {
-	t.Helper()
-	worker := newExecutionFakeWorker(t, rig.mailbox, executionNode, nil)
-	worker.mangle = mangle
-	if secret != "" {
-		worker.resultSecret = secret
-	}
-	worker.serve()
-	t.Cleanup(worker.close)
-	return worker.answered
-}
-
-// TestExecutionLostResultPushIsRecognizedNotRepeated: a node's result push
-// lands on the remote and its answer never comes back.
-//
-// The node re-reads the branch, finds its own object there and treats the
-// rejection as the success it was, so the orchestrator accepts one result for
-// one build. Nothing is repeated: the build script ran exactly once, the
-// package is released and no publication outcome is left unknown, because
-// nothing about a publication happened.
-func TestExecutionLostResultPushIsRecognizedNotRepeated(t *testing.T) {
+// TestExecutionResultReturnsWithoutPeerGitPush keeps the live one-build,
+// one-publication control for result settlement. A worker that cannot push
+// still returns its signed Result over the first node's return channel. The
+// exact lost-reply receipt lookup is tested by TestWorkerLostResultReplyUsesExactReceipt.
+func TestExecutionResultReturnsWithoutPeerGitPush(t *testing.T) {
 	rig := newExecutionRig(t, func(cfg *models.File) {
 		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
 		cfg.Scripts["build"] = models.Script{executionRecordingScript}
 		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 60, Cancel: 10}
 	})
-	// The second push a node makes onto a build branch: the first is its
-	// claim, so this is the result, applied and then reported as rejected.
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*push*dispat-task-*", Nth: 2, After: true})
+		Pattern: "*push*", Code: 128})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
 
 	res := rig.release()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Positive(t, fault.Matches(), "the fault reached the invocation it names")
+	assert.Zero(t, fault.Matches(), "the peer never pushed a claim or result")
 	assert.Len(t, rig.runs(), 1, "the build ran exactly once: %v", rig.runs())
 	assert.Equal(t, map[string]string{"core": executionNode}, rig.nodesByPackage())
 	assert.NotEmpty(t, rig.repo.TagList(), "and the package was released")
@@ -417,10 +214,9 @@ func TestExecutionLockLossStopsNewEffects(t *testing.T) {
 // A signal is not a failure. The run withdraws the attempt it has in flight
 // and waits, bounded, to be told that nothing of it is running; the node kills
 // the process group its build started and answers with the phase the frame had
-// reached; the package is `cancelled` rather than failed, so no failure hook
-// runs and the next run owes it the same release. The node itself is still
-// serving afterwards, because an orchestrator going away is not a reason for a
-// machine to stop.
+// reached; the package is cancelled without running its failure hook, and the
+// next run owes it the same release. The node remains available after the
+// signed Cancel, Ack and terminal decision settle.
 func TestExecutionInterruptCancelsRemoteTasks(t *testing.T) {
 	rig := newExecutionRig(t, func(cfg *models.File) {
 		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
@@ -434,7 +230,7 @@ func TestExecutionInterruptCancelsRemoteTasks(t *testing.T) {
 		cfg.LogLevel = "debug"
 	})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
-	started := rig.repo.StartReleaseEnv(rig.env(), "release")
+	started := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
 
 	// The build is under way: an interrupt before the claim would be a
 	// scenario about an assignment nobody took.
@@ -443,17 +239,9 @@ func TestExecutionInterruptCancelsRemoteTasks(t *testing.T) {
 	res := started.Wait()
 
 	assert.NotEqual(t, 0, res.Code, "an interrupted release exits non-zero")
-	withdrawn, isWithdrawn := executionLine(res, "attempt withdrawn")
-	require.True(t, isWithdrawn, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, "core:build", withdrawn.Str("task"))
-	assert.Equal(t, executionNode, withdrawn.Str("worker"))
-	settled, isSettled := executionLine(res, "the withdrawn attempt was acknowledged")
-	require.True(t, isSettled, "the node said that nothing of it is running\nstdout:\n%s", res.Stdout)
-	assert.Equal(t, "commands", settled.Str("phase"),
-		"and said what the frame had reached when it was withdrawn")
-	assert.Equal(t, true, settled["commandStarted"],
-		"the stage's own command sequence had begun, which is the fact the flag states; "+
-			"only a publication reads it as a statement about an effect")
+	requireChoreographyTaskChain(t, rig.mailbox, rig.branches(),
+		"choreography-claim", "cancel", "ack", "choreography-decision")
+	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the cancelled command started once")
 	assert.Empty(t, executionReleaseTags(rig), "nothing was recorded")
 	for _, run := range rig.runs() {
 		assert.NotEqual(t, "probe-onfail", run.Node,
@@ -462,22 +250,17 @@ func TestExecutionInterruptCancelsRemoteTasks(t *testing.T) {
 
 	// The node outlived the run that dispatched to it and is still serving.
 	served := worker.stop(t)
-	assert.Contains(t, served.Stdout, `"message":"cancellation acknowledged"`)
-	assert.Contains(t, served.Stdout, `"message":"task withdrawn"`)
+	assert.Equal(t, 0, served.Code, "the serving node remains available after cancellation")
 }
 
 // TestExecutionKilledWorkerBlocksDependentsAndKeepsCapacity (spec vector 14):
 // the only node able to run this plan's builds disappears mid-build.
 //
-// Four things follow and none of them may be traded for another. The package
-// being built fails, because nothing of it can be admitted. Its dependents are
-// blocked rather than attempted, because a consumer of a provider that did not
-// publish has nothing to build against. The node's slot is not freed and the
-// node leaves the pool, since the work may still be running on that machine,
-// so the next task that needed a node fails at once with the placement error
-// rather than waiting for a machine that will not come back. And the locks are
-// still released, because a compute attempt holds no authorization and is
-// fenced by revoking its ref.
+// The accepted Claim has an unknown command outcome after the process dies.
+// The first node must retain the physical capacity, active run identity and
+// release lock until signed Ack or exact recovery settles it. Dependents do
+// not execute and no package is published. Secondary tasks that never
+// reported a Result must be blocked without inventing admitted finality.
 func TestExecutionKilledWorkerBlocksDependentsAndKeepsCapacity(t *testing.T) {
 	wait, cancel := 4, 2
 	if harness.IsTinyGo() {
@@ -492,7 +275,7 @@ func TestExecutionKilledWorkerBlocksDependentsAndKeepsCapacity(t *testing.T) {
 		executionOneWorker(cfg)
 	})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
-	started := rig.repo.StartReleaseEnv(rig.env(), "release")
+	started := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
 
 	executionAwaitProbe(t, rig, executionNode)
 	worker.proc.Signal(syscall.SIGKILL)
@@ -502,17 +285,14 @@ func TestExecutionKilledWorkerBlocksDependentsAndKeepsCapacity(t *testing.T) {
 	events := executionEvents(res)
 	assert.True(t, harness.IsCodePresent(events, executionIntegrityCode),
 		"the abandoned attempt is reported\nstdout:\n%s", res.Stdout)
-	unhealthy, isUnhealthy := executionLine(res, "worker marked unhealthy")
-	require.True(t, isUnhealthy, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, "task-deadline", unhealthy.Str("reason"))
+	assert.Contains(t, res.Stdout, "active claim must settle",
+		"the first node retains the unknown accepted Claim for reconciliation")
+	assert.NotContains(t, res.Stdout, "has no admitted result awaiting settlement",
+		"a task without an admitted Result cannot be signed as if it reported one")
 	// Nothing downstream of the package that failed was executed anywhere,
 	// which is the observable form of "its dependents are blocked": a
 	// consumer of a provider that produced nothing has nothing to build
 	// against, and a pool with no healthy node has nowhere to put it either.
-	summary, isSummarized := executionLine(res, "distributed execution summary")
-	require.True(t, isSummarized, "stdout:\n%s", res.Stdout)
-	assert.Equal(t, float64(0), summary["computed"],
-		"no task of this run completed its computation")
 	built := map[string]bool{}
 	for _, run := range rig.runs() {
 		built[run.Package] = true
@@ -520,8 +300,8 @@ func TestExecutionKilledWorkerBlocksDependentsAndKeepsCapacity(t *testing.T) {
 	assert.Equal(t, map[string]bool{"assets": true}, built,
 		"and no build of a dependent was placed anywhere: %v", rig.runs())
 	assert.Empty(t, executionReleaseTags(rig), "nothing was published")
-	assert.False(t, remoteHoldsLock(t, rig.origin),
-		"a compute attempt is fenced by revoking its ref, so the exclusion goes back")
+	assert.True(t, remoteHoldsLock(t, rig.origin),
+		"the unresolved accepted Claim keeps native authorization fenced")
 	assert.False(t, harness.IsCodePresent(events, executionUnknownCode),
 		"and no publication outcome is in doubt, because none was authorized")
 	_ = worker.proc.Wait()

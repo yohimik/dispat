@@ -5,15 +5,13 @@ package integration
 
 // Goal 57: a serving node, driven through the compiled binary.
 //
-// What a worker is, is what it does with a mailbox: it answers the work
-// addressed to it, refuses everything it cannot authenticate without saying
-// what it refused, and stops when it is told to. Every message here is
-// written by hand, because the interesting ones are exactly the ones no
-// dispat would produce.
+// A serving node answers authenticated work addressed to it, refuses work it
+// cannot authenticate without exposing its contents, and stops when asked.
+// The current protocol cases use real compiled runs; retired protocol cases
+// retain hostile documents to prove that they cannot start a command.
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,74 +32,70 @@ import (
 // TestExecutionWorkerAnswersProbe: the whole exchange one probe produces, as
 // the mailbox records it, and the node's own description of itself.
 func TestExecutionWorkerAnswersProbe(t *testing.T) {
-	rig := newExecutionRig(t)
-	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	branch := executionBranchName("answered")
-	orchestrator.offer(branch, orchestrator.probe(branch, "preflight"))
-
-	worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox,
-		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(3) }), 4)
-	executionAwaitMessage(t, rig.mailbox, branch, "result")
-	res := worker.proc.Wait()
-
+	if runtime.GOOS == "windows" {
+		t.Skip("the distributed durable node-slot backend is not available on Windows")
+	}
+	rig := newExecutionRig(t, func(cfg *models.File) {
+		cfg.Scripts["build"] = models.Script{executionRecordingScript}
+		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker,
+			Publish: models.RunOnlyOrchestrator}
+	})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
+		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(3) }), 20,
+		peerGit.Env()...)
+	release := rig.release()
+	require.Equal(t, 0, release.Code, "stdout:\n%s\nstderr:\n%s", release.Stdout, release.Stderr)
+	res := worker.stop(t)
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, branch),
-		"one attempt is one chain, advanced by one party per step")
 
-	result := executionMessage(t, rig.mailbox, branch, "result")
-	assert.Equal(t, "succeeded", result["status"])
-	assert.Equal(t, branch, result["branch"], "a reply binds itself to the branch it was found on")
-	assert.Equal(t, executionNode, result["node"])
-	assert.Equal(t, float64(executionProtocolVersion), result["protocol"])
-	report, isReported := result["report"].(map[string]any)
-	require.True(t, isReported, "a probe is answered with what the node is: %v", result)
-	assert.Equal(t, runtime.GOOS, report["os"], "the platform is the binary's own")
-	assert.Equal(t, runtime.GOARCH, report["arch"])
-	assert.Equal(t, float64(3), report["capacity"], "and the capacity is the node's configuration")
-	assert.NotEmpty(t, report["gitVersion"])
-
+	ready, isReady := executionLine(release, "worker ready")
+	require.True(t, isReady, "the first node accepted the signed return-channel report: %s", release.Stdout)
+	assert.Equal(t, executionNode, ready.Str("worker"))
+	assert.Equal(t, runtime.GOOS, ready.Str("os"))
+	assert.Equal(t, runtime.GOARCH, ready.Str("arch"))
+	assert.Equal(t, float64(3), ready["capacity"])
+	assert.NotEmpty(t, ready.Str("dispat"))
+	assert.Equal(t, executionNode, rig.nodesByPackage()["core"],
+		"the accepted report made the peer eligible for the real build")
+	assert.Zero(t, peerGit.Matches(), "the peer returned Probe, Claim and Result without a Git push")
 	started, isStarted := executionLine(res, "worker started")
 	require.True(t, isStarted, "stdout:\n%s", res.Stdout)
 	assert.Equal(t, executionNode, started.Str("node"))
 	stopped, isStopped := executionLine(res, "worker stopped")
 	require.True(t, isStopped)
-	assert.Equal(t, "idle", stopped.Str("reason"),
-		"a node started for one release ends by itself")
+	assert.Equal(t, "signal", stopped.Str("reason"))
 }
 
-// An accepted claim is durable before its task starts. If the replay record
-// cannot be replaced, the worker must leave the claimed attempt unanswered;
-// after the state path is repaired it must still serve fresh work.
+// The replay record is durable before a worker answers a v3 probe or starts
+// an assigned command. A failed state write must leave the next run without
+// an accepted claim or command; repairing the path lets the same process work.
 func TestExecutionWorkerRefusesWorkWhenItsReplayRecordCannotBeSaved(t *testing.T) {
-	rig := newExecutionRig(t)
-	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 8)
-
-	control := executionBranchName("state-write-control")
-	orchestrator.offer(control, orchestrator.probe(control, "control"))
-	executionAwaitMessage(t, rig.mailbox, control, "result")
+	if runtime.GOOS == "windows" {
+		t.Skip("the distributed durable node-slot backend is not available on Windows")
+	}
+	rig := newExecutionSweepRig(t, `printf 'worker-v3 %s\n' "$DISPAT_PACKAGE" >> "$DISPAT_IT_EXECUTION_LOG"`, func(cfg *models.File) {
+		cfg.Execution.Workers = cfg.Execution.Workers[:1]
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 3}
+		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker,
+			Publish: models.RunOnlyOrchestrator}
+	})
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60)
+	defer worker.stop(t)
+	first := rig.sweep(nil)
+	require.Equal(t, 0, first.Code, "first v3 sweep:\n%s\n%s", first.Stdout, first.Stderr)
+	before := len(rig.runs())
 	seen := filepath.Join(worker.stateDir, executionNode, "seen.json")
-	require.FileExists(t, seen, "the first answer established the durable replay record")
+	require.FileExists(t, seen)
 	require.NoError(t, os.Remove(seen))
 	require.NoError(t, os.Mkdir(seen, 0o755))
-
-	blocked := executionBranchName("state-write-blocked")
-	orchestrator.offer(blocked, orchestrator.probe(blocked, "blocked"))
-	executionAwaitMessage(t, rig.mailbox, blocked, "claim")
-	require.Never(t, func() bool {
-		return len(executionChain(t, rig.mailbox, blocked)) > 2
-	}, 2*time.Second, 50*time.Millisecond,
-		"work cannot start when the node cannot remember its claim")
+	blocked := rig.sweep(nil)
+	require.NotEqual(t, 0, blocked.Code, "a worker unable to save replay state answered work")
+	assert.Equal(t, before, len(rig.runs()), "no command starts without durable replay state")
 	require.NoError(t, os.Remove(seen))
-
-	fresh := executionBranchName("state-write-recovered")
-	orchestrator.offer(fresh, orchestrator.probe(fresh, "recovered"))
-	executionAwaitMessage(t, rig.mailbox, fresh, "result")
-	reply := worker.proc.Wait()
-	require.Equal(t, 0, reply.Code, "stdout:\n%s\nstderr:\n%s", reply.Stdout, reply.Stderr)
-	assert.Equal(t, []string{"assignment", "claim"}, executionChain(t, rig.mailbox, blocked))
-	assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, fresh))
-	assert.Contains(t, reply.Stdout, "the mailbox could not be served")
+	recovered := rig.sweep(nil)
+	require.Equal(t, 0, recovered.Code, "recovered v3 sweep:\n%s\n%s", recovered.Stdout, recovered.Stderr)
+	assert.Greater(t, len(rig.runs()), before, "the same worker served fresh work after repair")
 }
 
 // A correctly signed legacy publish assignment still grants no publication
@@ -115,79 +109,54 @@ func TestExecutionWorkerRefusesLegacyPublication(t *testing.T) {
 	// signed publish authority; the branch hint never grants that authority.
 	legacy := executionCraftedBranchName("probe", "legacy-publish")
 	orchestrator.offer(legacy, orchestrator.publication(legacy, "legacy", state))
-	control := executionCraftedBranchName("probe", "incomplete-control")
-	orchestrator.offer(control, orchestrator.probe(control, "incomplete-control"))
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
 		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(2) }), 4)
 
-	executionAwaitMessage(t, rig.mailbox, control, "result")
 	reply := worker.proc.Wait()
 	require.Equal(t, 0, reply.Code, "stdout:\n%s\nstderr:\n%s", reply.Stdout, reply.Stderr)
 	assert.Empty(t, rig.runs(), "neither hooks nor publication commands may run")
 	assert.Contains(t, executionRejections(reply), "permit")
 	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, legacy),
 		"a signed publish assignment is refused before claim")
-	assert.Equal(t, []string{"assignment", "claim", "result"},
-		executionChain(t, rig.mailbox, control), "the worker kept serving")
+	stopped, isStopped := executionLine(reply, "worker stopped")
+	require.True(t, isStopped, "the node kept serving after the refusal: %s", reply.Stdout)
+	assert.Equal(t, "idle", stopped.Str("reason"))
 }
 
-// TestExecutionWorkerRejectsAssignments: every acceptance rule, through the
-// binary. None of these is claimed, each is refused with a reason the log can
-// be filtered on and nothing of what it said, and a valid probe offered
-// beside them is still answered: a mailbox full of rubbish does not stop a
-// node from serving.
-func TestExecutionWorkerRejectsAssignments(t *testing.T) {
+// Retired handcrafted v2 probe refs and malformed v3-shaped probes cannot
+// grant a claim. The real v3 signed-carrier refusal ladder lives in
+// execution.TestChoreographyWorkerRefusesCraftedCarriedInputs and the header,
+// cancellation and bootstrap verifier tests; this black-box test keeps the
+// hostile documents and checks that none executes through the current CLI.
+func TestExecutionWorkerRetiredAssignmentsCannotClaim(t *testing.T) {
 	rig := newExecutionRig(t)
 	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
 	forged := "forged-" + strings.Repeat("x", 16)
-
 	refused := map[string]struct {
 		document func(string) map[string]any
 		options  []func(*executionMessageOptions)
-		reason   string
 	}{
-		"a signature from another secret": {
-			options: []func(*executionMessageOptions){
-				func(o *executionMessageOptions) { o.secret = forged }},
-			reason: "signature"},
-		"a document signed as another kind of message": {
-			options: []func(*executionMessageOptions){
-				func(o *executionMessageOptions) { o.signedAs = "result" }},
-			reason: "signature"},
-		"a tip nobody signed at all": {
-			options: []func(*executionMessageOptions){
-				func(o *executionMessageOptions) { o.isSigned = false }},
-			reason: "unreadable"},
-		"work addressed to another node": {
-			document: func(branch string) map[string]any {
-				return orchestrator.probe(branch, "preflight",
-					func(m map[string]any) { m["node"] = "build-b" })
-			},
-			reason: "node"},
-		"a message bound to another branch": {
-			document: func(branch string) map[string]any {
-				return orchestrator.probe(branch, "preflight",
-					func(m map[string]any) { m["branch"] = executionBranchName("elsewhere") })
-			},
-			reason: "branch"},
-		"a protocol this node does not speak": {
-			document: func(branch string) map[string]any {
-				return orchestrator.probe(branch, "preflight",
-					func(m map[string]any) { m["protocol"] = executionProtocolVersion + 1 })
-			},
-			reason: "protocol"},
-		"a message issued outside the replay window": {
-			document: func(branch string) map[string]any {
-				return orchestrator.probe(branch, "preflight",
-					func(m map[string]any) { m["issuedAt"] = "2026-09-01T00:00:00Z" })
-			},
-			reason: "issued-at"},
-		"a document larger than this node's ceiling": {
-			document: func(branch string) map[string]any {
-				return orchestrator.probe(branch, "preflight",
-					func(m map[string]any) { m["generation"] = strings.Repeat("g", 4096) })
-			},
-			reason: "oversize"},
+		"foreign signer": {options: []func(*executionMessageOptions){
+			func(o *executionMessageOptions) { o.secret = forged }}},
+		"signed as result": {options: []func(*executionMessageOptions){
+			func(o *executionMessageOptions) { o.signedAs = "result" }}},
+		"unsigned tip": {options: []func(*executionMessageOptions){
+			func(o *executionMessageOptions) { o.isSigned = false }}},
+		"another node": {document: func(branch string) map[string]any {
+			return orchestrator.probe(branch, "preflight", func(m map[string]any) { m["node"] = "build-b" })
+		}},
+		"another branch": {document: func(branch string) map[string]any {
+			return orchestrator.probe(branch, "preflight", func(m map[string]any) { m["branch"] = executionBranchName("elsewhere") })
+		}},
+		"unsupported protocol": {document: func(branch string) map[string]any {
+			return orchestrator.probe(branch, "preflight", func(m map[string]any) { m["protocol"] = executionProtocolVersion + 1 })
+		}},
+		"stale issue time": {document: func(branch string) map[string]any {
+			return orchestrator.probe(branch, "preflight", func(m map[string]any) { m["issuedAt"] = "2026-09-01T00:00:00Z" })
+		}},
+		"oversized document": {document: func(branch string) map[string]any {
+			return orchestrator.probe(branch, "preflight", func(m map[string]any) { m["generation"] = strings.Repeat("g", 4096) })
+		}},
 	}
 	for name, tc := range refused {
 		branch := executionBranchName(executionLabel(name))
@@ -197,151 +166,66 @@ func TestExecutionWorkerRejectsAssignments(t *testing.T) {
 		}
 		orchestrator.offer(branch, document, tc.options...)
 	}
-	// A chain no legal sequence of pushes could have produced: an assignment
-	// written directly onto another assignment.
 	illegal := executionBranchName("illegalchain")
 	first := orchestrator.offer(illegal, orchestrator.probe(illegal, "preflight"))
 	orchestrator.offer(illegal, orchestrator.probe(illegal, "preflight"),
 		func(o *executionMessageOptions) { o.parents = []string{first} })
-	// And one valid probe, which has to be answered all the same.
-	valid := executionBranchName("valid")
-	orchestrator.offer(valid, orchestrator.probe(valid, "preflight"))
-
 	worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox,
 		func(settings *models.ExecutionConfig) {
 			settings.Transfer = &models.ExecutionTransferConfig{MaxManifestBytes: 2048}
 		}), 4)
-	executionAwaitMessage(t, rig.mailbox, valid, "result")
-	res := worker.proc.Wait()
-
+	time.Sleep(3 * time.Second)
+	res := worker.stop(t)
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	reasons := executionRejections(res)
-	for name, tc := range refused {
-		t.Run(name, func(t *testing.T) {
-			branch := executionBranchName(executionLabel(name))
-			assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, branch),
-				"nothing was claimed and nothing was answered")
-			assert.Contains(t, reasons, tc.reason)
-		})
+	for name := range refused {
+		branch := executionBranchName(executionLabel(name))
+		assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, branch), name)
 	}
-	t.Run("an assignment on an illegal chain", func(t *testing.T) {
-		assert.Equal(t, []string{"assignment", "assignment"}, executionChain(t, rig.mailbox, illegal))
-		assert.Contains(t, reasons, "chain")
-	})
-	assert.NotContains(t, res.Stdout, forged, "a rejected message is never echoed")
-	assert.NotContains(t, res.Stdout, executionSecret, "and neither is the secret")
-	assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, valid),
-		"the node kept serving through all of it")
-
-	t.Run("work this node already answered is refused on a new branch", func(t *testing.T) {
-		// The same triple, offered again after the node answered it: the
-		// record of what was answered outlives the process that answered it.
-		replay := executionBranchName("replay")
-		orchestrator.offer(replay, orchestrator.probe(replay, "preflight"))
-		fresh := executionBranchName("fresh")
-		orchestrator.offer(fresh, orchestrator.probe(fresh, "second"))
-
-		second := worker.restart(t, rig.repo, 4)
-		executionAwaitMessage(t, rig.mailbox, fresh, "result")
-		res := second.proc.Wait()
-
-		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Contains(t, executionRejections(res), "replay")
-		assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, replay))
-		assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, fresh),
-			"and other work of the same run is still answered")
-	})
+	assert.Equal(t, []string{"assignment", "assignment"}, executionChain(t, rig.mailbox, illegal))
+	assert.Empty(t, rig.runs(), "no hostile document started a command")
+	assert.NotContains(t, res.Stdout, forged, "the foreign secret is never logged")
+	assert.NotContains(t, res.Stdout, executionSecret, "the signing secret is never logged")
 }
 
-// TestExecutionWorkerPrunesAnsweredWorkWhileServing: a node can stay up past
-// the full acceptance horizon. An old answer still blocks a replay while live,
-// then a later answer forgets it in the durable record without restarting the
-// node: the record is appended to, so the forgotten triple's last value there
-// is the zero time, which every reader's horizon drops.
-//
-// The old answer is seeded to expire a margin after the attempt starts, and
-// the replay has to be answered inside that margin. The test controls the
-// margin: a machine too loaded to answer in time gets a longer one on a fresh
-// node rather than a failure, so the wall time is as short as the machine
-// allows and a slow runner costs time rather than a false result.
+// A serving v3 worker prunes expired answered-work tuples when it writes a
+// fresh accepted probe. The live boundary tuple remains durable without a
+// process restart, and the new run still executes normally.
 func TestExecutionWorkerPrunesAnsweredWorkWhileServing(t *testing.T) {
-	for _, margin := range []time.Duration{3 * time.Second, 10 * time.Second, 30 * time.Second, 90 * time.Second} {
-		live := false
-		t.Run(fmt.Sprintf("the old answer expires %s ahead", margin), func(t *testing.T) {
-			live = pruneAnsweredWorkWithin(t, margin)
-		})
-		if live {
-			return
-		}
+	if runtime.GOOS == "windows" {
+		t.Skip("the distributed durable node-slot backend is not available on Windows")
 	}
-	t.Fatal("no attempt answered the replay while the seeded answer was still live")
-}
-
-// pruneAnsweredWorkWithin runs one attempt of
-// TestExecutionWorkerPrunesAnsweredWorkWhileServing with the old answer
-// expiring margin from now. It answers false, and skips, when the node only
-// reached the replay after the expiry, which proves nothing either way.
-func pruneAnsweredWorkWithin(t *testing.T, margin time.Duration) bool {
-	rig := newExecutionRig(t)
-	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+	rig := newExecutionSweepRig(t, `printf 'worker-v3 %s\n' "$DISPAT_PACKAGE" >> "$DISPAT_IT_EXECUTION_LOG"`, func(cfg *models.File) {
+		cfg.Execution.Workers = cfg.Execution.Workers[:1]
+		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker,
+			Publish: models.RunOnlyOrchestrator}
+	})
 	root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
 	state := t.TempDir()
 	nodeState := filepath.Join(state, executionNode)
 	require.NoError(t, os.MkdirAll(nodeState, 0o755))
 	seenPath := filepath.Join(nodeState, "seen.json")
-	oldKey := orchestrator.run + " preflight 1"
-	// A header may be issued 24 hours ahead of acceptance and remain valid
-	// for 24 hours after issuance. Seed just inside that 48-hour boundary.
-	expires := time.Now().Add(margin)
-	oldAt := expires.Add(-48 * time.Hour)
-	seed, err := json.Marshal(map[string]time.Time{oldKey: oldAt})
+	now := time.Now().UTC()
+	oldKey := "run-expired preflight 1"
+	liveKey := "run-boundary preflight 1"
+	seed, err := json.Marshal(map[string]time.Time{
+		oldKey: now.Add(-49 * time.Hour), liveKey: now.Add(-25 * time.Hour),
+	})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(seenPath, seed, 0o644))
-
-	replay := executionBranchName("aaa-seen-prune-replay")
-	orchestrator.offer(replay, orchestrator.probe(replay, "preflight",
-		func(message map[string]any) {
-			message["issuedAt"] = oldAt.Add(24 * time.Hour).Format(time.RFC3339)
-		}))
-	proc := rig.repo.StartCommandEnv([]string{executionSecretEnv + "=" + executionSecret},
-		"worker", "--root", root, "--state-dir", state, "--idle-timeout", "30")
+	proc := rig.repo.StartCommandEnv(append(executionNodeHomeEnv(t, state),
+		executionSecretEnv+"="+executionSecret, executionBuildLogEnv+"="+rig.builds),
+		"worker", "--root", root, "--state-dir", state, "--idle-timeout", "60")
 	worker := &executionWorker{t: t, proc: proc, stateDir: state, root: root}
-	control := executionBranchName("zzz-seen-prune-control")
-	orchestrator.offer(control, orchestrator.probe(control, "control"))
-	executionAwaitMessage(t, rig.mailbox, control, "result")
-	// The branches are served in name order, so the replay was answered
-	// before the control result appeared.
-	if time.Until(expires) <= 0 {
-		worker.stop(t)
-		t.Skipf("the node answered after the seeded answer expired; a longer margin follows")
-		return false
-	}
-	before, err := os.ReadFile(seenPath)
-	require.NoError(t, err)
-	stored := map[string]time.Time{}
-	require.NoError(t, json.Unmarshal(before, &stored))
-	heldAt, ok := stored[oldKey]
-	require.True(t, ok, "the live answer remains until its replay window ends")
-	assert.True(t, heldAt.Equal(oldAt), "the replay must not refresh the old answer")
-	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, replay))
-
-	if remaining := time.Until(expires); remaining > 0 {
-		time.Sleep(remaining + 100*time.Millisecond)
-	}
-	fresh := executionBranchName("seen-prune-fresh")
-	orchestrator.offer(fresh, orchestrator.probe(fresh, "fresh"))
-	executionAwaitMessage(t, rig.mailbox, fresh, "result")
-	res := worker.stop(t)
-	assert.Contains(t, executionRejections(res), "replay")
-	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, replay))
+	defer worker.stop(t)
+	result := rig.sweep(nil)
+	require.Equal(t, 0, result.Code, "v3 sweep:\n%s\n%s", result.Stdout, result.Stderr)
 	content, err := os.ReadFile(seenPath)
 	require.NoError(t, err)
-	stored = map[string]time.Time{}
+	stored := map[string]time.Time{}
 	require.NoError(t, json.Unmarshal(content, &stored))
-	forgottenAt, isHeld := stored[oldKey]
-	assert.True(t, !isHeld || forgottenAt.IsZero(), "the fresh answer must forget the expired one on disk")
-	assert.Contains(t, stored, orchestrator.run+" fresh 1")
-	return true
+	assert.NotContains(t, stored, oldKey)
+	assert.Contains(t, stored, liveKey)
+	assert.Greater(t, len(stored), 1, "the accepted v3 run wrote fresh replay knowledge")
 }
 
 // A future-issued assignment accepted 25 hours ago can still pass the
@@ -370,12 +254,12 @@ func TestExecutionWorkerKeepsFutureIssuedReplayKnowledge(t *testing.T) {
 		func(message map[string]any) {
 			message["issuedAt"] = accepted.Add(24*time.Hour - time.Second).Format(time.RFC3339)
 		}))
-	control := executionBranchName("zzz-future-issued-control")
-	orchestrator.offer(control, orchestrator.probe(control, "control"))
-	proc := rig.repo.StartCommandEnv([]string{executionSecretEnv + "=" + executionSecret},
+	proc := rig.repo.StartCommandEnv(append(executionNodeHomeEnv(t, state),
+		executionSecretEnv+"="+executionSecret),
 		"worker", "--root", root, "--state-dir", state, "--idle-timeout", "10")
 	worker := &executionWorker{t: t, proc: proc, stateDir: state, root: root}
-	executionAwaitMessage(t, rig.mailbox, control, "result")
+	control := rig.release()
+	require.Equal(t, 0, control.Code, "stdout:\n%s\nstderr:\n%s", control.Stdout, control.Stderr)
 	reply := worker.stop(t)
 
 	assert.Contains(t, executionRejections(reply), "replay")
@@ -411,12 +295,12 @@ func TestExecutionWorkerReadsAnAnsweredWorkRecordACrashCut(t *testing.T) {
 
 	replay := executionBranchName("aaa-cut-replay")
 	orchestrator.offer(replay, orchestrator.probe(replay, "cut-live"))
-	control := executionBranchName("zzz-cut-control")
-	orchestrator.offer(control, orchestrator.probe(control, "control"))
-	proc := rig.repo.StartCommandEnv([]string{executionSecretEnv + "=" + executionSecret},
+	proc := rig.repo.StartCommandEnv(append(executionNodeHomeEnv(t, state),
+		executionSecretEnv+"="+executionSecret),
 		"worker", "--root", root, "--state-dir", state, "--idle-timeout", "10")
 	worker := &executionWorker{t: t, proc: proc, stateDir: state, root: root}
-	executionAwaitMessage(t, rig.mailbox, control, "result")
+	control := rig.release()
+	require.Equal(t, 0, control.Code, "stdout:\n%s\nstderr:\n%s", control.Stdout, control.Stderr)
 	reply := worker.stop(t)
 
 	assert.Contains(t, executionRejections(reply), "replay")
@@ -427,39 +311,13 @@ func TestExecutionWorkerReadsAnAnsweredWorkRecordACrashCut(t *testing.T) {
 	stored := map[string]time.Time{}
 	require.NoError(t, json.Unmarshal(content, &stored), "the first claim repairs the record")
 	assert.Contains(t, stored, liveKey)
-	assert.Contains(t, stored, orchestrator.run+" control 1")
+	assert.Greater(t, len(stored), 1, "the real v3 probe added a complete answer after the cut")
 	assert.NotContains(t, stored, cutKey, "the claim that never finished is forgotten")
 }
 
-// TestExecutionWorkerAcceptsAModestClockSkew: an issue time bounds replay and
-// nothing else, and it is the writer's clock rather than the reader's, so two
-// machines whose clocks disagree by minutes still coordinate. Probes issued a
-// quarter of an hour ahead of this node's clock and a quarter of an hour
-// behind it sit well inside the 24-hour window the replay rule allows, and the
-// node claims and answers both; TestExecutionWorkerRejectsAssignments is the
-// refusal of a message outside it.
-func TestExecutionWorkerAcceptsAModestClockSkew(t *testing.T) {
-	rig := newExecutionRig(t)
-	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	skews := map[string]time.Duration{"ahead": 15 * time.Minute, "behind": -15 * time.Minute}
-	for label, skew := range skews {
-		branch := executionBranchName("skew" + label)
-		orchestrator.offer(branch, orchestrator.probe(branch, "skew-"+label, func(m map[string]any) {
-			m["issuedAt"] = time.Now().UTC().Add(skew).Format(time.RFC3339)
-		}))
-	}
-
-	worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 4)
-	for label := range skews {
-		branch := executionBranchName("skew" + label)
-		result := executionAwaitMessage(t, rig.mailbox, branch, "result")
-		assert.Equal(t, "succeeded", result["status"], label)
-		assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, branch), label)
-	}
-	res := worker.proc.Wait()
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.NotContains(t, executionRejections(res), "issued-at", "neither skewed message was refused")
-}
+// The signed v3 clock acceptance and refusal ladder moved to
+// execution.TestWorkerV3AcceptsModestClockSkew; the retired handcrafted
+// v2 probe cannot exercise the live return-channel path.
 
 // executionLabel is a branch-safe label for one table row's name.
 func executionLabel(name string) string {
@@ -485,11 +343,8 @@ func TestExecutionWorkerLeavesWorkItCannotRun(t *testing.T) {
 	build := executionBranchName("relaywork")
 	orchestrator.offer(build, orchestrator.probe(build, "core",
 		func(m map[string]any) { m["kind"] = "relay" }))
-	valid := executionBranchName("probework")
-	orchestrator.offer(valid, orchestrator.probe(valid, "preflight"))
 
 	worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 4)
-	executionAwaitMessage(t, rig.mailbox, valid, "result")
 	res := worker.proc.Wait()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -524,6 +379,13 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 		"a secret variable that is unset": {
 			env:  []string{executionSecretEnv + "="},
 			says: executionSecretEnv},
+		"a late identity seed variable that is unset": {
+			adjust: func(settings *models.ExecutionConfig) { settings.IdentityKeyEnv = executionLateJoinIdentitySeedEnv },
+			says:   executionLateJoinIdentitySeedEnv},
+		"a malformed late identity seed": {
+			adjust: func(settings *models.ExecutionConfig) { settings.IdentityKeyEnv = executionLateJoinIdentitySeedEnv },
+			env:    []string{executionLateJoinIdentitySeedEnv + "=not-a-seed"},
+			says:   "canonical base64url Ed25519 seed"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := executionWorkerConfig(rig.mailbox)
@@ -640,24 +502,32 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 	})
 
 	t.Run("an answered-work record from another week is pruned", func(t *testing.T) {
-		root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
+		if runtime.GOOS == "windows" {
+			t.Skip("the distributed durable node-slot backend is not available on Windows")
+		}
+		sweepRig := newExecutionSweepRig(t, executionSweepScript, func(cfg *models.File) {
+			cfg.Execution.Workers = cfg.Execution.Workers[:1]
+			cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 10}
+			cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker,
+				Publish: models.RunOnlyOrchestrator}
+		})
+		root := writeNodeConfig(t, executionWorkerConfig(sweepRig.mailbox))
 		state := t.TempDir()
 		require.NoError(t, os.MkdirAll(filepath.Join(state, executionNode), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(state, executionNode, "seen.json"),
 			[]byte(`{"old-run old-task 1":"2020-01-01T00:00:00Z"}`), 0o644))
-		orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-		branch := executionBranchName("pruned")
-		orchestrator.offer(branch, orchestrator.probe(branch, "preflight"))
-
-		res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
-			"worker", "--root", root, "--state-dir", state, "--idle-timeout", "3")
-
+		env := append([]string{executionSecretEnv + "=" + executionSecret,
+			executionBuildLogEnv + "=" + sweepRig.builds}, executionNodeHomeEnv(t, state)...)
+		proc := sweepRig.repo.StartCommandEnv(env, "worker", "--root", root,
+			"--state-dir", state, "--idle-timeout", "20")
+		defer func() { proc.Signal(syscall.SIGINT); _ = proc.Wait() }()
+		res := sweepRig.sweep(nil)
 		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-		assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, branch))
 		record, err := os.ReadFile(filepath.Join(state, executionNode, "seen.json"))
 		require.NoError(t, err)
 		assert.NotContains(t, string(record), "old-run",
 			"a triple older than the replay window is refused by the window anyway")
+		assert.Contains(t, string(record), "core:run", "a compiled v3 claim rewrote the live replay record")
 	})
 }
 
@@ -678,7 +548,7 @@ func TestExecutionWorkerConcurrentStaleStateClaimHasOneOwner(t *testing.T) {
 	workers := make([]*harness.Proc, contenders)
 	for i := range workers {
 		workers[i] = rig.repo.StartCommandEnv(
-			[]string{executionSecretEnv + "=" + executionSecret},
+			append(executionNodeHomeEnv(t, state), executionSecretEnv+"="+executionSecret),
 			"worker", "--root", root, "--state-dir", state, "--idle-timeout", "3")
 	}
 	started := 0
@@ -701,20 +571,22 @@ func TestExecutionWorkerConcurrentStaleStateClaimHasOneOwner(t *testing.T) {
 // it, stops through its ordinary exit path with E225, and leaves the other
 // process's lock in place.
 func TestExecutionWorkerStopsWhenAnotherProcessClaimsItsFolder(t *testing.T) {
-	rig := newExecutionRig(t)
-	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
+	rig := newExecutionRig(t, func(cfg *models.File) {
+		cfg.Execution.Timeouts.Preflight = 3
+	})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60)
-	served := executionBranchName("before-takeover")
-	orchestrator.offer(served, orchestrator.probe(served, "served"))
-	executionAwaitMessage(t, rig.mailbox, served, "result")
+	served := rig.release()
+	require.Equal(t, 0, served.Code, "stdout:\n%s\nstderr:\n%s", served.Stdout, served.Stderr)
+	require.Contains(t, rig.repo.TagList(), "core@0.1.0")
 
 	// This test process is running and is not the worker, which is what a
 	// process that took the folder over looks like from inside it.
 	lock := filepath.Join(worker.stateDir, executionNode, "worker.lock")
 	other := strconv.Itoa(os.Getpid())
 	require.NoError(t, os.WriteFile(lock, []byte(other), 0o644))
-	left := executionBranchName("after-takeover")
-	orchestrator.offer(left, orchestrator.probe(left, "left"))
+	rig.repo.WriteFile("packages/core/after-takeover.txt", "new input\n")
+	rig.repo.Commit("feat(core): request work after state takeover")
+	left := rig.release()
 	res := worker.proc.Wait()
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -723,8 +595,8 @@ func TestExecutionWorkerStopsWhenAnotherProcessClaimsItsFolder(t *testing.T) {
 	stopped, isStopped := executionLine(res, "worker stopped")
 	require.True(t, isStopped, "the node stopped through its ordinary exit path\nstdout:\n%s", res.Stdout)
 	assert.Equal(t, "disowned", stopped.Str("reason"))
-	assert.Equal(t, []string{"assignment"}, executionChain(t, rig.mailbox, left),
-		"the assignment is left for the process that owns the folder")
+	assert.NotEqual(t, 0, left.Code, "the old owner cannot take a new signed run")
+	assert.NotContains(t, rig.repo.TagList(), "core@0.2.0", "the new input was not published")
 	held, err := os.ReadFile(lock)
 	require.NoError(t, err, "the other process's lock is not removed")
 	assert.Equal(t, other, string(held))
@@ -736,10 +608,11 @@ func TestExecutionWorkerStopsWhenAnotherProcessClaimsItsFolder(t *testing.T) {
 func TestExecutionWorkerStopsOnSignal(t *testing.T) {
 	rig := newExecutionRig(t)
 	worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 0)
-	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	branch := executionBranchName("signalled")
-	orchestrator.offer(branch, orchestrator.probe(branch, "preflight"))
-	executionAwaitMessage(t, rig.mailbox, branch, "result")
+	lock := filepath.Join(worker.stateDir, executionNode, "worker.lock")
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(lock)
+		return err == nil
+	}, 10*time.Second, 25*time.Millisecond, "the node started serving before it was signalled")
 
 	worker.proc.Signal(syscall.SIGINT)
 	res := worker.proc.Wait()
@@ -754,52 +627,84 @@ func TestExecutionWorkerStopsOnSignal(t *testing.T) {
 // node whose folder disappears under it makes another one and carries on.
 func TestExecutionWorkerSurvivesALostStateDir(t *testing.T) {
 	rig := newExecutionRig(t)
-	worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 0)
-	orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-	first := executionBranchName("beforeloss")
-	orchestrator.offer(first, orchestrator.probe(first, "first"))
-	executionAwaitMessage(t, rig.mailbox, first, "result")
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
+	first := rig.release()
+	require.Equal(t, 0, first.Code, "stdout:\n%s\nstderr:\n%s", first.Stdout, first.Stderr)
+	require.Contains(t, rig.repo.TagList(), "core@0.1.0")
 
 	require.NoError(t, os.RemoveAll(filepath.Join(worker.stateDir, executionNode, "cache")))
-	second := executionBranchName("afterloss")
-	orchestrator.offer(second, orchestrator.probe(second, "second"))
-	executionAwaitMessage(t, rig.mailbox, second, "result")
+	rig.repo.WriteFile("packages/core/after-loss.txt", "new input\n")
+	rig.repo.Commit("feat(core): build after cache loss")
+	second := rig.release()
+	require.Equal(t, 0, second.Code, "stdout:\n%s\nstderr:\n%s", second.Stdout, second.Stderr)
+	require.Contains(t, rig.repo.TagList(), "core@0.2.0")
 
 	worker.proc.Signal(syscall.SIGINT)
 	res := worker.proc.Wait()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, second))
+	assert.Contains(t, res.Stdout, "task claimed", "the same process served the second signed run")
 }
 
-// TestExecutionWorkerGitFaults: a node whose git fails once reports it,
-// stays up, and answers the next thing it is asked. The cache being
-// dispensable is what makes that possible: every failure reopens it.
+// Transient Git read errors on the v3 serving node cannot make it push or
+// start a command twice. Its next poll may reread the same signed task and
+// complete the actual compiled sweep. A push-reject transport is also used
+// as a capability check: the worker never invokes push at all.
 func TestExecutionWorkerGitFaults(t *testing.T) {
-	for name, pattern := range map[string]string{
-		"a poll that fails":          "*ls-remote*dispat-worker-*",
-		"a fetch that fails":         "*fetch*dispat-worker-*",
-		"an object write that fails": "*hash-object*",
-		"a tree write that fails":    "*mktree*",
-		"a commit that fails":        "*commit-tree*",
-		"a push that fails":          "*push*dispat-worker-*",
+	if runtime.GOOS == "windows" {
+		t.Skip("the distributed durable node-slot backend is not available on Windows")
+	}
+	for _, tc := range []struct {
+		name, pattern string
+		wantMatches   int
+		mayFail       bool
+	}{
+		{"poll fails once", "*ls-remote*", 1, false},
+		{"fetch fails once", "*fetch*", 1, false},
+		{"blob write fails once", "*hash-object*", 1, true},
+		{"tree write fails once", "*mktree*", 1, true},
+		{"commit write fails once", "*commit-tree*", 1, true},
+		{"remote mutation forbidden", "*push*", 0, false},
 	} {
-		t.Run(name, func(t *testing.T) {
-			rig := newExecutionRig(t)
-			fault := harness.NewGitFault(t, harness.GitFault{Pattern: pattern, Nth: 1})
-			worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
-			orchestrator := newExecutionFakeOrchestrator(t, rig.mailbox)
-			branch := executionBranchName("afterfault")
-			orchestrator.offer(branch, orchestrator.probe(branch, "preflight"))
-
-			executionAwaitMessage(t, rig.mailbox, branch, "result")
-			worker.proc.Signal(syscall.SIGINT)
-			res := worker.proc.Wait()
-
-			require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.Positive(t, fault.Matches(), "the fault reached the invocation it names")
-			assert.Equal(t, []string{"assignment", "claim", "result"}, executionChain(t, rig.mailbox, branch),
-				"and the node answered once the fault had passed")
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newExecutionSweepRig(t,
+				`printf 'worker-git-fault %s\n' "$DISPAT_PACKAGE" >> "$DISPAT_IT_EXECUTION_LOG"`,
+				func(cfg *models.File) {
+					cfg.Execution.Workers = cfg.Execution.Workers[:1]
+					cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 15, Task: 30, Cancel: 5}
+					cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker,
+						Publish: models.RunOnlyOrchestrator}
+				})
+			nth := 1
+			if tc.wantMatches == 0 {
+				nth = 0 // reject every attempted peer push
+			}
+			fault := harness.NewGitFault(t, harness.GitFault{Pattern: tc.pattern, Nth: nth, Code: 128})
+			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60, fault.Env()...)
+			defer worker.stop(t)
+			res := rig.sweep(nil)
+			if !tc.mayFail {
+				require.Equal(t, 0, res.Code, "v3 sweep after %s:\n%s\n%s", tc.name, res.Stdout, res.Stderr)
+			}
+			if tc.wantMatches == 0 {
+				assert.Zero(t, fault.Matches(), "the worker must never push")
+			} else {
+				assert.Positive(t, fault.Matches(), "the injected Git operation was reached")
+			}
+			content, err := os.ReadFile(rig.builds)
+			if tc.mayFail && os.IsNotExist(err) {
+				content = nil
+			} else {
+				require.NoError(t, err)
+			}
+			for _, pkg := range executionSweepPackages {
+				count := strings.Count(string(content), "worker-git-fault "+pkg+"\n")
+				if tc.mayFail {
+					assert.LessOrEqual(t, count, 1, "an uncertain result cannot rerun a command")
+				} else {
+					assert.Equal(t, 1, count, "the peer ran each package script once")
+				}
+			}
 		})
 	}
 }
