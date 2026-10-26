@@ -1,5 +1,147 @@
 # Changelog
 
+## specs/ccme-spec/v3.1.0-rc.7 (2026-10-26)
+
+### Features
+
+- define all distribution modes before implementation ([ee55295](https://github.com/yohimik/dispat/commit/ee5529516cdc03ec54732c90e9bc134882148836)) (by yohimik, Codex)
+  Specify compilation, interpretation and mixed execution over the same pinned
+  semantic plan and task graph. Reserve Git pushes and release effects for the
+  first node while defining independent interpretation, exact claim admission,
+  recovery and cross-partition outcome gates.
+
+  State conditional scheduling, scaling and equilibrium bounds without claiming
+  a unique algorithm or a universal planner time or memory minimum. Separate the
+  published specification from the engine modes still awaiting implementation.
+
+- initialize worker task branches before execution ([def8e7d](https://github.com/yohimik/dispat/commit/def8e7d41914e266d474b04c43de31e07be5d0a4)) (by yohimik, Codex)
+  Reserve every eligible task attempt and bounded worker notice slots before
+  starting package frames. Activate ready work with atomic leased updates,
+  carry exact input commits with assignments, and keep publication on the
+  orchestrator. Workers verify and execute assignments without replanning.
+
+  Cover cancellation, uncertain pushes, carrier integrity and large fan-in.
+  Document the node-player execution game and prove its scoped equilibrium
+  and span optimum without claiming a unique algorithm or equilibrium.
+
+- execute configured stages with explicit dependency ordering ([1bf38e3](https://github.com/yohimik/dispat/commit/1bf38e3ab10c7f3f8ba6204033fbde8f4749066b)) (by yohimik, Codex)
+  Compile configured stage placement and selected provider outcomes before
+  dispatch, rejecting task cycles before effects. Carry verified predecessor
+  outputs between local and worker stages from pinned source inputs, including
+  idempotent preparation and providers that do not release.
+
+  Preserve durable publication receipts and suppress stages after a failed
+  required record. Document configuration inheritance, concurrency premises
+  and the boundary between declared dependencies and arbitrary script reads.
+
+### Fixes
+
+- admit completed native records across repository owners ([ace697e](https://github.com/yohimik/dispat/commit/ace697ea9f2c249264501bbf1b08e321b5d72d27)) (by yohimik, Codex)
+  Preserve parallel publication when a relevant peer completes a nested native
+  commit or link settlement. Validate its exact completed effects before
+  advancing the snapshot, and wait for unfinished transitions without locks.
+
+- keep publication on the orchestrator ([280d782](https://github.com/yohimik/dispat/commit/280d7823200c69be7a96a9b7c1b3ae02801f58ec)) (by yohimik, Codex)
+  Run publication and release recording on the orchestrator while workers
+  execute build, test and configured computation stages. Refuse worker
+  publication placement and signed publication permits, and remove the
+  worker publication executor and authorization handshake.
+
+  Keep local input and ownership validation, document the single entry
+  point and mailbox credentials, and replace obsolete worker-publication
+  tests with local publication and refusal coverage. Repair remaining
+  recovery and stage fixture assumptions without weakening their checks.
+
+- preserve recovery guarantees across release retries ([5bb70d5](https://github.com/yohimik/dispat/commit/5bb70d5b8260f893dc10d09a1f208c36be2560e8)) (by yohimik, Codex)
+  Complete receipt-backed releases when an immutable remote tag already names the prepared commit, and retry branch races from authoritative state. Report pinned-source capture errors and exercise recovery faults after the new dependency and output-preparation boundaries.
+
+- name the optional release stage test ([6a648af](https://github.com/yohimik/dispat/commit/6a648af70e9b8035d4dbc78d8e1991b76b536ecd)) (by yohimik, Codex)
+  Use the verb test in flow configuration, hooks, task identities and stage constraints. Refuse the former prerelease spellings with migration guidance while preserving scripts named tests. Align custom-stage docs, the agent guide and CCME, and keep skipped-consumer fixtures ordered before provider settlement.
+
+- recover published packages with durable receipts ([80ecde8](https://github.com/yohimik/dispat/commit/80ecde80937e618469fdd47b7e975a850fb9cf3e)) (by yohimik, Codex)
+  Persist per-package publication evidence before dependent publication and
+  optional recorders. Verify repeated artifact identity, preserve exported
+  source targets, and reject conflicting or unverifiable records.
+
+  Finalize release commits with atomic branch and immutable-tag pushes plus
+  leased receipt deletion. Bind local retries to prepared targets, reconcile
+  lost replies and remote advances, and keep optional aliases independent.
+
+  Cover rejected writes, interrupted finalization, same-checkout retries,
+  tag tampering, stale receipts and adoption mismatches with regressions.
+
+- close ancestry and recovery proof gaps ([1460e93](https://github.com/yohimik/dispat/commit/1460e93f219255a4e475947501b3306e72f80a3e)) (by yohimik, Codex)
+  Correct the pending-union ancestry relation and charge induced adjacency,
+  zero-marker traversal and queries about targets outside the union.
+
+  Limit replay guarantees to fixed publication identities and conditional
+  forward-plan convergence. Account for extra catch-up releases and exclude
+  post-record stages without independent durable replay contracts.
+
+  Show that the list-scheduling factor is sharp for arbitrary priorities
+  and that the work/span lower bound need not be attained with finite slots.
+  Keep the exact global minimum scoped to execution of a fixed task DAG.
+
+- scope the global execution minimum to a compiled task DAG ([006df5a](https://github.com/yohimik/dispat/commit/006df5ae7fd9e3b3836238e9517097d120632e73)) (by yohimik, Codex)
+  State that the exact minimum compares precedence-feasible executions of
+  one fixed task graph with fixed durations and enough compatible capacity
+  for immediate dispatch. Keep finite-slot approximation bounds and the
+  separate planning, bookkeeping and recovery cost accounts explicit.
+
+- compare planner and execution bounds across methods ([ee5dde1](https://github.com/yohimik/dispat/commit/ee5dde1be47e403d5f789a7b608ba17d5cb07a51)) (by yohimik, Codex)
+  Prove growing task-time gaps for sequential execution, level barriers and
+  duration-oblivious static placement under the stated identical-slot model.
+  Compare event counters with full dependency rescans and heap ordering with
+  least-ready scans, keeping actual scheduler sorting costs separate.
+
+  Derive the expected list-scheduling bound from its pointwise guarantee for
+  any workload distribution with finite expected optimum. State where other
+  schedulers match the bound and where an unimplemented chain-rank planner
+  fast path could improve window and author processing.
+
+- distinguish planner and execution optimality proofs ([0e49579](https://github.com/yohimik/dispat/commit/0e4957971754ff8bc523588b2ef48f5f5f5cb7ea)) (by yohimik, Codex)
+  Prove that immediate dispatch is the only universally exact online start
+  policy under unlimited compatible capacity and independently unknown task
+  durations. Separate that result from asymptotic optimality with an online
+  schedule that deliberately delays work while staying within twice the span.
+
+  State the full planner's input, output and comparison-model lower bounds,
+  the task compiler's explicit graph costs, and a restricted readiness problem
+  whose auxiliary memory has a matching bit lower bound. Record the linear
+  history family where materialized windows and repeated author scans use
+  more memory and work than needed.
+
+  Compose semantic planning, task dependencies and durable replay for
+  correctness without inferring a global time or auxiliary-memory optimum.
+
+- prove compiled-plan bounds and model configured stages ([20e694f](https://github.com/yohimik/dispat/commit/20e694f26002eea76b9aa11c89573c8fcb6172ca)) (by yohimik, Claude Opus 5.5, Codex)
+  Define configured stage graphs, required precedence, publication and record
+  edges, and their acyclicity and order-reduction proofs. Keep one semantic
+  plan for fixed inputs with no fixed upper bound on tasks, edges or workers.
+
+  Prove the work-span list-scheduling bound with a schedule-dependent chain
+  and the disjoint-stage-budget bound. Prove the unique earliest-start vector
+  under sufficient compatible capacity and the vertical and horizontal
+  scaling laws for chains and independent tasks. Account separately for node,
+  stage, record-unit and owner capacity, and derive the scaling knee.
+  Separate graph input, auxiliary scheduler state, placement and priority
+  costs, and durable recovery. Give counterexamples to executor uniqueness
+  and explain which asymptotic minima the stated models actually establish.
+
+  Prove necessary saga-style forward recovery from irreversible effects and
+  crash-history indistinguishability. State the crash-readiness contract,
+  outcome-settlement requirements, and limits on conditional progress.
+
+  Align build-readiness formulas, configured-stage conformance and the design
+  history with those premises. Preserve the specification version markers.
+
+### Authors
+
+- yohimik
+- Codex
+- Claude Opus 5.5
+
+
 ## specs/ccme-spec/v3.1.0-rc.6 (2026-10-25)
 
 ### Fixes
