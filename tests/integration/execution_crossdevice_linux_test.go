@@ -55,7 +55,7 @@ func TestExecutionLinkedWorktreeInstallsOutputsAcrossFilesystemBoundary(t *testi
 	require.NoError(t, os.Remove(probe))
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
 
-	res := rig.repo.CommandRootEnv(worktree, rig.env(), "release")
+	res := rig.repo.CommandRootEnv(worktree, rig.env(), "release", "--return-endpoint", rig.returnURL)
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	content, err := os.ReadFile(filepath.Join(worktree, "packages", "core", "dist", "from-worker.txt"))
