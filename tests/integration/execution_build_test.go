@@ -17,6 +17,7 @@ package integration
 // release is recorded in.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -676,9 +677,12 @@ func (w *executionBranchWatch) seen() []string {
 // ref without invalidating the commit that the watcher already observed.
 func observedBuildBranches(mailbox string) ([]string, error) {
 	git := func(args ...string) (string, error) {
-		out, err := exec.Command("git", append([]string{"-C", mailbox}, args...)...).CombinedOutput()
+		cmd := exec.Command("git", append([]string{"-C", mailbox}, args...)...)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
 		if err != nil {
-			return "", fmt.Errorf("git %v: %w: %s", args, err, out)
+			return "", fmt.Errorf("git %v: %w: %s", args, err, stderr.String())
 		}
 		return string(out), nil
 	}
