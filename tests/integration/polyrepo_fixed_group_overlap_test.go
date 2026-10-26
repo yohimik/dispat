@@ -45,8 +45,8 @@ func fixedGroupNativeOverlap(t *testing.T) (*harness.Repo, map[string]any) {
 		"publish": []string{`case "$DISPAT_PACKAGE" in ` +
 			`a) printf 'a\n' > nested-release.txt; ` + commitA + `; ` +
 			`: > ../../../../a-nested-recorded; ` +
-			`attempts=0; while [ ! -f ../../../../b-published ] && [ "$attempts" -lt 300 ]; do ` +
-			`attempts=$((attempts + 1)); sleep 0.01; done;; ` +
+			`attempts=0; while [ ! -f ../../../../b-published ] && [ "$attempts" -lt 1000 ]; do ` +
+			`attempts=$((attempts + 1)); sleep 0.01; done; test -f ../../../../b-published;; ` +
 			`b) : > ../../../../b-published;; esac`},
 	}
 	cfg["flow"] = map[string]any{
