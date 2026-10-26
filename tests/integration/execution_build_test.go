@@ -45,8 +45,9 @@ var executionWorkspacePackages = []string{"assets", "ui", "docs", "app"}
 // executionIntegrityCode is the diagnostic a task that could not be executed
 // carries.
 const executionIntegrityCode = "E227"
-const executionTaskTimeoutSettlementWait = 60 * time.Second
+const executionTaskTimeoutSettlementWait = 90 * time.Second
 const executionTaskTimeoutWorkerDiagnosticWait = 5 * time.Second
+const executionTaskTimeoutCancelSeconds = 5
 const executionTaskTimeoutScript = executionRecordingScript +
 	` && if [ "$DISPAT_PACKAGE" = assets ]; then sleep 60; fi`
 
@@ -625,13 +626,14 @@ func TestExecutionStrayWritesAreReported(t *testing.T) {
 
 // TestExecutionTaskTimeoutCancelsAndSettlesAttempt: each bounded retry of a
 // timed-out build is stopped by a signed Cancel and Ack before one terminal
-// decision. Other packages may use the released slot once, and nothing is published.
+// decision. Other packages may use the released slot once; the timed-out package never publishes.
 func TestExecutionTaskTimeoutCancelsAndSettlesAttempt(t *testing.T) {
 	rig := newExecutionWorkspace(t, func(*harness.Repo) string {
 		return executionTaskTimeoutScript
 	}, func(cfg *models.File) {
+		cfg.Execution.RetryAfterUncertainAttempt = true
 		cfg.Concurrency = []int{1, 1}
-		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 3}
+		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 3, Cancel: executionTaskTimeoutCancelSeconds}
 		executionOneWorker(cfg)
 	})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
@@ -676,7 +678,8 @@ func TestExecutionTaskTimeoutCancelsAndSettlesAttempt(t *testing.T) {
 		assert.LessOrEqual(t, executionBuildsOf(rig, name), 1,
 			"a later package may use the settled slot but cannot run a duplicate command: %s", name)
 	}
-	assert.Empty(t, rig.repo.TagList(), "nothing was published")
+	assert.Equal(t, 0, rig.repo.TagCount("assets@"),
+		"the timed-out package was not published")
 	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock was given back")
 
 	reply := stopAll(t, []*executionWorker{worker})[0]

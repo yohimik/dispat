@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -115,8 +114,12 @@ func TestChoreographyCompiledSweepRecoversAcceptedResultBeforeDecision(t *testin
 			peer.stop(t)
 		}
 	}()
+	// The first task-and-ledger push after this signed receipt is
+	// ResultAccepted; the next is its terminal Decision. Earlier ledger
+	// traffic varies as the graph and pickup protocol evolve.
 	decisionGate := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*push*dispat-ledger-*", Nth: 7, Hold: true,
+		ArmAfter: "*commit-tree*dispat transport choreography-result*",
+		Pattern:  "*push*refs/heads/dispat-task-*", Nth: 2, Hold: true,
 	})
 	env := append(rig.env("HOME="+firstHome,
 		"XDG_CONFIG_HOME="+filepath.Join(firstHome, "config")), decisionGate.Env()...)
@@ -137,21 +140,25 @@ func TestChoreographyCompiledSweepRecoversAcceptedResultBeforeDecision(t *testin
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
-	acceptedResult := false
-	for _, branch := range rig.branches() {
-		if !strings.HasPrefix(branch, "refs/heads/dispat-task-") {
+	acceptedResult := executionLateJoinLedgerEvent{}
+	decisionPresent := false
+	for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+		if event.Task != "core:run" {
 			continue
 		}
-		kinds := executionReadChain(rig.mailbox, strings.TrimPrefix(branch, "refs/heads/"))
-		if slices.Contains(kinds, "choreography-result") && !slices.Contains(kinds, "choreography-decision") {
-			acceptedResult = true
+		if event.Kind == "result-accepted" {
+			acceptedResult = event
+		}
+		if event.Kind == "terminal" {
+			decisionPresent = true
 		}
 	}
-	if !acceptedResult {
+	if acceptedResult.Kind != "result-accepted" || acceptedResult.OutputOID == "" ||
+		acceptedResult.ResultReceiptOID == "" || decisionPresent {
 		decisionGate.Resume()
 		result := first.Wait()
-		t.Fatalf("held ledger push before accepted Result; matches=%d stdout:\n%s\nstderr:\n%s",
-			decisionGate.Matches(), result.Stdout, result.Stderr)
+		t.Fatalf("held push did not follow an accepted Result before Decision; matches=%d result=%+v terminal=%t stdout:\n%s\nstderr:\n%s",
+			decisionGate.Matches(), acceptedResult, decisionPresent, result.Stdout, result.Stderr)
 	}
 	first.Signal(syscall.SIGKILL)
 	require.NoError(t, syscall.Kill(decisionGate.HeldPID(), syscall.SIGKILL))
@@ -164,15 +171,26 @@ func TestChoreographyCompiledSweepRecoversAcceptedResultBeforeDecision(t *testin
 		"XDG_CONFIG_HOME="+filepath.Join(firstHome, "config")),
 		"run", "tests", "--since", "HEAD", "--return-endpoint", rig.returnURL)
 	require.Equal(t, 0, second.Code, "recovery stdout:\n%s\nrecovery stderr:\n%s", second.Stdout, second.Stderr)
-	peerResult := peer.stop(t)
 	peerStopped = true
+	peerResult := peer.stop(t)
 	content, err := os.ReadFile(rig.builds)
 	require.NoError(t, err, "first stdout:\n%s\nfirst stderr:\n%s\nrecovery stdout:\n%s\nrecovery stderr:\n%s\npeer stdout:\n%s\npeer stderr:\n%s\nbranches: %v",
 		firstResult.Stdout, firstResult.Stderr, second.Stdout, second.Stderr,
 		peerResult.Stdout, peerResult.Stderr, rig.branches())
 	require.Equal(t, 1, strings.Count(string(content), "result-start core\n"))
-	requireChoreographyTaskChain(t, rig.mailbox, rig.branches(),
-		"choreography-claim", "choreography-result", "choreography-decision")
+	terminal := executionLateJoinLedgerEvent{}
+	for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+		if event.Task == "core:run" && event.Kind == "terminal" {
+			terminal = event
+		}
+	}
+	require.Equal(t, "terminal", terminal.Kind, "recovery signs core's logical finality")
+	require.Equal(t, acceptedResult.ResultReceiptOID, terminal.ResultReceiptOID,
+		"recovery uses the exact accepted Result receipt")
+	require.Equal(t, acceptedResult.OutputOID, terminal.OutputOID,
+		"recovery retains the accepted raw Result identity")
+	require.Contains(t, strings.Fields(bareGit(t, rig.mailbox, "rev-list", "--parents", "-n", "1", terminal.TaskOID)),
+		acceptedResult.ResultReceiptOID, "the terminal commit directly carries the signed receipt")
 	_, err = os.Stat(filepath.Join(base, "active-run"))
 	require.ErrorIs(t, err, os.ErrNotExist)
 	require.Zero(t, peerGit.Matches())

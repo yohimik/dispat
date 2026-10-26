@@ -77,8 +77,9 @@ func TestLevelsRootBooleansAreThreeState(t *testing.T) {
 	cfg := levelsConfig()
 	cfg.Scripts["mutate"] = models.Script{"echo dirty > mutated.txt"}
 	cfg.Scripts["fail"] = models.Script{"exit 1"}
+	cfg.Scripts["publish"] = models.Script{"echo publishing"}
 	cfg.RevertOnFail = models.Bool(true)
-	cfg.Flow = &models.SpaceFlowConfig{Build: []string{"mutate"}, Publish: []string{"fail"}}
+	cfg.Flow = &models.SpaceFlowConfig{Build: []string{"mutate"}, BeforePublish: []string{"fail"}, Publish: []string{"publish"}}
 	cfg.Spaces["apps"] = models.SpaceConfig{Path: models.PathList{"services"}, RevertOnFail: models.Bool(false)}
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "core")
@@ -86,7 +87,7 @@ func TestLevelsRootBooleansAreThreeState(t *testing.T) {
 	r.Commit("feat(core,app): bootstrap")
 
 	res := r.Release()
-	require.Equal(t, 1, res.Code, "both packages fail to publish\nstdout:\n%s", res.Stdout)
+	require.Equal(t, 1, res.Code, "both packages fail before publication\nstdout:\n%s", res.Stdout)
 
 	// core inherits the root's true and is rolled back; app said false and
 	// keeps what its version stage wrote.

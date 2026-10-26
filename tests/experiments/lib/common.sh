@@ -589,9 +589,8 @@ resume_release() {
 
 # provider_phase_asserts <first step> <observation> <provider observation>:
 # the provider's refusal failed the first run and left no release of it, and
-# the provider-only run that followed shipped it. dispat states the same
-# facts in its own words, with its own rollback; these are the sentences a
-# tool without that rollback is asked.
+# the provider-only run that followed shipped it. The compared tools use
+# this helper; dispat retains its lock after an unsettled external upload.
 provider_phase_asserts() {
   assert "the first run reported the failure" [ "${STEP_RC[$1]:-0}" != 0 ]
   assert "the provider's refused version is not on the registry" observed "$2" '.packages.core.registry == "1.0.0"'

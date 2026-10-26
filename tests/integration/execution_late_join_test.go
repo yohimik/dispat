@@ -144,6 +144,7 @@ type executionLateJoinLedgerEvent struct {
 	Node                 string `json:"node"`
 	PickupID             string `json:"pickupId"`
 	OutputOID            string `json:"outputOid"`
+	ResultReceiptOID     string `json:"resultReceiptOid"`
 	RefusalReason        string `json:"refusalReason"`
 	PreparedInputOID     string `json:"preparedInputOid"`
 	Package              string `json:"package"`

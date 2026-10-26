@@ -71,6 +71,7 @@ const choreographyLedgerRootReadErr = "execution: invalid ledger root read"
 const choreographyLedgerRefAbsentErr = "execution: canonical ledger ref is unavailable"
 const choreographyLedgerBootstrapRootErr = "execution: canonical ledger is not rooted at the pinned bootstrap"
 const choreographyLedgerSignedRootErr = "execution: invalid signed choreography ledger root"
+const choreographyLedgerRootReadCauseErrorFormat = "execution: reading the signed choreography ledger root: %w"
 const choreographyLedgerRootParentErr = "execution: choreography ledger root has wrong bootstrap parent"
 const choreographyLedgerCursorInvalidErr = "execution: invalid choreography event cursor"
 const choreographyLedgerCursorOutsideErr = "execution: event cursor is outside the signed ledger"
@@ -644,7 +645,11 @@ func ReadChoreographyLedgerRoot(ctx context.Context, mailbox *GitMailbox,
 	}
 	rootOID := oids[choreographyLedgerFirstItemIndex]
 	root, err := readChoreographyLedgerRecord(ctx, mailbox, rootOID, binding)
-	if err != nil || root.Sequence != choreographyLedgerRootSequence || root.Event != nil ||
+	if err != nil {
+		return ChoreographyLedgerReservation{}, ChoreographyRuntimeRoster{},
+			fmt.Errorf(choreographyLedgerRootReadCauseErrorFormat, err)
+	}
+	if root.Sequence != choreographyLedgerRootSequence || root.Event != nil ||
 		root.BootstrapOID != bootstrapOID ||
 		root.Roster == nil || root.Roster.validate() != nil {
 		return ChoreographyLedgerReservation{}, ChoreographyRuntimeRoster{},
@@ -805,7 +810,10 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 		return err
 	}
 	root, err := g.readLedgerRecord(ctx, g.opts.Ledger.OID)
-	if err != nil || root.Sequence != choreographyLedgerRootSequence || root.Event != nil ||
+	if err != nil {
+		return fmt.Errorf(choreographyLedgerRootReadCauseErrorFormat, err)
+	}
+	if root.Sequence != choreographyLedgerRootSequence || root.Event != nil ||
 		root.BootstrapOID != g.opts.BootstrapOID ||
 		root.Roster == nil || root.Roster.validate() != nil {
 		return fmt.Errorf(choreographyLedgerSignedRootErr)
@@ -1171,7 +1179,10 @@ func (g *GitChoreographyPersist) readLedgerRecord(ctx context.Context, oid strin
 func readChoreographyLedgerRecord(ctx context.Context, mailbox *GitMailbox,
 	oid string, binding ChoreographyRunBinding) (choreographyLedgerRecord, error) {
 	tree, err := mailbox.readTree(ctx, oid)
-	if err != nil || tree.kind != choreographyLedgerKind {
+	if err != nil {
+		return choreographyLedgerRecord{}, err
+	}
+	if tree.kind != choreographyLedgerKind {
 		return choreographyLedgerRecord{}, fmt.Errorf(choreographyLedgerUnsignedObjectErr)
 	}
 	document, err := mailbox.Read(ctx, ChainTip{OID: oid, Kind: tree.kind,

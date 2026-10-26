@@ -181,7 +181,7 @@ func TestHooksLoginFailureIsolatedToItsSpace(t *testing.T) {
 }
 
 // TestHooksOnFailAndOnSkipOutcomeScripts covers the outcome scripts end to
-// end in one failing run over three packages: provider fails its publish,
+// end in one failing run over three packages: provider fails its beforePublish gate,
 // consumer is skipped because of it, bystander publishes. onFail must run
 // once for provider with the failure specifics (DISPAT_FAILED_STAGE,
 // DISPAT_ERROR), onSkip once for consumer with the blame
@@ -193,18 +193,20 @@ func TestHooksOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{
-		"build":       {"echo building"},
-		"publish":     {`[ "$DISPAT_PACKAGE" != "provider" ]`},
-		"boom":        {"exit 1"},
-		"record-fail": {`env | grep '^DISPAT_' > "../../onfail-$DISPAT_PACKAGE.env"`},
-		"record-skip": {`env | grep '^DISPAT_' > "../../onskip-$DISPAT_PACKAGE.env"`},
+		"build":            {"echo building"},
+		"publish":          {"echo publishing"},
+		"publication-gate": {`[ "$DISPAT_PACKAGE" != "provider" ]`},
+		"boom":             {"exit 1"},
+		"record-fail":      {`env | grep '^DISPAT_' > "../../onfail-$DISPAT_PACKAGE.env"`},
+		"record-skip":      {`env | grep '^DISPAT_' > "../../onskip-$DISPAT_PACKAGE.env"`},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
-			Build:   []string{"build"},
-			Publish: []string{"publish"},
-			OnFail:  []string{"boom", "record-fail"},
-			OnSkip:  []string{"record-skip"},
+			Build:         []string{"build"},
+			BeforePublish: []string{"publication-gate"},
+			Publish:       []string{"publish"},
+			OnFail:        []string{"boom", "record-fail"},
+			OnSkip:        []string{"record-skip"},
 		}},
 	}
 	cfg.Dependencies = []models.DependencyConfig{{Consumer: "consumer", Provider: "provider"}}
@@ -215,7 +217,7 @@ func TestHooksOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 	r.Commit("feat(provider,bystander)^: provider will fail its publish")
 
 	res := r.Release()
-	require.Equal(t, 1, res.Code, "provider's publish failure must fail the run\nstdout:\n%s", res.Stdout)
+	require.Equal(t, 1, res.Code, "provider's prepublication failure must fail the run\nstdout:\n%s", res.Stdout)
 	assert.True(t, r.IsTagged("bystander@0.1.0"), "the unrelated package still publishes; tags: %v", r.TagList())
 	assert.Zero(t, r.TagCount("provider@"))
 	assert.Zero(t, r.TagCount("consumer@"))
@@ -249,7 +251,7 @@ func TestHooksOnFailAndOnSkipOutcomeScripts(t *testing.T) {
 // documented but easy-to-miss half of revertOnFail: "the same rollback runs
 // when a package is skipped after an earlier stage already modified
 // files." The consumer's beforeAll hook dirties its folder and leaves a
-// marker; the provider's *publish* waits for that marker and then fails, so
+// marker; the provider's beforePublish gate waits for that marker and fails, so
 // the consumer is skipped at version admission after real damage, and
 // revertOnFail must still clean its folder up. The marker is what makes the
 // order a fact rather than a likelihood: without it a provider that failed
@@ -264,14 +266,14 @@ func TestHooksRevertOnFailAppliesAfterBeforeAllOnSkip(t *testing.T) {
 		"build": {"echo building"},
 		// Bounded, so a consumer whose beforeAll hook never runs fails the
 		// assertion below instead of holding the run open.
-		"fail-publish": {"attempts=0; while [ ! -e " + harness.ShQuote(mutated) + " ] && [ \"$attempts\" -lt 600 ]; " +
+		"refuse-publish": {"attempts=0; while [ ! -e " + harness.ShQuote(mutated) + " ] && [ \"$attempts\" -lt 600 ]; " +
 			"do attempts=$((attempts + 1)); sleep 0.05; done; exit 1"},
 		"mutate":  {"echo dirty >> main.txt && echo extra > extra.txt && : > " + harness.ShQuote(mutated)},
 		"publish": {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"provider": {Path: models.PathList{"packages/provider"}, Flow: &models.SpaceFlowConfig{
-			Build: []string{"build"}, Publish: []string{"fail-publish"}}},
+			Build: []string{"build"}, BeforePublish: []string{"refuse-publish"}, Publish: []string{"publish"}}},
 		"consumer": {Path: models.PathList{"packages/consumer"}, RevertOnFail: models.Bool(true), Flow: &models.SpaceFlowConfig{
 			BeforeAll: []string{"mutate"}, Build: []string{"build"}, Publish: []string{"publish"}}},
 	}
@@ -282,7 +284,7 @@ func TestHooksRevertOnFailAppliesAfterBeforeAllOnSkip(t *testing.T) {
 	r.Commit("feat(provider)^: reaches its one consumer, but fails to publish")
 
 	res := r.Release()
-	require.Equal(t, 1, res.Code, "provider's publish failure must fail the run\nstdout:\n%s", res.Stdout)
+	require.Equal(t, 1, res.Code, "provider's prepublication failure must fail the run\nstdout:\n%s", res.Stdout)
 	require.FileExists(t, mutated, "the consumer's beforeAll hook ran before the provider failed")
 	assert.Zero(t, r.TagCount("provider@"))
 	assert.Zero(t, r.TagCount("consumer@"))
@@ -295,9 +297,9 @@ func TestHooksRevertOnFailAppliesAfterBeforeAllOnSkip(t *testing.T) {
 	assert.NoFileExists(t, filepath.Join(dir, "extra.txt"), "the beforeAll untracked file must be removed")
 }
 
-// skippedConsumerRepo is a provider whose first publish fails and consumers
+// skippedConsumerRepo is a provider whose first beforePublish gate fails and consumers
 // whose beforeAll hook edits their folder, a tracked file and an untracked
-// one, before the provider's failure skips them: the failing publish waits
+// one, before the provider's failure skips them: the publication gate waits
 // until every consumer's edit is made. Nothing sets revertOnFail;
 // isCommitEnabled decides whether the run makes a release commit. The markers
 // that order the two, and make the provider fail only once, live outside the
@@ -310,14 +312,14 @@ func skippedConsumerRepo(t *testing.T, isCommitEnabled bool, consumers ...string
 	cfg := harness.BaseFile(len(consumers) + 1)
 	cfg.Scripts = map[string]models.Script{
 		"build": {"echo building"},
-		"fail-publish-once": {"if [ ! -e " + failedMark + " ]; then " + waitForMarks(marks, consumers...) +
+		"refuse-publish-once": {"if [ ! -e " + failedMark + " ]; then " + waitForMarks(marks, consumers...) +
 			"touch " + failedMark + "; exit 1; fi"},
 		"mutate":  {"echo dirty >> main.txt && echo extra > extra.txt && : > " + harness.ShQuote(marks) + `/"$DISPAT_PACKAGE"`},
 		"publish": {"echo publishing"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"provider": {Path: models.PathList{"packages/provider"}, Flow: &models.SpaceFlowConfig{
-			Build: []string{"build"}, Publish: []string{"fail-publish-once"}}},
+			Build: []string{"build"}, BeforePublish: []string{"refuse-publish-once"}, Publish: []string{"publish"}}},
 		"consumers": {Path: models.PathList{"packages/consumers"}, Flow: &models.SpaceFlowConfig{
 			BeforeAll: []string{"mutate"}, Build: []string{"build"}, Publish: []string{"publish"}}},
 	}
@@ -369,7 +371,7 @@ func TestHooksCommitModeRestoresASkippedConsumer(t *testing.T) {
 	r, marks := skippedConsumerRepo(t, true, "consumer")
 
 	res := r.Release()
-	require.Equal(t, 1, res.Code, "the provider's publish failure fails the run\nstdout:\n%s", res.Stdout)
+	require.Equal(t, 1, res.Code, "the provider's prepublication failure fails the run\nstdout:\n%s", res.Stdout)
 	require.FileExists(t, filepath.Join(marks, "consumer"), "the beforeAll edit preceded provider failure")
 	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "consumer"), "the consumer is reported blocked")
 	assert.Zero(t, r.TagCount("consumer@"))
@@ -436,7 +438,7 @@ func TestHooksSkippedNestedParentLeavesItsPublishedChildAlone(t *testing.T) {
 	cfg.Flow = &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"provider": {Path: models.PathList{"packages/provider"}, Flow: &models.SpaceFlowConfig{
-			Build: []string{"build"}, Publish: []string{"fail"}}},
+			Build: []string{"build"}, BeforePublish: []string{"fail"}, Publish: []string{"publish"}}},
 		"libs": {Path: models.PathList{"packages/libs"}, Flow: &models.SpaceFlowConfig{
 			BeforeAll: []string{"mutate"}, Build: []string{"build"}, Publish: []string{"publish"}}},
 	}

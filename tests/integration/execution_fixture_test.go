@@ -81,10 +81,9 @@ func newExecutionRig(t *testing.T, adjust ...func(*models.File)) *executionRig {
 	mailbox := executionMailbox(t)
 	cfg := libsConfig(markerBuild, 1)
 	cfg.Execution = &models.ExecutionConfig{
-		RetryAfterUncertainAttempt: true,
-		SecretEnv:                  executionSecretEnv,
-		Workers:                    []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
-		Timeouts:                   &models.ExecutionTimeoutsConfig{Preflight: 30},
+		SecretEnv: executionSecretEnv,
+		Workers:   []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
+		Timeouts:  &models.ExecutionTimeoutsConfig{Preflight: 30},
 	}
 	for _, change := range adjust {
 		change(&cfg)
@@ -103,10 +102,9 @@ func newExecutionRigOnOrigin(t *testing.T, adjust ...func(*models.File)) *execut
 	repo.SeedPackage("packages", "core")
 	cfg := libsConfig(markerBuild, 1)
 	cfg.Execution = &models.ExecutionConfig{
-		RetryAfterUncertainAttempt: true,
-		SecretEnv:                  executionSecretEnv,
-		Workers:                    []models.ExecutionWorkerConfig{{Name: executionNode}},
-		Timeouts:                   &models.ExecutionTimeoutsConfig{Preflight: 30},
+		SecretEnv: executionSecretEnv,
+		Workers:   []models.ExecutionWorkerConfig{{Name: executionNode}},
+		Timeouts:  &models.ExecutionTimeoutsConfig{Preflight: 30},
 	}
 	for _, change := range adjust {
 		change(&cfg)

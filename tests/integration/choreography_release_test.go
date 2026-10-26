@@ -111,9 +111,10 @@ func TestChoreographyCatchesUpAfterProviderOnlyRetry(t *testing.T) {
 	api.ReleaseOK("--package", "*")
 
 	fleet.configureIn(api.Repo, "sdk", "chore: gate provider publication", func(cfg *models.File) {
-		cfg.Scripts["publish"] = models.Script{
-			`if [ -n "$DISPAT_IT_SDK_OK" ]; then echo published; else exit 1; fi`,
+		cfg.Scripts["publication-gate"] = models.Script{
+			`test -n "$DISPAT_IT_SDK_OK"`,
 		}
+		cfg.Flow.BeforePublish = []string{"publication-gate"}
 	})
 	api.Git("add", ".links/sdk")
 	api.Commit("chore: pin provider publication policy")
@@ -123,7 +124,7 @@ func TestChoreographyCatchesUpAfterProviderOnlyRetry(t *testing.T) {
 	fleet.workOnly("api", "feat(api-pkg): own flag")
 
 	failed := api.Release("--package", "*")
-	require.NotEqual(t, 0, failed.Code, "provider publish failed")
+	require.NotEqual(t, 0, failed.Code, "provider was refused before publication")
 	require.Equal(t, 1, api.TagCount("api-pkg@0.2.0"), "app should ship its own work: %s", failed.Stdout)
 	assert.Equal(t, []string{"sdk-pkg@0.1.0"}, tagsIn(api.Repo, ".links/sdk"),
 		"provider should keep only its bootstrap tag")

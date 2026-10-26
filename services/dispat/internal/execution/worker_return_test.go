@@ -22,12 +22,13 @@ import (
 const workerCompiledBootstrapMode = "compilation"
 
 type fakeWorkerReturn struct {
-	probe  func(ChoreographyProbeReply) (ChoreographyReceipt, error)
-	claim  func(ChoreographyClaimProposal) (ChoreographyReceipt, error)
-	result func(ChoreographyResultProposal, io.ReadSeeker) (ChoreographyReceipt, error)
-	ack    func(ChoreographyAckProposal) (ChoreographyReceipt, error)
-	lookup func(ChoreographyReceiptQuery) (ChoreographyReceipt, bool, error)
-	poll   func(ChoreographyEventRequest) (ChoreographyEventPage, error)
+	probe           func(ChoreographyProbeReply) (ChoreographyReceipt, error)
+	claim           func(ChoreographyClaimProposal) (ChoreographyReceipt, error)
+	result          func(ChoreographyResultProposal, io.ReadSeeker) (ChoreographyReceipt, error)
+	ack             func(ChoreographyAckProposal) (ChoreographyReceipt, error)
+	lookup          func(ChoreographyReceiptQuery) (ChoreographyReceipt, bool, error)
+	poll            func(ChoreographyEventRequest) (ChoreographyEventPage, error)
+	pollWithContext func(context.Context, ChoreographyEventRequest) (ChoreographyEventPage, error)
 }
 
 func (f *fakeWorkerReturn) SubmitProbe(_ context.Context, p ChoreographyProbeReply) (ChoreographyReceipt, error) {
@@ -50,8 +51,11 @@ func (f *fakeWorkerReturn) LookupReceipt(_ context.Context,
 	q ChoreographyReceiptQuery) (ChoreographyReceipt, bool, error) {
 	return f.lookup(q)
 }
-func (f *fakeWorkerReturn) PollEvents(_ context.Context,
+func (f *fakeWorkerReturn) PollEvents(ctx context.Context,
 	request ChoreographyEventRequest) (ChoreographyEventPage, error) {
+	if f.pollWithContext != nil {
+		return f.pollWithContext(ctx, request)
+	}
 	if f.poll != nil {
 		return f.poll(request)
 	}
@@ -421,6 +425,98 @@ func TestWorkerStoppedBeforeFinalityRetainsPhysicalNodeSlot(t *testing.T) {
 	held, err := authority.Held(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, []NodeSlotLease{lease}, held)
+}
+
+func TestWorkerStopReadsAlreadySignedFinalityBeforeRetainingNodeSlot(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.Chmod(root, 0o700))
+	authority, err := OpenNodeSlotAuthority(root, "node-a", 1)
+	require.NoError(t, err)
+	intent := NodeSlotIntent{Run: "run", Task: "pkg:build", Attempt: 1, Weight: 1}
+	lease, available, err := authority.TryReserve(t.Context(), intent)
+	require.NoError(t, err)
+	require.True(t, available)
+	finalityCtx, stopFinality := context.WithCancel(t.Context())
+	stopFinality()
+	receiptOID := strings.Repeat("b", 40)
+	receipt := ChoreographyReceipt{OID: receiptOID, Accepted: true,
+		Cursor: ChoreographyEventCursor{OID: "ledger-2", Sequence: 2}}
+	w := &Worker{Node: "node-a", NodeSlots: authority, Log: zerolog.Nop()}
+	task := &claimedTask{assignment: Assignment{Header: Header{Run: intent.Run,
+		Task: intent.Task, Attempt: intent.Attempt}}, slotLease: lease,
+		finalityCtx: finalityCtx}
+	polls := 0
+	fake := &fakeWorkerReturn{pollWithContext: func(readCtx context.Context,
+		request ChoreographyEventRequest) (ChoreographyEventPage, error) {
+		polls++
+		require.Equal(t, receipt.Cursor, request.Cursor)
+		if polls == 1 {
+			require.ErrorIs(t, readCtx.Err(), context.Canceled)
+			return ChoreographyEventPage{}, context.Canceled
+		}
+		require.NoError(t, readCtx.Err(), "the finality probe must detach from serving cancellation")
+		return ChoreographyEventPage{Cursor: ChoreographyEventCursor{OID: "ledger-3", Sequence: 3},
+			Events: []ChoreographyEvent{{Sequence: 3, Kind: ChoreographyTerminal,
+				Task: intent.Task, Attempt: intent.Attempt, Node: "node-a",
+				TaskOID: strings.Repeat("c", 40), ResultReceiptOID: receiptOID}}}, nil
+	}}
+	require.NoError(t, w.awaitNodeSlotDecision(t.Context(), task,
+		&workerReturnChannel{binding: testReturnBinding(), client: fake}, receipt))
+	require.Equal(t, 2, polls, "the canceled first read must not release capacity")
+	held, err := authority.Held(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, held)
+}
+
+func TestWorkerStopRechecksMaskedCancellationWithoutTrustingMismatch(t *testing.T) {
+	for _, exact := range []bool{true, false} {
+		t.Run(map[bool]string{true: "exact finality", false: "mismatched finality"}[exact], func(t *testing.T) {
+			root := t.TempDir()
+			require.NoError(t, os.Chmod(root, 0o700))
+			authority, err := OpenNodeSlotAuthority(root, "node-a", 1)
+			require.NoError(t, err)
+			intent := NodeSlotIntent{Run: "run", Task: "pkg:build", Attempt: 1, Weight: 1}
+			lease, available, err := authority.TryReserve(t.Context(), intent)
+			require.NoError(t, err)
+			require.True(t, available)
+			finalityCtx, stopFinality := context.WithCancel(t.Context())
+			stopFinality()
+			receiptOID := strings.Repeat("b", 40)
+			receipt := ChoreographyReceipt{OID: receiptOID, Accepted: true,
+				Cursor: ChoreographyEventCursor{OID: "ledger-2", Sequence: 2}}
+			polls := 0
+			fake := &fakeWorkerReturn{poll: func(ChoreographyEventRequest) (ChoreographyEventPage, error) {
+				polls++
+				if polls == 1 {
+					return ChoreographyEventPage{}, errors.New("masked cancelled read")
+				}
+				resultReceiptOID := receiptOID
+				if !exact {
+					resultReceiptOID = strings.Repeat("d", 40)
+				}
+				return ChoreographyEventPage{Cursor: ChoreographyEventCursor{OID: "ledger-3", Sequence: 3},
+					Events: []ChoreographyEvent{{Sequence: 3, Kind: ChoreographyTerminal,
+						Task: intent.Task, Attempt: intent.Attempt, Node: "node-a",
+						TaskOID: strings.Repeat("c", 40), ResultReceiptOID: resultReceiptOID}}}, nil
+			}}
+			w := &Worker{Node: "node-a", NodeSlots: authority, Log: zerolog.Nop()}
+			task := &claimedTask{assignment: Assignment{Header: Header{Run: intent.Run,
+				Task: intent.Task, Attempt: intent.Attempt}}, slotLease: lease,
+				finalityCtx: finalityCtx}
+			err = w.awaitNodeSlotDecision(t.Context(), task,
+				&workerReturnChannel{binding: testReturnBinding(), client: fake}, receipt)
+			held, heldErr := authority.Held(t.Context())
+			require.NoError(t, heldErr)
+			if exact {
+				require.NoError(t, err)
+				require.Empty(t, held)
+			} else {
+				require.Error(t, err)
+				require.Equal(t, []NodeSlotLease{lease}, held)
+			}
+			require.Equal(t, 2, polls)
+		})
+	}
 }
 
 func TestWorkerNodeSlotRejectsMismatchedSignedFinality(t *testing.T) {

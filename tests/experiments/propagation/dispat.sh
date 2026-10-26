@@ -3,10 +3,10 @@
 # alone would release core and reconcile nothing else; the caret is what asks
 # for core's declared consumers to be released with it.
 #
-# The provider publishes, cli then fails, and a run with the fault removed must
-# discharge the owed consumer without publishing the provider a second time and
-# without being handed any new release intent. The catch-up is dispat's
-# documented recovery: run the release again.
+# For a failed build, the provider publishes and the next run discharges the
+# owed consumer. A failed external publish has a different contract: its
+# request may still be in flight, so the release lock stays held and a fresh
+# invocation is fenced until that exact outcome is reconciled.
 #
 # The fault is armed before the first run. dispat runs the whole release as one
 # command, so what orders the provider's publication before the consumer's
@@ -24,16 +24,18 @@
 #                      consumers, and cli sits the provider's release out
 #   held               no fault: cli is held by `Release-As: none` while the
 #                      provider ships, and the operator resumes it
-#   deferred           the provider is refused while cli publishes its own
-#                      fix, then ships alone on the next run
-#   deferred-build     the same with cli's real build, which finished against
-#                      the provider's planned version before the refusal
+#   deferred           cli's build is disabled; a refused provider upload
+#                      retains the lock before cli's version can begin
+#   deferred-build     cli's build is enabled, but its version waits for the
+#                      provider's record, so no build can start before a
+#                      refused provider upload settles
 
-# The worker link every dispat command of the distributed cell names: a node
-# name alone, which reaches the repository being released.
+# The distributed cell serves an authenticated return channel within its
+# isolated container. The worker identity and mailbox are pinned in the two
+# node configurations, and the first node advertises this local HTTPS URL.
 WORKER=()
 if [ "$SCENARIO" = build-distributed ]; then
-  WORKER=(--worker build-a)
+  WORKER=(--return-endpoint https://127.0.0.1:18443)
 fi
 
 # logged <step> <jq condition>: whether any line of that step's log meets it.
@@ -100,9 +102,8 @@ start_worker() {
   mkdir -p /work/node
   cat > /work/node/dispat.yaml <<EOF
 execution:
-  role: worker
   name: build-a
-  endpoint: $REPO-origin.git
+  endpoint: file://$REPO-origin.git
   secretEnv: EXPERIMENT_EXECUTION_SECRET
 logFormat: json
 EOF
@@ -132,13 +133,44 @@ run_fault() {
   keep_publish_logs after-failure
   observe after-failure
 
+  if [ "$SCENARIO" = publish ]; then
+    # The registry's 502 does not prove its upload is no longer in flight.
+    # A second release must encounter the retained exclusion before it can
+    # send another upload. The build-fault scenarios below have no external
+    # publication uncertainty and still exercise automatic catch-up.
+    local cli_uploads_before_retry core_uploads_before_retry
+    cli_uploads_before_retry=$(proxy_uploads cli '[0-9]+')
+    core_uploads_before_retry=$(proxy_uploads core '[0-9]+')
+    clear_fault
+    catch_up
+    step release:release2 dispat release "${WORKER[@]}" --log-format json
+    observe after-fenced-retry
+
+    first_run_asserts release1 after-failure
+    assert "the registry refused cli's upload" [ "$(proxy_refused cli)" -gt 0 ]
+    assert "the first run reports cli's unsettled publication (E228)" \
+      logged release1 '.code == "E228" and (.error | contains("cli@1.0.1"))'
+    assert "the unresolved upload retains the remote release lock" \
+      git --git-dir="$REPO-origin.git" show-ref --verify --quiet refs/tags/dispat-release-lock
+    assert "a fresh release is fenced by the retained lock (E336)" \
+      logged release2 '.code == "E336"'
+    assert "the fenced retry did not upload cli again" \
+      [ "$(proxy_uploads cli '[0-9]+')" = "$cli_uploads_before_retry" ]
+    assert "the fenced retry did not republish core" \
+      [ "$(proxy_uploads core '[0-9]+')" = "$core_uploads_before_retry" ]
+    assert "the fenced retry advanced no tags" \
+      jq -se '.[0].origin.tags == .[1].origin.tags' \
+        "$OUT/observe-after-failure.json" "$OUT/observe-after-fenced-retry.json"
+    return
+  fi
+
   clear_fault
   catch_up
-  step query:retry-plan dispat status "${WORKER[@]}" --log-format json
+  step query:retry-plan dispat status --log-format json
   step release:release2 dispat release "${WORKER[@]}" --log-format json
   keep_publish_logs after-recovery
   observe after-recovery
-  step query:final-plan dispat status "${WORKER[@]}" --require-release --log-format json
+  step query:final-plan dispat status --require-release --log-format json
   stop_worker
 
   first_run_asserts release1 after-failure
@@ -238,11 +270,12 @@ run_held() {
 
 # ---- deferred, deferred-build ----------------------------------------------------
 
-# A consumer can publish its own work against the old provider baseline after
-# the provider fails. On the next run only the provider is selected. The
-# consumer is therefore absent from the provider's successful release, while
-# its own tag has already consumed the original `fix(core)^` commit. Recovery
-# must use durable release evidence, not a still-pending commit in its window.
+# AutoVersion makes cli's version task wait for core's signed record. That
+# record cannot be settled while core's external upload is unresolved, so a
+# cli build cannot precede the refused upload. The two fixtures retain their
+# distinct flow declarations, but both must stop safely before cli's effect.
+cli_build_enabled() { ! grep -Fq 'flow: {build: []}' "$REPO/dispat.yaml"; }
+
 run_deferred() {
   fixture dispat --deferred
   baseline_publish
@@ -250,77 +283,38 @@ run_deferred() {
 
   # shellcheck disable=SC2034 # read by common.sh, which checks the fault fired
   FAULT=provider
-  if [ "$SCENARIO" = deferred-build ]; then
-    # The refusal waits for cli's build output, so cli has built against the
-    # provider's planned version by the time the provider is refused. Without
-    # the gate that order is a race the build usually wins.
-    deny core "$REPO/packages/cli/dist/index.js"
-  else
-    deny core
-  fi
+  deny core
   step release:release1 dispat release --log-format json
   keep_publish_logs after-provider-failure
   observe after-provider-failure
-
-  # The two propagated-only consumers were skipped before publication; their
-  # version writes are inspection state from the failed run. Restoring those
-  # generated manifests before selecting them in the next release is a
-  # worktree cleanup by hand, not a source commit or new release instruction.
-  if [ "$SCENARIO" = deferred-build ]; then
-    step manual:cleanup git checkout -- packages/ui/package.json packages/api/package.json packages/cli/package.json
-  else
-    step manual:cleanup git checkout -- packages/ui/package.json packages/api/package.json
-  fi
+  local core_uploads_before_retry
+  core_uploads_before_retry=$(proxy_uploads core '[0-9]+')
   allow core
-  step query:provider-plan dispat status --package core,ui,api --log-format json
-  if [ "$SCENARIO" = deferred ]; then
-    # cli released its own fix at the head this run starts from. The provider
-    # released alone there would share cli's commit, which ancestry cannot
-    # order, so the plan reports E201 and a release would be refused. One
-    # empty commit, dated by the fixture's clock like every commit of the
-    # fixture, moves the head past cli's release.
-    local retried
-    retried="$(( ${EXPERIMENT_EPOCH:-1735689600} + 60 * 4 )) +0000"
-    step manual:provider-commit env GIT_AUTHOR_DATE="$retried" GIT_COMMITTER_DATE="$retried" \
-      git commit --allow-empty -qm "chore(core): retry the provider"
-  fi
-  step release:release2 dispat release --package core,ui,api --log-format json
-  keep_publish_logs after-provider-success
-  observe after-provider-success
-
   catch_up
-  step query:retry-plan dispat status --log-format json
-  step release:release3 dispat release --log-format json
-  keep_publish_logs after-catch-up
-  observe after-catch-up
-  step query:final-plan dispat status --require-release --log-format json
+  step release:release2 dispat release --log-format json
+  observe after-fenced-retry
 
   assert "the first run reported the failure" [ "${STEP_RC[release1]}" != 0 ]
-  assert "the provider's failed version was rolled back" \
-    observed after-provider-failure '.packages.core.registry == "1.0.0" and .packages.core.manifest.version == "1.0.0"'
+  assert "the registry refused core's upload" [ "$(proxy_refused core)" -gt 0 ]
+  assert "core's unresolved external publication is reported (E228)" \
+    logged release1 '.code == "E228" and (.error | contains("core@1.0.1"))'
+  assert "the failed provider and cli remain at their baseline registry versions" \
+    observed after-provider-failure '.packages.core.registry == "1.0.0" and .packages.cli.registry == "1.0.0"'
+  assert "cli's version and build did not start while core's record was unsettled" \
+    never_logged release1 '.package == "cli" and (.stage == "version" or .stage == "build")'
   if [ "$SCENARIO" = deferred-build ]; then
-    assert "the provider was refused after cli had built" \
-      grep -qE "^failproxy: DENY PUT [^ ]+ \\(package core\\) after " /registry/failproxy.log
-    assert "the built cli was withheld (W194)" logged release1 '.package == "cli" and .code == "W194"'
-    assert "the provider and the other consumers released while cli waited" \
-      released_with release2 after-provider-success \
-      '.packages.core.registry == "1.0.1" and .packages.core.state == "consistent" and .packages.cli.registry == "1.0.0"'
-    assert "cli's own fix is still pending in the next plan" \
-      logged retry-plan '.package == "cli" and has("bump") and .reason == "direct" and .ownCommits == 1'
-    assert "the next plan releases cli alone" [ "$(planned retry-plan)" = "cli " ]
-    catch_up_asserts 1.0.1
+    assert "this fixture keeps cli's real build stage configured" \
+      cli_build_enabled
   else
-    assert "cli published its own fix while the provider failed" \
-      observed after-provider-failure '.packages.cli.registry == "1.0.1" and .packages.cli.state == "consistent"'
-    assert "the provider-only plan at cli's release commit reports E201 for cli" \
-      logged provider-plan '.package == "cli" and .code == "E201"'
-    assert "the selected provider and the other consumers released without cli" \
-      released_with release2 after-provider-success \
-      '.packages.core.registry == "1.0.1" and .packages.core.state == "consistent" and .packages.cli.registry == "1.0.1"'
-    catch_up_plan_asserts "1.0.1 -> 1.0.2"
-    catch_up_asserts 1.0.2
+    assert "this fixture disables cli's build stage" \
+      grep -Fq 'flow: {build: []}' "$REPO/dispat.yaml"
   fi
-  assert "the recovered consumer's range names the provider it shipped with" \
-    jq -e '.packages.cli.manifest.dependencies.core == "^1.0.1"' "$OUT/last-observation.json"
-  receipts_asserts
+  assert "the unresolved upload retains the remote release lock" \
+    git --git-dir="$REPO-origin.git" show-ref --verify --quiet refs/tags/dispat-release-lock
+  assert "a fresh release is fenced by that lock (E336)" logged release2 '.code == "E336"'
+  assert "the fenced retry made no second core upload" \
+    [ "$(proxy_uploads core '[0-9]+')" = "$core_uploads_before_retry" ]
+  assert "the fenced retry advanced no tags" \
+    jq -se '.[0].origin.tags == .[1].origin.tags' \
+      "$OUT/observe-after-provider-failure.json" "$OUT/observe-after-fenced-retry.json"
 }

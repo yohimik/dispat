@@ -29,20 +29,24 @@ func npmDistributionConfig() models.File {
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"services": {
 			Path: models.PathList{"services"}, VersionGroup: "cli",
-			IsBuildWaitingPublish: models.StageRelationOf(true), Flow: buildPublish(),
-			TagFormat: "services/{name}/v{version}",
+			IsBuildWaitingPublish: models.StageRelationOf(true),
+			Flow:                  &models.SpaceFlowConfig{Build: []string{"build"}, BeforePublish: []string{"provider-gate"}, Publish: []string{"publish"}},
+			TagFormat:             "services/{name}/v{version}",
 			Scripts: map[string]models.Script{
-				"build":   {"echo build"},
-				"publish": {`test ! -f ../../fail-provider && mkdir -p ../../published && printf '%s' "$DISPAT_NEW_VERSION" > ../../published/version`},
+				"build":         {"echo build"},
+				"provider-gate": {`test ! -f ../../fail-provider`},
+				"publish":       {`mkdir -p ../../published && printf '%s' "$DISPAT_NEW_VERSION" > ../../published/version`},
 			},
 		},
 		"packages": {
-			Path: models.PathList{"packages"}, VersionGroup: "cli", Flow: buildPublish(),
+			Path: models.PathList{"packages"}, VersionGroup: "cli",
+			Flow:        &models.SpaceFlowConfig{Build: []string{"build"}, BeforePublish: []string{"npm-gate"}, Publish: []string{"publish"}},
 			TagFormat:   "packages/{name}/v{version}",
 			AutoVersion: &models.AutoVersionConfig{Enabled: models.Bool(true)},
 			Scripts: map[string]models.Script{
-				"build":   {`test "$(cat ../../published/version)" = "$DISPAT_WORKSPACE_DISPAT_VERSION" && printf '%s' "$DISPAT_WORKSPACE_DISPAT_VERSION" > binary-version.txt`},
-				"publish": {`test ! -f ../../fail-npm`},
+				"build":    {`test "$(cat ../../published/version)" = "$DISPAT_WORKSPACE_DISPAT_VERSION" && printf '%s' "$DISPAT_WORKSPACE_DISPAT_VERSION" > binary-version.txt`},
+				"npm-gate": {`test ! -f ../../fail-npm`},
+				"publish":  {"echo publishing npm"},
 			},
 		},
 	}
@@ -272,9 +276,11 @@ func TestNPMDistributionGatesDocsOnPublishedCLI(t *testing.T) {
 		commands := `
 scripts:
   build: test "$(cat ../../published/version)" = "$DISPAT_WORKSPACE_DISPAT_VERSION"
-  publish: test ! -f ../../fail-npm && printf '%s' "$DISPAT_NEW_VERSION" > ../../published/npm
+  npm-gate: test ! -f ../../fail-npm
+  publish: printf '%s' "$DISPAT_NEW_VERSION" > ../../published/npm
 flow:
   build: build
+  beforePublish: npm-gate
   publish: publish
 `
 		if name == "docs" {

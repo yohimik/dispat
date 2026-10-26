@@ -523,14 +523,15 @@ func TestEdgeRevertOnFailIsThreeStateAtThePackageLevel(t *testing.T) {
 	r := harness.New(t)
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{
-		"mutate": {"echo dirty > leftover.txt"},
-		"fail":   {"exit 1"},
+		"mutate":  {"echo dirty > leftover.txt"},
+		"fail":    {"exit 1"},
+		"publish": {"echo publishing"},
 	}
 	// The root says yes; the space stays silent and inherits it.
 	cfg.RevertOnFail = models.Bool(true)
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: models.PathList{"packages"}, Flow: &models.SpaceFlowConfig{
-			Build: []string{"mutate"}, Publish: []string{"fail"}}},
+			Build: []string{"mutate"}, BeforePublish: []string{"fail"}, Publish: []string{"publish"}}},
 	}
 	// ...and one package says no, against the root's yes.
 	cfg.Packages = map[string]models.PackageConfig{
@@ -539,7 +540,7 @@ func TestEdgeRevertOnFailIsThreeStateAtThePackageLevel(t *testing.T) {
 	r.WriteConfigModel(cfg)
 	r.SeedPackage("packages", "keeper")
 	r.SeedPackage("packages", "cleaner")
-	r.Commit("feat(keeper,cleaner): both fail to publish")
+	r.Commit("feat(keeper,cleaner): both fail before publish")
 
 	res := r.Release()
 	require.Equal(t, 1, res.Code, "stdout:\n%s", res.Stdout)
@@ -696,7 +697,7 @@ func TestEdgeReleaseCommitLockOmitsASkippedConsumer(t *testing.T) {
 		libs.Flow.Sign = []string{"web-prep"}
 		cfg.Spaces["libs"] = libs
 		cfg.Spaces["core"] = models.SpaceConfig{Path: models.PathList{"providers"},
-			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"fail"}}}
+			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, BeforePublish: []string{"fail"}, Publish: []string{"publish"}}}
 		cfg.Dependencies = []models.DependencyConfig{{Consumer: "web", Provider: "core"}}
 	})
 	seedManifest(r, "providers", "core")

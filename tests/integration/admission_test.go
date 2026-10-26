@@ -60,7 +60,7 @@ type admissionShape struct {
 }
 
 // admissionRepo is the two-package workspace of vector 80d: `core` in a space
-// whose publish fails unless this run says otherwise, and `cli` in a space
+// whose beforePublish gate refuses publication unless this run says otherwise, and `cli` in a space
 // that reconciles its manifest natively.
 //
 // Every provider publication is appended to a log inside the repository's Git
@@ -70,12 +70,13 @@ func admissionRepo(t *testing.T, shape admissionShape, adjust ...func(*models.Fi
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{
-		"build": {"echo building $DISPAT_PACKAGE"},
-		"core-publish": {`if [ -n "$` + admissionProviderOK + `" ]; then echo published; echo "$DISPAT_NEW_VERSION" >> '` +
-			admissionPublicationLog(r) + `'; else exit 1; fi`},
-		"cli-version": {"echo versioning $DISPAT_PACKAGE against ${DISPAT_UPDATED_PACKAGES:-nothing}"},
-		"cli-publish": {`if [ -n "$` + admissionConsumerFails + `" ]; then exit 1; fi`,
-			"echo publishing $DISPAT_PACKAGE at $DISPAT_NEW_VERSION"},
+		"build":               {"echo building $DISPAT_PACKAGE"},
+		"core-before-publish": {`[ -n "$` + admissionProviderOK + `" ]`},
+		"core-publish": {`echo published; echo "$DISPAT_NEW_VERSION" >> '` +
+			admissionPublicationLog(r) + `'`},
+		"cli-version":        {"echo versioning $DISPAT_PACKAGE against ${DISPAT_UPDATED_PACKAGES:-nothing}"},
+		"cli-before-publish": {`[ -z "$` + admissionConsumerFails + `" ]`},
+		"cli-publish":        {"echo publishing $DISPAT_PACKAGE at $DISPAT_NEW_VERSION"},
 	}
 	if shape.nestedTag {
 		bin, _ := harness.Build(t)
@@ -83,7 +84,7 @@ func admissionRepo(t *testing.T, shape admissionShape, adjust ...func(*models.Fi
 			Name: "admission-test", Email: "admission@example.com"}
 		cfg.Scripts["cli-publish"] = models.Script{bin + " commit --tag"}
 	}
-	consumerFlow := &models.SpaceFlowConfig{Publish: []string{"cli-publish"}}
+	consumerFlow := &models.SpaceFlowConfig{BeforePublish: []string{"cli-before-publish"}, Publish: []string{"cli-publish"}}
 	if shape.hasBuild {
 		consumerFlow.Build = []string{"build"}
 	}
@@ -93,7 +94,7 @@ func admissionRepo(t *testing.T, shape admissionShape, adjust ...func(*models.Fi
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: models.PathList{"packages/libs"},
 			Flow: &models.SpaceFlowConfig{
-				Build: []string{"build"}, Publish: []string{"core-publish"}}},
+				Build: []string{"build"}, BeforePublish: []string{"core-before-publish"}, Publish: []string{"core-publish"}}},
 		"apps": {Path: models.PathList{"packages/apps"},
 			Flow: consumerFlow,
 			AutoVersion: &models.AutoVersionConfig{
@@ -155,8 +156,8 @@ func admissionManifest(t *testing.T, r *harness.Repo) string {
 	return string(data)
 }
 
-// admissionProceeded is vector 80d's first run: the provider's publish of the
-// commit fails and the consumer proceeds at it on its own feature.
+// admissionProceeded is vector 80d's first run: the provider's beforePublish
+// gate refuses the commit and the consumer proceeds at it on its own feature.
 func admissionProceeded(t *testing.T, shape admissionShape, adjust ...func(*models.File)) *harness.Repo {
 	t.Helper()
 	r := admissionRepo(t, shape, adjust...)
@@ -189,7 +190,7 @@ func assertAdmissionSettled(t *testing.T, r *harness.Repo) {
 }
 
 // TestAdmissionCatchesUpAConsumerThatProceededOnItsOwn is vector 80d. One
-// commit carries `feat(core)^` and `feat(cli)`; the provider's publish fails
+// commit carries `feat(core)^` and `feat(cli)`; the provider's beforePublish gate fails
 // and the consumer proceeds, because a fresh bump of its own is a cause no
 // failed provider can invalidate. What it publishes names the provider's
 // BASELINE, and the next run that publishes the provider catches it up.
@@ -545,13 +546,14 @@ func admissionOwedByTwo(t *testing.T) *harness.Repo {
 	r := harness.New(t)
 	cfg := harness.BaseFile(2)
 	cfg.Scripts = map[string]models.Script{
-		"build":       {"echo building $DISPAT_PACKAGE"},
-		"lib-publish": {`if [ -n "$` + admissionProviderOK + `" ]; then echo published; else exit 1; fi`},
-		"app-publish": {"echo publishing $DISPAT_PACKAGE at $DISPAT_NEW_VERSION"},
+		"build":              {"echo building $DISPAT_PACKAGE"},
+		"lib-before-publish": {`[ -n "$` + admissionProviderOK + `" ]`},
+		"lib-publish":        {"echo published"},
+		"app-publish":        {"echo publishing $DISPAT_PACKAGE at $DISPAT_NEW_VERSION"},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: models.PathList{"packages/libs"},
-			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"lib-publish"}}},
+			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, BeforePublish: []string{"lib-before-publish"}, Publish: []string{"lib-publish"}}},
 		"apps": {Path: models.PathList{"packages/apps"},
 			Flow: &models.SpaceFlowConfig{Publish: []string{"app-publish"}}},
 	}
@@ -975,8 +977,9 @@ func TestAdmissionOwesEveryConsumerThatOvertookOnePendingCommit(t *testing.T) {
 	cfg.Scripts = map[string]models.Script{
 		// One command, because every entry of a script list runs in its own
 		// shell: an `exit 0` in the first would end that shell, not the stage.
-		"core-publish": {`if [ -n "$` + admissionProviderOK + `" ]; then echo published; else ` +
+		"core-before-publish": {`if [ -n "$` + admissionProviderOK + `" ]; then :; else ` +
 			stageRelationGateWait(gate) + `; exit 1; fi`},
+		"core-publish": {"echo published"},
 		// The gate opens once both consumers have reconciled, which is what
 		// puts the provider's failure after both version stages.
 		"app-post-version": {"printf x >> '" + gate + ".marks'",
@@ -985,7 +988,7 @@ func TestAdmissionOwesEveryConsumerThatOvertookOnePendingCommit(t *testing.T) {
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: models.PathList{"packages/libs"},
-			Flow: &models.SpaceFlowConfig{Publish: []string{"core-publish"}}},
+			Flow: &models.SpaceFlowConfig{BeforePublish: []string{"core-before-publish"}, Publish: []string{"core-publish"}}},
 		"apps": {Path: models.PathList{"packages/apps"},
 			Flow: &models.SpaceFlowConfig{
 				PostVersion: []string{"app-post-version"}, Publish: []string{"app-publish"}},

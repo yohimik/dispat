@@ -490,9 +490,11 @@ func (k *executionMailboxSnapshot) objects() []string {
 // independent packages continue after workers supplied their build outputs.
 func TestExecutionOrchestratorPublishFailureKeepsLocalSemantics(t *testing.T) {
 	for name, row := range map[string]struct {
-		scripts func(*models.File)
+		scripts              func(*models.File)
+		uncertainPublication bool
 	}{
 		"the publish command exits non-zero": {
+			uncertainPublication: true,
 			scripts: func(cfg *models.File) {
 				cfg.Scripts["publish"] = models.Script{executionRemotePublishScript +
 					` && { [ "$DISPAT_PACKAGE" != ui ] || exit 7; }`}
@@ -518,12 +520,21 @@ func TestExecutionOrchestratorPublishFailureKeepsLocalSemantics(t *testing.T) {
 			res := rig.release()
 
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.Contains(t, executionFailedStages(res), "publish",
-				"the package failed at its publish stage\nstdout:\n%s", res.Stdout)
 			assert.False(t, rig.repo.IsTagged("ui@0.1.0"), "nothing of the failed package was recorded")
 			assert.True(t, rig.repo.IsTagged("docs@0.1.0"), "an unrelated package still released")
-			assert.Equal(t, executionOrchestratorLabel,
-				executionProbeValue(t, rig, "onfail", "ui"), "its outcome script ran here")
+			if row.uncertainPublication {
+				assert.True(t, harness.IsCodePresent(res.Events, executionPublicationUnknownCode),
+					"a failed external command leaves its destination outcome unsettled\nstdout:\n%s", res.Stdout)
+				assert.True(t, remoteHoldsLock(t, rig.origin), "release exclusion remains while publication may finish")
+				assert.NotContains(t, executionProbedPackages(rig, "onfail"), "ui",
+					"an unsettled publication does not run its failure hook")
+			} else {
+				assert.Contains(t, executionFailedStages(res), "publish",
+					"the package failed at its prepublication gate\nstdout:\n%s", res.Stdout)
+				assert.Equal(t, executionOrchestratorLabel,
+					executionProbeValue(t, rig, "onfail", "ui"), "its outcome script ran here")
+				assert.False(t, remoteHoldsLock(t, rig.origin), "a definitive prepublication failure releases exclusion")
+			}
 			assert.Empty(t, executionAuthorizations(res),
 				"orchestrator publication needs no worker authorization\nstdout:\n%s", res.Stdout)
 			stopAll(t, workers)

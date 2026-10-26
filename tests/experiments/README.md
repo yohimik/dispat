@@ -79,7 +79,10 @@ range up to the provider it was released with. lerna and nx release all six: the
 changed package, `theme` and `docs` included, although `~1.0.0` already accepted `core@1.0.1`.
 
 The fault is then removed with no commit and no new release intent, and the catch-up is each tool's documented
-recovery. dispat's is the same command again. lerna's is `lerna changed` and then `lerna publish from-package`, which
+response. For a failed build, dispat can run the release again. After an external publish request receives an error,
+dispat retains its release lock because the request might still be in flight; a fresh release is fenced until an
+operator proves and reconciles that exact destination outcome. The experiment records that safe non-convergence and
+does not remove the lock. lerna's response is `lerna changed` and then `lerna publish from-package`, which
 publishes whatever the registry is missing; when that refuses the working tree its own failed publish left rewritten,
 the protocol checks the manifests out by hand and runs it again. nx's is `nx release --dry-run`, then
 `nx release publish` for what the first run versioned or `nx release` again when it versioned nothing, and a push by
@@ -91,23 +94,19 @@ tool runs each of them. dispat's protocol is described first; the other tools fo
 through its own nearest mechanism:
 
 - `build-distributed` is the `build` fault with every build on a worker node, `build-a`, started in the container.
-  The fixture sets `runOnly: [worker, orchestrator]` and names the signing secret's variable; every dispat command
-  links the worker with `--worker build-a` and no endpoint, so the fixture's own origin is the mailbox, and the worker
-  names that origin as its `execution.endpoint`. The outcomes are the local cell's, and the log names `build-a` in the
-  task outcome of `cli`'s build.
+  The fixture sets `runOnly: [worker, orchestrator]`, names the signing secret's variable, and preauthorizes `build-a`
+  in `execution.workers`. The worker reads the fixture's origin as its mailbox, while the first node serves an HTTPS
+  return endpoint inside the isolated container. The log names `build-a` in the task outcome of `cli`'s build.
 - `deselected` has no fault: the first run is `dispat release --package core,ui,api`, so `cli` sits the provider's
   release out, and the next full run must find what it is owed from the provider's release alone.
 - `held` has no fault: an empty `release(cli): hold` commit with `Release-As: none` precedes the fix, so the first run
   ships `core` while `cli` is held (`W154`). The operator's resume, an empty `release(cli): resume` commit with
   `Release-As: auto`, is a manual step of the first phase, and the catch-up follows it.
-- `deferred` gives `cli` a fix of its own and no build. The registry refuses `core` while `cli` publishes its fix
-  against the old provider; the manifests the failed run left are checked out by hand, one empty commit moves the head
-  past `cli`'s release (a provider released alone on its owed consumer's own release commit is refused with `E201`),
-  and `dispat release --package core,ui,api` ships the provider without `cli`. The catch-up must then find what `cli`
-  is owed although its own tag already contains the propagation commit.
-- `deferred-build` keeps `cli`'s build. The proxy holds `core`'s refused upload until `cli`'s build has written
-  `dist/index.js`, so `cli` has always built against the provider's planned version when the provider fails, and
-  dispat withholds it with `W194`. The catch-up builds and publishes it against the version that shipped.
+- `deferred` gives `cli` a fix of its own and disables its build. When the registry refuses `core`, dispat retains the
+  lock. Its version task waits for `core`'s record, so `cli` cannot publish against an unsettled provider.
+- `deferred-build` keeps `cli`'s build configured. Its version task has the same provider-record dependency, so neither
+  version nor build starts while `core`'s refused upload remains unsettled. The proxy answers the refused upload
+  immediately; a gate waiting for `cli/dist/index.js` would be impossible under this graph.
 
 lerna, nx and changesets run the same scenarios this way. Where a tool has no mechanism for the operator's intent, the
 protocol runs its ordinary documented release and says so in the transcript.
@@ -125,11 +124,10 @@ reverses it as `chore(release): resume cli`. A changeset that names an ignored p
 `deselected` and `held` the changesets fixture asks for the same four patches in two files. In `deferred`, `cli` has a
 fix of its own committed as `fix(cli): repair command` (and a changeset for changesets) and no build script, because
 these tools run every build script they find; `deferred-build` keeps it. After the first run, a `deselected` or `held`
-catch-up is the tool's own release again, and a `deferred` catch-up is the tool's documented recovery from the
-`build` protocol. nx publishes with `nx release publish` instead whenever a version it tagged is missing from the
-registry. The expectations are dispat's sentences that are not about dispat's own diagnostics: what the first
-run shipped, whether the provider's refused version stayed off the registry, whether `cli` had built before that
-refusal in `deferred-build`, and the catch-up questions below.
+catch-up is the tool's own release again. In the `deferred` cells, dispat instead retains its lock after an uncertain
+external upload and records a fenced retry; the other tools run their documented recovery commands. nx publishes
+with `nx release publish` instead whenever a version it tagged is missing from the registry. The shared fault is
+preserved, while each verdict states what that tool actually established.
 
 ### The timing cells
 
@@ -236,15 +234,11 @@ phase writes no `recovery`, and the report reads it as not measured: the midrele
 none, the orphan protocols measure the recovery after the refused upload, and every propagation protocol measures its
 catch-up.
 
-The propagation cells hold every tool to the same sentences. For the first run of a fault cell: the provider shipped
-in the first run, the consumer did not ship in the first run, and the first run reported the failure. For the
-catch-up: the plan before the catch-up named the owed consumer, the catch-up took one run, the catch-up took no manual
-step, the consumer shipped at the version first planned, the provider was published once (exactly one accepted upload
-of `core` after the baseline, read from the proxy's own log), and the release converged. dispat's cells add checks on
-the run's structured log (the order of the provider's publication and the consumer's build, the stage that failed, a
-catch-up plan of `cli` alone as `W193` at the version it is owed) and on the manifests (the consumer's range caught up
-to `^1.0.1`, `theme` and `docs` untouched), on origin (no publication receipt left behind), and the per-cell facts
-above.
+The build-fault propagation cells ask whether the provider shipped, the consumer was withheld, and the next release
+finished the consumer without republishing the provider. The registry-refusal cells ask a different safety question:
+whether dispat reports `E228`, retains its remote release lock, and refuses a fresh release with `E336` before any
+second upload or tag. Their `recovery.converged` value remains false. Compared tools still run their ordinary
+commands under the same injected fault; their verdicts describe what happened rather than gating the campaign.
 
 ### The colleague's push
 
@@ -271,10 +265,10 @@ After the tool's run, the experiment performs the recovery an operator is left w
 then asks each tool what it would release next: `lerna changed`, `nx release --dry-run`, `changeset status`,
 `dispat status`. For dispat it then runs the release again from the same clone.
 
-dispat's orphan fixture opts `cli` into `revertOnFail`. The protocol verifies that the refused package's version
-rewrite is rolled back and the worktree is clean before retrying. This exercises the configured automatic recovery
-path; without that opt-in, dispat deliberately preserves the failed rewrite for inspection and its dirty-path safety
-check requires an operator to resolve it before another release.
+dispat's orphan fixture opts `cli` into `revertOnFail`, but that worktree rule cannot prove a refused registry upload
+has ceased. The protocol verifies that earlier successful packages remain durable, `cli` has no new tag, `E228`
+retains the remote lock, and a fresh release is fenced with `E336` without another upload. The fixture does not
+remove the lock or claim automatic recovery from an uncertain external publication.
 
 ### What is observed
 

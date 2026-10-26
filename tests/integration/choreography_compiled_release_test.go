@@ -92,6 +92,7 @@ sleep 60;
 printf 'native-cancel-finished %s\n' "$DISPAT_PACKAGE" >> "$DISPAT_IT_EXECUTION_LOG"`
 	rig := newExecutionRig(t, func(cfg *models.File) {
 		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 10, Task: 3, Cancel: 5}
+		cfg.Execution.RetryAfterUncertainAttempt = false
 		one := 1
 		cfg.Execution.Concurrency = &one
 		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyOrchestrator,

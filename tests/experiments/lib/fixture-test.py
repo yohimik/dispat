@@ -199,11 +199,14 @@ class DispatScenarioTest(FixtureTest):
         root = self.build("dispat", scenario="build-distributed",
                           env={"EXPERIMENT_EXECUTION_SECRET": secret})
         config = (root / "dispat.yaml").read_text()
-        self.assertIn("execution:\n  secretEnv: EXPERIMENT_EXECUTION_SECRET\n  timeouts:\n    preflight: 60\n", config)
+        self.assertIn("execution:\n  secretEnv: EXPERIMENT_EXECUTION_SECRET\n"
+                      "  workers:\n    - name: build-a\n"
+                      "      endpoint: file:///work/dispat-origin.git\n"
+                      "  timeouts:\n    preflight: 60\n", config)
         self.assertIn("runOnly: [worker, orchestrator]\n", config)
         self.assertNotIn(secret, config)
-        # The link is named on the command line, so the file lists no worker.
-        self.assertNotIn("workers:", config)
+        # The first node pins the worker and its exact mailbox endpoint.
+        self.assertEqual(1, config.count("name: build-a"))
 
     def test_only_the_distributed_scenario_configures_execution(self):
         for scenario in ("build", "publish", "deselected", "held", "deferred", "deferred-build"):

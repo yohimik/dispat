@@ -210,16 +210,18 @@ def dispat_packages():
 
 def dispat_execution():
     """The root keys a distributed release adds: the name of the variable the
-    signing secret is read from, never the secret itself, a preflight wait
-    sized for a worker started beside the run, and every build placed on a
-    worker while every publication stays here. The link to the worker is
-    named on the command line, and with no endpoint it reaches the fixture's
-    own origin."""
+    signing secret is read from, never the secret itself, a worker identity
+    pinned to the fixture's exact origin, a preflight wait sized for a worker
+    started beside the run, and every build placed on that worker while every
+    publication stays here."""
     if experiment() != "propagation" or scenario() != "build-distributed":
         return ""
     return """\
 execution:
   secretEnv: EXPERIMENT_EXECUTION_SECRET
+  workers:
+    - name: build-a
+      endpoint: file:///work/dispat-origin.git
   timeouts:
     preflight: 60
 runOnly: [worker, orchestrator]

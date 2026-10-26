@@ -716,10 +716,40 @@ func (w *Worker) awaitNodeSlotDecision(ctx context.Context, task *claimedTask,
 	if task.finalityCtx != nil {
 		ctx = task.finalityCtx
 	}
+	request := workerFinalityWaitRequest{Task: task, Channel: channel, Receipt: receipt}
+	err := w.awaitNodeSlotDecisionUntil(ctx, request)
+	if err == nil || (ctx.Err() == nil && !errors.Is(err, context.Canceled)) {
+		return err
+	}
+	// A graceful stop may cancel the serving context just after exact signed
+	// finality was persisted. Read the already available event once with an
+	// independent bound before retaining the physical lease as unknown.
+	probeCtx, done := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
+	defer done()
+	request.ProbeOnly = workerReturnFinalityProbeOnly
+	probeErr := w.awaitNodeSlotDecisionUntil(probeCtx, request)
+	if probeErr == nil {
+		return nil
+	}
+	if !errors.Is(probeErr, context.Canceled) {
+		return probeErr
+	}
+	return err
+}
+
+type workerFinalityWaitRequest struct {
+	Task      *claimedTask
+	Channel   *workerReturnChannel
+	Receipt   ChoreographyReceipt
+	ProbeOnly bool
+}
+
+func (w *Worker) awaitNodeSlotDecisionUntil(ctx context.Context, request workerFinalityWaitRequest) error {
+	task, channel, receipt := request.Task, request.Channel, request.Receipt
 	cursor := receipt.Cursor
 	var retained *RetainedChoreographyFeed
 	for {
-		if waiter, ok := channel.client.(workerTaskEventWaiter); ok {
+		if waiter, ok := channel.client.(workerTaskEventWaiter); ok && !request.ProbeOnly {
 			event, next, err := waiter.WaitTaskEvent(ctx, task.assignment.Task, cursor)
 			if err != nil {
 				return fmt.Errorf(workerReturnCapacityUnsettledErrorFormat, err)
@@ -769,6 +799,9 @@ func (w *Worker) awaitNodeSlotDecision(ctx context.Context, task *claimedTask,
 			if ctx.Err() != nil {
 				return fmt.Errorf(workerReturnCapacityUnsettledErrorFormat, ctx.Err())
 			}
+			if request.ProbeOnly {
+				return fmt.Errorf(workerReturnCapacityUnsettledErrorFormat, err)
+			}
 			w.Log.Debug().Err(err).Str(workerReturnLogTaskField, task.assignment.Task).
 				Msg(workerReturnAwaitFinalityMessage)
 		} else {
@@ -804,6 +837,12 @@ func (w *Worker) awaitNodeSlotDecision(ctx context.Context, task *claimedTask,
 				return w.settleClaimedNodeSlot(ctx, task, event.TaskOID)
 			}
 			cursor = page.Cursor
+			if request.ProbeOnly && len(page.Events) == workerReturnNoEntries {
+				return fmt.Errorf(workerReturnCapacityUnsettledErrorFormat, context.Canceled)
+			}
+		}
+		if request.ProbeOnly {
+			continue
 		}
 		select {
 		case <-ctx.Done():

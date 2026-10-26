@@ -34,6 +34,22 @@ type retainedSweepAttemptReplay struct {
 	sealed   bool
 }
 
+const retainedSweepReplyHasNoReceiptErrorFormat = "execution: retained sweep task %s has no exact signed Result or Ack receipt"
+
+// A pickup leaves the canonical task tip at its Claim while the ledger names
+// its exact signed Result or Ack as a carried receipt. Local first-node tickets
+// retain the older direct task-ref transition, where that tip is the receipt.
+func retainedSweepReplyReceiptOID(attempt retainedSweepAttempt) string {
+	if attempt.reply.ResultReceiptOID != retainedRunAbsentValueText {
+		return attempt.reply.ResultReceiptOID
+	}
+	if attempt.reply.PickupID == retainedRunAbsentValueText &&
+		attempt.reply.TaskOID != attempt.claim.TaskOID {
+		return attempt.reply.TaskOID
+	}
+	return retainedRunAbsentValueText
+}
+
 func (r *retainedSweepAttemptReplay) advance(ctx context.Context,
 	persist *execution.GitChoreographyPersist) error {
 	for {
@@ -116,6 +132,10 @@ func (a *App) settleRetainedSweepAttempts(ctx context.Context, options retainedS
 				return fmt.Errorf(retainedSweepReplyWithoutClaimErrorFormat, task)
 			}
 			if attempt.reply.TaskOID != retainedRunAbsentValueText {
+				receiptOID := retainedSweepReplyReceiptOID(attempt)
+				if receiptOID == retainedRunAbsentValueText {
+					return fmt.Errorf(retainedSweepReplyHasNoReceiptErrorFormat, task)
+				}
 				succeeded := retainedSweepUnsuccessfulState
 				if attempt.reply.Kind == execution.ChoreographyResultAccepted {
 					result, err := mailbox.ReadVerifiedChoreographyAcceptedResultFromAssignment(
@@ -136,7 +156,7 @@ func (a *App) settleRetainedSweepAttempts(ctx context.Context, options retainedS
 					ChoreographyRunBinding: binding, Task: task,
 					Branch:  execution.FormatChoreographyTaskBranch(binding.Run, task),
 					Attempt: attempt.reply.Attempt, Node: attempt.reply.Node,
-					ResultOID: attempt.reply.TaskOID, Succeeded: succeeded,
+					ResultOID: receiptOID, Succeeded: succeeded,
 					PackageOutcome: outcome,
 				}); err != nil {
 					return fmt.Errorf(retainedSweepResultFinalityErrorFormat, task, err)

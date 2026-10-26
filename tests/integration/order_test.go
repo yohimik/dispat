@@ -260,7 +260,7 @@ func TestOrderProviderFailureSkipsTheWaitingConsumer(t *testing.T) {
 		cfg.Spaces = map[string]models.SpaceConfig{
 			"provider": {Path: models.PathList{"packages/provider"},
 				IsBuildWaitingPublish: models.StageRelationOf(isBuildWaitingPublish),
-				Flow:                  &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"fail-publish"}}},
+				Flow:                  &models.SpaceFlowConfig{Build: []string{"build"}, BeforePublish: []string{"fail-publish"}, Publish: []string{"publish"}}},
 			"consumer": {Path: models.PathList{"packages/consumer"},
 				Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
 		}
@@ -274,7 +274,7 @@ func TestOrderProviderFailureSkipsTheWaitingConsumer(t *testing.T) {
 
 	r := failingRepo(true)
 	res := r.Release()
-	require.Equal(t, 1, res.Code, "the provider's publish fails the run\nstdout:\n%s", res.Stdout)
+	require.Equal(t, 1, res.Code, "the provider's prepublication gate fails the run\nstdout:\n%s", res.Stdout)
 	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "consumer"),
 		"the consumer is skipped, its own work notwithstanding: %s", res.Stdout)
 	assert.Zero(t, r.TagCount("consumer@"),

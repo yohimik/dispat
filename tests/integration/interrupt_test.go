@@ -112,11 +112,9 @@ func TestInterruptStopsARunCommand(t *testing.T) {
 
 // TestInterruptTerminatesAPublishCommand: a SIGTERM, what a CI runner sends
 // when a job is cancelled, that arrives while a publish command runs stops
-// that command and nothing is recorded for it. A publication that never
-// reported success is not a completed publish, so the package is cancelled
-// rather than published or failed, its consumer never publishes, nothing is
-// tagged, and the lock the run held is given back rather than stranded. The
-// next run owes both packages the same release and completes it.
+// that command and records no release. The external destination may still
+// finish an in-flight request, so the run retains its lock and the next run
+// cannot publish the same version until that outcome is reconciled.
 func TestInterruptTerminatesAPublishCommand(t *testing.T) {
 	r := harness.New(t)
 	cfg := libsConfig(echoBuild, 1)
@@ -138,22 +136,22 @@ func TestInterruptTerminatesAPublishCommand(t *testing.T) {
 	res := proc.Wait()
 
 	assert.NotEqual(t, 0, res.Code, "a terminated run does not exit 0\nstdout:\n%s", res.Stdout)
-	statuses := summaryStatuses(res.Events)
-	assert.Equal(t, "cancelled", statuses["core"], "a publish that never reported success is not a publication")
-	assert.Equal(t, "cancelled", statuses["app"], "and its consumer never publishes")
+	assert.Contains(t, res.Stdout+res.Stderr, executionPublicationUnknownCode,
+		"the in-flight destination request has no proven outcome")
 	data, err := os.ReadFile(r.Path("publish.tsmark"))
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "core end", "the publish command was stopped")
 	assert.NotContains(t, string(data), "app start")
-	assert.Empty(t, r.TagList(), "nothing is recorded for work that did not finish")
-	assert.False(t, remoteHoldsLock(t, bare), "the lock is given back, not stranded")
+	assert.Zero(t, r.TagCount("core@"), "the interrupted publication was not recorded")
+	assert.Zero(t, r.TagCount("app@"), "the consumer did not publish")
+	assert.True(t, remoteHoldsLock(t, bare), "unresolved publication retains release exclusion")
 
-	cfg.Scripts["publish"] = models.Script{r.TsmarkScript("publish.tsmark", "$DISPAT_PACKAGE", 0)}
-	r.WriteConfigModel(cfg)
-	r.Commit("chore: publish without the dwell")
-	r.ReleaseOK()
-	assert.True(t, r.IsTagged("core@0.1.0"), "tags: %v", r.TagList())
-	assert.True(t, r.IsTagged("app@0.1.0"), "tags: %v", r.TagList())
+	retry := r.CommandEnv(harness.LockEnabled)
+	assert.NotEqual(t, 0, retry.Code, "a fresh run cannot repeat the uncertain publish\nstdout:\n%s", retry.Stdout)
+	assert.True(t, harness.IsCodePresent(retry.Events, "E336"), "stdout:\n%s", retry.Stdout)
+	assert.True(t, remoteHoldsLock(t, bare))
+	assert.Zero(t, r.TagCount("core@"))
+	assert.Zero(t, r.TagCount("app@"))
 }
 
 // TestInterruptKilledAfterAPublishStrandsTheLock: a run killed outright

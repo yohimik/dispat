@@ -579,12 +579,13 @@ func TestVersionGroupPartialReleaseNewerWorkMovesOn(t *testing.T) {
 
 // groupOwedRepo is a fixed group whose member app1 consumes core1, a package
 // outside the group, and whose other member lib1 does not. core1's publish,
-// and app1's, fail while their marker files exist.
+// and app1's, are refused by beforePublish while their marker files exist.
 func groupOwedRepo(t *testing.T) *harness.Repo {
 	t.Helper()
 	cfg := groupConfig(models.VersioningFixed)
-	cfg.Scripts["flaky-publish"] = models.Script{`[ ! -f "../../fail-$DISPAT_PACKAGE" ] || exit 1`, "echo publishing"}
-	flaky := &models.SpaceFlowConfig{Publish: []string{"flaky-publish"}}
+	cfg.Scripts["flaky-before-publish"] = models.Script{`[ ! -f "../../fail-$DISPAT_PACKAGE" ]`}
+	cfg.Scripts["flaky-publish"] = models.Script{"echo publishing"}
+	flaky := &models.SpaceFlowConfig{BeforePublish: []string{"flaky-before-publish"}, Publish: []string{"flaky-publish"}}
 	cfg.Spaces["svc"] = models.SpaceConfig{Path: models.PathList{"services"}, VersionGroup: "platform", Flow: flaky}
 	cfg.Spaces["core"] = models.SpaceConfig{Path: models.PathList{"core"}, Flow: flaky}
 	cfg.Dependencies = models.Dependencies{{Consumer: "app1", Provider: "core1"}}
@@ -594,12 +595,12 @@ func groupOwedRepo(t *testing.T) *harness.Repo {
 	r.ReleaseOK()
 	require.True(t, r.IsTagged("app1@0.1.0"), "tags: %v", r.TagList())
 
-	// app1 proceeds past core1's failed publish on a feature of its own and
+	// app1 proceeds past core1's refused publication on a feature of its own and
 	// lib1 rides with it, so the group holds 0.2.0 and core1 still owes app1.
 	r.Commit("feat(core1)^: streaming\n\n---\n\nfeat(app1): own flag")
 	require.NoError(t, os.WriteFile(r.Path("fail-core1"), nil, 0o644))
 	res := r.Release()
-	require.Equal(t, 1, res.Code, "core1's publish fails\nstdout:\n%s", res.Stdout)
+	require.Equal(t, 1, res.Code, "core1's beforePublish gate fails\nstdout:\n%s", res.Stdout)
 	require.True(t, r.IsTagged("app1@0.2.0"), "tags: %v", r.TagList())
 	require.True(t, r.IsTagged("lib1@0.2.0"), "tags: %v", r.TagList())
 	require.Zero(t, r.TagCount("core1@0.2.0"), "tags: %v", r.TagList())

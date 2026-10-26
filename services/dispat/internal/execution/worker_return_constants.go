@@ -28,6 +28,7 @@ const (
 	workerReturnTaskNotStarted                 = false
 	workerReturnUnconfirmedCommandStart        = false
 	workerReturnSlotSettled                    = true
+	workerReturnFinalityProbeOnly              = true
 	workerReturnLegacyNoSlot                   = true
 	workerReturnSlotUnavailable                = false
 	workerReturnParkedNotWoken                 = false

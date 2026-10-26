@@ -2371,14 +2371,15 @@ func TestPolyrepoCheckpointRefusesASourceRevisionItCannotProve(t *testing.T) {
 	}
 }
 
-// TestRevertOnFailRestoresThroughTheOwningRepository: `revertOnFail` puts a
-// failed package's folder back the way the run found it, and in a composed
+// TestRevertOnFailRestoresThroughTheOwningRepository: a definite failure in
+// beforePublish puts a package's folder back the way the run found it. In a composed
 // workspace that folder belongs to a repository other than the checkout that
 // contains it. The rollback runs in the owning repository in both history
 // modes that have more than one: in a control repository, a source package
 // reverts inside its source and a control package inside the control, neither
 // reaching into the other; in a choreographed fleet, a provider's package
-// reverts through the provider's own repository.
+// reverts through the provider's own repository. A failed publish command
+// has an unresolved external outcome and cannot use this rollback path.
 func TestRevertOnFailRestoresThroughTheOwningRepository(t *testing.T) {
 	t.Run("a control repository and its source", func(t *testing.T) {
 		source := harness.New(t)
@@ -2393,9 +2394,10 @@ func TestRevertOnFailRestoresThroughTheOwningRepository(t *testing.T) {
 			"libs":  {Path: models.PathList{"sources/lib/packages"}, RevertOnFail: models.Bool(true)},
 			"tools": {Path: models.PathList{"packages"}, RevertOnFail: models.Bool(true)},
 		}
-		cfg.Scripts["publish"] = models.Script{"echo scribbled >> main.txt", "exit 3"}
+		cfg.Scripts["guard"] = models.Script{"echo scribbled >> main.txt", "exit 3"}
+		cfg.Flow.BeforePublish = []string{"guard"}
 		control.WriteConfigModel(cfg)
-		control.Commit("chore: configure a fleet that reverts a failed publish")
+		control.Commit("chore: configure a fleet that reverts a failed prepublication gate")
 
 		res := control.Release()
 		assert.Equal(t, 1, res.Code)
@@ -2410,11 +2412,12 @@ func TestRevertOnFailRestoresThroughTheOwningRepository(t *testing.T) {
 	t.Run("a choreographed fleet", func(t *testing.T) {
 		fleet := crossRepositoryFleet(t)
 		fleet.writeConfig("sdk", func(cfg *models.File) {
-			cfg.Scripts = releaseFlow("echo building", "printf 'half written\\n' > packages/sdk-pkg/main.txt; exit 1")
-			cfg.Flow = &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}
+			cfg.Scripts = releaseFlow("echo building", "echo publishing")
+			cfg.Scripts["guard"] = models.Script{"printf 'half written\\n' > packages/sdk-pkg/main.txt; exit 1"}
+			cfg.Flow = &models.SpaceFlowConfig{Build: []string{"build"}, BeforePublish: []string{"guard"}, Publish: []string{"publish"}}
 			cfg.RevertOnFail = models.Bool(true)
 		})
-		fleet.peer("sdk").Commit("fix(sdk-pkg): fail while publishing")
+		fleet.peer("sdk").Commit("fix(sdk-pkg): fail before publishing")
 		fleet.push("sdk")
 		fleet.follow("api", "sdk")
 		api := fleet.peer("api")
@@ -2425,6 +2428,56 @@ func TestRevertOnFailRestoresThroughTheOwningRepository(t *testing.T) {
 			"the provider's own repository restored its own file")
 		assert.Empty(t, tagsIn(api.Repo, ".links/sdk"))
 	})
+}
+
+// TestPolyrepoUncertainSourcePublishRetainsOwningLockAndBytes keeps the
+// source's external request, changed worktree and release exclusion together.
+// A failed publish command does not become a definite rollback even when the
+// source space requests revertOnFail.
+func TestPolyrepoUncertainSourcePublishRetainsOwningLockAndBytes(t *testing.T) {
+	source := harness.New(t)
+	source.SeedPackage("packages", "lib")
+	source.Commit("feat(lib): bootstrap library")
+
+	control := harness.New(t)
+	addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
+	request := filepath.Join(t.TempDir(), "queued-request")
+	cfg := polyrepoModelFile()
+	cfg.Spaces = map[string]models.SpaceConfig{
+		"libs": {Path: models.PathList{"sources/lib/packages"}, RevertOnFail: models.Bool(true)},
+	}
+	cfg.Scripts["publish"] = models.Script{
+		"printf '%s\\n' \"$DISPAT_PACKAGE@$DISPAT_NEW_VERSION\" >> " + harness.ShQuote(request),
+		"echo scribbled >> main.txt",
+		"exit 7",
+	}
+	control.WriteConfigModel(cfg)
+	control.Commit("chore: configure a source publication with an uncertain outcome")
+	controlRemote := control.AddBareRemote()
+	control.Git("push", "-q", "origin", "HEAD")
+	sourceRemote := filepath.Join(t.TempDir(), "lib-source.git")
+	control.Git("init", "-q", "--bare", sourceRemote)
+	control.Git("-C", "sources/lib", "remote", "set-url", "origin", sourceRemote)
+	control.Git("-C", "sources/lib", "push", "-q", "origin", "HEAD:refs/heads/"+harness.DefaultBranch)
+
+	res := releaseLocked(control)
+	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.True(t, harness.IsCodePresent(res.Events, "E228"), "stdout:\n%s", res.Stdout)
+	assert.Equal(t, "lib@0.1.0\n", readAbs(t, request), "the external request was queued before failure")
+	assert.Equal(t, "lib\nscribbled\n", readAbs(t, control.Path("sources", "lib", "packages", "lib", "main.txt")),
+		"an uncertain source publication is not rolled back")
+	assert.Empty(t, control.Git("-C", "sources/lib", "tag", "--list", "lib@*"),
+		"the source has no release record for an uncertain publication")
+	assert.Empty(t, bareGit(t, sourceRemote, "tag", "--list", "lib@*"),
+		"the source remote has no release tag")
+	assert.True(t, remoteHoldsLock(t, sourceRemote), "the source's own remote retains exclusion")
+	assert.True(t, remoteHoldsLock(t, controlRemote), "the complete fleet lock set remains held")
+
+	retry := releaseLocked(control)
+	require.Equal(t, 1, retry.Code, "stdout:\n%s\nstderr:\n%s", retry.Stdout, retry.Stderr)
+	assert.True(t, harness.IsCodePresent(retry.Events, "E336"), "stdout:\n%s", retry.Stdout)
+	assert.Equal(t, "lib@0.1.0\n", readAbs(t, request), "a fresh run cannot queue a second request")
+	assert.True(t, remoteHoldsLock(t, sourceRemote))
 }
 
 // TestPolyrepoReleaseLockGuardsAndCleansSourceWork acquires every repository
@@ -3076,8 +3129,8 @@ func TestPolyrepoCommitModeSourceRestoresASkippedConsumer(t *testing.T) {
 
 	control := harness.New(t)
 	addPolyrepoSource(t, control, "lib-source", "sources/lib", source)
-	// core fails only once app's beforeAll hook has edited its folder, so the
-	// skip always follows a stage that wrote.
+	// core's prepublication gate fails only once app's beforeAll hook has
+	// edited its folder, so the skip always follows a stage that wrote.
 	appMarkPath := filepath.Join(t.TempDir(), "app")
 	appMark := harness.ShQuote(appMarkPath)
 	cfg := polyrepoFile()
@@ -3087,14 +3140,16 @@ func TestPolyrepoCommitModeSourceRestoresASkippedConsumer(t *testing.T) {
 		"build": []string{"echo building"},
 		"mutate": []string{`if [ "$DISPAT_PACKAGE" = app ]; then ` +
 			`echo dirty >> main.txt && echo extra > extra.txt && : > ` + appMark + `; fi`},
-		"publish": []string{`if [ "$DISPAT_PACKAGE" = core ]; then i=0; ` +
+		"guard": []string{`if [ "$DISPAT_PACKAGE" = core ]; then i=0; ` +
 			`while [ ! -e ` + appMark + ` ] && [ "$i" -lt 400 ]; do sleep 0.05; i=$((i+1)); done; ` +
-			`test -e ` + appMark + ` || exit 2; exit 1; fi; echo publishing`},
+			`test -e ` + appMark + ` || exit 2; exit 1; fi`},
+		"publish": []string{"echo publishing"},
 	}
 	cfg["flow"] = map[string]any{
-		"beforeAll": []string{"mutate"},
-		"build":     []string{"build"},
-		"publish":   []string{"publish"},
+		"beforeAll":     []string{"mutate"},
+		"build":         []string{"build"},
+		"beforePublish": []string{"guard"},
+		"publish":       []string{"publish"},
 	}
 	cfg["repositoryOverrides"] = map[string]any{
 		"lib-source": map[string]any{"commit": map[string]any{"enabled": true}},
@@ -3103,7 +3158,7 @@ func TestPolyrepoCommitModeSourceRestoresASkippedConsumer(t *testing.T) {
 	control.Commit("chore: release a source in commit mode")
 
 	res := control.Release()
-	require.Equal(t, 1, res.Code, "the provider's publish failure fails the run\nstdout:\n%s", res.Stdout)
+	require.Equal(t, 1, res.Code, "the provider's prepublication failure fails the run\nstdout:\n%s", res.Stdout)
 	assert.FileExists(t, appMarkPath, "app's beforeAll edit preceded the provider failure")
 	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "app"), "app is reported blocked")
 	assert.Empty(t, polyrepoTags(control, "sources/lib"))

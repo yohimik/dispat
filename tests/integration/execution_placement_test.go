@@ -171,10 +171,9 @@ func newExecutionPlacementRig(t *testing.T, names []string, script func(*harness
 	mailbox := executionMailbox(t)
 	cfg := libsConfig(script(repo), 4, 4)
 	cfg.Execution = &models.ExecutionConfig{
-		RetryAfterUncertainAttempt: true,
-		SecretEnv:                  executionSecretEnv,
-		Workers:                    []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
-		Timeouts:                   &models.ExecutionTimeoutsConfig{Preflight: 30},
+		SecretEnv: executionSecretEnv,
+		Workers:   []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
+		Timeouts:  &models.ExecutionTimeoutsConfig{Preflight: 30},
 	}
 	for _, change := range adjust {
 		change(&cfg)

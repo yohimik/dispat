@@ -60,6 +60,10 @@ func publishOrderRepo(t *testing.T, libPublish string, fixedGroup []string) *har
 			Flow: &models.SpaceFlowConfig{
 				Build: []string{"app-build"}, Publish: []string{"app-publish"}}},
 	}
+	if libPublish == "fail-publish" {
+		cfg.Spaces["libs"].Flow.BeforePublish = []string{libPublish}
+		cfg.Spaces["libs"].Flow.Publish = []string{"lib-publish"}
+	}
 	cfg.Dependencies = []models.DependencyConfig{
 		{Consumer: "app", Provider: "ui"},
 		{Consumer: "ui", Provider: "core"},
@@ -123,7 +127,7 @@ func TestPublishOrderBlocksAConsumerBehindAFailedProviderItDoesNotNameDirectly(t
 		r.Commit("feat(core): the group moves")
 
 		res := r.Release()
-		require.Equal(t, 1, res.Code, "the provider publish fails the run\nstdout:\n%s", res.Stdout)
+		require.Equal(t, 1, res.Code, "the provider prepublication gate fails the run\nstdout:\n%s", res.Stdout)
 		assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "app"),
 			"the consumer is skipped behind a provider it never names: %s", res.Stdout)
 		assert.Equal(t, "core", publishOrderBlockedBy(t, res, "app"),
@@ -160,7 +164,7 @@ func TestPublishOrderBlocksAConsumerBehindAFailedProviderItDoesNotNameDirectly(t
 			"libs": {Path: models.PathList{"packages/libs"},
 				Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
 			"broken": {Path: models.PathList{"packages/broken"},
-				Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"fail-publish"}}},
+				Flow: &models.SpaceFlowConfig{Build: []string{"build"}, BeforePublish: []string{"fail-publish"}, Publish: []string{"publish"}}},
 			"apps": {Path: models.PathList{"packages/apps"},
 				Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"publish"}}},
 		}

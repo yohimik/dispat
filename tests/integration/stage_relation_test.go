@@ -160,7 +160,7 @@ func TestStageRelationBooleansKeepTheirMeaning(t *testing.T) {
 }
 
 // stageRelationFailingRepo is stageRelationRepo's failure counterpart: the
-// infrastructure publish fails, and the frontend carries a bump of its own, so
+// infrastructure prepublication gate fails, and the frontend carries a bump of its own, so
 // the only thing deciding whether it releases is whether the relation blocks.
 // Its build has already run by then, which is exactly the state `none` is
 // supposed to produce and exactly the state that must still publish nothing.
@@ -178,7 +178,7 @@ func stageRelationFailingRepo(t *testing.T, relation *models.StageRelation) *har
 		"infra": {Path: models.PathList{"packages/infra"},
 			IsBuildWaitingPublish: relation,
 			Flow: &models.SpaceFlowConfig{
-				Build: []string{"build"}, Publish: []string{"fail-publish"}}},
+				Build: []string{"build"}, BeforePublish: []string{"fail-publish"}, Publish: []string{"publish"}}},
 		"apps": {Path: models.PathList{"packages/apps"},
 			RevertOnFail: models.Bool(true),
 			Flow: &models.SpaceFlowConfig{
@@ -202,7 +202,7 @@ func TestStageRelationBlockingSkipsAConsumerWithItsOwnChanges(t *testing.T) {
 	blocked := stageRelationFailingRepo(t,
 		&models.StageRelation{Build: models.StageWaitNone, IsBlocking: models.Bool(true)})
 	res := blocked.Release()
-	require.Equal(t, 1, res.Code, "the infrastructure publish fails the run\nstdout:\n%s", res.Stdout)
+	require.Equal(t, 1, res.Code, "the infrastructure prepublication gate fails the run\nstdout:\n%s", res.Stdout)
 	assert.True(t, harness.IsCodePresentForPackage(res.Events, "W194", "frontend"),
 		"the consumer is skipped, its own work notwithstanding: %s", res.Stdout)
 	assert.Zero(t, blocked.TagCount("frontend@"),

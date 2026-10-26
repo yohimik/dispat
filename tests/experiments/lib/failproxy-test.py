@@ -2,9 +2,9 @@
 """The fault proxy's decisions: which request names which package, and how a
 gated refusal waits for its gate.
 
-The deferred-build cell depends on the gate to order the provider's refusal
-after the consumer's build, so a gate that stopped waiting, or waited forever,
-would turn that cell back into the race it replaced.
+The compared tools' deferred-build cells depend on the gate to order the
+provider's refusal after the consumer's build. Dispat's version task instead
+waits for the provider's settled record, so its cell refuses immediately.
 """
 import http.client
 import http.server
