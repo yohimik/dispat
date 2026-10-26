@@ -11,9 +11,10 @@ constitutes a patch, minor, and major revision of the document.
 
 **Implementation boundary.** The published CCME 3 line specifies VCS adapters and explicit rollback; the current
 source also defines the optional polyrepository Git profile of §27 and distributed execution profile of §28.
-The dispat release engine implements the distributed profile over a Git mailbox transport; what it implements, where it
-departs from §28 and what it has measured are stated by date in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md), and no
-speedup is claimed. Implementing one profile does not implement the others or the adapter and rollback protocols.
+Earlier dispat releases implemented a Git-mailbox execution protocol. The revised all-mode contract in §28
+precedes its full engine implementation; dated behavior, departures and measurements are stated in
+[DESIGN-HISTORY.md](./DESIGN-HISTORY.md). No speedup is claimed. Implementing one profile does not implement
+the others or the adapter and rollback protocols.
 Neither changes the message parser grammar. The version markers are stamped by the specification release process.
 Publishing a specification does not implement its behavior. The immutable
 [CCME 2.0.0 specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)
@@ -153,9 +154,9 @@ to be interpreted as described in RFC 2119.
 | **Repository revision**  | A pair `(repository identity, full commit object ID)`. A bare commit ID is never a fleet-wide identity (§27.2).          |
 | **Fleet link**           | A submodule joining two peers of a linked peer tree, named by the linked peer's identity and declared by its roster (§27.11). |
 | **Execution node** | A machine or runner executing the release engine; independent of repository identity (§28.1). |
-| **Orchestrator** | The node that owns one run's locks, fixed planning input, task assignment, admission and finalization (§28). |
-| **Worker** | A node executing assigned tasks without authority to initiate or finalize a release (§28.1). |
-| **Execution link** | An authenticated worker endpoint used for task assignment, distinct from a repository or fleet link (§28.2). |
+| **Orchestrator** | The first node of a run, owning its locks, Git pushes, publication and durable admission (§28). |
+| **Choreographer** | Another node running or proposing tasks without first-node authority (§28.1). |
+| **Execution link** | An authenticated choreographer endpoint, distinct from a repository or fleet link (§28.2). |
 | **Task receipt** | Identity-bound execution evidence; never an ordinary release or rollback-completion record (§28.6). |
 
 `max(a, b)` over bumps returns the higher of the two in the ordering above.
@@ -2079,7 +2080,7 @@ ordinary way.
 The complete ordinary-release procedure. It is a pure function of (repository history, immutable release records, workspace graph, configuration) and
 MUST be deterministic.
 
-Under §28, the complete semantic plan remains `plan = Plan(input)`: worker placement and scheduling MUST NOT alter it.
+Under §28, the complete semantic plan remains `plan = Plan(input)`: node placement and scheduling MUST NOT alter it.
 A distributed release MUST acquire every participating repository's lock before fixing `input` and computing `plan`;
 read-only planning remains lock-free (§28.3). Preparation and output-transfer prerequisites do not add release
 intent or discharge pending work.
@@ -2988,9 +2989,10 @@ in the longest route between two peers (at most `Q - 1`, and at most 2 in a star
 `(repository, revision)` trees whose fleet links are read (`B <= X · Y`). The implementation MUST preserve repository
 identity in every index and cache key.
 
-For the execution profile of §28, let `Tk` be the run's tasks and `Dk` their precedence edges, `Wn` the worker nodes,
-`Po` the packages whose outputs some other task consumes, and `Lr` the coordination refs alive in one transport
-repository. For configured stages, `S_p` is one package's stages, standing in a cost for their number, and `C_p` the
+For the execution profile of §28, let `Tk` be the run's tasks and `Dk` their precedence edges,
+`Wn` the execution nodes,
+`Po` the packages whose outputs some other task consumes, and `Fr` the accepted logical terminal events in a run.
+For configured stages, `S_p` is one package's stages, standing in a cost for their number, and `C_p` the
 stage names its constraints state, a list counting each name it holds (*Configured stages in the compiled plan*, below).
 A `sum` over them runs over the packages `p`, as `sum(Hq + Aq)` runs over the repositories `q`.
 In graph construction and readiness bounds, `Tk` includes zero-duration build and publication relay vertices.
@@ -3023,11 +3025,14 @@ In graph construction and readiness bounds, `Tk` includes zero-duration build an
 | Task graph and readiness (§28.3) | `O(Tk · (Tk + Dk))` | `O(Tk + Dk)` | Rescanning every task after each completion; indegree counters decrement each successor once |
 | Placement (§28.2)          | `O(Tk · Wn)`          | `O(Tk · Wn)`          | The node scan is charged for every task; indexed compatible free slots can trade additional state for fewer probes |
 | Output transfer (§28.5)    | up to `Tk · Po` transfers | at most `Po · Wn` transfers | One per distinct `(output set, node)`, not one per consumer task; verified bytes are not fetched again |
-| Coordination polling (§28.4) | `O(Lr)` refs per tick | refs addressed to the polling node per tick | The branch-name prefix routes; one fetch per changed tip; refs of dead runs tax every tick until removed |
+| Event readiness (§28.4) | `O(Fr(Tk + Dk))` | `O(Fr + Dk)` | Apply each event and successor edge once. |
 
 The bold rows highlight common multiplicative costs; corrections, cancellation, provenance and retained indexes can
 also dominate. Each must be charged even when its final result is empty. Window classes safely share history reachability work. Propagation traversal is reusable
 only under the stricter conditions below; predicate hoisting and channel incidence inversion remain safe independently.
+The terminal-feed row counts in-memory event application for an explicit graph. It does not bound Git polling,
+network round trips, bytes transferred or restart replay latency. A verified cursor avoids a graph-wide scan
+on each terminal event; no per-tick network bound follows from the number of live refs alone.
 
 The polyrepository bounds are deliberately sums over repositories. They are not globally linear in fleet history:
 distinct boundaries can require distinct reachability sets, output can contain `P · U` scope incidences, and propagation
@@ -3349,8 +3354,8 @@ implementation uses verified rank intervals and a shared author-prefix scan; the
 apply, and composed histories retain their general path. No workload distribution is specified,
 so these worst-case and family comparisons make no average-case planner claim.
 
-**The dispat theorem (bounds for a compiled plan).** A compiled plan is a finite directed acyclic graph of tasks.
-There is no fixed upper limit on its task, edge or worker counts; `Tk`, `Dk` and `Wn` remain input parameters,
+**The dispat theorem (bounds for a fixed task graph).** A task graph is a finite directed acyclic graph.
+There is no fixed upper limit on its task, edge or node counts; `Tk`, `Dk` and `Wn` remain input parameters,
 and constants in asymptotic claims do not depend on them.
 Its vertices and precedence edges are fixed before execution; task durations become known when the tasks run. For a
 fixed history, configuration and inventory, §17.2 determines one semantic release plan and hence one task graph under
@@ -3605,14 +3610,16 @@ and still starts `i` at `S_i`. The new span is `P_i + M + Q_i`: a path through `
 path avoiding `i` is shorter than `M`. The policy finishes no earlier than `S_i + M + Q_i`, which is
 strictly greater than the span. This contradicts universal exactness. Thus every universally exact
 nonanticipating policy has the same earliest-start vector `E`. The claim concerns starts, not a unique
-algorithm, worker assignment, durable protocol or makespan-optimal schedule on one duration assignment.
+algorithm, node assignment, durable protocol or makespan-optimal schedule on one duration assignment.
 It also does not force immediate dispatch of a task whose zero duration is known in advance, or apply when
 durations have known bounds that permit harmless delay.
 
-**A node-player execution game.** Fix one finite compiled DAG and a finite set of compatible execution nodes.
-The orchestrator is one player: it chooses when and where to offer ready tasks. Each worker is a separate player:
-it chooses when to start an assigned task after the assignment and its predecessor outcomes arrive. These are
-nonanticipating policies; a worker does not replan the graph. An environment fixes arbitrary finite nonnegative
+**A node-player execution game.** Fix one finite task DAG and a finite set of compatible execution nodes.
+The orchestrator and each choreographer are separate players. In compilation, the first chooses placements and
+each assigned node chooses when to start. In interpretation, nodes choose ready proposals and the first checks
+and persists them. In mixed, the first assigns nonpush tasks and interprets first-only effects.
+These are nonanticipating legal policies over the same fixed graph; the mode changes neither its edges nor the
+duration vector. An environment fixes arbitrary finite nonnegative
 task durations before play. Each duration coordinate may be chosen separately, without a probability law, and is
 learned only when that task completes.
 Admissible policies make legal decisions and eventually start every task for every finite duration vector.
@@ -3624,8 +3631,9 @@ tasks, with no configured bound on their number.
 
 For fixed durations `d`, give every execution player the same payoff `-(T(P,d) - Lk(d))`, where `P` is the joint
 policy and `T` its task makespan. The recurrence above proves `T(P,d) >= Lk(d)` for every feasible profile.
-The profile in which the orchestrator offers each newly ready task immediately under the stated placement policy
-and each assigned worker starts immediately attains `T = Lk(d)`. It is therefore a pure Nash equilibrium for
+The all-ASAP profile in which the mode's chooser proposes each newly ready task under the stated uniform
+placement policy, the first accepts it without delay, and its executor starts immediately attains `T = Lk(d)`.
+It is therefore a pure Nash equilibrium for
 each fixed `d`: no unilateral deviation can raise any player's payoff above zero. It is also a global team
 optimum under these premises because even a joint deviation cannot finish before `Lk(d)`. This is a direct
 equilibrium proof for infinite policy spaces, not an application of
@@ -3636,15 +3644,15 @@ An optional robust outer game makes the environment an adversary with payoff
 `r(ASAP,d) = 0 = r(ASAP,d*) <= r(P,d*)` for all `P,d`. Thus `(ASAP,d*)` is directly a pure equilibrium of
 the adversarial team game; the collapsed team-versus-environment zero-sum game has a saddle with minimax and
 maximin value zero. The regret form also covers an empty or all-zero plan. When `Lk(d) > 0`, `T/Lk` gives the
-same argument with value one. Nature is an optional outer adversary, not a substitute for the worker players.
+same argument with value one. Nature is an optional outer adversary, not a substitute for the node players.
 
 Equilibria need not be unique or efficient. For a fixed duration vector, take two independent unit tasks,
-each eligible only on its own worker. Let the orchestrator offer both at time zero and let both workers wait one
-unit before starting. The makespan is two although `Lk = 1`. If either worker alone starts immediately, the
+each eligible only on its own choreographer. Let both be accepted at time zero and both executors wait one
+unit before starting. The makespan is two although `Lk = 1`. If either executor alone starts immediately, the
 other task still finishes at time two; the orchestrator cannot reassign, duplicate or execute either pinned task.
 This is an inefficient weak Nash equilibrium under the common payoff. The preceding universal-exactness proof instead
 identifies the joint online start-time behavior required across every hidden unbounded duration vector. It does
-not identify unique code, individual strategies, worker mappings or an equilibrium profile. Binding capacity,
+not identify unique code, individual strategies, node mappings or an equilibrium profile. Binding capacity,
 transport, failure and recovery costs of an actual CCME run lie outside this ideal game.
 
 Even under unlimited capacity, asymptotic optimality does not force this exact start policy. An online policy
@@ -3670,7 +3678,7 @@ take 1 for the first level, `k` for each of the next `k - 1` levels, and `k` for
 `T_barrier = 1 + (k - 1)k + k = k² + 1`. Their task-time ratio is `Theta(k)` on this family.
 
 A static nonstealing assignment fixed before durations are known also has an unbounded worst-case gap.
-Take `s >= 2` and `n = s²` independent tasks on `s` one-slot workers. Some worker receives at least `s` tasks.
+Take `s >= 2` and `n = s²` independent tasks on `s` one-slot nodes. Some node receives at least `s` tasks.
 Give `s` of its tasks duration 1 and every other task duration `epsilon = 1/s³`. Its completion time
 is at least `s`. A dynamic work-conserving list has `Wk < s + 1/s`, `Lk = 1`, and by clause 2 finishes
 before `2 + 1/s²`. This says nothing against static placement that knows durations or permits stealing.
@@ -3685,7 +3693,7 @@ separations from the named rescanning, sequential, barrier and nonstealing metho
 The graph input and scheduler state have distinct space accounts. A retained explicit adjacency-list task graph
 occupies `Theta(Tk + Dk)` words under that representation. Indegree counters, a ready queue and in-flight leases
 use `O(Tk + Wn)` auxiliary words, apart from compatibility and output-set metadata whose sizes depend on their
-inputs. Retaining both the explicit graph and a `Wn`-entry worker directory gives
+inputs. Retaining both the explicit graph and a `Wn`-entry node directory gives
 `Theta(Tk + Dk + Wn)` resident words for those chosen structures and conventional bookkeeping. This matches
 their required representation size; it supplies no universal auxiliary-memory lower bound.
 Each edge can be processed once, for `O(Tk + Dk)` readiness work. If every explicit task and edge must be
@@ -3727,7 +3735,7 @@ event. Count every mutable completion annotation or overlay as auxiliary schedul
 borrowed graph fields; immutable input and write-only output are excluded. Distinguishable state for all
 subsets then needs at least `n` auxiliary bits. An `n`-bit completion bitmap and one gate bit attain
 `O(n)` bits with `O(n)` total update and enumeration work on this family. For word size `w`, the
-lower bound is `Omega(n / w)` words, not `Omega(n)` words. Replaying durable evidence, querying workers,
+lower bound is `Omega(n / w)` words, not `Omega(n)` words. Replaying durable evidence, querying nodes,
 changing the output timing or changing the graph representation changes this model. The result proves no
 universal auxiliary-word minimum for the full executor or planner.
 
@@ -4137,8 +4145,8 @@ CCME 3 additionally defines `vcs` (§25), explicit rollback activation plus pack
 the optional polyrepository Git profile (§27), and optional distributed execution (§28). External VCS adapters and
 rollback remain future engine contracts; implementing one profile does not implement the others. Omitting `vcs`
 selects Git. Omitting rollback execution enablement never authorizes withdrawal. Omitting all §27 activation inputs
-preserves the single-history model. Section 28.2 defines the `execution` node settings: the default role is
-orchestrator, and an empty worker list preserves local execution.
+preserves the single-history model. Section 28.2 defines `execution` node settings: the entry node is the
+orchestrator for that run, and an empty choreographer list preserves local execution.
 
 Defaults are chosen so that an unconfigured repository behaves conservatively and predictably.
 
@@ -4228,7 +4236,8 @@ Configuration MUST NOT be able to change:
 * the fact that every workspace package is a release unit (§13.10a).
 * repository-qualified revision identity, the ban on timestamp baseline inference, and source-first durable recording
   in the polyrepository profile (§27).
-* worker authority restrictions, complete locking before distributed planning, exact input/output identity and
+* choreographer authority restrictions, complete locking before distributed release planning,
+  exact input/output identity and
   exclusion of transport state from native release history in the distributed execution profile (§28).
 
 These are the guarantees the format rests on. A tool that makes any of them configurable is not conforming, however it
@@ -4779,9 +4788,9 @@ For §27, fixed repository state means the complete map from repository identity
 gitlink snapshot, reachable release tags, and explicit baseline tuples. Output order compares repository identities
 byte-wise before repository-local topological commit index and unit index. Commit dates never provide an order.
 
-For §28, placement settings, worker availability, transient run identifiers, branch names and completion order
+For §28, placement settings, choreographer availability, transient run identifiers, branch names and completion order
 MUST NOT change the semantic plan. Operational receipt metadata is separate from its canonical serialization;
-diagnostics retain deterministic semantic ordering rather than worker arrival order.
+diagnostics retain deterministic semantic ordering rather than choreographer arrival order.
 
 ### 17.3 Versioning of this specification
 
@@ -7229,8 +7238,8 @@ them:
 
 Existing configurations of the second mode retain their established behavior.
 
-The optional execution profile (§28) works with all three history modes. Execution links connect worker nodes;
-fleet links connect repositories. Neither worker placement nor the run's orchestrator role changes repository
+The optional execution profile (§28) works with all three history modes. Execution links connect choreographer nodes;
+fleet links connect repositories. Neither node placement nor the run's first-node identity changes repository
 discovery or makes a peer a separate control repository.
 
 The control repository of the second mode is where the fleet's configuration, its fleet-wide intent and its optional
@@ -7723,9 +7732,10 @@ topology requires copying package manifests or other peers' package configuratio
 The entry checkout MUST satisfy the same link
 initialization, history, configuration and release requirements as any other invocation; choosing a different
 entry point does not waive those requirements.
-Under §28, repository entry points and execution-node roles are distinct: an explicit worker MUST refuse
-release initiation, including nested hooks, before acquiring locks or forwarding the request. The CI-starting
-orchestrator MUST acquire every participating repository's lock before planning and assigning tasks (§28.3).
+Under §28, repository entry points and per-run node authority are distinct: a choreographer handling an
+assignment MUST refuse release initiation, including nested hooks, before acquiring locks or forwarding it.
+The starting orchestrator MUST acquire every participating repository's lock before fixing planning input
+or dispatching release tasks (§28.3).
 
 **Peer identity.** `repository` is a repository's own identity in its fleet. It is REQUIRED in this topology and is
 written as `[A-Za-z0-9._-]+`. `control` and its case variants remain reserved for a central control repository and MUST NOT
@@ -7981,260 +7991,221 @@ This is an **optional execution profile**, independent of the history-selection 
 syntax and asserts no speedup; what the dispat engine implements of it, and where that engine departs from it, is
 stated by date in [DESIGN-HISTORY.md](./DESIGN-HISTORY.md), not here. Git is REQUIRED for the
 source/result transport defined by this profile; external VCS adapter support does not imply support for it.
-Omitting worker links preserves local execution. Implementations advertising this profile MUST satisfy all
-of its safety, output-transfer and conformance requirements, not only remote command dispatch.
+Omitting choreographer links preserves local execution. Implementations advertising this profile MUST satisfy
+its common safety and output-transfer requirements and the conformance vectors for every mode they advertise,
+not only remote command dispatch. A mode that the binary does not implement is refused before effects (§28.1).
 
-### 28.1 Scope and roles
+### 28.1 Nodes, modes and authority
 
-An execution node is a machine or runner executing the same release engine and
-configuration schema. It is distinct from a repository peer. One repository
-may have work on several nodes; one node may work on several repositories.
+An execution node runs the same engine and configuration schema. It is distinct from a repository peer.
+One repository may have work on several nodes, and one node may join several runs.
+The node where a run starts is its **orchestrator**. Every other execution node of that run is a
+**choreographer**. The orchestrator is an ordinary eligible execution node too; it may run build, test and other
+compatible tasks within its own capacity. A machine may be the orchestrator of one run and a choreographer of
+another. There is no persistent configured role or second worker product.
 
-Every node MUST support both roles, and one engine provides both. Serving
-delegated tasks MAY be a distinct invocation or process of that same engine,
-for example a long-running serving command; no separate worker product and no
-second configuration format is required. The default role is **orchestrator**;
-an explicit **worker** role MUST refuse release initiation, including indirect
-initiation from a delegated hook. A worker executes authorized tasks in an
-existing run and MUST NOT substitute a locally recomputed plan, acquire competing release
-ownership, dispatch to another pool, or independently finalize a release.
-An orchestrator-capable node MAY accept delegated tasks; for that assignment it
-has only worker authority. Role changes MUST NOT transfer a live run's ownership.
+The orchestrator alone owns release locks, release publication, native recording and every engine-managed Git
+push of the run, including preflight, task claims, results, retries, cancellation and cleanup. A choreographer
+may fetch exact coordination objects read-only and return authenticated proposals and results over the non-Git
+channel of §28.4. It has no authorized Git-push effect. A configured shell command is trusted executable policy,
+not a sandbox: this rule does not claim to stop arbitrary shell code with independently available credentials
+from contacting Git or a registry. Such a command still cannot gain engine-managed native-release authority.
+The orchestrator verifies the current release-lock objects and generation before new write-capable effects.
+A signature alone does not prove lock ownership. A sweep has its separate non-lock generation and cannot write
+release refs. At most one orchestrator owns a given run; a second entry process must acquire its own complete
+lock set and may be refused by the first run's exclusion.
 
-The orchestrator-role node on which CI starts the release is the run's orchestrator. A CI release
-invoked on an explicit worker MUST fail before acquiring release locks or forwarding an initiation request.
-The orchestrator owns repository lock acquisition, the fixed planning input, task allocation, result admission, and
-release finalization. It MAY execute tasks locally under the same rules: a build it keeps is captured, described,
-signed and admitted exactly as a worker's is, and its consumers receive the same identity for the result, so nothing
-about an output says where it was built. There is one orchestrator per run, not a permanent leader of the
-repositories.
+`--distribution-mode` accepts exactly `compilation`, `interpretation` and `mixed`; its default is
+`compilation`. The modes share one semantic release plan, deterministic task identities, dependency and outcome
+edges, capacity rules, provenance checks, and recovery obligations. They differ in who chooses eligible work
+and when effect decisions are evaluated:
 
-Workers MAY be added to **every history mode**: single history (including a
-large monorepo), specified histories, or discovered histories. They MUST NOT
-require a control repository, a particular peer topology, or polyrepo activation.
-Worker endpoint links are execution links, not Git submodule/fleet links, and
-MUST NOT alter source discovery, repository identity or release scope.
+* In `compilation`, the orchestrator compiles the graph and assigns ready command tasks. It publishes and records.
+* In `interpretation`, every node derives the graph and proposes locally ready work. The orchestrator validates,
+  publishes and records.
+* In `mixed`, the orchestrator compiles and assigns nonpush command tasks. It interprets first-only effects after
+  exact prerequisites settle.
 
-### 28.2 Configuration and concurrency
+Mixed is specified here for a later implementation. A binary MUST reject a mode it does not implement; it
+MUST NOT silently execute it as compilation. An implementation's dated conformance status belongs in
+DESIGN-HISTORY.md, not in the normative meaning of these values. No mode changes which packages or versions
+`Plan(input)` selects. Execution links are independent of the history-selection modes in §27 and MUST NOT
+change source ownership, repository discovery or release scope.
 
-The same configuration format and schema MUST serve both roles. The following keys belong to this profile:
+### 28.2 Configuration and capacity
 
-| Key | Default | Contract |
-| --- | --- | --- |
-| `execution.role` | `orchestrator` | `orchestrator` or `worker`; governs release initiation on this node. |
-| `execution.concurrency` | `1` | Positive integer bounding simultaneous assigned command tasks on this node, including tasks from different runs. |
-| `execution.workers` | `[]` | Orchestrator's execution links, each with a unique nonempty node `name` and authenticated transport `endpoint`. |
+The public serving command is `dispat choreographer`. `dispat worker` is removed and MUST fail with migration
+guidance before shorthand script dispatch; `dispat run worker` remains a valid ordinary script invocation.
+Configuration uses `execution.choreographers` for linked nodes, `execution.concurrency` for this node's
+positive cross-run command capacity, and `runOnly: choreographer` for a task eligible only on a non-first node.
+`runOnly: orchestrator` selects the first node. The old `execution.role`, `execution.workers`,
+`runOnly: worker` and `--worker` spellings MUST fail explicitly. A linked repository or delegated package
+policy cannot change node capacity or the first node's authority. Node names identify execution endpoints,
+not repository peers.
 
-These are node-startup settings. A package, space, linked repository, or delegated policy snapshot MUST NOT change the
-local role, local capacity, or worker list when execution enters another checkout. A worker MUST have an empty worker
-list. An orchestrator receiving a delegated task MUST NOT use its own list for that task. Endpoint schemes, protocol
-framing and credential references are implementation-defined and MUST be documented in this same schema; secrets MUST
-NOT appear in endpoint URLs, receipts or logs. Node names identify authenticated execution endpoints, not repository
-peers. A node may serve both capabilities, but each assignment has exactly one authority scope. A transport the worker
-polls, as the Git mailbox of §28.4 is, additionally gives the worker its own name and the endpoint it polls; those keys
-belong to the transport and are documented with it. Execution links MAY also be stated by the invocation itself, as when
-a pipeline names a machine it created a moment earlier: such links are validated as the configuration's are, refused
-under worker authority as the configuration's are, and are no part of `plan` or its digest.
+With no remote choreographer, eligible work in every mode runs on the first node without a return listener.
+A task restricted to a choreographer then has no compatible node and must be refused before effects.
+With any remote choreographer, release and command-sweep entry points require an advertised
+`--return-endpoint=https://host:port`. `--return-listen=host:port` MAY set a different local bind address
+without changing the advertised one. These are runtime invocation settings, not a new static role.
+Endpoints contain no credentials. The signed bootstrap binds the exact advertised endpoint and per-run TLS
+leaf-certificate SHA-256 pin. The direct authenticated return channel has bounded requests and streamed result
+bodies; it requires no external relay service. The same configuration schema serves all nodes.
 
-Example, with the Git mailbox transport of §28.4, where an endpoint is a Git repository the nodes share, here the
-project's own repository, and `secretEnv` names the variable holding the secret the mailbox's messages are
-authenticated with:
+Local node capacity bounds simultaneous command tasks across runs. A run also respects its existing build,
+publish, stage, recording and owner-lane limits; adding nodes does not multiply a run-wide budget. A delegable
+command attempt consumes its applicable weighted node and run-wide budgets from accepted claim until terminal
+completion or safely acknowledged cancellation. First-only publication and native recording retain their
+owner-lane and run-wide budget accounting without a peer claim. An unanswered timeout alone never frees a
+possibly active attempt.
+An unclaimed reservation consumes no task capacity. Shared workspace writes serialize or use isolated task
+materializations. Preflight MUST validate every linked node, protocol/toolchain version, platform, exact
+transport capability, capacity and return route before any package frame. It MUST refuse an incompatible node
+rather than silently drop it. Secret values are resolved from local references at the executing node and MUST
+NOT appear in signed Git objects, endpoint URLs, manifests, receipts or logs.
 
-```yaml
-execution:
-  role: orchestrator
-  concurrency: 2
-  secretEnv: CCME_EXECUTION_SECRET
-  workers:
-    - name: build-a
-      endpoint: https://git.example.invalid/acme/project.git
-    - name: build-b
-      # No endpoint: accepted where the implementation documents the
-      # repository's own remote as the endpoint of a link that states none.
-```
+### 28.3 Fixed input, shared graph and mode semantics
 
-The corresponding worker uses the same schema with `execution.role: worker`, its own name, the endpoint it polls, its
-own concurrency limit and no worker links. Package configuration, commands and release policy remain the
-orchestrator's resolved input.
-Node settings select the role, execution concurrency and worker-node links. A worker needs no worker-specific release graph, package
-policy, version rules or workflow; it receives the run's resolved configuration.
-Transport credentials and node authentication are deployment prerequisites,
-not a second release-policy format.
+Before a write-capable release run, the orchestrator identifies every participating repository, including a
+control repository where one exists, and acquires the complete release-lock set in stable order. It revalidates
+discovery and authoritative release records under those locks before planning. A changed participant set
+requires releasing partial locks and acquiring the complete set again. Read-only planning takes no release
+lock and dispatches no effect. An unsafe lock bypass MUST refuse distributed release execution.
 
-Worker concurrency is a positive local upper bound on simultaneous assigned
-tasks. Effective capacity is the intersection of that bound and the run's
-existing stage limits and resource exclusions. Existing build/publish limits
-MUST be respected across the whole run, not multiplied by the number of workers.
-Preparation, test, build and publish command tasks MUST consume node capacity, plus their applicable
-run-wide stage budgets. Transfer, recording and control work MUST have separately documented bounded capacity;
-recording still takes its owner's publication lane. An in-flight attempt retains its capacity reservation until
-completion or acknowledged cancellation, or until execution has been safely fenced. A timeout alone cannot free
-capacity for a possibly overlapping attempt. Capacity is reserved from the claim: an assignment no node has claimed
-is queued work and not an attempt, holds no capacity, and MAY be withdrawn and offered again without any of the
-above. Shared workspace writes MUST serialize or use separate task worktrees.
+The run fixes one planning envelope: repository identities and relative checkout layout, exact planned HEADs,
+source and configuration snapshot commits, the complete relevant commit-history and unit object closure,
+authoritative release records, withdrawal and publication receipts, and applicable §27 fleet links and
+checkpoint evidence. It also fixes the complete authoritative release-tag inventory for every configured
+package namespace and alias ref, each ref's direct object ID and peeled target, explicit selection,
+semantic planner options, algorithm and protocol versions, run ID and ownership generation. Annotated tag
+objects travel by exact OID, not by reconstructing them from peeled commits. No resolved secret belongs in the
+envelope. The planner MUST read an immutable materialization of those source/config bytes and exact ref map.
+A before/after sample of mutable live files alone does not prove that one coherent state was read: an input can
+change and revert between samples, or one pass can observe a mixed intermediate state. An alternative
+stable-read protocol needs an explicit exclusion or fence that detects every relevant concurrent mutation.
+If the actual planning input cannot be established, preflight refuses or replans from a new immutable capture.
+A late snapshot MUST NOT be asserted to be the state the planner used.
 
-The orchestrator MUST validate the effective configuration, protocol/toolchain
-compatibility and output-transfer capability before dispatch. Worker-local
-settings MUST NOT override package policy, planned versions, commands or inputs.
-An empty worker list preserves local execution. Malformed links, an invalid
-role or nonpositive concurrency MUST be configuration errors. Unsupported protocol versions, target platforms or declared output sizes MUST fail preflight rather than
-silently dropping a worker or omitting required bytes. Implementations MUST document their task input/output
-schema, transfer limits and workspace integration policy; these are part of the shared configuration contract,
-not worker-specific copies of release policy.
+The envelope and graph identity are signed. Source snapshots and the exact history/record closure are carried
+by authenticated object IDs reachable to every interpreting node; a history-free source tree alone is
+insufficient to recompute `Plan(input)`. Source snapshot commits are direct carrier parents of the preflight
+object. A receiving node verifies signature, run, generation, exact source and history objects, receipts,
+tag object/peeled pairs, and carrier membership before private materialization. In a release it checks the
+first node's identity
+against current lock-acquisition evidence; a sweep checks its signed non-lock generation instead.
+A peer may not read ambient mutable files or follow moving refs in place of pinned inputs. A mismatch in plan
+or graph digest refuses claims. A task result binds the exact effective source, admitted prepared state,
+predecessor results and declared outputs it actually consumed.
 
-### 28.3 Lock, snapshot, plan, assign
+The deterministic semantic planner computes the release plan, then one shared graph compiler defines task
+vertices, predecessor and failure/outcome edges, placement, weights and budgets for every mode. The indexed
+readiness interpreter uses in-memory adjacency and indegree/outcome counters; it does
+not mean whole-DAG rescanning on every completion. There is no standalone persisted plan file.
+Native preparation that writes shared manifests or lockfiles is an explicit first-node task with its required
+file/owner lane. Its admitted bytes are a new prepared input state. A later relevant native change invalidates
+an earlier result if that result's full effective input identity no longer matches. A build never implicitly
+regenerates a shared lockfile on each peer. Transport commits never become release intent, plan history,
+release-tag ancestry or a native-head admission.
 
-Before creating a write-capable run, the orchestrator MUST identify every participating repository, including any
-control repository, and acquire all release locks in one stable total order. It MUST verify ownership before planning or
-dispatch; failure releases acquired locks in reverse order and dispatches no write-capable task. Repository lock
-resource identities MUST be stable across CI entry points and endpoint aliases, so runs addressing the same repository
-compete for the same exclusion. Under the Git release-lock convention, every participant's lock is its own
-`dispat-release-lock`; one entry lock does not cover unlocked sources. It MUST revalidate discovery under those locks; a
-changed participant set requires releasing the partial acquisition and acquiring the complete set again in the stable
-order, not silent expansion. Discovery and compatibility inspection before locking MUST be read-only; hooks or task
-setup that can write run only after the complete locked snapshot is validated. Distributed release execution MUST refuse
-a configured or environment-based unsafe lock bypass, including the bypass described for local peer execution in §27.11.
-Read-only planning remains lock-free and does not dispatch side effects, execution links or not: with links it MAY fix
-and report the plan digest and probe the links, and MUST NOT assign a task.
+In `compilation`, the orchestrator computes the graph, maintains readiness and chooses compatible task/node
+placements. It signs exact assignments containing run, plan and graph digests, task/attempt, node, ownership
+generation, source and predecessor object IDs, resolved command frame, permitted writes and outputs, and
+platform requirements. Peers authenticate and execute those assignments; they do not replan or substitute a
+locally chosen task. The first node may choose itself. Every probe, claim and result reply returns over §28.4;
+the first node alone persists Git state and supplies an exact signed acceptance receipt before execution.
 
-Let `input` contain the fixed repository-qualified heads and complete relevant history, release records, graph,
-resolved semantic configuration and explicit release options, plus the verified withdrawal inventory and
-receipts required by §§13 and 26. Its release records are the authoritative stores' records as compared under the
-locks (§13.2): the orchestrator's checkout is one clone among several, and a plan fixed from records it never fetched
-would be signed, digested and dispatched to every node exactly as a correct one is. The semantic release plan is the
-pure function `plan = Plan(input)`, including both forward-release and applicable rollback projections. Node placement
-configuration is not semantic input:
-worker count, placement, completion order, wall-clock time, run IDs and transport branch names MUST NOT change
-`plan`. A plan digest MUST use a documented canonical serialization of semantic input and plan content;
-transient execution identity MUST be bound separately. The cost obligations of §13.11 still apply to planning;
-parallel execution is not evidence that a planner satisfies them. Native records
-and peer settlement retain their narrowly defined admission under §27; they
-do not authorize replacing the original planning input with an arbitrary ref.
+In `interpretation`, every node independently computes the same semantic plan and indexed task graph from
+the identical pinned envelope. It compares both digests before it proposes work. Each node applies accepted
+terminal events once to its outgoing edges, chooses a locally ready compatible task, and enforces its own
+cross-run capacity. A proposal is not authority to start. The orchestrator validates the proposed task/node
+against fixed graph readiness, accepted predecessor outcomes and exact input IDs, attempt/branch state,
+platform and global weighted budgets. It MUST NOT silently replace the proposal with a different task or
+node of its own choice. It atomically persists accepted claim and capacity change in the one authoritative
+CAS domain, then returns an exact signed receipt. Only that receipt authorizes execution. A disconnected
+first node stalls new claims and admission; it is a persistence dependency, not central task selection.
+The orchestrator cannot certify a peer's actual free local slots from a timestamp: the peer enforces and
+attests its own cross-run limit. A failed attempt is not a logical terminal failure until its retry/exhaustion
+decision is durable. First-node local work uses the same broker rules.
 
-The orchestrator derives a task DAG from `plan`, including required preparation,
-tests, builds, transfers, publications and recording gates. A task can be placed
-only on a compatible node and only when its exact prerequisites are available.
-Independent ready tasks MAY run concurrently. The assignment schedule need not
-be deterministic; selected packages, versions, commands and dependency semantics
-MUST remain those of the same fixed plan. Where a package's stages may be placed, on the orchestrator, on a worker
-or on either, is execution policy of the package or its space, declared beside the relation of §19.2a and, like it,
-no part of `plan`.
+In `mixed`, the orchestrator compiles and centrally assigns tasks whose engine-managed effects do not push
+Git or perform a native release mutation. Delegable preparation, test, build and user stages are in that
+segment. Version, sign, syncLock and shared-file preparation may be compiled there only when their
+engine-managed effects are nonpush; they retain required first-node placement and file/owner lanes.
+Login and publish hooks, publication, native release commits/tags/ref pushes, peer settlement, receipt
+reconciliation, recording and postrecord hooks belong to the first-only interpreted effect segment.
+An engine-managed native mutation in an earlier preparing stage also belongs to that effect segment.
+This is an authority classification, not a claim that arbitrary trusted shell commands are sandboxed.
+Virtual relay vertices are graph gates rather than separately executable tasks. Every executable task has
+exactly one policy owner. Signed exact outcome and effective-input gates cross the partition in both directions:
+a build can unlock publication, and a settled provider publication/record can unlock a later consumer build.
+These alternations may recur along one dependency chain; mixed is not a global two-phase barrier.
+The same fixed graph and failure semantics apply throughout. The orchestrator interprets effect decisions only
+after those predecessors settle and alone performs every authorized push.
 
-Every reconciliation that writes a shared manifest or lockfile MUST be an explicit task executed under the
-orchestrator's authority, never implicitly by a worker. Such tasks MUST serialize per shared file, and each
-admitted result is one prepared input state. Builds fan out only from an admitted state, and every build MUST
-bind, in its own manifest, the exact admitted prepared input state it consumed.
-Workers MUST NOT each regenerate and race to merge a workspace-wide lockfile
-as an implicit part of otherwise independent package builds. A later required
-shared mutation creates a new prepared input state rather than mutating one a running build consumes; it
-creates a new dependency gate and invalidates affected outputs, and it MUST NOT force all builds in the
-repository onto one node when their prepared inputs and output write sets allow independent execution.
+### 28.4 Return channel, Git state and recovery
 
-Each assignment MUST identify the run, plan digest, task, attempt, ownership
-generation, repository-qualified source object IDs, effective configuration and command environment,
-toolchain/platform requirements, input receipts, permitted writes and outputs.
-The ownership generation identifies the exclusion the run holds: under the Git
-release-lock convention it is a value derived from the identities of the lock objects the run holds, for
-example the lock tag object IDs of every participating repository, so that a new acquisition always yields a
-new generation. Secret references are separate from logged or transported public metadata. A command
-environment derived from secret references travels as those references and is resolved on the executing node
-from that node's own environment; resolved secret values MUST NOT be written to transport branches,
-manifests, receipts or logs.
-Workers MUST authenticate the assigning orchestrator and the assignment's integrity; a matching digest alone
-is not proof of authority. Nested hooks and commands retain the assigned policy, package-root mapping and
-worker authority; they MUST NOT rediscover policy or source history from a transport checkout, compute a second
-release plan, or revise the orchestrator's fixed plan. They verify the assignment's source object IDs and materialize
-only its stated inputs before executing its commands.
-Duplicate delivery MUST be recognized. Only one attempt may be authorized to
-perform a given external side effect; an uncertain previous attempt is reconciled
-before another is authorized. A task receipt is execution evidence, never a
-package release record.
+The first node starts the authenticated return listener before signed preflight. Peers send signed probes,
+claim proposals, result bundles and receipt queries there; they only fetch Git read-only. The first node
+verifies a probe and persists its Claim/Result on its owned probe ref. A proposal sent before the task broker
+is initialized receives a bounded refusal, not an implicit claim. A result body is streamed to bounded
+temporary storage, checked against its digest and exact task/input binding, then admitted and pushed only by
+the first node. A lost response is settled by proposal ID and exact persisted object; repeating a request is
+not permission to repeat an external effect.
 
-### 28.4 Git synchronization branches
+All three modes use one canonical shared authoritative coordination Git repository per run. Every participant
+MUST be able to fetch it read-only; otherwise preflight refuses. An endpoint alias or mirror may carry the
+same objects but is never a second claim authority. After the fixed graph is known and before the first
+package frame, the first node creates one inert signed branch for each known logical delegable task, using
+bounded atomic batches. Other fixed-size dispatch/index refs may be precreated for bounded polling.
+Preflight probes, release locks, tags and native record refs are separate. The complete initialization must
+settle at exact OIDs before execution starts. A refused or ambiguous later batch requires exact read
+settlement and leased cleanup; there is no global atomic push across distinct repositories.
+An inert branch, empty slot or task name alone authorizes nothing.
 
-Protocol version 2 separates an inert task attempt from its later placement. After preflight and task-graph
-compilation, the orchestrator MUST create signed reservations for every permitted attempt of each worker-eligible
-logical task, before any package frame starts. A task ref is
-`refs/heads/dispat-task-<run>-<task-digest>-<attempt>`; the digest is the first 128 bits of SHA-256 of the task name,
-and the ref does not name a worker. For each worker, the orchestrator
-MUST also initialize a fixed set of signed slot-notice refs. Its slot count is
-`min(reported worker capacity, logical tasks eligible on that worker)`. A slot ref is
-`refs/heads/dispat-slot-<node-digest>-<run>-<slot>`, where the node digest is the first 128 bits of SHA-256 of its
-configured name. Names route and index work but grant no authority: signed
-messages bind the run, plan, task, attempt, node when assigned, branch and exact object identities. A worker polls
-only its own slot prefix and preflight probes, then fetches the task ref named by a verified notice. It MUST reject
-an unsupported protocol version before accepting work. Local version, sign and publication work, preflight probes,
-release tags and locks require no task reservation. The task and slot refs are execution state, not a serialized plan
-file or an input to a new worker-side planning pass.
+The task branch is the sole attempt authority for that logical task. Claim, result, retry-ready, cancel and
+terminal decision are successive exact-lease CAS commits on it, so two peers cannot claim separately
+precreated attempt branches. The durable claim contains its proposal ID and exact input digest. Claim and
+capacity-ledger refs are updated atomically in the same repository; preflight verifies atomic multi-ref push
+capability. Terminal, acknowledged cancellation and retry transitions fence capacity release in the same domain.
+A Git no-op ref update with a stale lease is not treated as a fencing proof; signed state and companion refs are
+checked. No timed-out or disconnected attempt is reassigned until it is safely stopped, fenced and, where
+necessary, its external effect reconciled under §19.4.
 
-The orchestrator MUST settle the complete initialization on every configured endpoint before the first package
-frame. It MAY use bounded atomic batches per endpoint, but if a later batch is refused or remains unresolved, it
-MUST settle or clean the refs it created and refuse the run without starting a package frame. Endpoint aliases for
-the same prepared reservation MUST receive the same exact object ID. At readiness, the orchestrator chooses a
-compatible node and atomically compares and swaps one reservation to a signed assignment together with one of
-that node's reusable slot notices. The assignment's first parent is the reservation. Exact source and predecessor
-result carrier objects are its secondary parents; the worker verifies the signed input identities and the required
-direct-parent membership before materializing them. The active protocol creates no separate runtime snapshot or
-relay refs. Neither a reservation nor an empty slot authorizes execution.
+The first node writes a monotonic signed terminal-event chain or equivalent bounded read-only feed in that
+canonical repository. Every event has a sequence, task identity and exact accepted outcome/result OID.
+The authoritative task-terminal CAS and event-index advance MUST be one atomic remote transaction, or a
+restart reconciler MUST publish a missing event from the exact terminal task state before peers proceed.
+An event MUST NOT name an outcome whose task CAS did not land. Its sequence lives in signed durable state,
+not only process memory.
+Peers fetch from their last verified sequence, reject gaps/reordering, and replay from the signed root after
+restart. Cleanup cannot remove an unread required event. A terminal event becomes visible only after attempt
+retry/finality and result durability settle; a raw failed attempt cannot release a successor. Each node
+applies an event once to its indexed outgoing edges. The feed is coordination state, not a plan file or peer
+push authority. The first node can reconstruct broker task, budget and receipt state from exact signed refs
+and events after restart; orphaned proposals never become accepted by inference. The per-run TLS key and
+certificate pin are also part of that continuity. Resuming the same generation requires protected durable
+access to the same return identity and signing authority. If those keys were memory-only and lost, the old
+generation MUST be aborted and fenced, outstanding effects settled, and a new signed generation bootstrapped.
+A new certificate under the old pin is not silently trusted by peers.
 
-Each acknowledged checkpoint MUST identify an exact full object ID;
-consumers fetch that object and validate its manifest rather than following a
-moving branch tip. A consumer MAY obtain the object by fetching a ref that advertises it and then resolving
-the exact object ID locally; it MUST then read only from that object ID and never from a ref whose tip can
-still move. A tip a node fetched but could not read or verify has not been seen: the node MUST NOT record it as
-observed, or one transient read failure silently costs the attempt its only reading of that message and, with it,
-the rest of its deadline. Both the orchestrator and the assigned worker MAY advance an attempt's branch. Ref updates and
-deletions MUST check the expected previous object ID and attempt ownership, so that an update racing the
-other party's update fails instead of overwriting it. Transport-only credentials MUST NOT authorize a worker
-to update native release branches, tags or fleet settlement refs.
-Acknowledged checkpoints MUST remain fetchable until all required consumers have retrieved and verified them.
-Where concurrency permits several tasks at once, use separate branches/worktrees
-and admit their results independently as their dependencies become ready.
-Concurrency one still supports the same protocol in sequence.
-
-A source snapshot MAY travel without the history behind it. The assignment names the repository-qualified planned
-head the snapshot was taken from, provenance binds to that revision (below), and a task's commands may not read
-history from a transport checkout (§28.3), so a parentless commit or a bare tree carrying the same bytes serves every
-purpose the snapshot has. A snapshot that descends from the planned head carries, on its first transport to a
-mailbox, every object reachable from that head, which for a large history is the dominant cost of the run and is paid
-again whenever cleanup removed the objects with the refs. A mailbox that already holds the repository's objects, the
-repository's own remote for one, a durable ref the mailbox keeps, or a history-free snapshot each avoid it. An
-implementation states which it does. Source and result carrier commits reachable through assignment parents do not
-become release records or additional mutable coordination refs.
-
-Transport commits MUST NOT be treated as release intent, a pending-window
-boundary, a successful release, or a §27 native-head admission. They MUST NOT
-be merged wholesale into a release branch or made ancestors of release tags.
-The orchestrator validates declared changes against the task's exact base and
-write set, detects overlapping/conflicting writes, and admits only authorized
-release-file changes through the ordinary native release transaction. Build
-outputs remain transport data. Hooks needing to change release-relevant inputs
-beyond the admitted writes require a new plan under the existing rules.
-
-Artifact provenance MUST bind the exact source revision and admitted release-file state actually used
-for its build. The ordinary native record MUST identify that publication: tag-only recording retains the
-planned source head under §19.1, while an enabled native release commit follows §27.7. Neither policy is
-replaced by tagging a transport commit or requiring a source commit solely for distributed execution.
-Generated release-file digests remain execution provenance when ordinary tag-only policy does not commit them.
-
-Before starting publication, the orchestrator MUST compare the result's full effective input identity
-against the current admitted relevant input closure. A native head advance preserves a completed result only
-when its effective input state still matches; admitting a head is not permission to ignore changed source
-bytes. Integrating one task MUST NOT silently alter another task's inputs. Overlapping writes require explicit
-ordering, revalidation and rebuilding when necessary; a change outside permitted native transitions requires
-a new plan. Transport branches MUST remain outside the heads, release refs and gitlinks supplied to `Plan(input)`.
-This is not an automatic merge policy for arbitrary generated files.
+One task's source and predecessor result carrier objects are exact signed inputs, not mutable ref tips.
+A receiving node verifies their direct-parent membership, manifest, byte count, path safety and declared
+write set before materializing them. Incomplete or conflicting declared outputs fail admission and required
+consumers remain blocked. A published release still requires its ordinary native record; no task receipt or
+coordination commit discharges that debt. Native release branches, tags and lock refs remain outside the
+task transport graph. An orchestrator publication with uncertain external outcome follows §19.4 regardless
+of which distribution mode supplied its build.
 
 ### 28.5 Dependent build outputs are first-class inputs
 
 **Source synchronization alone is insufficient.** A provider's Git revision or
-worker branch does not make its ignored/untracked `dist` files, generated
+task branch does not make its ignored/untracked `dist` files, generated
 types, assets or package bundle available to a consumer on another machine.
 A conforming implementation MUST transport the outputs needed by a local-output
 dependency, including declared ignored/generated files. It MUST NOT satisfy
 distributed execution merely by recloning sources and rebuilding the provider
 closure on every consumer node, or by pinning the entire connected JS graph
-to one worker.
+to one choreographer.
 
 A successful build MUST emit a manifest binding its outputs to the run, plan,
 task and attempt, repository-qualified source revision, admitted release-file
@@ -8306,39 +8277,39 @@ bytes replaces (above); and under `none` nothing.
 
 ### 28.6 Publication, recording and recovery
 
-One orchestrator owns each compiled release run and its lock set. Other entry processes MAY attempt a release of an
+One orchestrator owns each distributed release run and its lock set. Other entry processes MAY attempt a release of an
 overlapping repository set, but the locks admit at most one owner; they do not create additional orchestrators for
-that run. Build, test and user-defined stages before the release records MAY execute on workers under §28.2. The
-engine-managed `publish` stage and its hooks MUST execute on the orchestrator. A configured worker placement for
-`publish` MUST be refused; a scalar `runOnly: worker` also states that forbidden placement and MUST be refused.
-`runOnly: [worker, orchestrator]` delegates eligible build-side frames while retaining publication on the
-orchestrator. A worker MUST NOT independently move release branches, create release tags, settle peer links or
-finalize the fleet. Arbitrary worker script commands remain executable policy and do not gain native release authority.
+that run. Build, test and eligible user stages MAY execute on choreographers under §28.2. The engine-managed
+`publish` stage and its hooks execute on the orchestrator. A configured choreographer placement for `publish`
+MUST be refused; scalar `runOnly: choreographer` states that forbidden placement too.
+`runOnly: [choreographer, orchestrator]` permits eligible build-side frames on peers while publication stays
+on the first node. A choreographer MUST NOT move release branches, create release tags, settle peer links or
+finalize the fleet. Trusted shell commands retain their policy responsibility and gain no native authority.
 
-The orchestrator alone admits worker results, verifies their complete relevant input identity, and starts
+The orchestrator alone admits choreographer results, verifies their complete relevant input identity, and starts
 publication after all test, dependency, settlement, output and lock-ownership checks. It runs `beforePublish` in its
 own checkout and revalidates immediately after that hook and before the irreversible publish command (§27.2). It
 serializes publication and recording within one owner, including a single-history monorepo; isolated builds within
 that owner MAY overlap. Independent owners retain allowed dependency-safe publication concurrency. Run-level hooks,
 native recording, hooks that observe a completed publication, failure hooks, and restoration of a package's working
 tree after failure execute under the orchestrator. Hooks that bracket a delegated build-side stage execute with that
-stage under worker authority.
+stage under choreographer task authority.
 
-The orchestrator MUST retain and verify lock ownership while it dispatches work and publishes. Assignments and
-results are bound to its ownership generation; a stale result cannot authorize publication or native recording.
-After lock loss the orchestrator issues no new assignment or publication, but it MUST still attempt the create-only
+The orchestrator MUST retain and verify lock ownership while it dispatches work and publishes. Claims, assignments
+and results bind to its ownership generation; stale state cannot authorize publication or native recording.
+After lock loss it accepts no new claim, assignment or publication, but it MUST still attempt the create-only
 record of an effect that completed before the loss (§19.1). A record of an existing effect is not a new publication.
-A worker's missing result concerns computation or validation and MUST NOT be mistaken for an unknown
-engine-managed publication. Claimed work is not retried on another worker within the same run without proof the
-prior attempt stopped; an unclaimed assignment may be revoked under its exact coordination ref and offered again.
-Neither a missing worker reply nor a task receipt discharges a release obligation.
+A choreographer's missing result concerns computation or validation and MUST NOT be mistaken for an unknown
+engine-managed publication. Claimed work is not retried on another node without proof the prior attempt stopped
+and its task branch was fenced. An inert unclaimed task may be proposed again under its exact ref.
+Neither a missing choreographer reply nor a task receipt discharges a release obligation.
 
 The orchestrator's own publish command can still have an uncertain external result. A failed command reply or a
 missing tag does not prove that the destination lacks the artifact. Before repeating a potentially completed
 external effect, recovery MUST establish destination identity under §19.4 or use a publisher whose retry is
 demonstrably safe for that package, version and artifact identity. An opaque command without either capability
 cannot promise automatic recovery from this window. Preserve prior successes, block affected dependents and
-continue unrelated safe work under the ordinary failure rules. Worker completion order does not change
+continue unrelated safe work under the ordinary failure rules. Choreographer completion order does not change
 consumer-owned release boundaries. Fresh invocations reconstruct pending releases from authoritative repository
 records; task receipts, coordination branches, bundles and caches are not a second recovery ledger. Verified task
 outputs MAY be reused only when their full semantic input identity and provenance match, with a fresh current-run
@@ -8350,20 +8321,20 @@ borrowed nodes' unrelated data is never deleted. Repository locks are normally r
 order after the orchestrator's publication and recording path ends. A local publish-script error alone does not
 retain a release lock as evidence of an uncertain destination outcome. The lock serializes active orchestrators;
 it does not establish what happened at an external destination. A process stopped without lock cleanup leaves its
-lock for operator recovery under VCS-PROTOCOL.md §4. Revoking an unclaimed worker assignment fences that
-assignment's coordination ref, not an external publication. A changed ownership generation rejects stale worker
-results but is not an external-effect
-fence.
+lock for operator recovery under VCS-PROTOCOL.md §4. Revoking an unclaimed task fences its coordination ref,
+not an external publication. A changed generation rejects stale choreographer results but is not an
+external-effect fence.
 
 ### 28.7 Required example and performance boundary
 
 In one large JS repository, let the task-precedence notation `assets => {ui, docs} => app` mean that `ui` and `docs` consume
-`assets`, and `app` consumes both. The package edges of §2 point in the opposite direction. Worker A builds `assets` once and exports its required outputs.
-Workers B and C receive verified outputs and build `ui` and `docs` concurrently.
-The assigned app worker receives both output sets and builds `app`. Publication
+`assets`, and `app` consumes both. The package edges of §2 point in the opposite direction.
+Choreographer A builds `assets` once and exports its required outputs.
+Choreographers B and C receive verified outputs and build `ui` and `docs` concurrently.
+The assigned app node receives both output sets and builds `app`. Publication
 and source recording then obey the existing stage/owner constraints; an isolated
 registry-based image consumer still waits for image publication when required.
-Neither B nor C rebuilds `assets`, and the app worker does not rebuild their
+Neither B nor C rebuilds `assets`, and the app node does not rebuild their
 closures. This example MUST work without converting the monorepo to a polyrepo
 or publishing private intermediate JS packages solely for transport.
 
@@ -8374,35 +8345,44 @@ build products, guarantee compatible environments, or make effects exactly-once.
 A strictly serial dependency chain retains its critical path. Transfer and
 setup overhead can outweigh saved compute on small jobs, so universal speedup
 is not a semantic guarantee. Before making an implementation performance claim,
-compare the same pinned large-JS fixture locally and on multiple nodes, including cold/warm setup, per-node resources, transfer bytes/time, task execution counts, total work,
-wall time, repetitions and variability, and artifact equivalence. The fixture and environment MUST be
-identified with the measurements; skipped or failed trials MUST NOT be described as successful speedups. Require demonstrated wall-time benefit on a
-declared representative parallel fixture; do not call source-only dispatch or
+compare the same pinned large-JS fixture locally and on multiple nodes, including cold and warm setup,
+per-node resources, transfer bytes and time, task execution counts, total work, wall time, repetitions,
+variability and artifact equivalence. Identify the fixture and environment with the measurements;
+skipped or failed trials MUST NOT be described as successful speedups. Require a demonstrated wall-time
+benefit on a declared representative parallel fixture; do not call source-only dispatch or
 duplicate prerequisite compilation a distributed-build success.
+
+For an already supplied explicit graph of `n` vertices and `e` edges, one adjacency-list construction and
+one incremental readiness pass inspect `Theta(n + e)` required records and do `O(n + e)` graph/event work
+without retries. Interpretation repeats that in-memory state on each of `q` interpreting nodes, so the
+aggregate explicit graph state and event processing can be `O(q(n + e))`. Fixed-size claim and terminal
+events update indexed successors; polling all predecessors or all task refs after every event does not meet
+this bound. Semantic `Plan(input)`, sorting, Git history and record discovery, transport, publication,
+retries and recovery are separate costs. These bounds neither establish a fastest implementation nor a
+wall-time gain.
 
 ### 28.8 Conformance vectors
 
-These are required cases. Whether an implementation has executed them is that implementation's claim, made where its
-status is stated, and none of them is evidence of speedup. Some vectors state a condition on the implementation. A
-vector whose condition does not hold for an implementation is not applicable to it: it is neither satisfied nor
-violated, and every remaining vector still applies in full.
+These are required cases for each advertised mode. Whether an implementation has executed them is its dated claim,
+and none is evidence of speedup. A vector conditioned on a mode or optional profile the binary does not implement
+is not applicable, while that mode's invocation must fail before effects. Every other vector applies in full.
 
-1. No role or worker list: local orchestrator behavior remains unchanged.
-2. A worker receives direct or nested release initiation: refuse before locks
-   or side effects. An orchestrator-capable node accepts a delegated task with
-   worker authority and does not initiate another run.
-3. Add workers independently to each of the three history modes: same fixed
+1. No choreographer list: local first-node behavior remains unchanged. Removed role and worker keys,
+   old placement tokens and unknown mode values fail before effects; explicit `dispat run worker` still works.
+2. A choreographer receives direct or nested release initiation: refuse before locks or side effects.
+   A node may start a separate run only after acquiring that run's own first-node authority.
+3. Add choreographers independently to each of the three history modes: same fixed
    inputs produce identical package/version plans and source owners.
 4. Two CI entry nodes target overlapping repository sets: at most one acquires
    the complete lock set and dispatches effects; failure releases its partial
    set. An unsafe lock bypass refuses distributed execution.
-5. Vary worker count, date, randomness and completion order: `Plan(input)` is
+5. Vary node count, date, randomness and completion order: `Plan(input)` is
    unchanged. Concurrency limits hold locally and across the run.
 6. Two ready tasks share a repository: use isolated worktrees and branches;
    conflicting declared release-file writes are detected before admission.
 7. Branch tips move after dispatch or a stale receipt arrives: use only the
    assigned full object ID and matching plan/attempt/ownership generation.
-8. Ignored JS outputs from `assets` reach `ui` and `docs` on separate workers:
+8. Ignored JS outputs from `assets` reach `ui` and `docs` on separate choreographers:
    both builds use those bytes, overlap when ready and never rebuild `assets`.
    The app consumes both output sets without rebuilding either provider.
 9. An unselected provider is needed by a selected consumer: supply or prepare
@@ -8411,14 +8391,14 @@ violated, and every remaining vector still applies in full.
     prerequisite before consumer execution; preserve its release obligation.
 11. A registry-based consumer has local provider bytes but no required
     publication/record: remain blocked. Local transport does not weaken the edge.
-12. A worker's Git transport commit is fetched: no new intent, release baseline,
+12. A choreographer's transport result is fetched: no new intent, release baseline,
     tag, or admitted native head arises. Temporary commits stay outside release
     ancestry; only validated release-file changes enter native recording.
-13. A configuration places `publish` on a worker, including scalar `runOnly: worker`:
-    refuse it before dispatch. With `runOnly: [worker, orchestrator]`, delegate
+13. A configuration places `publish` on a choreographer, including scalar `runOnly: choreographer`:
+    refuse it before dispatch. With `runOnly: [choreographer, orchestrator]`, delegate
     the eligible build-side frames and run `publish` on the orchestrator.
-14. A worker disconnects or the orchestrator loses its lock: no new assignments
-    or publications start, and no missing worker reply is treated as evidence
+14. A choreographer disconnects or the orchestrator loses its lock: no new claims, assignments
+    or publications start, and no missing peer reply is treated as evidence
     of an engine-managed publication.
 15. A source tag succeeds and later checkpoint/cleanup fails: preserve source
     success and report the specific failure; no source republication for cleanup.
@@ -8429,20 +8409,20 @@ violated, and every remaining vector still applies in full.
     transport still carries every declared build output.
 18. Shared JS manifest/lockfile preparation executes under the orchestrator only
     and serializes per shared file; each build records the admitted prepared
-    state it consumed, consumers of one state see identical bytes, and no worker
+    state it consumed, consumers of one state see identical bytes, and no choreographer
     competes to write the lockfile.
 19. Independent builds in one repository overlap, but its publication/recording
     transactions serialize; cross-owner publication remains dependency-safe.
 20. Where verified outputs are reused across runs, a cached output has matching semantic inputs but belongs to
     an earlier run: verify its original provenance and issue a current admission receipt before reuse. An old
     run's receipt alone authorizes no task or effect.
-21. A worker pool accepts two runs: its total active command tasks remain within each node's local capacity,
+21. A choreographer joins two runs: its total active command tasks remain within local capacity,
     and each run's stage budgets remain global. An unacknowledged timed-out attempt still consumes capacity; an
     assignment no node has claimed consumes none and is offered again.
 22. A build-only dependency outside propagation kinds supplies ignored output: transfer it before the consumer
     builds. Where the implementation admits execution-only edges that the release graph does not already
     reject, an execution-only cycle fails preflight without changing the semantic release plan.
-23. An authenticated assignment declares `worker` authority but its hook invokes release or writes a native
+23. An authenticated assignment declares choreographer task authority but its hook invokes release or writes a native
     release ref: refuse the operation. A role or endpoint in a linked repository cannot elevate the assignment.
 24. A native record changes an in-flight task's relevant effective input bytes: withhold its publication and
     rebuild or require a new plan as the input rules dictate. An unrelated admitted change alone does not
@@ -8450,7 +8430,7 @@ violated, and every remaining vector still applies in full.
 25. A receiver sees a valid manifest but only part of its file set: remain unready until all required bytes
     have been verified and installed. A digest, filename or branch reference without retrievable bytes fails.
 26. Where the implementation advertises the rollback profile of §26, enabled rollback work precedes ordinary
-    publication and records only its §26 completion receipt. A worker task receipt never replaces that receipt
+    publication and records only its §26 completion receipt. A choreographer task receipt never replaces that receipt
     and never discharges a release obligation.
 27. The orchestrator's checkout lacks a release tag that its remote holds on a commit reachable from the planned
     head: refuse with `E196` under the locks, before the plan is fixed and before any assignment. Planning that
@@ -8463,7 +8443,8 @@ violated, and every remaining vector still applies in full.
     retry. A task receipt or missing tag alone does not settle it; a local publish-script error alone does not retain
     the release lock. Without destination verification or a safe repeatable publisher, automatic recovery is not
     guaranteed.
-30. A claimed worker task exceeds its deadline: the executing node ends its command, and the orchestrator does not
+30. A claimed choreographer task exceeds its deadline: the executing node ends its command.
+    The orchestrator does not
     reassign that attempt within the same run without proof it stopped. The release lock does not lapse by timeout.
 31. Where the implementation delegates command sweeps (§28.10), a sweep and a release of the same repositories run
     at once: the sweep takes no release lock, its messages carry a generation of their own, and neither run reads
@@ -8475,7 +8456,19 @@ violated, and every remaining vector still applies in full.
 33. A sweep task's script writes nothing under a declared root: the task's set for that root is admitted as empty
     and the sweep continues. The same absence under a build output root fails the build's prerequisite (§28.5).
 34. A read-only invocation is given execution links: it reports the plan digest and MAY probe the links, and no
-    node receives an assignment.
+    node receives an executable claim.
+35. A peer sends a probe, claim, result or cancellation response: only the orchestrator pushes its Git state.
+    A peer with read-only mailbox access can complete the task through the authenticated return channel.
+36. In interpretation, two peers derive one plan and graph digest from the same pinned input. A changed config
+    byte, missing annotated tag object, same-target tag-object replacement or carrier mismatch refuses claims.
+37. In interpretation, two peers propose one logical task concurrently: exactly one claim is accepted at the
+    canonical CAS endpoint. A lost receipt is settled by proposal ID; a timed-out attempt is not retried blindly.
+38. A failed attempt eligible for retry does not emit logical TaskFailed to successors. A signed terminal feed
+    replays without gaps after peer or first-node restart and processes each graph edge once per terminal event.
+39. In mixed, each executable task has one policy owner. Exact accepted outcomes cross compiled and interpreted
+    gates in both directions; a provider publication can gate a later compiled consumer build. No peer pushes.
+40. In every advertised mode, the orchestrator executes eligible ordinary tasks and alone performs every
+    engine-managed Git push. An unreachable first-node return route refuses remote participation before frames.
 
 ### 28.9 Operational diagnostics
 
@@ -8488,17 +8481,21 @@ parser leniency.
 
 | Category | Identifier | Required handling |
 | --- | --- | --- |
-| Execution configuration | `execution-configuration` | Invalid role, concurrency, endpoint, protocol, task graph or transfer capability fails before dispatch. |
-| Execution authority | `execution-authority` | Worker initiation, unauthenticated assignment, stale ownership or unauthorized writes are refused before the affected operation. A duplicate receipt cannot create a second side effect. |
+| Execution configuration | `execution-configuration` | Invalid mode, removed keys or transport capability fail early. |
+| Execution authority | `execution-authority` | Unauthorized initiation, proposal or write fails before its effect. |
 | Input or output integrity | `io-integrity` | Missing, changed, incomplete, incompatible or escaping input/output data fails the affected prerequisite and blocks required consumers. Preserve unrelated successful work. |
 | Native recording or lock failure | `native-recording-or-lock` | Apply §§19 and 27, preserve successful publication and fail the run; do not retag transport work or release unsafe exclusion. |
 | Transport cleanup | `transport-cleanup` | Report owned temporary refs or bundles that could not be removed. Their existence cannot erase a release record. Harmless retained transport data MAY be a warning; lost exclusion or unresolved effects MUST be an error. |
 
+Configuration refusal includes invalid capacity, endpoint, protocol, graph or transfer capability and occurs
+before dispatch. Authority refusal includes stale ownership and a duplicate receipt that would create another
+effect; neither is admitted by a valid endpoint name alone.
+
 The task/run summary MUST distinguish completed computation, admitted outputs, successful publication, durable
 native recording and blocked dependents. A completed task is not synonymous with a released package. An external
-publication whose outcome remains unresolved MUST NOT be counted as successful merely because a worker task
+publication whose outcome remains unresolved MUST NOT be counted as successful merely because a choreographer task
 completed; its retry still requires §19.4 reconciliation. The orchestrator-only publication path reports a local
-publish-command error as a failed package. It has no worker-publication `unknown` summary list or count, and that
+publish-command error as a failed package. It has no peer-publication `unknown` summary list or count, and that
 error does not prove the destination lacks the artifact. A prepared provider (vector 9) has completed computation,
 admitted outputs, no publication and no record; the summary states it so and does not list the provider as released.
 Diagnostic output order follows the semantic order of §17.2, independently of arrival order.
@@ -8506,20 +8503,23 @@ Diagnostic output order follows the semantic order of §17.2, independently of a
 ### 28.10 Command sweeps
 
 An engine that runs one declared command across the packages a plan selects, without releasing them, MAY delegate
-that sweep to workers under this profile. A sweep is not a release: it records nothing, discharges nothing, and its
-receipts are execution evidence only (§28.3). It takes no release lock. Its messages are bound to an ownership
+that sweep to choreographers under this profile. A sweep is not a release: it records nothing, discharges nothing,
+and its receipts are execution evidence only (§28.3). It takes no release lock. Its messages are bound to an ownership
 generation drawn from a fresh run identity, one value per sweep, which rejects duplicate and stale messages exactly as
 a lock-derived generation does; a sweep authorizes no effect a generation would have to fence, so it needs no
 exclusion, and a release of the same repositories MAY run beside it. The plan digest is fixed and reported as for a
-release, so that every assignment names the plan the sweep ran over, and the refusals of §28.1 and §28.3 apply
-unchanged: a worker MUST NOT initiate a sweep, and a configured or environment-based lock bypass refuses a sweep with
-execution links as it refuses a release with them.
+release, so that every claim or assignment names the plan the sweep ran over. A serving choreographer MUST NOT
+turn an assigned script into nested sweep initiation. A separately invoked node may start its own sweep with a
+new first-node identity; that does not grant the current assignment first-node authority. A configured or
+environment-based lock bypass refuses a sweep with execution links as it refuses a release with them.
 
 A sweep task carries the package's commands for the swept script alone, with the sweep's computed environment and the
 unresolved static environment of §28.3, and runs them in the snapshot of the package's input closure; the hooks that
 bracket a release stage do not bracket it. It consumes no output of another task, because a sweep installs nothing,
 and it returns its exports as a build returns its manifest. Its signed assignment carries kind `run` on a
-preinitialized task-attempt branch (§28.4).
+preinitialized logical-task branch (§28.4). Interpretation peers independently derive the same pinned sweep
+task graph and propose ready work; compilation centrally assigns it. Mixed has no publication segment in a
+sweep and follows the compiled nonpush command path. In every mode the first node alone persists Git state.
 
 A sweep MAY declare, per script and in the entry configuration only, repository-relative roots its tasks write. They
 are captured on the node after the task succeeds under the manifest and validation of §28.5 and installed on the

@@ -633,3 +633,24 @@ adversarial environment gives a zero-regret saddle. The proof does not invoke a 
 Universal exactness determines observable online start times, not a unique program or equilibrium: the section
 gives an inefficient weak equilibrium with two pinned workers. Binding capacity, transport, release effects and
 recovery remain outside this ideal game and keep their separate bounds.
+
+## 2026-10-26: Three specified distribution modes before their implementation
+
+The revised §28 specifies `compilation`, `interpretation` and `mixed` over one pinned semantic plan and task graph.
+The first node is the orchestrator for one run and can execute eligible ordinary work. Other nodes are
+choreographers. Only the orchestrator may perform engine-managed Git pushes, publication and native recording.
+Compilation lets it select and assign ready work. Interpretation has every participating node derive the plan and
+indexed graph from the same pinned inputs and propose eligible ready work; the first node verifies and persists
+claims without selecting a different peer task. Mixed compiles nonpush command placement and interprets
+first-node effect decisions, including publication and records. The partitions exchange exact accepted outcomes
+in both directions.
+The three policies change selection and placement, not the semantic plan or release authority.
+
+This is a specification milestone, not an implementation or performance claim. The RC.9 candidate retains
+the earlier compiled worker Git-mailbox protocol described above; it does not conform to revised §28.
+The isolated RC.10 implementation is unfinished; `compilation` and `interpretation` are its targets.
+`mixed` is a later RC.11 target. The public name
+changes (`dispat choreographer`, `execution.choreographers`, `runOnly: choreographer`) and first-only coordination
+pushes take effect only in an implementation that passes the revised §28 conformance vectors. Earlier entries keep
+the names and behavior of the designs they record. Neither repeated planning on interpretation nodes nor the
+mode label changes §13.11's phase-specific lower bounds into a global time, memory or communication minimum.

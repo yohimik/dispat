@@ -10,14 +10,23 @@ The current source contains the following additional contracts:
 - [Explicit rollback](./ROLLBACK.md): an exact-version `rollback(scope)` request, package/space handlers, consumer-first withdrawal and durable receipts. A missing handler fails preflight. Published version identities and release tags are retained.
 - [Polyrepository Git profile](./SPEC.md#27-polyrepository-git-profile): optional planning across explicitly linked source histories, with repository-qualified revisions, gitlink checkpoints, explicit ambiguous-boundary recovery, and one combined dependency graph.
 - [Linked peer topology](./SPEC.md#2711-linked-peer-topology): the same profile without a control repository. Identity and roster activate the fleet; peers carry their own configuration and records, two-sided links join them, a release may start in any of them, and a cross-repository boundary is proven from the links a release recorded rather than from a checkpoint.
-- [Distributed task and release execution](./SPEC.md#28-distributed-task-and-release-execution): optional orchestration and worker roles across all three history modes, complete locking before planning, verified transfer and reuse of dependent build outputs, and command sweeps that run on workers without a release lock. Temporary Git branches carry task data; ordinary repository records retain release authority.
+- [Distributed task and release execution](./SPEC.md#28-distributed-task-and-release-execution): optional
+  compilation, interpretation and mixed modes across all three history modes. One first node owns engine-managed
+  Git pushes and release effects; choreographers execute eligible tasks. Pinned planning inputs, a verified
+  return channel and exact task outcomes preserve release authority in ordinary repository records.
 - [Build readiness](./SPEC.md#192a-build-readiness): what a consumer's build waits for in its provider, `none`, `build` or `publish`; the provider publishes first under all three.
 
 External VCS adapters and rollback remain specification contracts rather than claims about the current dispat implementation. Existing CCME 2 users should read the immutable [CCME 2.0.0 specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md). The [dated design history](./DESIGN-HISTORY.md) records disclosures separately from implementation and experimental validation.
 
-The distributed profile is implemented by the dispat release engine over a Git mailbox transport; the design history's entry for 2026-09-22 states what is implemented, which vectors are met, where the engine departs from the profile and what was measured. The conformance vectors are required cases and are not evidence of speedup. Repository entry points remain independent of execution-node roles; an explicit worker cannot initiate a release.
+The dated [design history](./DESIGN-HISTORY.md) states which distribution-mode contracts the dispat binary
+actually implements and which remain future work. The specification of all three modes does not claim that
+the current binary implements them. Conformance vectors are required cases for advertised modes, not speedup
+evidence. Repository entry points remain independent of a node's per-run first-node authority.
 
-The specification and parser retain the `ccme` major/minor version group. An explicit `release(ccme)` / `Release-As: none` commit holds the parser when a specification release adds engine behavior without changing message parsing. That deliberate hold is not a claim of parser compatibility with every optional CCME 3 profile. Do not lift it without reviewing the resulting group plan and implemented behavior.
+The parser at `pkg/ccme` has `versioning: none`: its unsuffixed Go module remains on the published v1.0.0
+line and is not tagged or published by a specification release. Its scripts may still run. A specification
+change does not imply that the parser or any pending engine package is released or conformant; inspect each
+package's versioning policy and the dated design history separately.
 
 ## Optional authoring tools
 
