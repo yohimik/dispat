@@ -378,7 +378,7 @@ func (a *NodeSlotAuthority) withLock(ctx context.Context, action func() error) e
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, nodeSlotPrivateFileMode)
+	file, err := fsx.OpenLockFile(lockPath, nodeSlotPrivateFileMode)
 	if err != nil {
 		return err
 	}

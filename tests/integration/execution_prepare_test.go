@@ -302,7 +302,9 @@ func TestExecutionPreparedProviderFailureBlocksItsConsumers(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"ui", "docs"} {
-		assert.Containsf(t, failedConsumers[name], "prepared provider assets failed before",
+		assert.Truef(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, name),
+			"%s failed with the signed prepared-provider integrity code\nstdout:\n%s", name, res.Stdout)
+		assert.Containsf(t, failedConsumers[name], `blocked by "assets"`,
 			"%s failed with the exact missing provider\nstdout:\n%s", name, res.Stdout)
 	}
 	assert.Equal(t, 1, executionBuildCount(rig, "assets"),
@@ -416,7 +418,8 @@ func executionLockRefs(t *testing.T, bare string) []string {
 // The provider's publish occupies a window of its own, because a publication
 // that took no time at all would make "the consumer built afterwards" true of
 // a run that never waited for anything.
-func newExecutionRegistryEdgeWorkspace(t *testing.T, assetsPublish string) *executionRig {
+func newExecutionRegistryEdgeWorkspace(t *testing.T, assetsPublish string,
+	assetsBeforePublish ...string) *executionRig {
 	t.Helper()
 	return newExecutionPrepareWorkspace(t, func(repo *harness.Repo, cfg *models.File) {
 		mark := repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE-$DISPAT_STAGE", time.Second)
@@ -424,6 +427,14 @@ func newExecutionRegistryEdgeWorkspace(t *testing.T, assetsPublish string) *exec
 		cfg.Scripts["build"] = models.Script{executionPrepareBuild, mark}
 		cfg.Scripts["publish"] = models.Script{
 			`case "$DISPAT_PACKAGE" in assets) ` + assetsPublish + ` ;; esac`, mark,
+		}
+		if len(assetsBeforePublish) != 0 {
+			cfg.Scripts["provider-gate"] = models.Script{
+				`case "$DISPAT_PACKAGE" in assets) ` + assetsBeforePublish[0] + ` ;; esac`,
+			}
+			space := cfg.Spaces["libs"]
+			space.Flow.BeforePublish = []string{"provider-gate"}
+			cfg.Spaces["libs"] = space
 		}
 	})
 }
@@ -454,11 +465,11 @@ func TestExecutionRegistryEdgeStillWaitsForPublication(t *testing.T) {
 }
 
 // TestExecutionRegistryEdgeWithdrawsAConsumerWhosePublicationFailed is the
-// other half of vector 11: a provider that never published leaves its
+// other half of vector 11: a provider refused before publication leaves its
 // consumers nothing to follow, so they are never placed on any node at all and
 // are reported blocked rather than failed.
 func TestExecutionRegistryEdgeWithdrawsAConsumerWhosePublicationFailed(t *testing.T) {
-	rig := newExecutionRegistryEdgeWorkspace(t, "exit 4")
+	rig := newExecutionRegistryEdgeWorkspace(t, "echo publishing", "exit 4")
 	rig.commitTo("everything moved", "assets", "docs", "ui")
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
 
@@ -532,6 +543,7 @@ const executionPrepareEnvProbe = `printf '%s %s %s\n' probe-env "$DISPAT_PACKAGE
 func TestExecutionAPreparedBuildIsToldItIsNotReleasing(t *testing.T) {
 	rig := newExecutionPrepareWorkspace(t, func(_ *harness.Repo, cfg *models.File) {
 		cfg.Scripts["build"] = models.Script{executionPrepareBuild, executionPrepareEnvProbe}
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
 		space := cfg.Spaces["libs"]
 		space.Env = map[string]string{"TRAVELLED": "$DISPAT_IT_EXECUTION_NODE_NAME"}
 		cfg.Spaces["libs"] = space
@@ -620,11 +632,15 @@ func TestExecutionPreparedProviderObeysItsOwnPlatforms(t *testing.T) {
 		cfg.Packages = map[string]models.PackageConfig{
 			"assets": {BuildPlatforms: []string{"plan9/mips"}},
 		}
+		cfg.Execution.Timeouts.Admission = executionUnavailablePlatformAdmissionSeconds
 	})
 	rig.commitTo("the page and the manual use the new asset", "docs", "ui")
 	workers := rig.startWorkersHolding([]string{executionNode, executionSecondNode}, 2)
 
-	res := rig.release()
+	res := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL).
+		WaitForDiagnostic(executionUnavailablePlatformWait, func() {
+			t.Logf("signed prepared-platform ledger: %+v", executionLateJoinLedgerEvents(t, rig.mailbox))
+		})
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, 0, executionBuildCount(rig, "assets"),

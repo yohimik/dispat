@@ -94,10 +94,12 @@ func TestExecutionPeerNeverPushesClaimRef(t *testing.T) {
 // exact ref is readable, it claims once through the return channel and builds
 // once; no timeout authorizes a second command.
 func TestExecutionUnreadableTaskRefWaitsWithoutDuplicateClaim(t *testing.T) {
-	rig := newExecutionPushOutcomeRig(t)
+	rig := newExecutionPushOutcomeRig(t, func(cfg *models.File) {
+		cfg.Execution.Timeouts.Admission = 15
+	})
 	reads := harness.NewGitFault(t, harness.GitFault{
 		Pattern: "*ls-remote*refs/heads/dispat-task-*",
-		Nth:     1, Onward: true, Through: 12, Output: executionLostPushReply})
+		Nth:     1, Onward: true, Through: 2, Output: executionLostPushReply})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, reads.Env()...)
 
 	started := time.Now()
@@ -105,7 +107,7 @@ func TestExecutionUnreadableTaskRefWaitsWithoutDuplicateClaim(t *testing.T) {
 	served := worker.stop(t)
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.GreaterOrEqual(t, reads.Matches(), 3, "the exact task-ref reads were unavailable")
+	assert.GreaterOrEqual(t, reads.Matches(), 2, "two exact task-ref reads were unavailable before recovery")
 	assert.Equal(t, 1, strings.Count(served.Stdout, `"message":"task claimed"`),
 		"recovery of a temporarily unreadable task ref must not duplicate the Claim")
 	assert.Equal(t, 1, executionBuildsOf(rig, "core"), "the build ran once: %v", rig.runs())

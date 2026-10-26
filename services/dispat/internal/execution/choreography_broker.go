@@ -1538,7 +1538,7 @@ func (b *FirstNodeBroker) DecideAttempt(ctx context.Context, d ChoreographyDecis
 		return err
 	}
 	if task.spec.Package != choreographyBrokerAbsentState && d.PackageOutcome == choreographyBrokerAbsentState &&
-		!task.spec.ExecutorOwned && task.spec.Kind != string(KindPrepare) {
+		!task.spec.ExecutorOwned {
 		task.pendingPackageSettlement = choreographyBrokerPackageSettlementPending
 	} else {
 		b.discharge(task)

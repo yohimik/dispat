@@ -12,6 +12,8 @@ import (
 )
 
 const returnHandlerCannotBindBrokerError = "execution: return channel cannot bind task broker"
+const returnHandlerTransferTimeoutMissingError = "execution: return channel has no configured result transfer timeout"
+const returnHandlerNoTransferTimeout time.Duration = 0
 const returnHandlerTempDirectoryParent = ""
 const returnHandlerTempDirectoryPrefix = "dispat-return-"
 const returnHandlerUnsetTempDirectory = ""
@@ -40,19 +42,21 @@ type runReturnChannel struct {
 }
 
 type taskReturnHandlerBinding struct {
-	binding execution.ChoreographyRunBinding
-	signer  *execution.Signer
-	limits  execution.TransferLimits
-	broker  execution.ChoreographyReturnBrokerx
-	channel *runReturnChannel
+	binding               execution.ChoreographyRunBinding
+	signer                *execution.Signer
+	limits                execution.TransferLimits
+	resultTransferTimeout time.Duration
+	broker                execution.ChoreographyReturnBrokerx
+	channel               *runReturnChannel
 }
 
 type retainedRunReturnChannelOptions struct {
-	identity firstRunIdentity
-	signer   *execution.Signer
-	limits   execution.TransferLimits
-	binding  execution.ChoreographyRunBinding
-	broker   execution.ChoreographyReturnBrokerx
+	identity              firstRunIdentity
+	signer                *execution.Signer
+	limits                execution.TransferLimits
+	resultTransferTimeout time.Duration
+	binding               execution.ChoreographyRunBinding
+	broker                execution.ChoreographyReturnBrokerx
 }
 
 // bindTaskReturnHandler enables claims only after every canonical task and
@@ -63,10 +67,22 @@ func (a *App) bindTaskReturnHandler(coordinator *execution.Coordinator,
 	if coordinator == nil || channel == nil || channel.probe == nil {
 		return fmt.Errorf(returnHandlerCannotBindBrokerError)
 	}
+	transferTimeout, err := a.configuredResultTransferTimeout()
+	if err != nil {
+		return err
+	}
 	return bindTaskReturnHandler(taskReturnHandlerBinding{binding: execution.ChoreographyRunBinding{Run: coordinator.Run,
 		Generation: coordinator.Generation, PlanDigest: coordinator.PlanDigest,
 		GraphDigest: coordinator.GraphDigest}, signer: coordinator.Signer, limits: coordinator.Limits,
-		broker: broker, channel: channel})
+		resultTransferTimeout: transferTimeout,
+		broker:                broker, channel: channel})
+}
+
+func (a *App) configuredResultTransferTimeout() (time.Duration, error) {
+	if a == nil || a.cfg == nil || a.cfg.Execution == nil {
+		return returnHandlerNoTransferTimeout, fmt.Errorf(returnHandlerTransferTimeoutMissingError)
+	}
+	return time.Duration(a.cfg.Execution.ResolveTransfer().Timeout) * time.Second, nil
 }
 
 func bindTaskReturnHandler(options taskReturnHandlerBinding) error {
@@ -75,15 +91,19 @@ func bindTaskReturnHandler(options taskReturnHandlerBinding) error {
 	if channel == nil || channel.gate == nil || broker == nil || channel.tempDir != returnHandlerUnsetTempDirectory {
 		return fmt.Errorf(returnHandlerCannotBindBrokerError)
 	}
+	if options.resultTransferTimeout <= returnHandlerNoTransferTimeout {
+		return fmt.Errorf(returnHandlerTransferTimeoutMissingError)
+	}
 	tempDir, err := os.MkdirTemp(returnHandlerTempDirectoryParent, returnHandlerTempDirectoryPrefix)
 	if err != nil {
 		return err
 	}
 	handler, err := execution.NewChoreographyReturnHandler(execution.ReturnHandlerOptions{
 		Broker: broker, Signer: signer, Binding: binding,
-		MaxClaimBytes:  int64(limits.MaxManifestBytes),
-		MaxResultBytes: limits.MaxPackBytes,
-		TempDir:        tempDir,
+		MaxClaimBytes:         int64(limits.MaxManifestBytes),
+		MaxResultBytes:        limits.MaxPackBytes,
+		ResultTransferTimeout: options.resultTransferTimeout,
+		TempDir:               tempDir,
 	})
 	if err != nil {
 		_ = os.RemoveAll(tempDir)
@@ -124,7 +144,8 @@ func openRetainedRunReturnChannel(options retainedRunReturnChannelOptions) (*run
 		return nil, fmt.Errorf(retainedReturnListenerBindErrorFormat, err)
 	}
 	if err := bindTaskReturnHandler(taskReturnHandlerBinding{binding: binding, signer: signer,
-		limits: limits, broker: broker, channel: channel}); err != nil {
+		limits: limits, resultTransferTimeout: options.resultTransferTimeout,
+		broker: broker, channel: channel}); err != nil {
 		_ = channel.close()
 		return nil, err
 	}

@@ -636,9 +636,10 @@ func TestExecutionOutputInstallPermissionFailureCanRetry(t *testing.T) {
 			}
 			assert.Empty(t, asideLeftoverNames(t, rig.repo.Path("packages", "assets")))
 			assert.False(t, rig.repo.IsTagged("assets@0.1.0"), "no partial installation can publish")
-			assert.True(t, rig.repo.IsTagged("spare@0.1.0"), "independent work still releases")
+			assert.True(t, rig.repo.IsTagged("spare@0.1.0"),
+				"independent work still releases\nstdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
 			firstPublications, err := os.ReadFile(marker)
-			require.NoError(t, err)
+			require.NoError(t, err, "stdout:\n%s\nstderr:\n%s", failed.Stdout, failed.Stderr)
 			assert.Equal(t, "spare\n", string(firstPublications))
 
 			require.NoError(t, os.Chmod(blocked, 0o755))
@@ -902,6 +903,9 @@ func executionCarries(t *testing.T, mailbox, branch, kind string) bool {
 // reading the objects to digest them on the node, and reading them again to
 // install them here. Each fails the package it belongs to with the integrity
 // code, the run publishes nothing, and the node carries on serving.
+const executionOutputGitFaultWait = 60 * time.Second
+const executionOutputGitFaultWorkerDiagnosticWait = 5 * time.Second
+
 func TestExecutionOutputGitFaults(t *testing.T) {
 	for name, tc := range map[string]struct {
 		pattern  string
@@ -926,13 +930,19 @@ func TestExecutionOutputGitFaults(t *testing.T) {
 			worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
 				func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(4) }), 0, workerEnv...)
 
-			res := rig.release(releaseEnv...)
+			started := rig.repo.StartReleaseEnv(rig.env(releaseEnv...), "release",
+				"--return-endpoint", rig.returnURL)
+			res := started.WaitForDiagnostic(executionOutputGitFaultWait, func() {
+				t.Logf("signed output-fault ledger: %+v", executionLateJoinLedgerEvents(t, rig.mailbox))
+				stopped := worker.proc.KillForDiagnostic(executionOutputGitFaultWorkerDiagnosticWait)
+				t.Logf("worker stdout:\n%s\nstderr:\n%s", stopped.Stdout, stopped.Stderr)
+			})
 
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.Positive(t, fault.Matches(), "the fault reached the invocation it names")
 			assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode),
 				"the affected package is refused with the integrity code\nstdout:\n%s", res.Stdout)
-			assert.Empty(t, rig.repo.TagList(), "nothing was published")
+			assert.Empty(t, executionReleaseTags(rig), "nothing was published")
 			reply := stopAll(t, []*executionWorker{worker})[0]
 			assert.Equal(t, 0, reply.Code, "the node carries on serving after its git failed")
 			assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")

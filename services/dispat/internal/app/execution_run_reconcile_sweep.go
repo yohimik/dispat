@@ -15,7 +15,7 @@ import (
 // expires; an unsealed run must restore the same live certificate to accept
 // outstanding Result or Ack submissions.
 func retainedRunSealed(ctx context.Context, persist *execution.GitChoreographyPersist) (bool, error) {
-	replay := &retainedSweepAttemptReplay{attempts: make(map[string]retainedSweepAttempt)}
+	replay := &retainedSweepAttemptReplay{attempts: make(map[retainedSweepAttemptKey]retainedSweepAttempt)}
 	if err := replay.advance(ctx, persist); err != nil {
 		return retainedSweepUnsealedState, err
 	}
@@ -23,14 +23,22 @@ func retainedRunSealed(ctx context.Context, persist *execution.GitChoreographyPe
 }
 
 type retainedSweepAttempt struct {
-	claim  execution.ChoreographyEvent
-	cancel execution.ChoreographyEvent
-	reply  execution.ChoreographyEvent
+	claim       execution.ChoreographyEvent
+	cancel      execution.ChoreographyEvent
+	reply       execution.ChoreographyEvent
+	contactLost bool
+}
+
+const retainedSweepPickupContactLostState = true
+
+type retainedSweepAttemptKey struct {
+	task     string
+	pickupID string
 }
 
 type retainedSweepAttemptReplay struct {
 	cursor   execution.ChoreographyEventCursor
-	attempts map[string]retainedSweepAttempt
+	attempts map[retainedSweepAttemptKey]retainedSweepAttempt
 	sealed   bool
 }
 
@@ -43,11 +51,64 @@ func retainedSweepReplyReceiptOID(attempt retainedSweepAttempt) string {
 	if attempt.reply.ResultReceiptOID != retainedRunAbsentValueText {
 		return attempt.reply.ResultReceiptOID
 	}
+	// A compiled Ack can still win the canonical Cancel tip before any
+	// successor Claim. In that case the signed Ack event advances the task ref
+	// itself; only a late side Ack carries a separate ResultReceiptOID.
+	if attempt.reply.Kind == execution.ChoreographyAckAccepted &&
+		attempt.claim.PickupID != retainedRunAbsentValueText &&
+		attempt.cancel.TaskOID != retainedRunAbsentValueText &&
+		attempt.reply.TaskOID != retainedRunAbsentValueText &&
+		attempt.reply.PickupID == attempt.claim.PickupID &&
+		attempt.cancel.PickupID == attempt.claim.PickupID &&
+		attempt.cancel.PriorTaskOID == attempt.claim.TaskOID &&
+		attempt.reply.PriorTaskOID == attempt.cancel.TaskOID &&
+		attempt.reply.TaskOID != attempt.cancel.TaskOID &&
+		attempt.reply.Attempt == attempt.claim.Attempt &&
+		attempt.reply.Node == attempt.claim.Node {
+		return attempt.reply.TaskOID
+	}
 	if attempt.reply.PickupID == retainedRunAbsentValueText &&
 		attempt.reply.TaskOID != attempt.claim.TaskOID {
 		return attempt.reply.TaskOID
 	}
 	return retainedRunAbsentValueText
+}
+
+func retainedSweepReplyPackageOutcome(attempt retainedSweepAttempt, succeeded bool) string {
+	if succeeded || attempt.reply.Kind == execution.ChoreographyAckAccepted &&
+		(attempt.contactLost || attempt.reply.ResultReceiptOID != retainedRunAbsentValueText &&
+			attempt.reply.TaskOID == attempt.reply.PriorTaskOID) {
+		// An Ack after signed contact loss only settles the old pickup's
+		// retained capacity, even when it still advances the Cancel tip.
+		// The successor owns the package outcome.
+		return retainedRunAbsentValueText
+	}
+	return string(release.OutcomeFailed)
+}
+
+func (r *retainedSweepAttemptReplay) applyEvent(event execution.ChoreographyEvent) {
+	key := retainedSweepAttemptKey{task: event.Task, pickupID: event.PickupID}
+	switch event.Kind {
+	case execution.ChoreographyClaimAccepted:
+		r.attempts[key] = retainedSweepAttempt{claim: event}
+	case execution.ChoreographyCancelIssued:
+		attempt := r.attempts[key]
+		attempt.cancel = event
+		r.attempts[key] = attempt
+	case execution.ChoreographyResultAccepted, execution.ChoreographyAckAccepted:
+		attempt := r.attempts[key]
+		attempt.reply = event
+		r.attempts[key] = attempt
+	case execution.ChoreographyPickupContactLost:
+		attempt := r.attempts[key]
+		attempt.contactLost = retainedSweepPickupContactLostState
+		r.attempts[key] = attempt
+	case execution.ChoreographyRetryReady, execution.ChoreographyTerminal,
+		execution.ChoreographyPickupSettled:
+		delete(r.attempts, key)
+	case execution.ChoreographyRunSealed:
+		r.sealed = retainedSweepSealedState
+	}
 }
 
 func (r *retainedSweepAttemptReplay) advance(ctx context.Context,
@@ -62,23 +123,7 @@ func (r *retainedSweepAttemptReplay) advance(ctx context.Context,
 			return fmt.Errorf(retainedSweepEventSequenceGapErrorText)
 		}
 		for _, event := range page.Events {
-			switch event.Kind {
-			case execution.ChoreographyClaimAccepted:
-				r.attempts[event.Task] = retainedSweepAttempt{claim: event}
-			case execution.ChoreographyCancelIssued:
-				attempt := r.attempts[event.Task]
-				attempt.cancel = event
-				r.attempts[event.Task] = attempt
-			case execution.ChoreographyResultAccepted, execution.ChoreographyAckAccepted:
-				attempt := r.attempts[event.Task]
-				attempt.reply = event
-				r.attempts[event.Task] = attempt
-			case execution.ChoreographyRetryReady, execution.ChoreographyTerminal,
-				execution.ChoreographyBlocked:
-				delete(r.attempts, event.Task)
-			case execution.ChoreographyRunSealed:
-				r.sealed = retainedSweepSealedState
-			}
+			r.applyEvent(event)
 		}
 		r.cursor = page.Cursor
 		if !page.More {
@@ -104,7 +149,7 @@ type retainedSweepSettlementOptions struct {
 func (a *App) settleRetainedSweepAttempts(ctx context.Context, options retainedSweepSettlementOptions) (err error) {
 	identity, signer, limits, binding := options.Identity, options.Signer, options.Limits, options.Binding
 	mailbox, broker, persist := options.Mailbox, options.Broker, options.Persist
-	replay := &retainedSweepAttemptReplay{attempts: make(map[string]retainedSweepAttempt)}
+	replay := &retainedSweepAttemptReplay{attempts: make(map[retainedSweepAttemptKey]retainedSweepAttempt)}
 	if err := replay.advance(ctx, persist); err != nil {
 		return err
 	}
@@ -127,7 +172,8 @@ func (a *App) settleRetainedSweepAttempts(ctx context.Context, options retainedS
 			return nil
 		}
 		advanced := retainedSweepNoProgressState
-		for task, attempt := range replay.attempts {
+		for attemptKey, attempt := range replay.attempts {
+			task := attemptKey.task
 			if attempt.claim.TaskOID == retainedRunAbsentValueText {
 				return fmt.Errorf(retainedSweepReplyWithoutClaimErrorFormat, task)
 			}
@@ -148,10 +194,7 @@ func (a *App) settleRetainedSweepAttempts(ctx context.Context, options retainedS
 					attempt.cancel.TaskOID == retainedRunAbsentValueText {
 					return fmt.Errorf(retainedSweepUnverifiedTaskStopErrorFormat, task)
 				}
-				outcome := retainedRunAbsentValueText
-				if !succeeded {
-					outcome = string(release.OutcomeFailed)
-				}
+				outcome := retainedSweepReplyPackageOutcome(attempt, succeeded)
 				if err := broker.DecideAttempt(ctx, execution.ChoreographyDecision{
 					ChoreographyRunBinding: binding, Task: task,
 					Branch:  execution.FormatChoreographyTaskBranch(binding.Run, task),
@@ -166,9 +209,14 @@ func (a *App) settleRetainedSweepAttempts(ctx context.Context, options retainedS
 			}
 			if channel == nil {
 				var err error
+				transferTimeout, err := a.configuredResultTransferTimeout()
+				if err != nil {
+					return err
+				}
 				channel, err = openRetainedRunReturnChannel(retainedRunReturnChannelOptions{
 					identity: identity, signer: signer, limits: limits,
-					binding: binding, broker: broker})
+					resultTransferTimeout: transferTimeout,
+					binding:               binding, broker: broker})
 				if err != nil {
 					return err
 				}

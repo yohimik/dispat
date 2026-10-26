@@ -14,7 +14,7 @@ func acceptPackageFixtureResult(t *testing.T, fixture *mailboxFixture,
 	claim ChoreographyReceipt, claimProposal ChoreographyClaimProposal, proposalID, status string) ChoreographyReceipt {
 	t.Helper()
 	result := Result{Header: Header{Protocol: ChoreographyProtocolVersion,
-		Kind: KindBuild, Run: binding.Run, Generation: binding.Generation,
+		Kind: spec.Kind, Run: binding.Run, Generation: binding.Generation,
 		PlanDigest: binding.PlanDigest, Task: spec.Task, Attempt: 1,
 		Node: "node-a", Branch: spec.Branch}, Assignment: claim.OID, Status: status}
 	proposal, pack := prepareChoreographyFixturePickupResult(t, fixture,
@@ -82,17 +82,17 @@ func TestChoreographyCapacityOneParallelFailureDefersPackageEdgesAfterSignedTask
 	require.NoError(t, err)
 	_, err = restarted.SealRun(t.Context(), false)
 	require.ErrorContains(t, err, choreographyLedgerUnsettledTaskPackageSealErr)
-	require.ErrorContains(t, cold.SettleTaskPackage(t.Context(), second.Task, ""),
+	require.ErrorContains(t, cold.SettleTaskPackage(t.Context(), ChoreographyTaskPackageSettlement{TaskID: second.Task}),
 		choreographyTaskPackageSettlementCausalOrderError,
 		"a noncausal failed sibling cannot discharge edges before signed package failure")
-	require.NoError(t, cold.SettleTaskPackage(t.Context(), first.Task, "failed"))
-	require.NoError(t, cold.SettleTaskPackage(t.Context(), second.Task, ""))
+	require.NoError(t, cold.SettleTaskPackage(t.Context(), ChoreographyTaskPackageSettlement{TaskID: first.Task, PackageOutcome: "failed"}))
+	require.NoError(t, cold.SettleTaskPackage(t.Context(), ChoreographyTaskPackageSettlement{TaskID: second.Task}))
 	require.Equal(t, "failed", cold.packageState[first.Package])
 	require.Zero(t, cold.tasks[consumer.Task].remaining)
 	require.False(t, cold.tasks[first.Task].pendingPackageSettlement)
-	require.NoError(t, cold.SettleTaskPackage(t.Context(), first.Task, "failed"),
+	require.NoError(t, cold.SettleTaskPackage(t.Context(), ChoreographyTaskPackageSettlement{TaskID: first.Task, PackageOutcome: "failed"}),
 		"the exact signed package settlement is idempotent after a lost response")
-	require.Error(t, cold.SettleTaskPackage(t.Context(), first.Task, "succeeded"),
+	require.Error(t, cold.SettleTaskPackage(t.Context(), ChoreographyTaskPackageSettlement{TaskID: first.Task, PackageOutcome: "succeeded"}),
 		"a different outcome cannot reuse the signed settlement")
 	last, err := NewGitChoreographyPersist(persist.opts)
 	require.NoError(t, err)
@@ -106,4 +106,50 @@ func TestChoreographyCapacityOneParallelFailureDefersPackageEdgesAfterSignedTask
 	leases, err := last.CanonicalTaskLeases(t.Context())
 	require.NoError(t, err)
 	require.Len(t, leases, 3)
+}
+
+func TestChoreographyPreparedOutputRejectionBlocksOnlyDeclaredConsumersAfterColdReplay(t *testing.T) {
+	fixture, persist, binding, provider := newChoreographyLedgerFixture(t,
+		ChoreographyTaskSpec{Task: "assets:prepare", Package: "assets", Kind: string(KindPrepare)},
+		ChoreographyTaskSpec{Task: "ui:build", Package: "ui", Kind: string(KindBuild),
+			PreparedProviders: []string{"assets"}, Predecessors: []string{"assets:prepare"}},
+		ChoreographyTaskSpec{Task: "solo:build", Package: "solo", Kind: string(KindBuild),
+			Predecessors: []string{"assets:prepare"}})
+	opts := choreographyFixtureBrokerOptions(persist)
+	opts.OutcomePolicy = preparedBrokerPolicy{}
+	broker, err := RecoverFirstNodeBroker(t.Context(), opts)
+	require.NoError(t, err)
+	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
+		Task: provider.Task, Attempt: 1, Node: "node-a", Branch: provider.Branch,
+		ExpectedOID: provider.ReservationOID, InputsDigest: provider.InputsDigest,
+		PickupID: NewChoreographyPickupID(), ProposalID: "prepared-admission-claim"}
+	completeChoreographyFixtureClaim(t, persist, &claim)
+	acceptedClaim, err := broker.AcceptClaim(t.Context(), claim)
+	require.NoError(t, err)
+	acceptedResult := acceptPackageFixtureResult(t, fixture, broker, binding, provider,
+		acceptedClaim, claim, "prepared-admission-result", StatusSucceeded)
+	require.NoError(t, broker.DecideAttempt(t.Context(), ChoreographyDecision{
+		ChoreographyRunBinding: binding, Task: provider.Task, Branch: provider.Branch,
+		Attempt: 1, Node: "node-a", ResultOID: acceptedResult.OID, Succeeded: true}))
+	require.True(t, broker.tasks[provider.Task].pendingPackageSettlement)
+	require.Equal(t, 1, broker.tasks["ui:build"].remaining)
+	require.Equal(t, 1, broker.tasks["solo:build"].remaining)
+	require.NoError(t, broker.SettleTaskPackage(t.Context(), ChoreographyTaskPackageSettlement{
+		TaskID: provider.Task, OutputAdmissionRejected: true}))
+	require.Zero(t, broker.tasks["ui:build"].remaining)
+	require.Equal(t, "assets", broker.tasks["ui:build"].preparedBlockedBy)
+	require.Zero(t, broker.tasks["solo:build"].remaining)
+	require.Empty(t, broker.tasks["solo:build"].preparedBlockedBy)
+	require.NoError(t, broker.SettleTaskPackage(t.Context(), ChoreographyTaskPackageSettlement{
+		TaskID: provider.Task, OutputAdmissionRejected: true}), "exact lost-response retry is idempotent")
+	require.Error(t, broker.SettleTaskPackage(t.Context(), ChoreographyTaskPackageSettlement{
+		TaskID: provider.Task}), "changed admission disposition cannot reuse the signed settlement")
+	coldPersist, err := NewGitChoreographyPersist(persist.opts)
+	require.NoError(t, err)
+	opts.Persist = coldPersist
+	cold, err := RecoverFirstNodeBroker(t.Context(), opts)
+	require.NoError(t, err)
+	require.Equal(t, "assets", cold.tasks["ui:build"].preparedBlockedBy)
+	require.Empty(t, cold.tasks["solo:build"].preparedBlockedBy)
+	require.False(t, cold.tasks[provider.Task].pendingPackageSettlement)
 }

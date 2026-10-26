@@ -15,6 +15,7 @@ import (
 const (
 	compiledStageWaitIdentityErrorFormat   = "execution: compiled task %q has no signed broker wait identity"
 	compiledStageNoClaimErrorFormat        = "execution: compiled task %q expired without an admitted eligible worker"
+	compiledStageNoCompatibleNodeFormat    = "execution: compiled task %q expired without an admitted compatible node"
 	compiledStageBlockedErrorFormat        = "execution: compiled task %q was blocked by %q"
 	compiledStageAckErrorFormat            = "execution: compiled task %q stopped after signed cancellation"
 	compiledStageInertCancelledErrorFormat = "execution: compiled task %q was cancelled before claim after signed run stop"
@@ -36,6 +37,11 @@ const (
 	compiledStageAcceptedAck               = true
 	compiledStageSignedDecision            = true
 	compiledStagePackageNotSkipped         = false
+	compiledStageSignedResultReadAttempts  = 3
+	compiledStageFirstSignedResultRead     = 0
+	compiledStageSignedResultReadIncrement = 1
+	compiledStagePackageSettlementComplete = false
+	compiledStageSignedResultRetryDelay    = 50 * time.Millisecond
 )
 
 // IsPendingExternalStage lets the release graph account a signed task observer
@@ -115,7 +121,6 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 		Package: request.Release.Pkg.Name, Stage: request.Stage})
 	c.choreographyBroker.mu.Lock()
 	task := c.choreographyBroker.tasks[taskID]
-	workerOnly := task != nil && task.spec.Placement == PlacementWorker
 	started := c.choreographyBroker.executionStarted
 	deadlineUTC := c.choreographyBroker.admissionDeadlineUTC
 	c.choreographyBroker.mu.Unlock()
@@ -137,9 +142,6 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 	deadline, parseErr := time.Parse(time.RFC3339Nano, deadlineUTC)
 	if parseErr != nil || deadline.IsZero() {
 		return release.StageOutcome{}, fmt.Errorf(compiledStageWaitIdentityErrorFormat, taskID)
-	}
-	if !workerOnly {
-		deadline = time.Time{}
 	}
 	claimOID, assignmentOID, claimedNode, cancelOID :=
 		compiledStageAbsentIdentity, compiledStageAbsentIdentity,
@@ -449,8 +451,24 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 			if mailboxErr != nil {
 				return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, mailboxErr
 			}
-			result, readErr := mailbox.ReadVerifiedChoreographyAcceptedResultFromAssignment(activeCtx,
-				c.choreographyBroker.binding, event, c.Limits.MaxManifestBytes)
+			// This exact ResultAccepted is already durable. A local object read
+			// can fail once without changing its signed identity; retry only the
+			// same receipt verification, before any output admission or decision.
+			var result Result
+			var readErr error
+			for readAttempt := compiledStageFirstSignedResultRead; readAttempt < compiledStageSignedResultReadAttempts; readAttempt += compiledStageSignedResultReadIncrement {
+				result, readErr = mailbox.ReadVerifiedChoreographyAcceptedResultFromAssignment(activeCtx,
+					c.choreographyBroker.binding, event, c.Limits.MaxManifestBytes)
+				if readErr == nil || activeCtx.Err() != nil ||
+					readAttempt+compiledStageSignedResultReadIncrement == compiledStageSignedResultReadAttempts {
+					break
+				}
+				select {
+				case <-activeCtx.Done():
+					return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, activeCtx.Err()
+				case <-time.After(compiledStageSignedResultRetryDelay):
+				}
+			}
 			if readErr != nil {
 				return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, readErr
 			}
@@ -571,6 +589,12 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 				Request: request, Event: event, Err: ackErr})
 			return release.StageOutcome{Node: event.Node}, ackErr
 		case ChoreographyNoClaimExpired:
+			if event.MissingPlacement != string(PlacementWorker) {
+				return release.StageOutcome{NoClaim: &release.NoClaimFinality{
+						Blocker: event.BlockedBy, SignedTerminal: compiledStageSignedTaskTerminal}},
+					c.refuseTask(taskID, compiledStageAbsentIdentity, event.Attempt,
+						fmt.Errorf(compiledStageNoCompatibleNodeFormat, taskID))
+			}
 			return release.StageOutcome{NoClaim: &release.NoClaimFinality{
 					Blocker: event.BlockedBy, SignedTerminal: compiledStageSignedTaskTerminal}},
 				fmt.Errorf(compiledStageNoClaimErrorFormat, taskID)
@@ -627,9 +651,20 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 					decided: compiledStageSignedDecision}
 				c.choreographyBroker.mu.Lock()
 				indexed := c.choreographyBroker.tasks[taskID]
+				preparedTask := indexed != nil && indexed.spec.Kind == string(KindPrepare)
 				pending.packageSettlementPending = pending.packageName != compiledStageAbsentIdentity &&
-					indexed != nil && !indexed.spec.ExecutorOwned && indexed.spec.Kind != string(KindPrepare)
+					indexed != nil && !indexed.spec.ExecutorOwned
 				c.choreographyBroker.mu.Unlock()
+				if preparedTask {
+					settleCtx, cancel := context.WithTimeout(context.WithoutCancel(activeCtx), taskReportTimeout)
+					settleErr := c.choreographyBroker.SettleTaskPackage(settleCtx,
+						ChoreographyTaskPackageSettlement{TaskID: taskID})
+					cancel()
+					if settleErr != nil {
+						return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, settleErr
+					}
+					pending.packageSettlementPending = compiledStagePackageSettlementComplete
+				}
 				if pending.packageSettlementPending {
 					if _, loaded := c.choreographyPending.LoadOrStore(taskID, pending); loaded {
 						return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality},
@@ -660,14 +695,28 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 				Task:                   taskID, Branch: FormatChoreographyTaskBranch(c.Run, taskID),
 				Attempt: event.Attempt, Node: event.Node,
 				ResultOID: event.ResultReceiptOID, Succeeded: event.Succeeded},
-				packageName:    request.Release.Pkg.Name,
-				resultAccepted: compiledStageAcceptedResult,
-				decided:        compiledStageSignedDecision}
+				packageName:             request.Release.Pkg.Name,
+				resultAccepted:          compiledStageAcceptedResult,
+				decided:                 compiledStageSignedDecision,
+				outputAdmissionRejected: outcome.OutputAdmissionRejected}
 			c.choreographyBroker.mu.Lock()
 			indexed := c.choreographyBroker.tasks[taskID]
+			preparedTask := indexed != nil && indexed.spec.Kind == string(KindPrepare)
 			pending.packageSettlementPending = pending.packageName != compiledStageAbsentIdentity &&
-				indexed != nil && !indexed.spec.ExecutorOwned && indexed.spec.Kind != string(KindPrepare)
+				indexed != nil && !indexed.spec.ExecutorOwned
 			c.choreographyBroker.mu.Unlock()
+			if preparedTask {
+				settleCtx, cancel := context.WithTimeout(context.WithoutCancel(activeCtx), taskReportTimeout)
+				settleErr := c.choreographyBroker.SettleTaskPackage(settleCtx,
+					ChoreographyTaskPackageSettlement{TaskID: taskID,
+						OutputAdmissionRejected: outcome.OutputAdmissionRejected})
+				cancel()
+				if settleErr != nil {
+					return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality},
+						errors.Join(admissionErr, settleErr)
+				}
+				pending.packageSettlementPending = compiledStagePackageSettlementComplete
+			}
 			if pending.packageSettlementPending {
 				if _, loaded := c.choreographyPending.LoadOrStore(taskID, pending); loaded {
 					return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality},
@@ -714,7 +763,7 @@ func (c *Coordinator) decideCompiledAttempt(ctx context.Context,
 	c.choreographyBroker.mu.Lock()
 	task := c.choreographyBroker.tasks[pending.decision.Task]
 	pending.packageSettlementPending = pending.packageName != compiledStageAbsentIdentity &&
-		task != nil && task.spec.Kind != string(KindPrepare)
+		task != nil
 	c.choreographyBroker.mu.Unlock()
 	if !pending.packageSettlementPending {
 		c.choreographyPending.CompareAndDelete(pending.decision.Task, pending)

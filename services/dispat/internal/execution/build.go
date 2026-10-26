@@ -42,6 +42,7 @@ const (
 	buildFirstSourceIndex                     = 0
 	buildRevertStageName                      = "revert"
 	buildMissingPackageRepositoryError        = "the package's input closure does not name the repository %q it belongs to"
+	buildOutputAdmissionRejected              = true
 )
 
 // Dispatch is what a coordinator needs of the run before it places any work:
@@ -706,6 +707,7 @@ func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, attempt 
 		Repository: request.Release.Pkg.Repository, Package: request.Release.Pkg.Name,
 		SourceRoot: request.Release.Pkg.Dir, Roots: request.Release.Pkg.Space.BuildOutputs}); err != nil {
 		outcome.FailedPart = release.PartOutputs
+		outcome.OutputAdmissionRejected = buildOutputAdmissionRejected
 		return outcome, err
 	}
 	outcome, err := c.readReportedOutcome(task, attempt, outcome, result)
@@ -724,6 +726,7 @@ func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, attempt 
 		// satisfy its consumers, so the package fails here rather than
 		// somewhere downstream with a puzzle about missing files.
 		outcome.FailedPart = release.PartOutputs
+		outcome.OutputAdmissionRejected = buildOutputAdmissionRejected
 		return outcome, err
 	}
 	c.reportTaskFinished(task, result, outcome)

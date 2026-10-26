@@ -25,85 +25,89 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
+
+	public "github.com/yohimik/dispat/pkg/models"
 )
 
 const (
-	returnDocumentHeader                         = "X-Dispat-Document"
-	returnSignatureHeader                        = "X-Dispat-Signature"
-	returnReplyLimit                             = 64 << 10
-	returnEventPageLimit                         = 1 << 20
-	returnHandlerIncompleteError                 = "execution: incomplete choreography return handler"
-	returnTLSRequiredMessage                     = "TLS required"
-	returnEventCursorInvalidMessage              = "invalid event cursor"
-	returnEventFeedUnavailableMessage            = "event feed unavailable"
-	returnContentTypeHeader                      = "Content-Type"
-	returnJSONMediaType                          = "application/json"
-	returnSingleEventOversizeError               = "execution: single signed event exceeds transfer limit"
-	returnEventPageBoundError                    = "execution: invalid event page bound"
-	returnAckInvalidMessage                      = "invalid cancellation acknowledgement"
-	returnClaimInvalidMessage                    = "invalid claim proposal"
-	returnResultInvalidMessage                   = "invalid result proposal"
-	returnResultTempPattern                      = "dispat-result-*"
-	returnResultStagingUnavailableMessage        = "result staging unavailable"
-	returnResultLengthMismatchMessage            = "result bytes do not match proposal"
-	returnReceiptQueryInvalidMessage             = "invalid receipt query"
-	returnReceiptStatusUnknownMessage            = "receipt status unknown"
-	returnReceiptUnsettledMessage                = "receipt not yet settled"
-	returnDocumentOversizeError                  = "execution: return document exceeds limit"
-	returnDocumentSignatureError                 = "execution: return document signature invalid"
-	returnDocumentTrailingError                  = "execution: trailing return document"
-	returnProposalUnsettledMessage               = "proposal not settled"
-	returnPersistedReceiptInvalidMessage         = "invalid persisted receipt"
-	returnReceiptEncodingMessage                 = "receipt encoding failed"
-	returnHTTPScheme                             = "https"
-	returnEndpointInvalidError                   = "execution: invalid choreography return endpoint"
-	returnTLSIdentityInvalidError                = "execution: invalid choreography TLS identity"
-	returnCertificateMissingError                = "execution: return endpoint supplied no certificate"
-	returnCertificateMismatchError               = "execution: return endpoint certificate differs from signed preflight"
-	returnURLRootPath                            = "/"
-	returnRedirectRefusedError                   = "execution: return endpoint redirects are refused"
-	returnProbeReplyRunMismatchError             = "execution: probe reply does not match pinned run"
-	returnProbeReceiptMismatchError              = "execution: probe receipt differs from reply"
-	returnAckIdentityMissingError                = "execution: cancellation acknowledgement lacks identity"
-	returnAckReceiptMismatchError                = "execution: cancellation acknowledgement receipt differs"
-	returnClaimRunMismatchError                  = "execution: claim does not match pinned run"
-	returnClaimReceiptMismatchError              = "execution: claim receipt differs from proposal"
-	returnResultPayloadLimitError                = "execution: invalid result payload limit"
-	returnResultRewindErrorFormat                = "execution: rewinding result payload: %w"
-	returnResultHashErrorFormat                  = "execution: hashing result payload: %w"
-	returnResultPayloadOversizeError             = "execution: result payload exceeds limit"
-	returnResultRunMismatchError                 = "execution: result does not match pinned run"
-	returnResultPayloadLengthChangedError        = "execution: prepared result payload length changed"
-	returnResultReceiptMismatchError             = "execution: result receipt differs from proposal"
-	returnReceiptQueryIdentityError              = "execution: receipt query lacks identity"
-	returnQueriedReceiptIdentityError            = "execution: queried receipt differs from proposal identity"
-	returnEventRequestInvalidError               = "execution: invalid event request"
-	returnEventResponseUnknownFormat             = "execution: event response unknown: %w"
-	returnEventFeedStatusFormat                  = "execution: event feed unavailable (HTTP %d)"
-	returnEventPageSignatureError                = "execution: event page signature or size invalid"
-	returnEventPageContiguityError               = "execution: event page is not contiguous"
-	returnEventPageStateError                    = "execution: event page contains invalid state"
-	returnReceiptNotFoundError                   = "execution: proposal has no settled receipt"
-	returnResponseUnknownFormat                  = "execution: return response unknown: %w"
-	returnResponseUnsettledFormat                = "execution: return response unsettled (HTTP %d)"
-	returnReceiptSignatureError                  = "execution: return receipt signature or size invalid"
-	returnReceiptRunMismatchError                = "execution: return receipt does not match pinned run"
-	returnMissingIdentity                        = ""
-	returnMinimumPositiveBytes            int64  = 1
-	returnMinimumTaskAttempt                     = 1
-	returnMinimumEventPageSize                   = 1
-	returnMaximumEventPageSize                   = 32
-	returnEventPageHalvingDivisor                = 2
-	returnReplyReadOverflowBytes          int64  = 1
-	returnFirstCertificateIndex                  = 0
-	returnNoEvents                               = 0
-	returnNoFenceSequence                 uint64 = 0
-	returnNoCertificates                         = 0
-	returnSeekStartOffset                 int64  = 0
-	returnReadNoBytes                            = 0
-	returnEventNextSequence               uint64 = 1
-	returnNoReceipt                              = false
-	returnPinnedCertificateVerifier              = true
+	returnDocumentHeader                                = "X-Dispat-Document"
+	returnSignatureHeader                               = "X-Dispat-Signature"
+	returnReplyLimit                                    = 64 << 10
+	returnEventPageLimit                                = 1 << 20
+	returnHandlerIncompleteError                        = "execution: incomplete choreography return handler"
+	returnTLSRequiredMessage                            = "TLS required"
+	returnEventCursorInvalidMessage                     = "invalid event cursor"
+	returnEventFeedUnavailableMessage                   = "event feed unavailable"
+	returnContentTypeHeader                             = "Content-Type"
+	returnJSONMediaType                                 = "application/json"
+	returnSingleEventOversizeError                      = "execution: single signed event exceeds transfer limit"
+	returnEventPageBoundError                           = "execution: invalid event page bound"
+	returnAckInvalidMessage                             = "invalid cancellation acknowledgement"
+	returnClaimInvalidMessage                           = "invalid claim proposal"
+	returnResultInvalidMessage                          = "invalid result proposal"
+	returnResultTempPattern                             = "dispat-result-*"
+	returnResultStagingUnavailableMessage               = "result staging unavailable"
+	returnResultLengthMismatchMessage                   = "result bytes do not match proposal"
+	returnReceiptQueryInvalidMessage                    = "invalid receipt query"
+	returnReceiptStatusUnknownMessage                   = "receipt status unknown"
+	returnReceiptUnsettledMessage                       = "receipt not yet settled"
+	returnDocumentOversizeError                         = "execution: return document exceeds limit"
+	returnDocumentSignatureError                        = "execution: return document signature invalid"
+	returnDocumentTrailingError                         = "execution: trailing return document"
+	returnProposalUnsettledMessage                      = "proposal not settled"
+	returnPersistedReceiptInvalidMessage                = "invalid persisted receipt"
+	returnReceiptEncodingMessage                        = "receipt encoding failed"
+	returnHTTPScheme                                    = "https"
+	returnEndpointInvalidError                          = "execution: invalid choreography return endpoint"
+	returnTLSIdentityInvalidError                       = "execution: invalid choreography TLS identity"
+	returnCertificateMissingError                       = "execution: return endpoint supplied no certificate"
+	returnCertificateMismatchError                      = "execution: return endpoint certificate differs from signed preflight"
+	returnURLRootPath                                   = "/"
+	returnRedirectRefusedError                          = "execution: return endpoint redirects are refused"
+	returnProbeReplyRunMismatchError                    = "execution: probe reply does not match pinned run"
+	returnProbeReceiptMismatchError                     = "execution: probe receipt differs from reply"
+	returnAckIdentityMissingError                       = "execution: cancellation acknowledgement lacks identity"
+	returnAckReceiptMismatchError                       = "execution: cancellation acknowledgement receipt differs"
+	returnClaimRunMismatchError                         = "execution: claim does not match pinned run"
+	returnClaimReceiptMismatchError                     = "execution: claim receipt differs from proposal"
+	returnResultPayloadLimitError                       = "execution: invalid result payload limit"
+	returnResultRewindErrorFormat                       = "execution: rewinding result payload: %w"
+	returnResultHashErrorFormat                         = "execution: hashing result payload: %w"
+	returnResultPayloadOversizeError                    = "execution: result payload exceeds limit"
+	returnResultRunMismatchError                        = "execution: result does not match pinned run"
+	returnResultPayloadLengthChangedError               = "execution: prepared result payload length changed"
+	returnResultReceiptMismatchError                    = "execution: result receipt differs from proposal"
+	returnReceiptQueryIdentityError                     = "execution: receipt query lacks identity"
+	returnQueriedReceiptIdentityError                   = "execution: queried receipt differs from proposal identity"
+	returnEventRequestInvalidError                      = "execution: invalid event request"
+	returnEventResponseUnknownFormat                    = "execution: event response unknown: %w"
+	returnEventFeedStatusFormat                         = "execution: event feed unavailable (HTTP %d)"
+	returnEventPageSignatureError                       = "execution: event page signature or size invalid"
+	returnEventPageContiguityError                      = "execution: event page is not contiguous"
+	returnEventPageStateError                           = "execution: event page contains invalid state"
+	returnReceiptNotFoundError                          = "execution: proposal has no settled receipt"
+	returnResponseUnknownFormat                         = "execution: return response unknown: %w"
+	returnResponseUnsettledFormat                       = "execution: return response unsettled (HTTP %d)"
+	returnReceiptSignatureError                         = "execution: return receipt signature or size invalid"
+	returnReceiptRunMismatchError                       = "execution: return receipt does not match pinned run"
+	returnMissingIdentity                               = ""
+	returnMinimumPositiveBytes            int64         = 1
+	returnMinimumTaskAttempt                            = 1
+	returnMinimumEventPageSize                          = 1
+	returnMaximumEventPageSize                          = 32
+	returnEventPageHalvingDivisor                       = 2
+	returnReplyReadOverflowBytes          int64         = 1
+	returnFirstCertificateIndex                         = 0
+	returnNoEvents                                      = 0
+	returnNoFenceSequence                 uint64        = 0
+	returnNoCertificates                                = 0
+	returnSeekStartOffset                 int64         = 0
+	returnReadNoBytes                                   = 0
+	returnEventNextSequence               uint64        = 1
+	returnNoReceipt                                     = false
+	returnPinnedCertificateVerifier                     = true
+	returnNoTransferTimeout               time.Duration = 0
 )
 
 // ChoreographyReturnBrokerx owns semantic validation and Git persistence on
@@ -131,12 +135,13 @@ type ChoreographyDrainBrokerx interface {
 // existing transfer budget, not an in-memory allocation. TempDir must be a
 // first-node-owned directory on the same machine as its object store.
 type ReturnHandlerOptions struct {
-	Broker         ChoreographyReturnBrokerx
-	Signer         *Signer
-	Binding        ChoreographyRunBinding
-	MaxClaimBytes  int64
-	MaxResultBytes int64
-	TempDir        string
+	Broker                ChoreographyReturnBrokerx
+	Signer                *Signer
+	Binding               ChoreographyRunBinding
+	MaxClaimBytes         int64
+	MaxResultBytes        int64
+	ResultTransferTimeout time.Duration
+	TempDir               string
 }
 
 // NewChoreographyReturnHandler returns a handler, not a listener. Its caller
@@ -144,19 +149,35 @@ type ReturnHandlerOptions struct {
 // signed preflight. Every request is independently HMAC-authenticated.
 func NewChoreographyReturnHandler(opts ReturnHandlerOptions) (http.Handler, error) {
 	if opts.Broker == nil || opts.Signer == nil || !opts.Binding.valid() ||
-		opts.MaxClaimBytes < returnMinimumPositiveBytes || opts.MaxResultBytes < returnMinimumPositiveBytes || opts.TempDir == returnMissingIdentity {
+		opts.MaxClaimBytes < returnMinimumPositiveBytes || opts.MaxResultBytes < returnMinimumPositiveBytes ||
+		opts.ResultTransferTimeout < returnNoTransferTimeout || opts.TempDir == returnMissingIdentity {
 		return nil, fmt.Errorf(returnHandlerIncompleteError)
 	}
-	return &choreographyReturnHandler{opts: opts}, nil
+	if opts.ResultTransferTimeout == returnNoTransferTimeout {
+		opts.ResultTransferTimeout = time.Duration(public.DefaultExecutionTransferTimeout) * time.Second
+	}
+	return &choreographyReturnHandler{opts: opts, controlTimeout: taskReportTimeout}, nil
 }
 
-type choreographyReturnHandler struct{ opts ReturnHandlerOptions }
+type choreographyReturnHandler struct {
+	opts           ReturnHandlerOptions
+	controlTimeout time.Duration
+}
 
 func (h *choreographyReturnHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.TLS == nil {
 		http.Error(w, returnTLSRequiredMessage, http.StatusUpgradeRequired)
 		return
 	}
+	if r.Method == http.MethodPost && r.URL.Path == returnResultPath {
+		h.result(w, r)
+		return
+	}
+	// A peer can keep its connection alive after the run stops. Its ledger
+	// read must not hold the persistence lock past bounded local cleanup.
+	ctx, cancel := context.WithTimeout(r.Context(), h.controlTimeout)
+	defer cancel()
+	r = r.WithContext(ctx)
 	switch {
 	case r.Method == http.MethodPost && r.URL.Path == returnDrainPath:
 		h.drain(w, r)
@@ -168,8 +189,6 @@ func (h *choreographyReturnHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		h.joinReceipt(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == returnClaimPath:
 		h.claim(w, r)
-	case r.Method == http.MethodPost && r.URL.Path == returnResultPath:
-		h.result(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == returnAckPath:
 		h.ack(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == returnReceiptPath:
@@ -247,6 +266,11 @@ func (h *choreographyReturnHandler) claim(w http.ResponseWriter, r *http.Request
 }
 
 func (h *choreographyReturnHandler) result(w http.ResponseWriter, r *http.Request) {
+	// The worker's configured transfer window covers the upload and the
+	// first node's pack import and verification as one request.
+	ctx, cancel := context.WithTimeout(r.Context(), max(h.controlTimeout, h.opts.ResultTransferTimeout))
+	defer cancel()
+	r = r.WithContext(ctx)
 	document, err := base64.RawURLEncoding.DecodeString(r.Header.Get(returnDocumentHeader))
 	if err != nil || int64(len(document)) > h.opts.MaxClaimBytes ||
 		!h.opts.Signer.IsSignatureValid(returnResultKind, document, r.Header.Get(returnSignatureHeader)) {
@@ -268,7 +292,12 @@ func (h *choreographyReturnHandler) result(w http.ResponseWriter, r *http.Reques
 	}
 	defer func() { _ = tmp.Close(); _ = os.Remove(tmp.Name()) }()
 	digest := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(tmp, digest), io.LimitReader(r.Body, proposal.PayloadBytes+returnReplyReadOverflowBytes))
+	n, copyErr := io.Copy(io.MultiWriter(tmp, digest),
+		&contextReader{ctx: ctx, from: io.LimitReader(r.Body, proposal.PayloadBytes+returnReplyReadOverflowBytes)})
+	if ctx.Err() != nil {
+		h.writeReceipt(w, ChoreographyReceipt{}, ctx.Err())
+		return
+	}
 	if copyErr != nil || n != proposal.PayloadBytes ||
 		hex.EncodeToString(digest.Sum(nil)) != proposal.PayloadSHA256 {
 		http.Error(w, returnResultLengthMismatchMessage, http.StatusBadRequest)
@@ -278,7 +307,7 @@ func (h *choreographyReturnHandler) result(w http.ResponseWriter, r *http.Reques
 		http.Error(w, returnResultStagingUnavailableMessage, http.StatusServiceUnavailable)
 		return
 	}
-	receipt, err := h.opts.Broker.AcceptResult(r.Context(), proposal, tmp)
+	receipt, err := h.opts.Broker.AcceptResult(ctx, proposal, tmp)
 	h.writeReceipt(w, receipt, err)
 }
 

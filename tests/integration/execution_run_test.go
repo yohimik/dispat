@@ -112,7 +112,23 @@ func executionTaskOutcomes(res harness.RunResult) map[string]harness.Event {
 // summary names the node of every task; and the sweep takes no release lock
 // and retains signed task and ledger history for later finality checks.
 func TestExecutionRunSweepPlacesScriptsOnWorkers(t *testing.T) {
-	rig := newExecutionSweepRig(t, executionSweepScript)
+	latch := t.TempDir()
+	apiStarted := filepath.Join(latch, "api-started")
+	webStarted := filepath.Join(latch, "web-started")
+	script := executionSweepScript + ` &&
+case "$DISPAT_PACKAGE" in
+  api) touch ` + harness.ShQuote(apiStarted) + ` ;;
+  web) touch ` + harness.ShQuote(webStarted) + ` ;;
+esac
+case "$DISPAT_PACKAGE" in
+  api|web)
+    for i in $(seq 1 300); do
+      test -e ` + harness.ShQuote(apiStarted) + ` && test -e ` + harness.ShQuote(webStarted) + ` && break
+      sleep .1
+    done
+    test -e ` + harness.ShQuote(apiStarted) + ` && test -e ` + harness.ShQuote(webStarted) + ` ;;
+esac`
+	rig := newExecutionSweepRig(t, script, executionSweepPinnedToWorkers)
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 1)
 	fault := harness.NewGitFault(t, harness.GitFault{Pattern: lockPushPattern})
 
@@ -429,6 +445,9 @@ func TestExecutionRunOutputsConflictLeavesNeitherFile(t *testing.T) {
 		"the root holds neither task's file at the disputed path")
 	assert.NoFileExists(t, rig.repo.Path("coverage", "api.out"), "a disagreeing set is left out whole")
 	assert.NoFileExists(t, rig.repo.Path("coverage", "web.out"))
+	if _, err := os.Stat(rig.repo.Path("coverage", "core.out")); err != nil {
+		t.Logf("the undisputed output is absent; stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	}
 	assert.Equal(t, "core\n", readRepoFile(t, rig.repo, "coverage/core.out"), "the undisputed set is merged")
 	outcomes := executionTaskOutcomes(res)
 	assert.Equal(t, "rejected", outcomes["api"].Str("outputs"))

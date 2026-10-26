@@ -278,7 +278,9 @@ func (a *App) closeCoordinator(ctx context.Context, coordinator coordinationClos
 	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coordinationCloseTimeout)
 	defer cancel()
 	if err := coordinator.Close(closeCtx); err != nil {
-		a.coordinatorCloseErr = err
+		if !errors.Is(err, execution.ErrChoreographyProbeCleanup) {
+			a.coordinatorCloseErr = err
+		}
 		event := a.log.Warn().Err(err).Str("code", execution.CodeTransportRetained).
 			Str("category", execution.CategoryTransportCleanup)
 		execution.AttachIdentity(event, err).Msg("coordination branches were not closed")

@@ -3408,6 +3408,7 @@ For an explicit graph, each node's initial indexing and one replay of all termin
 `O(Tk + Dk + Fr)` under constant-time indexed updates; actual edge updates cost `O(Dk)` per node over one
 complete run. With `Wn` independently interpreting nodes, aggregate indexing can cost
 `O(Wn(Tk + Dk + Fr))`, plus separately counted claim, refusal, retry, membership and late-join events.
+This counts one initialization per node; the `Qint` account below also counts independent restarts.
 Sorting ready choices, compatibility search,
 repeated independent planning, Git operations, bytes and effect settlement retain their separately charged
 costs. In particular, interpreting
@@ -3416,19 +3417,26 @@ the same plan on `Wn` nodes can repeat planning work; it is not an end-to-end mi
 **The dispat theorem (bounds for a fixed task graph).** A task graph is a finite directed acyclic graph.
 There is no fixed upper limit on its task, edge or node counts; `Tk`, `Dk` and `Wn` remain input parameters,
 and constants in asymptotic claims do not depend on them.
-Its vertices and precedence edges are fixed before execution; task durations become known when the tasks run. For a
-fixed history, configuration and inventory, §17.2 determines one semantic release plan and hence one task graph under
+Each vertex `i` has a nonnegative realized duration `d_i`, making this a vertex-weighted DAG; a unit-weight DAG
+with every `d_i = 1` is a special case. Its vertices and precedence edges are fixed before execution. Exact
+durations may be known before task selection in an offline information model, or hidden until completion in a
+nonanticipating online model. An estimate or bound on duration is not an exact `d_i`. For a fixed history,
+configuration and inventory, §17.2 determines one semantic release plan and hence one task graph under
 the execution policy: package stages, sign, version, syncLock, build, test, publication and record tasks, and the
 edges of §19.2, §19.2a and §28.5. Let `R` name its publications, records and withdrawals whose effects require
 durable recovery evidence. This does not identify a unique schedule, representation or executor. A command sweep
 (§28.10) also compiles to a graph. Write `Wk = sum(d_i)` for its task work and `Lk` for the greatest sum of
 nonnegative durations on a precedence chain. A modeled record task's duration is included in `d_i`; extra
 protocol latency not represented by a task is outside the graph. The following bounds concern failure-free task
-makespan. For arbitrary finite DAGs, the exact global task-time minimum `T = Lk` compares schedules of one
-already compiled graph with fixed durations, zero overhead and enough compatible capacity to start every
+makespan. The lower bounds, work-conserving list guarantees and ideal earliest-start minimum apply pathwise to
+each realized duration vector under their resource premises, whether or not its weights were known in advance.
+Optional placement-dependent edge delays are modeled separately below; they are not silently included in `d_i`.
+For arbitrary finite DAGs, the exact global task-time minimum `T = Lk` compares schedules of one already
+compiled graph with fixed durations, zero overhead and enough compatible capacity to start every
 ready task immediately. A finite one-pool capacity yields the factor and asymptotic bound of clause 2,
-not a general exact optimum. Semantic planning, graph compilation, scheduler bookkeeping memory and recovery
-have separate costs and no global minimum claim here.
+not a general exact optimum. Known weights can inform finite-capacity priorities; the stated list bound does
+not prove exact finite-resource optimality or select a unique algorithm. Semantic planning, graph compilation,
+scheduler bookkeeping memory and recovery have separate costs and no global minimum claim here.
 The zero transfer and scheduling time and immediate zero-duration closure used below are ideal schedule premises,
 not a wall-clock deadline or instantaneous cancellation guarantee for the §28 executor.
 
@@ -3773,6 +3781,8 @@ These are nonanticipating legal policies over the same fixed graph; the mode cha
 duration vector. An environment fixes arbitrary finite nonnegative
 task durations before play. Each duration coordinate may be chosen separately, without a probability law, and is
 learned only when that task completes.
+This game uses the hidden-duration information model; evaluating payoff at a fixed realized vector does not
+reveal future task durations to any player.
 Admissible policies make legal decisions and eventually start every task for every finite duration vector.
 Assume there exists one nonanticipating compatible-pickup policy that, on every duration history, can start
 all newly ready tasks immediately while retaining slots for running tasks. There is no claim, communication,
@@ -4195,8 +4205,8 @@ draws on one pool of `s` slots, and no owner lane binds. Two corollaries follow.
    regardless of stage order. With overlapping capacities no constant-factor schedule bound is claimed.
 
 **The dispat algorithm.** The execution model is a distributed executor of a compiled plan. It knows tasks and
-precedence before dispatch; task durations are learned by running. Its recovery protocol is stated separately from
-the failure-free makespan result. One implementation can use these six steps.
+precedence before dispatch; it may know exact task durations in advance or observe them at completion. Its recovery
+protocol is stated separately from the failure-free makespan result. One implementation can use these six steps.
 
 1. **Fix inputs.** Take the release locks (§13.2, §28.3), then fix history at `HEAD`, configuration, record inventory
    and receipts for the semantic plan (§17.2). If relying on identical rebuilds, also capture the task inputs,
@@ -4246,8 +4256,74 @@ precedes the package record and the run stops before that record, a later run ca
 record is not resumed by the next release plan. An effect that cannot safely be repeated needs the publication
 or post-publication recovery policy described in *Configured stages in the compiled plan*.
 
-The theorem is informative and changes no conformance obligation (§17.2). The next two passages apply its
-premises to build readiness and distributed placement.
+The theorem is informative and changes no conformance obligation (§17.2). The following passages apply its
+premises to the distribution modes, build readiness and distributed placement.
+
+**Interpretation and hybrid: semantic simulation and cost.** Fix pinned semantic inputs `I`. Every mode
+derives the same `Plan(I)` and a corresponding finite typed task graph (§28.3). Compare different modes
+through a graph isomorphism that preserves logical task identities, virtual gates, edge types, placement
+rules and first-node effect authority. Their policy digests, carrier OIDs, task refs and signed attempt OIDs
+may differ. Pair authoritative accepted event prefixes by mapping those run-specific objects to corresponding
+logical tasks, typed outcomes and effective input values. Compare matching claim/attempt ledger, membership,
+budget, node-eligibility and capacity-authority state under that mapping. The projection concerns semantic
+readiness and eligible logical claim or effect-stage admission, not pending peer-ref confirmation or a
+physical command start.
+
+Within one interpretation run, every node computing from the complete pinned envelope obtains identical
+plan and graph digests. Induct on its exact accepted event prefix `H`: initially task identities, predecessor
+counters and gate types match. Each accepted event has a signed type and exact identity. Its deterministic
+update changes the same indexed counters or typed predicates on each replica; a failed attempt before a
+terminal decision discharges no edge, and a raw result does not discharge a settled-outcome gate. Hence
+replicas at the same `H` compute the same abstract ready set, signed outcomes and logical admission choices
+for the same authority inputs. Across modes, representation-only events leave this projection unchanged;
+paired typed claim, attempt, capacity, terminal, settlement, input or membership events advance corresponding
+states. This stuttering simulation concerns accepted semantic events, not identical mode-specific ref or
+receipt bytes.
+The equal-prefix induction uses the proof pattern of
+[Schneider's state-machine tutorial](https://www.cs.cornell.edu/fbs/publications/ibmFault.sm.pdf).
+This use of the proof pattern does not establish consensus, replicated first-node authority or deterministic
+external command outcomes without matched observations.
+
+Hybrid gives a structural proof for its partition. Classify each executable vertex by §28.3's compiled
+nonpush or interpreted effect segment, preserving its independent placement and effect authority. Keep
+every task, virtual gate and typed edge, including edges crossing either way. A compiled descriptor is the
+residual of pinned rules: after its gates settle, typed holes receive exact signed predecessor Result, output
+and prepared-state OIDs within that run, corresponding to the same logical input values across modes.
+Induct over a topological order of the paired graphs. Sources have corresponding pinned inputs; matching
+predecessor outcomes and effective inputs give the next vertex the same typed gates and eligible logical
+request. The actual publish, adopt or reconcile branch also needs the same external destination observation
+to compare outcomes; equal graph gates alone do not supply it. Cross-partition alternations may recur on a
+chain, with no global two-phase barrier. Neither segment adds unknown tasks, infers an external effect from
+a command reply, or transfers first-node native publication and recording authority.
+
+Equal pinned inputs alone do not fix task outputs, joins, transport order, failure timing, start times or a
+wall-clock trace. On each failure-free fixed-graph realization with vertex weights known in advance or
+hidden, the work/span lower bounds and conditional list guarantees above apply pathwise only under their
+resource premises. Repeated planning, admission, transport, owner lanes, recovery and online joins are
+outside the ideal `T = Lk` equality. Both modes retain durable effect evidence, late-attempt exclusion and
+forward-recovery premises; deterministic interpretation alone neither settles an external effect nor makes
+a retry safe.
+
+For the ideal node-player game above, suppose each player's admissible strategies have a bijection between
+modes preserving every joint payoff and unilateral deviation for the fixed duration vector. A pure Nash
+profile then transfers: an improving deviation in the image would map back to one in the source, a
+contradiction. Typed-graph equivalence alone supplies no such bijection; differing admission or transport
+costs can change the game. This makes no equilibrium claim for a real distributed run.
+
+For a specified full-replication implementation, let `Qint` count independent interpretation
+initializations, including late joins and cold restarts, not only simultaneous nodes. Let instance `r` do
+planner work `P_r`, graph-construction work `G_r` and apply `F_r` logical terminal events, from catch-up or
+live delivery, once. Under constant-time indexed updates, its graph indexing and terminal-event work is
+`O(Tk + Dk + F_r)`, charging each outgoing edge once per logical terminal. Aggregate work is the sum over
+instances of `P_r + G_r + O(Tk + Dk + F_r)`; claim, refusal, retry, membership, eligibility search,
+cryptography, payload, transport and recovery costs are separate. If each instance independently
+materializes every explicit vertex and edge, graph records alone require `Omega(Qint(Tk + Dk))` aggregate
+inspection or writing. Each retained adjacency copy occupies `Theta(Tk + Dk)` words; `a` simultaneous
+independent copies occupy `Theta(a(Tk + Dk))`, apart from auxiliary readiness counters, output payloads,
+the signed durable log and effect records. Hybrid avoids semantic replanning for compiled pickup but still
+indexes its graph and evaluates first-only effects as their gates settle. Shared caches, succinct
+representations and replay strategies change these accounts; no universal fastest mode or joint
+auxiliary-memory minimum follows.
 
 **Build readiness: what a weaker relation can and cannot buy.** Let `b_i` and `p_i` be the build and publication
 durations of package `i`. First suppose only those tasks take positive time, every ready task starts immediately
@@ -8432,10 +8508,12 @@ admitted roster MAY contain only the first node; absent
 preauthorized nodes need not delay unrelated work. A node not named before the run may join only when the
 bootstrap instead pins a trust root and a bounded enrollment policy that authorizes its identity. An arbitrary
 endpoint or self-asserted name grants no admission. The first node's authenticated listener and capacity
-authority are ready before the run starts, even when no peer is initially present. A task restricted to a
-choreographer waits for an eligible admitted node until the bootstrap's finite admission deadline; expiry
-produces a signed no-claim task failure and derives dependent blocking under the graph's ordinary policy,
-without a fabricated command result. Waiting does
+authority are ready before the run starts, even when no peer is initially present. A ready, unclaimed task
+with no admitted node eligible under its fixed placement and platform rules waits until the bootstrap's
+finite admission deadline. This covers choreographer-only, orchestrator-only and either-node placement;
+expiry produces a signed no-claim task failure and derives dependent blocking under the graph's ordinary
+policy, without a fabricated command result. An eligible node whose capacity is occupied is not missing
+placement: its queued tasks MUST NOT expire under this rule. Waiting does
 not block unrelated ready work. A run that cannot offer the return route or authorized admission fails before
 effects. This replaces fixed-roster preflight only for absent future participants; each admitted node still
 passes the same capability, platform, protocol and transport checks before its first offer or proposal.
@@ -8652,6 +8730,13 @@ Missing, stale, incomplete or incompatible outputs fail that prerequisite;
 they MUST NOT be silently substituted with registry contents or a new build
 under a different input.
 
+Accepting a signed Result and choosing a winning pickup do not by themselves admit its output set. The first
+node MUST durably distinguish rejected output admission from a later package or hook failure after admission.
+Replay retains the exact Result as evidence but MUST NOT expose rejected files or typed exports as provider,
+same-package or carried inputs. A prepared provider's dependent gates wait for this admission disposition;
+rejection blocks those prerequisites even when the worker reported success. A later package failure does not
+by itself reject an already admitted output set; its reuse still follows the typed dependency and failure policy.
+
 Required output bytes MUST be available through the temporary Git transport
 branch (for example a task result tree containing explicitly added outputs),
 or through immutable content-addressed bundles whose references and digests are
@@ -8731,7 +8816,10 @@ After lock loss it accepts no new claim, assignment or publication, but it MUST 
 record of an effect that completed before the loss (§19.1). A record of an existing effect is not a new publication.
 A choreographer's missing result concerns computation or validation and MUST NOT be mistaken for an unknown
 engine-managed publication. Claimed work is not retried on another node without proof the prior attempt stopped
-and its task branch was fenced. An inert unclaimed task may be proposed again under its exact ref.
+and its task branch was fenced, except for the bounded successor authorized by the signed repeat-safe policy in
+§28.4 after the post-Cancel reply deadline. That exception leaves the old pickup's physical lease and run-budget
+charge held until exact settlement, and never authorizes concurrent native publication or recording. An inert
+unclaimed task may be proposed again under its exact ref.
 Neither a missing choreographer reply nor a task receipt discharges a release obligation.
 
 The orchestrator's own publish command can still have an uncertain external result. A failed command reply or a
@@ -8915,9 +9003,10 @@ is not applicable, while that mode's invocation must fail before effects. Every 
     node after independent tasks become ready. Compilation and hybrid let it pick up a ready command from
     existing compiled descriptors; interpretation has it independently recompute the same graph first. Its signed
     membership receipt precedes any offer or accepted claim. The plan, task IDs and existing claims remain
-    identical, and the second node creates only its own pickup refs after its accepted Claim. A task restricted
-    to a choreographer can wait only until the signed admission deadline; expiry does not fabricate a command
-    result.
+    identical, and the second node creates only its own pickup refs after its accepted Claim. A ready task with
+    no admitted eligible node reaches signed no-claim finality after the admission deadline for each placement
+    class, including an impossible orchestrator platform. Expiry does not fabricate a command result, and a
+    compatible task waiting only for occupied capacity remains queued.
 42. Submit two joins with one node identity, a stale membership epoch, a changed input or graph digest, an
     unauthenticated endpoint and incompatible capacity authorities. At most one exact identity is admitted;
     none of the mismatches creates capacity or a claim. Repeating one identical accepted join returns its

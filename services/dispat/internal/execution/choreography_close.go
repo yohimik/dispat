@@ -5,6 +5,7 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,8 +17,10 @@ const (
 	choreographyCloseAdmissionFenceErrorFormat = "execution: choreography admission could not be fenced: %w"
 	choreographyClosePendingTaskErrorFormat    = "execution: choreography task %s still awaits task or physical-slot settlement"
 	choreographyCloseUnresolvedErrorFormat     = "execution: unresolved choreography work retains coordination refs: %w"
-	choreographyCloseProbeErrorFormat          = "execution: preflight probe cleanup: %w"
-	choreographyCloseProbeRetainedErrorFormat  = "execution: preflight probe %s remains after choreography seal"
+	choreographyCloseProbeErrorFormat          = "%w: %s: execution: preflight probe cleanup: %w"
+	choreographyCloseProbeRetainedErrorFormat  = "%w: execution: preflight probe %s remains after choreography seal"
+	choreographyCloseProbeCleanupError         = "execution: sealed choreography probe cleanup incomplete"
+	choreographyCloseProbeBranchSeparator      = ", "
 	choreographyCloseUnsealedRefsError         = "execution: canonical task refs cannot close before signed run seal"
 	choreographyCloseUnknownTaskError          = "execution: ledger names unknown task ref"
 	choreographyCloseUnknownTransitionError    = "execution: unknown task-ref transition"
@@ -34,6 +37,10 @@ const (
 	choreographyCloseAbortedSeal               = true
 	choreographyCloseNoCanonicalTasks          = 0
 )
+
+// ErrChoreographyProbeCleanup identifies disposable transport cleanup after
+// the signed run seal. It cannot describe an unresolved claim or failed seal.
+var ErrChoreographyProbeCleanup = errors.New(choreographyCloseProbeCleanupError)
 
 // closeChoreography first persists a stop-admission fence, then seals only a
 // quiescent run. The ledger, bootstrap, task refs and peer index stay retained
@@ -78,11 +85,17 @@ func (c *Coordinator) closeChoreography(ctx context.Context) error {
 	for _, node := range sortedNodes(probes) {
 		outcomes, err := c.mailboxes[node].Close(ctx, probes[node])
 		if err != nil {
-			return fmt.Errorf(choreographyCloseProbeErrorFormat, err)
+			branches := make([]string, choreographyCloseNoCanonicalTasks, len(probes[node]))
+			for _, lease := range probes[node] {
+				branches = append(branches, lease.Branch)
+			}
+			return fmt.Errorf(choreographyCloseProbeErrorFormat,
+				ErrChoreographyProbeCleanup, strings.Join(branches, choreographyCloseProbeBranchSeparator), err)
 		}
 		for _, outcome := range outcomes {
 			if outcome.Result != gitx.BranchDeleted {
-				return fmt.Errorf(choreographyCloseProbeRetainedErrorFormat, outcome.Branch)
+				return fmt.Errorf(choreographyCloseProbeRetainedErrorFormat,
+					ErrChoreographyProbeCleanup, outcome.Branch)
 			}
 		}
 	}

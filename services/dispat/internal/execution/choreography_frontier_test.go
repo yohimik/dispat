@@ -620,6 +620,73 @@ func TestCompiledFrontierHoldsAcceptedResultEdgesUntilPackageSettlement(t *testi
 		"package settlement must retain the earlier signed Result identity")
 }
 
+func TestCompiledFrontierPreparedAdmissionDispositionControlsConsumers(t *testing.T) {
+	for _, rejected := range []bool{false, true} {
+		name := "admitted"
+		if rejected {
+			name = "rejected"
+		}
+		t.Run(name, func(t *testing.T) {
+			binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
+			frontier, err := NewCompiledChoreographyFrontier(CompiledChoreographyFrontierOptions{
+				Binding: binding, GraphRootOID: "root",
+				Node: ChoreographyRuntimeNode{Name: "peer", Platform: "linux/amd64", Capacity: 1},
+				Tasks: []ChoreographyTaskSpec{
+					{Task: "assets:prepare", Package: "assets", Kind: string(KindPrepare),
+						ReservationOID: "inert-prepare", Placement: PlacementWorker},
+					{Task: "ui:build", Package: "ui", Kind: string(KindBuild),
+						ReservationOID: "inert-ui", Placement: PlacementWorker,
+						PreparedProviders: []string{"assets"}, Predecessors: []string{"assets:prepare"}},
+					{Task: "solo:build", Package: "solo", Kind: string(KindBuild),
+						ReservationOID: "inert-solo", Placement: PlacementWorker,
+						Predecessors: []string{"assets:prepare"}},
+				},
+			})
+			require.NoError(t, err)
+			require.NoError(t, frontier.AttachOutcomePolicy(&testedOutcomePolicy{status: map[string]string{}}))
+			require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
+				Cursor: ChoreographyEventCursor{OID: "ledger-five", Sequence: 5},
+				Events: []ChoreographyEvent{
+					{Sequence: 1, Kind: ChoreographyInitializationComplete, Task: choreographyRunTaskID,
+						TaskOID: "root", GraphRootOID: "root"},
+					{Sequence: 2, Kind: ChoreographyExecutionStarted, Task: choreographyRunTaskID,
+						TaskOID: "root", GraphRootOID: "root", AdmissionDeadlineUTC: "deadline"},
+					{Sequence: 3, Kind: ChoreographyClaimAccepted, Task: "assets:prepare", Package: "assets",
+						Attempt: 1, Node: "peer", TaskOID: "claim", PriorTaskOID: "inert-prepare",
+						AssignmentOID: "assignment", GraphRootOID: "root"},
+					{Sequence: 4, Kind: ChoreographyResultAccepted, Task: "assets:prepare", Package: "assets",
+						Attempt: 1, Node: "peer", TaskOID: "receipt", OutputOID: "raw-result",
+						ProposalID: "proposal", ProposalDigest: "digest"},
+					{Sequence: 5, Kind: ChoreographyTerminal, Task: "assets:prepare", Package: "assets",
+						Attempt: 1, Node: "peer", TaskOID: "terminal", ResultReceiptOID: "receipt",
+						OutputOID: "raw-result", Succeeded: true, GraphRootOID: "root"},
+				},
+			}))
+			require.Equal(t, 1, frontier.tasks["ui:build"].remaining)
+			require.Equal(t, 1, frontier.tasks["solo:build"].remaining)
+			require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
+				Cursor: ChoreographyEventCursor{OID: "ledger-six", Sequence: 6},
+				Events: []ChoreographyEvent{{Sequence: 6, Kind: ChoreographyTaskPackageSettled,
+					Task: "assets:prepare", Package: "assets", Attempt: 1,
+					TaskOID: "terminal", PriorTaskOID: "terminal", GraphRootOID: "root",
+					OutputAdmissionRejected: rejected}},
+			}))
+			require.Zero(t, frontier.tasks["ui:build"].remaining)
+			require.Zero(t, frontier.tasks["solo:build"].remaining)
+			if rejected {
+				require.Equal(t, "assets", frontier.tasks["ui:build"].failedPrepared)
+				require.Empty(t, frontier.tasks["solo:build"].failedPrepared)
+				_, found := frontier.CompletedResultEvent("assets:prepare")
+				require.False(t, found)
+			} else {
+				require.Empty(t, frontier.tasks["ui:build"].failedPrepared)
+				_, found := frontier.CompletedResultEvent("assets:prepare")
+				require.True(t, found)
+			}
+		})
+	}
+}
+
 func TestCompiledFrontierReleasesFirstOnlyVersionAfterItsSettledTicket(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
 	frontier, err := NewCompiledChoreographyFrontier(CompiledChoreographyFrontierOptions{
@@ -697,8 +764,16 @@ func TestCompiledFrontierFailedPreparedProviderSettlesWithoutReleaseOutcome(t *t
 				ResultReceiptOID: "ack-assets", Succeeded: false, GraphRootOID: "complete-root"},
 		},
 	}))
-	require.Zero(t, frontier.tasks["ui:build"].remaining,
-		"a prepared provider settles its edge at its signed terminal without a release package event")
+	require.Equal(t, 1, frontier.tasks["ui:build"].remaining,
+		"a prepared provider holds its edge until signed admission settlement")
+	require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
+		Cursor: ChoreographyEventCursor{OID: "ledger-five", Sequence: 5},
+		Events: []ChoreographyEvent{{Sequence: 5, Kind: ChoreographyTaskPackageSettled,
+			Task: "assets:prepare", Package: "assets", Attempt: 1,
+			TaskOID: "terminal-assets", PriorTaskOID: "terminal-assets",
+			GraphRootOID: "complete-root"}},
+	}))
+	require.Zero(t, frontier.tasks["ui:build"].remaining)
 	_, ready, err := frontier.SelectReady()
 	require.NoError(t, err)
 	require.False(t, ready)
@@ -706,8 +781,8 @@ func TestCompiledFrontierFailedPreparedProviderSettlesWithoutReleaseOutcome(t *t
 	require.True(t, found)
 	require.Equal(t, "assets", blocked.BlockedBy)
 	require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
-		Cursor: ChoreographyEventCursor{OID: "ledger-five", Sequence: 5},
-		Events: []ChoreographyEvent{{Sequence: 5, Kind: ChoreographyBlocked,
+		Cursor: ChoreographyEventCursor{OID: "ledger-six", Sequence: 6},
+		Events: []ChoreographyEvent{{Sequence: 6, Kind: ChoreographyBlocked,
 			Task: "ui:build", Package: "ui", Attempt: 1, TaskOID: "blocked-ui",
 			PriorTaskOID: "inert-ui", BlockedBy: "assets", PackageOutcome: "failed",
 			GraphRootOID: "complete-root"}},

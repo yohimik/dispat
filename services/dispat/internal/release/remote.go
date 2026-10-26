@@ -198,6 +198,10 @@ type StageOutcome struct {
 	Exports []plan.Output
 	// FailedPart names the part of the frame that failed, empty when none did.
 	FailedPart string
+	// OutputAdmissionRejected distinguishes a verified Result whose output
+	// set could not be admitted from a later hook failure after admission.
+	// The signed Result remains available as evidence in either case.
+	OutputAdmissionRejected bool
 	// LocalFailure is the executor's own sentence for a frame that failed
 	// here, empty for one that travelled. A failure on this machine is
 	// described by the code that ran it, so an operator reads the same words

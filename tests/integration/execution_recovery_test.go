@@ -286,8 +286,10 @@ func TestExecutionKilledWorkerBlocksDependentsAndKeepsCapacity(t *testing.T) {
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	events := executionEvents(res)
-	assert.True(t, harness.IsCodePresent(events, executionIntegrityCode),
-		"the abandoned attempt is reported\nstdout:\n%s", res.Stdout)
+	assert.True(t, harness.IsCodePresent(events, executionRetainedCode),
+		"the unsettled accepted Claim retains its signed coordination evidence\nstdout:\n%s", res.Stdout)
+	assert.Contains(t, res.Stdout, "signed retry safety policy forbids contact-loss successor",
+		"this fixture has not opted into repeating uncertain work")
 	assert.Contains(t, res.Stdout, "active claim must settle",
 		"the first node retains the unknown accepted Claim for reconciliation")
 	assert.NotContains(t, res.Stdout, "has no admitted result awaiting settlement",
@@ -310,24 +312,24 @@ func TestExecutionKilledWorkerBlocksDependentsAndKeepsCapacity(t *testing.T) {
 	_ = worker.proc.Wait()
 }
 
-// TestExecutionCleanupFailureKeepsPublishedOutcome (spec vector 15): the
-// batched deletion of this run's own coordination branches cannot be pushed.
+// TestExecutionCleanupFailureKeepsPublishedOutcome (spec vector 15): deletion
+// of this run's disposable preflight probe cannot be pushed after signed seal.
 //
-// Retained transport data is untidy and nothing else: a coordination branch
-// carries messages between two machines and no part of a release, so its
-// survival erases no record. The packages are published and tagged, the refs
-// that remain are named in a warning under the retained code, and the run
-// still exits zero (§28.9, "harmless retained transport data MAY be a
-// warning").
+// Retained probe data is untidy and nothing else: the signed canonical task
+// and ledger branches remain intentionally. The probe carries no release
+// record, so its survival erases no record. The packages are published and
+// tagged, the refs that remain are named in a warning under the retained
+// code, and the run still exits zero (§28.9, "harmless retained transport
+// data MAY be a warning").
 func TestExecutionCleanupFailureKeepsPublishedOutcome(t *testing.T) {
 	rig := newExecutionRig(t, func(cfg *models.File) {
 		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
 		cfg.Scripts["build"] = models.Script{executionRecordingScript}
 	})
-	// A push whose source side is empty is a deletion, and the only deletions
-	// this run makes are of the branches it created itself.
+	// The sealed v3 ledger and canonical task refs remain for reconciliation.
+	// Only the disposable preflight probe is deleted at close.
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*push* :refs/heads/dispat-task-*", Nth: 1, Onward: true})
+		Pattern: "*push* :refs/heads/dispat-worker-*", Nth: 1, Onward: true})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
 
 	res := rig.release(fault.Env()...)
@@ -339,9 +341,10 @@ func TestExecutionCleanupFailureKeepsPublishedOutcome(t *testing.T) {
 	require.True(t, isRetained, "stdout:\n%s", res.Stdout)
 	assert.Equal(t, executionRetainedCode, retained.Str("code"))
 	assert.Equal(t, "transport-cleanup", retained.Str("category"))
-	assert.Contains(t, retained.Str("error"), "dispat-task-",
+	assert.Contains(t, retained.Str("error"), "dispat-worker-",
 		"the refs that remain are named, so an operator can remove them")
-	assert.NotEmpty(t, rig.branches(), "and they really are still there")
+	assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-worker-"),
+		"the failed probe deletion left that exact disposable ref")
 	stopAll(t, []*executionWorker{worker})
 }
 

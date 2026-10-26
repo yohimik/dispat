@@ -749,3 +749,30 @@ the old outcome remains pending. Operational cancellation neither rolls back
 effects nor means the `cancel` commit unit of §10. Section 28.7 measures elapsed intervals on one monotonic
 clock, with explicit uncertainty needed for cross-node timestamp comparisons. Conformance vectors cover the
 late start, late result, delayed upload and clock-skew races.
+
+## 2026-10-26: Known and hidden task durations in the theorem
+
+The fixed finite task graph is vertex-weighted by nonnegative realized durations; unit weights are one case.
+Exact durations known before selection and durations learned only at completion are two information models
+for the same graph. The work/span lower bounds, list-scheduling guarantees and ideal earliest-start optimum
+hold pathwise for either model under their stated resource premises. Known weights can guide finite-capacity
+priorities without making the stated list guarantee an exact optimum or a unique algorithm. The online
+universal-start and node-player game claims retain their hidden-duration premises; estimates are not exact
+weights, and placement-dependent transfer delays retain their separate model.
+
+## 2026-10-27: Interpretation and hybrid semantic simulation
+
+Section 13.11 now compares interpretation replicas at one exact accepted event prefix and compares modes
+through a mapping of typed graphs, semantic events and authority state. Mode-specific digests, refs and OIDs
+need not match. An event-prefix induction gives interpretation the same abstract readiness and eligibility;
+a graph-order induction gives hybrid corresponding gates when compiled descriptors receive exact signed
+inputs and interpreted effects retain first-node authority. Cross-partition dependencies may alternate along
+a chain. The argument compares semantic states, not wall-clock traces or external effect outcomes without
+matching destination observations, and preserves the existing recovery premises.
+A strategy and payoff preserving bijection suffices to transfer an ideal-game Nash profile between modes.
+
+The cost account counts full independent interpretation initializations, including late joins and restarts,
+separately from simultaneous graph replicas. It charges planning, graph construction, indexed replay,
+retained graph state, auxiliary counters, payloads and durable evidence to their respective phases.
+Weighted task-time bounds remain pathwise and conditional on resources; the argument establishes no fastest
+distribution mode or joint memory minimum. The mode-specific §28 runtime contract is unchanged.

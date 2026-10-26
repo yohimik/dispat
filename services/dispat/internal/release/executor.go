@@ -95,6 +95,7 @@ const (
 	executorLocalCapacityPanicFormat     = "local task capacity acquisition panicked: %v"
 	executorFirstClaimPanicFormat        = "first-only task claim panicked: %v"
 	executorLocalLifecycleLogMessage     = "local task capacity or authority failed"
+	executorDiagnosticCodeLogKey         = "code"
 	executorFailureDigestFormat          = "%x"
 	delegatedNoClaimProofErrorFormat     = "proving no claim for task %s: %w"
 	delegatedNoClaimAbsentErrorFormat    = "delegated task %s has no proven no-claim finality"
@@ -2404,7 +2405,12 @@ func beginFirstOnlyTask(ctx context.Context,
 }
 
 func (r *run) failLocalLifecycle(err error) {
-	r.Log.Error().Err(err).Msg(executorLocalLifecycleLogMessage)
+	event := r.Log.Error().Err(err)
+	var diagnostic interface{ DiagnosticCode() string }
+	if errors.As(err, &diagnostic) {
+		event.Str(executorDiagnosticCodeLogKey, diagnostic.DiagnosticCode())
+	}
+	event.Msg(executorLocalLifecycleLogMessage)
 	r.mu.Lock()
 	if r.outcomeErr == nil {
 		r.outcomeErr = err

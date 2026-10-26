@@ -1393,6 +1393,21 @@ type executorDiagnosticError struct{ code string }
 func (e executorDiagnosticError) Error() string          { return "repository snapshot moved" }
 func (e executorDiagnosticError) DiagnosticCode() string { return e.code }
 
+func TestLocalAuthorityFailureKeepsItsDiagnosticAndCancellationCause(t *testing.T) {
+	var output bytes.Buffer
+	ctx, stop := context.WithCancelCause(t.Context())
+	defer stop(nil)
+	failure := fmt.Errorf("claiming first-only task: %w", executorDiagnosticError{code: "E227"})
+	active := &run{Executor: &Executor{Log: zerolog.New(&output)}, stop: stop}
+
+	active.failLocalLifecycle(failure)
+
+	assert.Contains(t, output.String(), `"code":"E227"`)
+	assert.Contains(t, output.String(), executorLocalLifecycleLogMessage)
+	require.ErrorIs(t, context.Cause(ctx), failure)
+	require.ErrorIs(t, active.outcomeErr, failure)
+}
+
 func TestBeforePublishValidationRunsAfterHookAndBeforePublish(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	p.Releases["a"].Pkg.Space.BeforePublishScript = []string{"before-publish"}

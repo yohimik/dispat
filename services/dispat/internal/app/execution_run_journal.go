@@ -140,7 +140,7 @@ func openPrivateRunLock(path string) (*os.File, error) {
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, firstRunJournalPrivateFileMode)
+	file, err := fsx.OpenLockFile(path, firstRunJournalPrivateFileMode)
 	if err != nil {
 		return nil, err
 	}

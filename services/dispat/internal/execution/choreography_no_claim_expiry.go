@@ -15,6 +15,7 @@ import (
 const (
 	choreographyNoClaimKind                           MessageKind = "choreography-no-claim-expired"
 	choreographyNoAdmittedWorkerCause                             = "no-admitted-worker"
+	choreographyNoCompatibleAdmittedNodeCause                     = "no-compatible-admitted-node"
 	choreographyNoClaimStateError                                 = "execution: no-claim deadline cannot terminalize a noninert or eligible task"
 	choreographyNoClaimPolicyError                                = "execution: no-claim expiry differs from fixed admission policy"
 	choreographyNoClaimPersistError                               = "execution: no-claim expiry has no canonical task persistence"
@@ -36,6 +37,18 @@ const (
 	choreographyNoClaimSettlementFound                            = true
 	choreographyNoClaimSettlementOutcomeMismatchError             = "execution: no-claim package settlement differs from exact signed record"
 )
+
+func choreographyNoClaimCause(placement Placement) string {
+	if placement == PlacementWorker {
+		return choreographyNoAdmittedWorkerCause
+	}
+	return choreographyNoCompatibleAdmittedNodeCause
+}
+
+func isChoreographyNoClaimPlacement(placement Placement) bool {
+	return placement == PlacementWorker || placement == PlacementOrchestrator ||
+		placement == PlacementAnyNode
+}
 
 // ChoreographyNoClaimOutcome is an inert canonical task terminal. It carries
 // no command Result, because no node ever acquired execution authority.
@@ -70,7 +83,8 @@ func (b *FirstNodeBroker) ExpireUnclaimed(ctx context.Context, taskID string) er
 	}
 	task := b.tasks[taskID]
 	if !b.executionStarted || b.stopping || b.sealed || task == nil || task.spec.Virtual ||
-		task.spec.Placement != PlacementWorker || task.remaining != choreographyNoClaimNoRemainingEdges ||
+		!isChoreographyNoClaimPlacement(task.spec.Placement) || task.spec.LocalAuthority ||
+		task.remaining != choreographyNoClaimNoRemainingEdges ||
 		task.terminal || task.claim != choreographyNoClaimNoIdentity || task.offeredNode != choreographyNoClaimNoIdentity || task.result != choreographyNoClaimNoIdentity ||
 		task.queueFence != choreographyNoClaimNoIdentity || task.attempt != choreographyNoClaimFirstAttempt || task.tip != task.spec.ReservationOID ||
 		time.Now().Before(deadline) {
@@ -88,7 +102,7 @@ func (b *FirstNodeBroker) ExpireUnclaimed(ctx context.Context, taskID string) er
 	outcome := ChoreographyNoClaimOutcome{ChoreographyRunBinding: b.binding,
 		GraphRootOID: b.graphRootOID, Task: taskID, Attempt: task.attempt,
 		Branch: task.spec.Branch, ExpectedOID: task.tip, Package: task.spec.Package,
-		MissingPlacement:      string(PlacementWorker),
+		MissingPlacement:      string(task.spec.Placement),
 		AdmissionDeadlineUTC:  b.admissionDeadlineUTC,
 		AdmissionPolicyDigest: policyDigest}
 	persist, ok := b.persist.(interface {
@@ -103,7 +117,7 @@ func (b *FirstNodeBroker) ExpireUnclaimed(ctx context.Context, taskID string) er
 	}
 	task.tip, task.terminal, task.succeeded = oid, choreographyNoClaimTaskTerminal, choreographyNoClaimTaskFailed
 	b.wakeBudgetWaiters()
-	if task.spec.Package != choreographyNoClaimNoIdentity {
+	if task.spec.Package != choreographyNoClaimNoIdentity && task.spec.Kind != string(KindPrepare) {
 		task.pendingNoClaim = choreographyNoClaimSettlementPending
 	} else {
 		b.discharge(task)
@@ -123,12 +137,13 @@ func (g *GitChoreographyPersist) PersistNoClaim(ctx context.Context,
 	deadlineUTC, started := g.admissionDeadlineUTC, g.executionStarted
 	g.mu.Unlock()
 	spec := g.tasks[outcome.Task]
-	if spec.Task == choreographyNoClaimNoIdentity || spec.Placement != PlacementWorker ||
+	if spec.Task == choreographyNoClaimNoIdentity ||
+		!isChoreographyNoClaimPlacement(spec.Placement) || spec.LocalAuthority ||
 		outcome.ChoreographyRunBinding != g.opts.Binding ||
 		outcome.GraphRootOID != g.opts.GraphRootOID ||
 		outcome.Branch != spec.Branch || outcome.ExpectedOID != spec.ReservationOID ||
 		outcome.Attempt != choreographyNoClaimFirstAttempt || outcome.Package != spec.Package ||
-		outcome.MissingPlacement != string(PlacementWorker) ||
+		outcome.MissingPlacement != string(spec.Placement) ||
 		outcome.AdmissionDeadlineUTC != deadlineUTC || !started {
 		return choreographyNoClaimNoIdentity, fmt.Errorf(choreographyNoClaimStateError)
 	}
@@ -159,7 +174,7 @@ func (g *GitChoreographyPersist) PersistNoClaim(ctx context.Context,
 			Task: outcome.Task, Attempt: outcome.Attempt, TaskOID: oid,
 			PriorTaskOID: outcome.ExpectedOID, GraphRootOID: outcome.GraphRootOID,
 			Package:               outcome.Package,
-			BlockedBy:             choreographyNoAdmittedWorkerCause,
+			BlockedBy:             choreographyNoClaimCause(spec.Placement),
 			MissingPlacement:      outcome.MissingPlacement,
 			AdmissionDeadlineUTC:  outcome.AdmissionDeadlineUTC,
 			AdmissionPolicyDigest: outcome.AdmissionPolicyDigest},
@@ -172,11 +187,12 @@ func (g *GitChoreographyPersist) PersistNoClaim(ctx context.Context,
 func (g *GitChoreographyPersist) verifyNoClaimEvent(ctx context.Context,
 	event ChoreographyEvent) error {
 	spec := g.tasks[event.Task]
-	if spec.Task == choreographyNoClaimNoIdentity || spec.Placement != PlacementWorker ||
+	if spec.Task == choreographyNoClaimNoIdentity ||
+		!isChoreographyNoClaimPlacement(spec.Placement) || spec.LocalAuthority ||
 		event.GraphRootOID != g.opts.GraphRootOID ||
 		event.PriorTaskOID != spec.ReservationOID ||
-		event.MissingPlacement != string(PlacementWorker) ||
-		event.BlockedBy != choreographyNoAdmittedWorkerCause {
+		event.MissingPlacement != string(spec.Placement) ||
+		event.BlockedBy != choreographyNoClaimCause(spec.Placement) {
 		return fmt.Errorf(choreographyNoClaimStateError)
 	}
 	parents, err := g.opts.Mailbox.plumbing.CommitParents(ctx, event.TaskOID)
@@ -360,7 +376,7 @@ func (g *GitChoreographyPersist) PersistNoClaimPackageSettlement(ctx context.Con
 		Event: ChoreographyEvent{Kind: ChoreographyNoClaimPackageSettled,
 			Task: taskID, Attempt: choreographyNoClaimFirstAttempt, TaskOID: noClaimOID, PriorTaskOID: noClaimOID,
 			GraphRootOID: g.opts.GraphRootOID, Package: spec.Package,
-			PackageOutcome: packageOutcome, BlockedBy: choreographyNoAdmittedWorkerCause},
+			PackageOutcome: packageOutcome, BlockedBy: choreographyNoClaimCause(spec.Placement)},
 	}); err != nil {
 		outcome, known, lookupErr := g.LookupNoClaimPackageSettlement(ctx, taskID, noClaimOID)
 		if lookupErr == nil && known && outcome == packageOutcome {
@@ -375,7 +391,8 @@ func (g *GitChoreographyPersist) verifyNoClaimPackageSettlementEvent(ctx context
 	event ChoreographyEvent) error {
 	spec := g.tasks[event.Task]
 	if spec.Task == choreographyNoClaimNoIdentity || spec.Package == choreographyNoClaimNoIdentity || event.Package != spec.Package ||
-		(event.PackageOutcome != choreographyNoClaimPackageFailed && event.PackageOutcome != choreographyNoClaimNoIdentity) || event.BlockedBy != choreographyNoAdmittedWorkerCause ||
+		(event.PackageOutcome != choreographyNoClaimPackageFailed && event.PackageOutcome != choreographyNoClaimNoIdentity) ||
+		event.BlockedBy != choreographyNoClaimCause(spec.Placement) ||
 		event.GraphRootOID != g.opts.GraphRootOID || event.TaskOID == choreographyNoClaimNoIdentity || event.Attempt != choreographyNoClaimFirstAttempt ||
 		event.PriorTaskOID != event.TaskOID {
 		return fmt.Errorf(choreographyNoClaimStateError)

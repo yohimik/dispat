@@ -180,6 +180,7 @@ type choreographyPendingDecision struct {
 	ackAccepted              bool
 	decided                  bool
 	packageSettlementPending bool
+	outputAdmissionRejected  bool
 	localError               error
 	localEnded               bool
 	watchSettled             func()
@@ -206,7 +207,9 @@ func (c *Coordinator) SettleChoreographyTask(ctx context.Context, taskID string,
 	decision := pending.decision
 	decision.PackageOutcome = string(status)
 	if pending.packageSettlementPending {
-		if err := c.choreographyBroker.SettleTaskPackage(ctx, taskID, string(status)); err != nil {
+		if err := c.choreographyBroker.SettleTaskPackage(ctx, ChoreographyTaskPackageSettlement{
+			TaskID: taskID, PackageOutcome: string(status),
+			OutputAdmissionRejected: pending.outputAdmissionRejected}); err != nil {
 			return err
 		}
 		pending.packageSettlementPending = choreographyStagePackageSettlementComplete

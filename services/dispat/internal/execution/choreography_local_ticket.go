@@ -86,7 +86,7 @@ func (c *Coordinator) BeginChoreographyLocalTask(ctx context.Context,
 		Produces: choreographyLocalOutputCaptureDisabledState})
 	receipt, err := c.ClaimChoreographyLocalTask(ctx, taskID, lease)
 	if err != nil {
-		return nil, err
+		return nil, c.refuseTask(taskID, c.Local.Name, attempt, err)
 	}
 	if !receipt.Accepted || receipt.Refused || receipt.OID == choreographyLocalAbsentIdentityText ||
 		receipt.AssignmentOID == choreographyLocalAbsentIdentityText || receipt.GraphRootOID != c.GraphRootOID ||

@@ -13,12 +13,10 @@ package integration
 // the invocations off the log, so the rows are the shapes the code really
 // issues rather than the shapes it looks as though it might.
 //
-// Every row states the same two things in different words. A call that
-// prepares or authorizes work is a call whose failure must stop that work:
-// the package fails with the integrity code and nothing of it is published. A
-// call that reads what a node said, or that tidies up after it, is a call
-// whose failure must cost a poll or a warning and nothing more, because the
-// work it is about has already happened somewhere else.
+// A definite failure before authorization stops the work with the integrity
+// code and no publication. An ambiguous task-and-ledger push retains its run
+// and lock for exact reconciliation. One failed read of an already signed
+// Result retries that same evidence without repeating the worker effect.
 //
 // The assertions are codes, exit statuses and git state. No row reads a git
 // message: the stand-in reports failures in this suite's own words, which is
@@ -59,6 +57,19 @@ const executionFaultNoClaimSettledEventKind = "no-claim-package-settled"
 func newExecutionFaultWorkspace(t *testing.T) *executionRig {
 	t.Helper()
 	return newExecutionWorkspace(t, recordingBuild, executionOneWorker, func(cfg *models.File) {
+		cfg.Execution.Timeouts.Task = executionFaultTaskTimeout
+		cfg.Execution.Timeouts.Cancel = 20
+	})
+}
+
+// One package makes the choreography Result receipt the delegated build's.
+// Its first-node version ticket uses the distinct local Result message. Other
+// packages would race independent first-local reads with the answer fault.
+func newExecutionFaultSinglePackage(t *testing.T) *executionRig {
+	t.Helper()
+	return newExecutionRig(t, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+		cfg.Scripts["build"] = models.Script{executionRecordingScript}
 		cfg.Execution.Timeouts.Task = executionFaultTaskTimeout
 		cfg.Execution.Timeouts.Cancel = 20
 	})
@@ -126,14 +137,11 @@ type executionGitFault struct {
 // TestExecutionOrchestratorGitFaults: the orchestrator's own git failing
 // around the mailbox, in the three ways that matter.
 //
-// A read that can never succeed is a pool this machine cannot talk to at all,
-// so the release refuses before a stage runs anywhere. An input state that
-// could not be prepared, and an assignment or a preparation that could not
-// be described or activated, are work that was never authorized, so
-// the package fails with the integrity code and nothing is published. A fetch
-// or a chain walk of what a node already answered is a report about work that
-// has already happened, so failing one of them costs a tick and the release
-// still ends as a release.
+// A read that can never succeed refuses the release before a stage runs.
+// Definitive input and assignment preparation failures refuse the package
+// without publication. An uncertain atomic push retains its exact refs and
+// lock. Reading the signed Result once unsuccessfully costs a retry; the
+// worker's effect is not rerun and the release still completes.
 func TestExecutionOrchestratorGitFaults(t *testing.T) {
 	for name, row := range map[string]executionGitFault{
 		"no message can be resolved at all": {
@@ -161,7 +169,7 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 		"the assignment cannot be offered": {
 			pattern: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
 			nth:     1, isOnward: true,
-			code: 1, diagnostic: executionIntegrityCode,
+			code: 1, unknownOutcome: true,
 		},
 		"the accepted claim cannot be committed": {
 			pattern: "*commit-tree*dispat transport choreography-claim*",
@@ -174,16 +182,16 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			code: 1, unknownOutcome: true, newRig: newExecutionFaultPreparation,
 		},
 		"the answer cannot be retrieved once": {
-			pattern: "*fetch*dispat-task-*", nth: 1,
-			armAfter: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
+			pattern: "*rev-list --parents --max-count=1*", nth: 1,
+			armAfter: "*commit-tree*dispat transport choreography-result*",
+			newRig:   newExecutionFaultSinglePackage,
 		},
 		"a node's answer cannot be read once": {
-			// Counted from the push that offers the build: how many blobs the
-			// preflight probe reads before that depends on when its claim and
-			// its result are observed, so the first blob read after the offer
-			// is the first blob of a node's answer to the build.
+			// A task-ref push may be initialization or a Claim. Start counting
+			// only after the first node has written the accepted Result receipt.
 			pattern: "*cat-file blob*", nth: 1,
-			armAfter: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
+			armAfter: "*commit-tree*dispat transport choreography-result*",
+			newRig:   newExecutionFaultSinglePackage,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -191,7 +199,8 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
 				func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(4) }), 0)
 			fault := harness.NewGitFault(t, harness.GitFault{
-				Pattern: row.pattern, Nth: row.nth, Onward: row.isOnward, ArmAfter: row.armAfter})
+				Pattern: row.pattern, Nth: row.nth, Onward: row.isOnward,
+				ArmAfter: row.armAfter})
 
 			res := rig.repo.StartReleaseEnv(rig.env(fault.Env()...), "release",
 				"--return-endpoint", rig.returnURL).WaitForDiagnostic(90*time.Second, func() {
@@ -214,6 +223,9 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			}
 			assert.Equal(t, 0, reply.Code, "the node carried on serving")
 			if row.code == 0 {
+				assert.Positive(t, fault.Matches(), "the one-shot fault reached a post-Result read\nstdout:\n%s", res.Stdout)
+				assert.Equal(t, 1, executionBuildCount(rig, "core"),
+					"the signed Result is reread without repeating the worker effect: %v", rig.runs())
 				assert.NotEmpty(t, rig.repo.TagList(), "a call that is retried costs a tick and nothing else")
 				assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
 					"the completed run retains its signed ledger for recovery")

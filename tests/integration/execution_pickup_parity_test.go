@@ -34,7 +34,7 @@ import (
 )
 
 // executionParityGateEnv names the file whose presence lets the provider's
-// publish succeed. It lives outside every checkout and reaches both runs.
+// beforePublish gate succeed. It lives outside every checkout and reaches both runs.
 const executionParityGateEnv = "DISPAT_IT_PARITY_GATE"
 
 // executionParityTwin is one of the two releases of the fixture: the
@@ -47,7 +47,7 @@ type executionParityTwin struct {
 }
 
 // newExecutionParityTwin seeds `core` and its consumer `cli`. Every script
-// records the machine it ran on; core's publish fails while the gate is shut.
+// records the machine it ran on; core's beforePublish gate fails while shut.
 // The delegating twin pins the builds of both packages to its one node,
 // which is the only difference between the twins.
 func newExecutionParityTwin(t *testing.T, isDistributed bool) *executionParityTwin {
@@ -57,12 +57,13 @@ func newExecutionParityTwin(t *testing.T, isDistributed bool) *executionParityTw
 	cfg := harness.BaseFile(2, 2)
 	cfg.Scripts = map[string]models.Script{
 		"build":        {executionRecordingScript},
-		"core-publish": {`test -f "$` + executionParityGateEnv + `" && ` + executionPublishProbe},
+		"core-ready":   {`test -f "$` + executionParityGateEnv + `"`},
+		"core-publish": {executionPublishProbe},
 		"cli-publish":  {executionPublishProbe},
 	}
 	cfg.Spaces = map[string]models.SpaceConfig{
 		"libs": {Path: models.PathList{"packages/libs"},
-			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"core-publish"}}},
+			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, BeforePublish: []string{"core-ready"}, Publish: []string{"core-publish"}}},
 		"apps": {Path: models.PathList{"packages/apps"},
 			Flow: &models.SpaceFlowConfig{Build: []string{"build"}, Publish: []string{"cli-publish"}}},
 	}

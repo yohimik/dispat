@@ -71,7 +71,7 @@ func (b *FirstNodeBroker) decidePickupAttempt(ctx context.Context,
 	}
 	if task.spec.Package != choreographyPickupDecisionBrokerMissingIdentity &&
 		d.PackageOutcome == choreographyPickupDecisionBrokerMissingIdentity &&
-		!task.spec.ExecutorOwned && task.spec.Kind != string(KindPrepare) {
+		!task.spec.ExecutorOwned {
 		task.pendingPackageSettlement = choreographyBrokerPackageSettlementPending
 	} else {
 		b.discharge(task)

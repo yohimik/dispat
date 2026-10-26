@@ -201,7 +201,7 @@ func TestSignedBindingCacheReleasesFirstOnlyVersionAfterTerminalWithoutPackageSe
 		"a first-only version has passed the executor barrier when its signed terminal exists")
 }
 
-func TestSignedBindingCacheReleasesPreparedProviderAtTerminalWithoutPackageSettlement(t *testing.T) {
+func TestSignedBindingCacheWaitsForPreparedProviderAdmissionSettlement(t *testing.T) {
 	feed := &bindingCacheEventReader{events: []ChoreographyEvent{{
 		Sequence: 1, LedgerOID: "ledger-prepare-terminal", Kind: ChoreographyTerminal,
 		Task: "assets:prepare", Package: "assets", TaskOID: "prepare-terminal",
@@ -224,6 +224,13 @@ func TestSignedBindingCacheReleasesPreparedProviderAtTerminalWithoutPackageSettl
 	})
 	require.NoError(t, err)
 	cache.accepted["prepare-result-receipt"] = choreographyAcceptedBindingResult{oid: "prepare-result"}
+	_, err = cache.State(t.Context(), "ui:build")
+	require.ErrorContains(t, err, "no signed logical finality")
+	feed.events = append(feed.events, ChoreographyEvent{
+		Sequence: 2, LedgerOID: "ledger-prepare-settled", Kind: ChoreographyTaskPackageSettled,
+		Task: "assets:prepare", Package: "assets", TaskOID: "prepare-terminal",
+		PriorTaskOID: "prepare-terminal", Attempt: 1,
+	})
 	state, err := cache.State(t.Context(), "ui:build")
 	require.NoError(t, err)
 	require.Equal(t, []string{"prepare-result"}, state.PredecessorTaskOIDs)
@@ -349,4 +356,82 @@ func TestSignedBindingCacheHoldsTaskOutputUntilExactPackageSettlementAndColdRepl
 	replayed, err := cold.State(t.Context(), "consumer:build")
 	require.NoError(t, err)
 	require.Equal(t, state, replayed, "cold event feed rebuilds only settled output state")
+}
+
+func TestSignedBindingCacheSeparatesRejectedAdmissionFromLaterPackageFailure(t *testing.T) {
+	for _, scenario := range []struct {
+		name                 string
+		succeeded            bool
+		rejected             bool
+		includeFailedExports bool
+		wantExports          bool
+		wantProvider         bool
+	}{
+		{name: "output admission rejected", succeeded: true, rejected: true},
+		{name: "later hook failed after admission", succeeded: true, wantExports: true, wantProvider: true},
+		{name: "failed command with admitted partial exports", includeFailedExports: true, wantExports: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			feed := &bindingCacheEventReader{events: []ChoreographyEvent{
+				{Sequence: 1, LedgerOID: "terminal-ledger", Kind: ChoreographyTerminal,
+					Task: "provider:build", Package: "provider", TaskOID: "terminal",
+					ResultReceiptOID: "receipt", OutputOID: "raw-result", Attempt: 1,
+					Succeeded: scenario.succeeded},
+				{Sequence: 2, LedgerOID: "settled-ledger", Kind: ChoreographyTaskPackageSettled,
+					Task: "provider:build", Package: "provider", TaskOID: "terminal",
+					PriorTaskOID: "terminal", Attempt: 1, PackageOutcome: "failed",
+					OutputAdmissionRejected: scenario.rejected},
+			}}
+			options := ChoreographyBindingCacheOptions{
+				Binding: ChoreographyRunBinding{Run: "run", Generation: "generation",
+					PlanDigest: "plan", GraphDigest: "graph"},
+				LedgerRootOID: "root", Reader: feed, Mailbox: &GitMailbox{}, MaxDocumentBytes: 1,
+				Tasks: []ChoreographyTaskSpec{{Task: "provider:build", Package: "provider", Kind: string(KindBuild)},
+					{Task: "consumer:build", Package: "consumer", Kind: string(KindBuild),
+						Predecessors: []string{"provider:build"}}},
+				InputPackagesByTask: map[string][]string{"consumer:build": {"provider"}},
+				OutputContexts: map[string]ChoreographyBindingOutputContext{"provider:build": {
+					Package: "provider", SourceRoot: t.TempDir(), Roots: []string{"dist"}}},
+				IncludeFailedExports: scenario.includeFailedExports,
+				Accumulate: func(_ string, _ map[string][]plan.Output, own []plan.Output) ([]plan.Output, error) {
+					return own, nil
+				},
+			}
+			newCache := func() *ChoreographyBindingCache {
+				cache, err := NewChoreographyBindingCache(options)
+				require.NoError(t, err)
+				cache.accepted["receipt"] = choreographyAcceptedBindingResult{oid: "raw-result",
+					result: Result{Header: Header{Protocol: ChoreographyProtocolVersion},
+						Outputs: &OutputManifest{Digest: "manifest", Entries: []ManifestEntry{{Path: "dist/artifact.txt"}}},
+						Exports: []ExportedValue{{Name: "TOKEN", Value: "token"},
+							{Name: "FILE", DeclaredPath: &ExportedDeclaredPath{
+								Package: "provider", Root: "dist", Relative: "artifact.txt"}}}}}
+				return cache
+			}
+			for _, cache := range []*ChoreographyBindingCache{newCache(), newCache()} {
+				state, err := cache.State(t.Context(), "consumer:build")
+				require.NoError(t, err)
+				require.Equal(t, []string{"raw-result"}, state.PredecessorTaskOIDs,
+					"raw verified Result identity remains in causal bindings")
+				require.Equal(t, scenario.wantExports,
+					len(state.PredecessorOutputs["provider:build"]) > 0)
+				require.Equal(t, scenario.wantProvider,
+					len(state.VerifiedOutputByPackage) > 0)
+				providerState, err := cache.State(t.Context(), "provider:build")
+				require.NoError(t, err)
+				require.Equal(t, scenario.wantProvider,
+					len(providerState.VerifiedOutputByStage) > 0)
+				require.Equal(t, scenario.wantExports,
+					len(state.VerifiedCarriedExports) > 0)
+				if scenario.wantExports {
+					require.Len(t, state.VerifiedCarriedExports, 1)
+					for key, carried := range state.VerifiedCarriedExports {
+						require.Equal(t, "FILE", key.Name)
+						require.Equal(t, "dist", carried.Signed.DeclaredPath.Root)
+						require.Equal(t, "raw-result", carried.Output.ResultOID)
+					}
+				}
+			}
+		})
+	}
 }

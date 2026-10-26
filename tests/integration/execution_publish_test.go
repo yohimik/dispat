@@ -135,6 +135,7 @@ const executionPublishKind = "publish"
 // assignment at all.
 func TestExecutionPublishWithALoginStaysOnTheOrchestrator(t *testing.T) {
 	rig := newExecutionOutputWorkspace(t, func(cfg *models.File) {
+		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
 		cfg.Scripts["publish"] = models.Script{executionRemotePublishScript}
 		cfg.Scripts["login"] = models.Script{
 			`printf '%s %s %s\n' probe-login space "${DISPAT_EXECUTION_NODE:-orchestrator}" ` +
@@ -220,7 +221,7 @@ const executionPublishWindow = 2 * time.Second
 // for a new plan.
 func TestExecutionRelevantNativeChangeWithholdsPublication(t *testing.T) {
 	rig := newExecutionOrchestratedPublishRig(t, executionCommitDuringTheRun(
-		filepath.Join("packages", "ui", "extra.txt")))
+		filepath.Join("packages", "ui", "extra.txt"), "ui"))
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
 
 	res := rig.release()

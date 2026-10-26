@@ -38,6 +38,9 @@ import (
 // variable and this machine does not, and its absence is the claim.
 const executionOrchestratorLabel = "orchestrator"
 
+const executionUnavailablePlatformWait = 60 * time.Second
+const executionUnavailablePlatformAdmissionSeconds = 5
+
 // placedOn is one runOnly value as the config model carries it.
 func placedOn(build, publish string) *models.RunOnly {
 	return &models.RunOnly{Build: build, Publish: publish}
@@ -223,9 +226,10 @@ func TestExecutionWorkerOnlyBuildNeverRunsOnTheOrchestrator(t *testing.T) {
 	stopAll(t, workers)
 }
 
-// TestExecutionBothUsesTheOrchestratorWhenWorkersAreFull: a worker-pinned task
-// occupies the only peer slot while another ready task remains eligible on the
-// first node. Both execute inside the run's shared build budget.
+// TestExecutionBothUsesTheOrchestratorWhenWorkersAreFull: a worker task occupies
+// the only peer slot while another task eligible on both nodes starts on the
+// first node. The separate worker pin is respected, and both effects share
+// the run's build budget.
 func TestExecutionBothUsesTheOrchestratorWhenWorkersAreFull(t *testing.T) {
 	markers := t.TempDir()
 	workerStarted := filepath.Join(markers, "worker-started")
@@ -234,12 +238,13 @@ func TestExecutionBothUsesTheOrchestratorWhenWorkersAreFull(t *testing.T) {
 	t.Cleanup(func() { _ = os.WriteFile(gate, nil, 0o600) })
 	rig := newExecutionPlacementRig(t, executionPlacementPackages,
 		func(repo *harness.Repo) string {
-			return executionRecordingScript + " && " + fmt.Sprintf(`case "$DISPAT_PACKAGE" in
-alpha) printf started > %q ;;
-*) if [ "${DISPAT_EXECUTION_NODE:-orchestrator}" != %q ]; then printf started > %q; fi ;;
-esac
+			return executionRecordingScript + " && " + fmt.Sprintf(`if [ "${DISPAT_EXECUTION_NODE:-orchestrator}" = %q ]; then
+  printf started > %q
+else
+  printf started > %q
+fi
 for i in $(seq 1 600); do test -f %q && break; sleep .1; done; test -f %q && `,
-				workerStarted, executionNode, firstStarted, gate, gate) +
+				executionNode, workerStarted, firstStarted, gate, gate) +
 				repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE", executionStageWindow)
 		}, func(cfg *models.File) {
 			cfg.Concurrency = []int{2, 1}
@@ -249,12 +254,17 @@ for i in $(seq 1 600); do test -f %q && break; sleep .1; done; test -f %q && `,
 		}))
 	workers := rig.startWorkers([]string{executionNode}, 1)
 	releaseProcess := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
-	require.Eventually(t, func() bool {
+	if !assert.Eventually(t, func() bool {
 		_, workerErr := os.Stat(workerStarted)
 		_, firstErr := os.Stat(firstStarted)
 		return workerErr == nil && firstErr == nil
 	}, 45*time.Second, 50*time.Millisecond,
-		"the worker-pinned task and an independent first-node task run before either releases")
+		"a worker task and an independent first-node task run before either releases") {
+		require.NoError(t, os.WriteFile(gate, nil, 0o600))
+		result := releaseProcess.WaitForDiagnostic(30*time.Second, nil)
+		t.Fatalf("parallel placement markers missing: runs=%v, stdout:\n%s\nstderr:\n%s",
+			rig.runs(), result.Stdout, result.Stderr)
+	}
 	require.NoError(t, os.WriteFile(gate, nil, 0o600))
 	res := releaseProcess.Wait()
 
@@ -263,6 +273,7 @@ for i in $(seq 1 600); do test -f %q && break; sleep .1; done; test -f %q && `,
 	require.True(t, isStarted, "the run reports its first-node identity\nstdout:\n%s", res.Stdout)
 	firstNode := started.Str("node")
 	placed := rig.nodesByPackage()
+	assert.Equal(t, executionNode, placed["alpha"], "the worker pin is respected: %v", rig.runs())
 	here, away := 0, 0
 	for _, name := range executionPlacementPackages {
 		require.Contains(t, placed, name, "%s built somewhere: %v", name, rig.runs())
@@ -304,6 +315,10 @@ func TestExecutionRunOnlyPerStagePair(t *testing.T) {
 	res := rig.release()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	started, isStarted := executionLine(res, "release started")
+	require.True(t, isStarted, "the release names its first node\nstdout:\n%s", res.Stdout)
+	firstNode := started.Str("node")
+	require.NotEmpty(t, firstNode)
 	for name, want := range map[string][]string{
 		"alpha": {models.RunOnlyWorker, models.RunOnlyOrchestrator},
 		"beta":  {models.RunOnlyOrchestrator, models.RunOnlyOrchestrator},
@@ -317,7 +332,7 @@ func TestExecutionRunOnlyPerStagePair(t *testing.T) {
 	assert.Equal(t, executionNode, placed["alpha"], "alpha built on the node: %v", rig.runs())
 	assert.Equal(t, executionOrchestratorLabel, published["alpha"],
 		"and published here: %v", rig.runs())
-	assert.Equal(t, executionOrchestratorLabel, placed["beta"],
+	assert.Equal(t, firstNode, placed["beta"],
 		"beta built here: %v", rig.runs())
 	assert.Equal(t, executionOrchestratorLabel, published["beta"], "and published here: %v", rig.runs())
 	assert.Len(t, rig.repo.TagList(), len(executionPlacementPackages),
@@ -537,10 +552,14 @@ func TestExecutionOrchestratorOnlyBuildIsNotHeldToTheWorkersPlatforms(t *testing
 			"alpha": placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator),
 		}), func(cfg *models.File) {
 			cfg.BuildPlatforms = []string{"plan9/mips"}
+			cfg.Execution.Timeouts.Admission = executionUnavailablePlatformAdmissionSeconds
 		})
 	workers := rig.startWorkers([]string{executionNode}, 1)
 
-	res := rig.release()
+	res := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL).
+		WaitForDiagnostic(executionUnavailablePlatformWait, func() {
+			t.Logf("signed unavailable-platform ledger: %+v", executionLateJoinLedgerEvents(t, rig.mailbox))
+		})
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.False(t, harness.IsCodePresent(executionEvents(res), executionRefusalCode),

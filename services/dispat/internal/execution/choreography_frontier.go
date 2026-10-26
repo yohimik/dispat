@@ -44,18 +44,19 @@ type ChoreographyBlockedTask struct {
 }
 
 type choreographyFrontierTask struct {
-	spec                   ChoreographyTaskSpec
-	remaining              int
-	children               []string
-	attempt                int
-	state                  choreographyFrontierState
-	outputOID              string
-	terminal               ChoreographyEvent
-	packageSettled         bool
-	virtualSucceeded       bool
-	refusedNotReady        bool
-	preparedSinceSelection bool
-	preparedInputOID       string
+	spec                    ChoreographyTaskSpec
+	remaining               int
+	children                []string
+	attempt                 int
+	state                   choreographyFrontierState
+	outputOID               string
+	terminal                ChoreographyEvent
+	packageSettled          bool
+	outputAdmissionRejected bool
+	virtualSucceeded        bool
+	refusedNotReady         bool
+	preparedSinceSelection  bool
+	preparedInputOID        string
 	// The signed task tip and offered Assignment bind an unclaimed queue
 	// retry to the exact offer; a newer ledger epoch alone is insufficient.
 	tipOID      string
@@ -518,6 +519,10 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 			f.failed = frontierQuarantined
 			return fmt.Errorf(frontierEventSequenceGapError)
 		}
+		if event.OutputAdmissionRejected && event.Kind != ChoreographyTaskPackageSettled {
+			f.failed = frontierQuarantined
+			return fmt.Errorf(frontierTaskPackageSettlementError)
+		}
 		if event.Kind == ChoreographyInitializationComplete {
 			if f.graphRootOID == frontierNoGraphRootOID || f.initialized || event.Sequence != frontierFirstEventSequence ||
 				event.Task != choreographyRunTaskID || event.TaskOID != f.graphRootOID ||
@@ -874,8 +879,7 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 				task.state = frontierTerminal
 				task.terminal = event
 				task.outputOID = event.OutputOID
-				pendingPackageSettlement := task.spec.Kind != KindPrepare &&
-					task.spec.Package != frontierNoPackage &&
+				pendingPackageSettlement := task.spec.Package != frontierNoPackage &&
 					event.PackageOutcome == frontierNoPackageOutcome
 				task.packageSettled = !pendingPackageSettlement
 				if !pendingPackageSettlement {
@@ -902,7 +906,7 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 			task.state = frontierTerminal
 			task.terminal = event
 			pendingPackageSettlement := f.graphRootOID != frontierNoGraphRootOID &&
-				!task.spec.ExecutorOwned && task.spec.Kind != KindPrepare && task.spec.Package != frontierNoPackage &&
+				!task.spec.ExecutorOwned && task.spec.Package != frontierNoPackage &&
 				event.PackageOutcome == frontierNoPackageOutcome &&
 				event.ResultReceiptOID != frontierNoResultReceiptOID
 			task.packageSettled = !pendingPackageSettlement
@@ -934,6 +938,7 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 				return fmt.Errorf(frontierTaskPackageSettlementError)
 			}
 			task.packageSettled = frontierPackageSettled
+			task.outputAdmissionRejected = event.OutputAdmissionRejected
 			if err := f.releaseChildren(task); err != nil {
 				f.failed = frontierQuarantined
 				return err
@@ -1030,7 +1035,7 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 func (f *ChoreographyFrontier) releaseChildren(task *choreographyFrontierTask) error {
 	for _, child := range task.children {
 		next := f.tasks[child]
-		if task.spec.Kind == KindPrepare && !task.terminal.Succeeded &&
+		if task.spec.Kind == KindPrepare && (!task.terminal.Succeeded || task.outputAdmissionRejected) &&
 			choreographyPreparedProviderFor(next.spec, task.spec.Package) {
 			next.noteFailedPrepared(task.spec.Package)
 		}
@@ -1056,7 +1061,8 @@ func (f *ChoreographyFrontier) Cursor() ChoreographyEventCursor { return f.curso
 // edges; no transitive graph scan or mutable ref lookup occurs at selection.
 func (f *ChoreographyFrontier) CompletedOutput(taskName string) (string, bool) {
 	task := f.tasks[taskName]
-	if task == nil || task.state != frontierTerminal || !task.packageSettled || task.outputOID == frontierNoOutputOID {
+	if task == nil || task.state != frontierTerminal || !task.packageSettled ||
+		task.outputAdmissionRejected || task.outputOID == frontierNoOutputOID {
 		return frontierNoOutputOID, frontierOutputUnavailable
 	}
 	return task.outputOID, frontierOutputAvailable
@@ -1067,7 +1073,7 @@ func (f *ChoreographyFrontier) CompletedOutput(taskName string) (string, bool) {
 // decision before reading its exports; a raw ResultAccepted is insufficient.
 func (f *ChoreographyFrontier) CompletedResultEvent(taskName string) (ChoreographyEvent, bool) {
 	task := f.tasks[taskName]
-	if task == nil || task.state != frontierTerminal || !task.packageSettled ||
+	if task == nil || task.state != frontierTerminal || !task.packageSettled || task.outputAdmissionRejected ||
 		task.terminal.Kind != ChoreographyTerminal || task.terminal.OutputOID == frontierNoOutputOID {
 		return ChoreographyEvent{}, frontierOutputUnavailable
 	}

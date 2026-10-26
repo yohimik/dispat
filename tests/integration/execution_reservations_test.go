@@ -59,10 +59,10 @@ func TestExecutionReservationsAndSlotsExistBeforeFirstFrame(t *testing.T) {
 	assert.Len(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"), 1,
 		"one retained signed event feed exists before the first frame")
 	slotRefs := executionProtocolRefs(t, rig.mailbox, "dispat-slot-")
-	assert.Len(t, slotRefs, 4,
-		"each of two nodes has min(capacity=2, eligible=3) fixed notice refs")
+	assert.Len(t, slotRefs, 2,
+		"each authorized node has one graph notice ref, independent of its physical capacity")
 	for _, ref := range slotRefs {
-		assert.Regexp(t, `^dispat-slot-[0-9a-f]{32}-[0-9a-f]{32}-[01]$`, ref)
+		assert.Regexp(t, `^dispat-slot-[0-9a-f]{32}-[0-9a-f]{32}-0$`, ref)
 	}
 	for _, branch := range executionProtocolRefs(t, rig.mailbox, "dispat-worker-") {
 		assert.NotContains(t, branch, "-snapshot-", "source objects use direct assignment parents")

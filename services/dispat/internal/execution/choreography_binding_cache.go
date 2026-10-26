@@ -242,6 +242,7 @@ type ChoreographyBindingCache struct {
 	terminal        map[string]ChoreographyEvent
 	pendingNoClaim  map[string]bool
 	pendingTask     map[string]bool
+	rejectedOutputs map[string]bool
 	prepared        map[string]string
 	outcomes        map[string]release.PackageOutcome
 	providers       map[string]ChoreographyVerifiedOutput
@@ -281,6 +282,7 @@ func NewChoreographyBindingCache(opts ChoreographyBindingCacheOptions) (*Choreog
 		terminal:       make(map[string]ChoreographyEvent),
 		pendingNoClaim: make(map[string]bool), prepared: make(map[string]string),
 		pendingTask:     make(map[string]bool),
+		rejectedOutputs: make(map[string]bool),
 		outcomes:        make(map[string]release.PackageOutcome),
 		providers:       make(map[string]ChoreographyVerifiedOutput),
 		stages:          make(map[string]ChoreographyVerifiedOutput),
@@ -344,12 +346,12 @@ func (c *ChoreographyBindingCache) apply(ctx context.Context, event Choreography
 			return fmt.Errorf(choreographyBindingInvalidResultErrorFormat, event.Task, event.ResultReceiptOID)
 		}
 		c.terminal[event.Task] = event
-		if event.Kind == ChoreographyNoClaimExpired && event.Package != choreographyBindingMissingPackage {
+		if event.Kind == ChoreographyNoClaimExpired && event.Package != choreographyBindingMissingPackage &&
+			c.tasks[event.Task].Kind != string(KindPrepare) {
 			c.pendingNoClaim[event.Task] = choreographyBindingIndexEntryPresent
 		}
 		if event.Kind == ChoreographyTerminal && event.Package != choreographyBindingMissingPackage &&
 			!c.tasks[event.Task].ExecutorOwned &&
-			c.tasks[event.Task].Kind != string(KindPrepare) &&
 			event.PackageOutcome == choreographyBindingMissingOutcome &&
 			event.ResultReceiptOID != choreographyBindingMissingOID {
 			c.pendingTask[event.Task] = choreographyBindingIndexEntryPresent
@@ -369,8 +371,13 @@ func (c *ChoreographyBindingCache) apply(ctx context.Context, event Choreography
 			return fmt.Errorf(choreographyBindingTaskSettlementPredecessorError)
 		}
 		delete(c.pendingTask, event.Task)
+		if event.OutputAdmissionRejected {
+			c.rejectedOutputs[event.Task] = choreographyBindingIndexEntryPresent
+		}
 		clear(c.outputMemo)
-		c.installTerminalOutput(prior)
+		if !c.rejectedOutputs[event.Task] {
+			c.installTerminalOutput(prior)
+		}
 	case ChoreographyFrameReady:
 		c.prepared[event.Task] = event.PreparedInputOID
 	case ChoreographyInputInvalidation:
@@ -488,7 +495,7 @@ func (c *ChoreographyBindingCache) cumulative(taskID string, memo map[string][]p
 	}
 	var own []plan.Output
 	terminal := c.terminal[taskID]
-	if (terminal.Succeeded || c.opts.IncludeFailedExports) &&
+	if !c.rejectedOutputs[taskID] && (terminal.Succeeded || c.opts.IncludeFailedExports) &&
 		terminal.OutputOID != choreographyBindingMissingOID {
 		result := c.accepted[terminal.ResultReceiptOID].result
 		result.Exports = slices.Clone(result.Exports)
@@ -537,7 +544,7 @@ func (c *ChoreographyBindingCache) collectCarriedExports(taskID string,
 	if c.pendingTask[taskID] {
 		return fmt.Errorf(choreographyBindingMissingFinalityErrorFormat, taskID)
 	}
-	if terminal.OutputOID == choreographyBindingMissingOID ||
+	if c.rejectedOutputs[taskID] || terminal.OutputOID == choreographyBindingMissingOID ||
 		(!terminal.Succeeded && !c.opts.IncludeFailedExports) {
 		return nil
 	}

@@ -243,39 +243,40 @@ func IsChoreographyEventKind(kind ChoreographyEventKind) bool {
 // ChoreographyEvent names the exact task ref object that caused one accepted
 // change. A result commit alone is never a terminal event.
 type ChoreographyEvent struct {
-	Sequence               uint64                   `json:"sequence"`
-	LedgerOID              string                   `json:"ledgerOid,omitempty"`
-	Kind                   ChoreographyEventKind    `json:"kind"`
-	Task                   string                   `json:"task"`
-	Package                string                   `json:"package,omitempty"`
-	PackageOutcome         string                   `json:"packageOutcome,omitempty"`
-	BlockedBy              string                   `json:"blockedBy,omitempty"`
-	Attempt                int                      `json:"attempt"`
-	Node                   string                   `json:"node,omitempty"`
-	Member                 *ChoreographyRuntimeNode `json:"member,omitempty"`
-	TaskOID                string                   `json:"taskOid"`
-	GraphRootOID           string                   `json:"graphRootOid,omitempty"`
-	OldPreparedOID         string                   `json:"oldPreparedOid,omitempty"`
-	NewPreparedOID         string                   `json:"newPreparedOid,omitempty"`
-	PreparedInputOID       string                   `json:"preparedInputOid,omitempty"`
-	AffectedTasks          []string                 `json:"affectedTasks,omitempty"`
-	AdmissionDeadlineUTC   string                   `json:"admissionDeadlineUtc,omitempty"`
-	ExecutionStartedUTC    string                   `json:"executionStartedUtc,omitempty"`
-	AdmissionPolicyDigest  string                   `json:"admissionPolicyDigest,omitempty"`
-	MissingPlacement       string                   `json:"missingPlacement,omitempty"`
-	AssignmentOID          string                   `json:"assignmentOid,omitempty"`
-	MembershipEpochOID     string                   `json:"membershipEpochOid,omitempty"`
-	CapacityAuthorityID    string                   `json:"capacityAuthorityId,omitempty"`
-	LeaseIntentID          string                   `json:"leaseIntentId,omitempty"`
-	LeaseWeight            int                      `json:"leaseWeight,omitempty"`
-	PickupID               string                   `json:"pickupId,omitempty"`
-	ClaimOID               string                   `json:"claimOid,omitempty"`
-	PickupDeadlineUTC      string                   `json:"pickupDeadlineUtc,omitempty"`
-	CancelReplyDeadlineUTC string                   `json:"cancelReplyDeadlineUtc,omitempty"`
-	PriorTaskOID           string                   `json:"priorTaskOid,omitempty"`
-	SlotBranch             string                   `json:"slotBranch,omitempty"`
-	SlotOID                string                   `json:"slotOid,omitempty"`
-	PriorSlotOID           string                   `json:"priorSlotOid,omitempty"`
+	Sequence                uint64                   `json:"sequence"`
+	LedgerOID               string                   `json:"ledgerOid,omitempty"`
+	Kind                    ChoreographyEventKind    `json:"kind"`
+	Task                    string                   `json:"task"`
+	Package                 string                   `json:"package,omitempty"`
+	PackageOutcome          string                   `json:"packageOutcome,omitempty"`
+	OutputAdmissionRejected bool                     `json:"outputAdmissionRejected,omitempty"`
+	BlockedBy               string                   `json:"blockedBy,omitempty"`
+	Attempt                 int                      `json:"attempt"`
+	Node                    string                   `json:"node,omitempty"`
+	Member                  *ChoreographyRuntimeNode `json:"member,omitempty"`
+	TaskOID                 string                   `json:"taskOid"`
+	GraphRootOID            string                   `json:"graphRootOid,omitempty"`
+	OldPreparedOID          string                   `json:"oldPreparedOid,omitempty"`
+	NewPreparedOID          string                   `json:"newPreparedOid,omitempty"`
+	PreparedInputOID        string                   `json:"preparedInputOid,omitempty"`
+	AffectedTasks           []string                 `json:"affectedTasks,omitempty"`
+	AdmissionDeadlineUTC    string                   `json:"admissionDeadlineUtc,omitempty"`
+	ExecutionStartedUTC     string                   `json:"executionStartedUtc,omitempty"`
+	AdmissionPolicyDigest   string                   `json:"admissionPolicyDigest,omitempty"`
+	MissingPlacement        string                   `json:"missingPlacement,omitempty"`
+	AssignmentOID           string                   `json:"assignmentOid,omitempty"`
+	MembershipEpochOID      string                   `json:"membershipEpochOid,omitempty"`
+	CapacityAuthorityID     string                   `json:"capacityAuthorityId,omitempty"`
+	LeaseIntentID           string                   `json:"leaseIntentId,omitempty"`
+	LeaseWeight             int                      `json:"leaseWeight,omitempty"`
+	PickupID                string                   `json:"pickupId,omitempty"`
+	ClaimOID                string                   `json:"claimOid,omitempty"`
+	PickupDeadlineUTC       string                   `json:"pickupDeadlineUtc,omitempty"`
+	CancelReplyDeadlineUTC  string                   `json:"cancelReplyDeadlineUtc,omitempty"`
+	PriorTaskOID            string                   `json:"priorTaskOid,omitempty"`
+	SlotBranch              string                   `json:"slotBranch,omitempty"`
+	SlotOID                 string                   `json:"slotOid,omitempty"`
+	PriorSlotOID            string                   `json:"priorSlotOid,omitempty"`
 	// ProposalDigest identifies the exact accepted or refused claim body.
 	// OutputOID is the signed Result commit admitted by a successful final
 	// decision; the decision's TaskOID alone is not an output manifest.
@@ -832,6 +833,9 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 		record, err := g.readLedgerRecord(ctx, oid)
 		if err != nil || record.Sequence != g.sequence+choreographyLedgerFirstSequence || record.Event == nil ||
 			record.Event.Sequence != record.Sequence || record.Event.Task == choreographyLedgerMissingIdentity || record.Event.TaskOID == choreographyLedgerMissingIdentity {
+			return fmt.Errorf(choreographyLedgerEventInvalidErr)
+		}
+		if record.Event.OutputAdmissionRejected && record.Event.Kind != ChoreographyTaskPackageSettled {
 			return fmt.Errorf(choreographyLedgerEventInvalidErr)
 		}
 		if g.sequence == choreographyLedgerRootSequence {

@@ -461,7 +461,7 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 			}
 			if task.spec.Package != choreographyReplayMissingIdentity &&
 				event.PackageOutcome == choreographyReplayMissingIdentity &&
-				!task.spec.ExecutorOwned && task.spec.Kind != string(KindPrepare) {
+				!task.spec.ExecutorOwned {
 				task.pendingPackageSettlement = choreographyReplayPending
 			} else {
 				b.discharge(task)
@@ -541,7 +541,7 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 			return err
 		}
 		if task.spec.Package != choreographyReplayMissingIdentity && event.PackageOutcome == choreographyReplayMissingIdentity &&
-			!task.spec.ExecutorOwned && task.spec.Kind != string(KindPrepare) &&
+			!task.spec.ExecutorOwned &&
 			event.ResultReceiptOID != choreographyReplayMissingIdentity {
 			task.pendingPackageSettlement = choreographyReplayPending
 		} else {
@@ -563,6 +563,9 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 		if err := b.applyPackageOutcome(event.Package, event.PackageOutcome); err != nil {
 			return err
 		}
+		if event.OutputAdmissionRejected && task.spec.Kind == string(KindPrepare) {
+			task.preparedBlockedBy = task.spec.Package
+		}
 		task.pendingPackageSettlement = choreographyReplayNotPending
 		b.discharge(task)
 		return nil
@@ -571,15 +574,16 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 		if err != nil {
 			return err
 		}
-		if task.spec.Virtual || task.spec.Placement != PlacementWorker ||
+		if task.spec.Virtual || !isChoreographyNoClaimPlacement(task.spec.Placement) ||
+			task.spec.LocalAuthority ||
 			task.remaining != choreographyReplayNoEdges || task.terminal || task.claim != choreographyReplayMissingIdentity ||
 			task.offeredNode != choreographyReplayMissingIdentity || task.result != choreographyReplayMissingIdentity ||
 			task.attempt != choreographyReplayFirstAttempt ||
 			task.tip != task.spec.ReservationOID || event.PriorTaskOID != task.tip ||
 			event.GraphRootOID != b.graphRootOID || event.Node != choreographyReplayMissingIdentity ||
 			event.Package != task.spec.Package || event.Succeeded ||
-			event.BlockedBy != choreographyNoAdmittedWorkerCause ||
-			event.MissingPlacement != string(PlacementWorker) ||
+			event.BlockedBy != choreographyNoClaimCause(task.spec.Placement) ||
+			event.MissingPlacement != string(task.spec.Placement) ||
 			event.AdmissionDeadlineUTC != b.admissionDeadlineUTC ||
 			event.AdmissionPolicyDigest != policyDigest {
 			return fmt.Errorf(choreographyReplayNoClaimDeadlineError)
@@ -633,7 +637,7 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 			event.TaskOID != task.tip || event.PriorTaskOID != task.tip ||
 			event.GraphRootOID != b.graphRootOID || event.Package != task.spec.Package ||
 			(event.PackageOutcome != choreographyReplayOutcomeFailed && event.PackageOutcome != choreographyReplayMissingIdentity) ||
-			event.BlockedBy != choreographyNoAdmittedWorkerCause {
+			event.BlockedBy != choreographyNoClaimCause(task.spec.Placement) {
 			return fmt.Errorf(choreographyReplayNoClaimSettlementError)
 		}
 		if err := b.validatePackageOutcome(event.Package, event.PackageOutcome); err != nil {

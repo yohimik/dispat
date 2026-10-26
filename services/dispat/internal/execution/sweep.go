@@ -43,6 +43,7 @@ import (
 const (
 	sweepCarriedExportMissingValue      = ""
 	sweepCarriedExportMissingFileFormat = "typed export %s has no matching admitted file"
+	sweepOutputAdmissionRejected        = true
 )
 
 // SweepTask is one package's task of a command sweep, as the run hands it to
@@ -203,12 +204,14 @@ func (c *Coordinator) readSweepOutcome(ctx context.Context, task string, attempt
 	owner, err := c.resolveOwnerRepository(sweep.Request)
 	if err != nil {
 		outcome.FailedPart = release.PartInputs
+		outcome.OutputAdmissionRejected = sweepOutputAdmissionRejected
 		return outcome, err
 	}
 	if err := rehomeChoreographyExports(choreographyExportRehomeOptions{Result: &result,
 		Repository: sweep.Request.Release.Pkg.Repository, Package: sweep.Request.Release.Pkg.Name,
 		SourceRoot: owner.Dir, Roots: cleanSweepRoots(sweep.Roots)}); err != nil {
 		outcome.FailedPart = release.PartOutputs
+		outcome.OutputAdmissionRejected = sweepOutputAdmissionRejected
 		return outcome, err
 	}
 	outcome, reportedErr := c.readReportedOutcome(task, attempt, outcome, result)
@@ -223,6 +226,7 @@ func (c *Coordinator) readSweepOutcome(ctx context.Context, task string, attempt
 			Repository: sweep.Request.Release.Pkg.Repository,
 			Package:    sweep.Request.Release.Pkg.Name}); err != nil {
 			outcome.Exports = nil
+			outcome.OutputAdmissionRejected = sweepOutputAdmissionRejected
 			return outcome, errors.Join(reportedErr,
 				c.refuseSweepOutputs(task, result.Node, ReasonOutputIdentity, err))
 		}
@@ -233,6 +237,7 @@ func (c *Coordinator) readSweepOutcome(ctx context.Context, task string, attempt
 	if result.Outputs != nil || reportedErr == nil {
 		if err := c.admitSweepOutputs(ctx, task, attempt, result, reply.commit, signedExports, sweep); err != nil {
 			outcome.Exports = nil
+			outcome.OutputAdmissionRejected = sweepOutputAdmissionRejected
 			if reportedErr == nil {
 				outcome.FailedPart = release.PartOutputs
 			}

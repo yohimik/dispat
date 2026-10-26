@@ -6,6 +6,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,6 +16,29 @@ import (
 
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 )
+
+type probeCleanupCoordinator struct{}
+
+func (probeCleanupCoordinator) Close(context.Context) error {
+	return errors.Join(execution.ErrChoreographyProbeCleanup, errors.New("dispat-worker-probe remains"))
+}
+
+func TestSealedProbeCleanupWarningDoesNotRetainReleaseLock(t *testing.T) {
+	var logs bytes.Buffer
+	a := &App{log: zerolog.New(&logs), choreographyRetained: true, choreographyBound: true}
+	a.closeCoordinator(t.Context(), probeCleanupCoordinator{})
+	require.True(t, a.isCoordinatorClosed)
+	require.NoError(t, a.coordinatorCloseErr)
+	assert.Contains(t, logs.String(), execution.CodeTransportRetained)
+	assert.Contains(t, logs.String(), "dispat-worker-probe")
+	unlocked := false
+	cleanup := &releaseCleanup{
+		BeforeUnlock: a.requireChoreographyQuiescent,
+		unlock:       func() error { unlocked = true; return nil },
+	}
+	require.NoError(t, cleanup.finish())
+	assert.True(t, unlocked)
+}
 
 // hangingCoordinator is a coordinator whose mailbox never answers: its close
 // waits for its context, and it counts how often it was asked.
