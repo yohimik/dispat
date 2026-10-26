@@ -37,21 +37,23 @@ type livePinRecord struct {
 
 // LivePinStore is a parent release's private live-pin directory.
 type LivePinStore struct {
-	dir    string
-	owners map[string]bool
-	mu     sync.Mutex
+	dir              string
+	owners           map[string]bool
+	transitionOwners map[string]bool
+	mu               sync.Mutex
 }
 
 // LivePinReader is a validated read handle for one inherited coordinator.
 // Its metadata is immutable; Pins reads the owner's atomic record afresh.
 type LivePinReader struct {
-	dir    string
-	owners map[string]bool
+	dir              string
+	owners           map[string]bool
+	transitionOwners map[string]bool
 }
 
 // NewLivePins creates a private run-scoped coordinator bound to the canonical
-// control root, control config, exact package-owner map, and exact source
-// repository identities.
+// control root, control config, exact package-owner map, and participating
+// repository identities. Only source identities may publish ordinary pins.
 func NewLivePins(root, configPath string, owners map[string]string, repositories []string) (*LivePinStore, error) {
 	metadata, err := canonicalLiveMetadata(root, configPath, owners, repositories)
 	if err != nil {
@@ -61,7 +63,8 @@ func NewLivePins(root, configPath string, owners map[string]string, repositories
 	if err != nil {
 		return nil, fmt.Errorf("creating live pin directory: %w", err)
 	}
-	store := &LivePinStore{dir: dir, owners: liveOwnerSet(metadata)}
+	store := &LivePinStore{dir: dir, owners: liveOwnerSet(metadata),
+		transitionOwners: nativeTransitionOwnerSet(metadata)}
 	data, err := json.Marshal(metadata)
 	if err == nil {
 		err = fsx.WriteFileComplete(filepath.Join(dir, liveMetadataFile), append(data, '\n'), 0o600)
@@ -143,7 +146,8 @@ func OpenLivePins(root, configPath string, env []string) (*LivePinReader, error)
 	if err != nil {
 		return nil, err
 	}
-	return &LivePinReader{dir: dir, owners: liveOwnerSet(metadata)}, nil
+	return &LivePinReader{dir: dir, owners: liveOwnerSet(metadata),
+		transitionOwners: nativeTransitionOwnerSet(metadata)}, nil
 }
 
 // Pins reads the latest atomic record for one exact source identity.
@@ -200,11 +204,11 @@ func canonicalLiveMetadata(root, configPath string, owners map[string]string, re
 	repositories = append([]string(nil), repositories...)
 	slices.Sort(repositories)
 	for i, repository := range repositories {
-		if repository == "" || repository == "control" {
-			return livePinMetadata{}, fmt.Errorf("invalid source repository identity %q", repository)
+		if repository == "" {
+			return livePinMetadata{}, fmt.Errorf("invalid participating repository identity %q", repository)
 		}
 		if i > 0 && repositories[i-1] == repository {
-			return livePinMetadata{}, fmt.Errorf("duplicate source repository identity %q", repository)
+			return livePinMetadata{}, fmt.Errorf("duplicate participating repository identity %q", repository)
 		}
 	}
 	known := make(map[string]bool, len(repositories))

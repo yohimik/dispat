@@ -20,9 +20,8 @@ func TestLivePinCreationRejectsInvalidWorkspaceIdentities(t *testing.T) {
 	}{
 		{name: "missing root", root: filepath.Join(root, "missing"), config: config, want: "canonicalizing live pin root"},
 		{name: "missing config", root: root, config: filepath.Join(root, "missing.json"), want: "canonicalizing live pin config"},
-		{name: "empty source", root: root, config: config, repositories: []string{""}, want: "invalid source repository identity"},
-		{name: "control as source", root: root, config: config, repositories: []string{"control"}, want: "invalid source repository identity"},
-		{name: "duplicate source", root: root, config: config, repositories: []string{"source", "source"}, want: "duplicate source repository identity"},
+		{name: "empty repository", root: root, config: config, repositories: []string{""}, want: "invalid participating repository identity"},
+		{name: "duplicate repository", root: root, config: config, repositories: []string{"source", "source"}, want: "duplicate participating repository identity"},
 		{name: "foreign package owner", root: root, config: config, owners: map[string]string{"PACKAGE_LIB": "foreign"}, repositories: []string{"source"}, want: "unknown repository"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

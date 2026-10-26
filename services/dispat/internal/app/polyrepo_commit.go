@@ -9,6 +9,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 	"github.com/yohimik/dispat/services/dispat/internal/release"
+	"github.com/yohimik/dispat/services/dispat/internal/workspaceenv"
 )
 
 func (a *App) commitWorkspace(ctx context.Context, pl *plan.Plan, covered []string, opts CommitOptions) error {
@@ -106,6 +107,10 @@ func (w *workspaceCommitWork) resolve(_ context.Context, rel *plan.Release) (tas
 		return nil, fmt.Errorf("missing repository owner for %s", rel.Pkg.Name)
 	}
 	return func(ctx context.Context) error {
+		tag := w.opts.TagName
+		if tag == "" {
+			tag = rel.TagName()
+		}
 		// The fleet links this release depends on are recorded before the
 		// release commit, so the commit's own tree carries the evidence. It
 		// happens outside r.mu because settling takes each repository's own
@@ -115,10 +120,16 @@ func (w *workspaceCommitWork) resolve(_ context.Context, rel *plan.Release) (tas
 		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		tag := w.opts.TagName
-		if tag == "" {
-			tag = rel.TagName()
+		transition := nativeTransitionFor(nativeTransitionSpec{
+			release: rel, owner: r.repo.Name, priorHead: r.expectedHead,
+			tagRequested: w.opts.Tag, pushRequired: w.opts.Push,
+		})
+		transition.Kind = workspaceenv.NativeTransitionSourceRecord
+		token, err := w.records.pins.beginNative(transition)
+		if err != nil {
+			return err
 		}
+		defer func() { w.records.pins.failNative(token, r.repo.Name) }()
 		pin, err := w.records.commit(ctx, r, []string{rel.Pkg.Dir}, rel, tag)
 		if err != nil {
 			return err
@@ -169,6 +180,23 @@ func (w *workspaceCommitWork) resolve(_ context.Context, rel *plan.Release) (tas
 				return err
 			}
 		}
+		transition.NewHead = pin
+		transition.PushComplete = w.opts.Push
+		if w.opts.Tag {
+			unlock, lockErr := gitx.AcquireMutations(ctx, r.git)
+			if lockErr != nil {
+				return lockErr
+			}
+			transition.Tags, err = nativeTags(ctx, nativeTagQuery{git: r.git, release: rel, tag: tag, head: pin})
+			unlock()
+			if err != nil {
+				return err
+			}
+		}
+		if err := w.records.pins.completeNative(token, transition); err != nil {
+			return err
+		}
+		token = ""
 		// A nested step exports its source pin; the outer recorder owns the
 		// checkpoint after the entire publish stage has succeeded.
 		if os.Getenv(release.OutputEnvVar) == "" && !r.repo.Control {

@@ -32,6 +32,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
+	"github.com/yohimik/dispat/services/dispat/internal/workspaceenv"
 )
 
 // setLinkPlan records which repositories each releasing package needs link
@@ -276,6 +277,16 @@ func (w *workspaceRecorder) settleNode(ctx context.Context, hooks recordHooks, r
 		}
 	}
 	if pending {
+		transition := nativeTransitionFor(nativeTransitionSpec{
+			release: rel, owner: record.repo.Name, priorHead: head,
+			pushRequired: record.repo.Commit.IsPushEnabled(),
+		})
+		transition.Kind = workspaceenv.NativeTransitionLinkSettlement
+		token, beginErr := w.pins.beginNative(transition)
+		if beginErr != nil {
+			return beginErr
+		}
+		defer func() { w.pins.failNative(token, record.repo.Name) }()
 		if record.repo.Commit.IsPushEnabled() {
 			if record.branch == "" {
 				return config.WithDiagnostic("E337", fmt.Errorf(
@@ -312,11 +323,23 @@ func (w *workspaceRecorder) settleNode(ctx context.Context, hooks recordHooks, r
 		node.head = settled
 		hooks.run(record.hooks, "afterCommit", record.repo.Config.Run.AfterCommit)
 		hooks.run(record.hooks, "postCommit", record.repo.Config.Run.PostCommit)
+		return w.pushSettled(ctx, hooks, settledPush{
+			record: record, head: node.head, created: pending,
+			complete: func() error {
+				transition.NewHead = node.head
+				transition.PushComplete = record.repo.Commit.IsPushEnabled()
+				if err := w.pins.completeNative(token, transition); err != nil {
+					return err
+				}
+				token = ""
+				return nil
+			},
+		})
 	} else {
 		record.git.Log.Debug().Str("package", rel.Pkg.Name).Strs("links", paths).
 			Msg("fleet links already record these revisions")
 	}
-	return w.pushSettled(ctx, hooks, record, node.head, pending)
+	return w.pushSettled(ctx, hooks, settledPush{record: record, head: node.head, created: false})
 }
 
 // verifySettledRemote proves a peer's remote already holds the revision this
@@ -397,13 +420,26 @@ func (w *workspaceRecorder) commitLinks(ctx context.Context, record *repositoryR
 // pushSettled makes a settlement durable. It pushes a commit it just created,
 // and also a head the remote does not have yet, which is how a run that was
 // interrupted between the commit and the push converges on a retry.
-func (w *workspaceRecorder) pushSettled(ctx context.Context, hooks recordHooks,
-	record *repositoryRecord, settled string, created bool) error {
+type settledPush struct {
+	record   *repositoryRecord
+	head     string
+	created  bool
+	complete func() error
+}
+
+func (w *workspaceRecorder) pushSettled(ctx context.Context, hooks recordHooks, push settledPush) error {
+	record, settled, created := push.record, push.head, push.created
 	if !record.repo.Commit.IsPushEnabled() {
+		if push.complete != nil {
+			return push.complete()
+		}
 		return nil
 	}
 	if !created {
 		if err := record.git.VerifyRemoteBranch(ctx, record.remote(), record.branch, settled); err == nil {
+			if push.complete != nil {
+				return push.complete()
+			}
 			return nil
 		}
 	}
@@ -424,6 +460,11 @@ func (w *workspaceRecorder) pushSettled(ctx context.Context, hooks recordHooks,
 	}
 	record.git.Log.Info().Str("revision", settled).Str("branch", record.branch).
 		Msg("pushed settled fleet links")
+	if push.complete != nil {
+		if err := push.complete(); err != nil {
+			return err
+		}
+	}
 	hooks.run(record.hooks, "afterPush", record.repo.Config.Run.AfterPush)
 	return nil
 }

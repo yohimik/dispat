@@ -51,7 +51,7 @@ func workspacePinRepositories(workspace *config.Workspace) []string {
 	}
 	repositories := make([]string, 0, len(workspace.Repositories))
 	for _, repository := range workspace.Repositories {
-		if !repository.Control && repository.Name != "" {
+		if repository.Name != "" {
 			repositories = append(repositories, repository.Name)
 		}
 	}

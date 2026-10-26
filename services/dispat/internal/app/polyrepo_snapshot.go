@@ -6,15 +6,19 @@ package app
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
+	"github.com/yohimik/dispat/services/dispat/internal/workspaceenv"
 )
 
 // workspaceSnapshotGuard retains the exact relevant refs read before
@@ -22,10 +26,13 @@ import (
 // under repositoryRecord.mu so recording and validation cannot observe each
 // other halfway through a native Git transaction.
 type workspaceSnapshotGuard struct {
-	mu        sync.Mutex
-	records   []*repositoryRecord
-	repoIndex map[string]int
-	byPackage map[string]*repositorySet
+	mu           sync.Mutex
+	records      []*repositoryRecord
+	repoIndex    map[string]int
+	byPackage    map[string]*repositorySet
+	nativePlan   map[string]*plan.Release
+	nativeOwners map[string]map[string]bool
+	pins         *workspacePins
 }
 
 type repositorySet struct{ words []uint64 }
@@ -68,6 +75,7 @@ func (w *workspaceRecorder) captureSnapshot(ctx context.Context, packages []*mod
 	guard := &workspaceSnapshotGuard{
 		records: w.ordered, repoIndex: make(map[string]int, len(w.ordered)),
 		byPackage: make(map[string]*repositorySet),
+		pins:      w.pins,
 	}
 	for index, record := range w.ordered {
 		guard.repoIndex[record.repo.Name] = index
@@ -113,6 +121,8 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 	}
 	guard := w.snapshot
 	guard.byPackage = make(map[string]*repositorySet)
+	guard.nativePlan = make(map[string]*plan.Release)
+	guard.nativeOwners = make(map[string]map[string]bool)
 	wordCount := (len(guard.records) + 63) / 64
 	interned := make(map[string]*repositorySet)
 	type plannerSetKey struct {
@@ -136,6 +146,16 @@ func (w *workspaceRecorder) setSnapshotPlan(pl *plan.Plan) {
 		rel := pl.Releases[name]
 		if rel == nil || rel.Pkg == nil {
 			continue
+		}
+		if rel.IsReleasing() {
+			guard.nativePlan[name] = rel
+			owners := map[string]bool{rel.Pkg.Repository: true}
+			if route, err := w.planLinks(rel); err == nil && route != nil {
+				for _, owner := range route.order {
+					owners[owner] = true
+				}
+			}
+			guard.nativeOwners[name] = owners
 		}
 		inputWords := pl.RepositoryInputs[name]
 		var words []uint64
@@ -286,27 +306,62 @@ func releaseLanes(held map[string]func(), keep string) {
 }
 
 func (g *workspaceSnapshotGuard) verify(ctx context.Context, rel *plan.Release) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	var selected *repositorySet
-	if rel != nil {
-		if rel.Pkg == nil {
-			return snapshotError("", "release has no package identity for repository input validation")
+	bounded, cancel := context.WithTimeout(ctx, release.RecordTimeout)
+	defer cancel()
+	for {
+		g.mu.Lock()
+		var selected *repositorySet
+		if rel != nil {
+			if rel.Pkg == nil {
+				g.mu.Unlock()
+				return snapshotError("", "release has no package identity for repository input validation")
+			}
+			selected = g.byPackage[rel.Pkg.Name]
+			if selected == nil {
+				g.mu.Unlock()
+				return snapshotError(rel.Pkg.Repository, "release "+rel.Pkg.Name+" has no repository input closure")
+			}
 		}
-		selected = g.byPackage[rel.Pkg.Name]
-		if selected == nil {
-			return snapshotError(rel.Pkg.Repository, "release "+rel.Pkg.Name+" has no repository input closure")
+		var err error
+		for index, record := range g.records {
+			if selected != nil && !selected.contains(index) {
+				continue
+			}
+			if err = g.verifyRepository(bounded, record, rel); err != nil {
+				break
+			}
 		}
-	}
-	for index, record := range g.records {
-		if selected != nil && !selected.contains(index) {
+		g.mu.Unlock()
+		var pending pendingNativeTransition
+		var retry retryNativeObservation
+		if errors.As(err, &retry) {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if bounded.Err() != nil {
+				return snapshotError("", "native transitions did not settle within the record deadline")
+			}
+			timer := time.NewTimer(5 * time.Millisecond)
+			select {
+			case <-bounded.Done():
+				timer.Stop()
+				return snapshotError("", "native transitions did not settle within the record deadline")
+			case <-timer.C:
+			}
 			continue
 		}
-		if err := g.verifyRepository(ctx, record, rel); err != nil {
+		if !errors.As(err, &pending) {
+			return err
+		}
+		// The native writer may need repository lanes and Git locks to finish.
+		// Revalidate the entire selected closure after it completes.
+		if err := g.waitNative(bounded, pending); err != nil {
+			if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+				return snapshotError(pending.owner, "pending native transition did not settle within the record deadline")
+			}
 			return err
 		}
 	}
-	return nil
 }
 
 func (g *workspaceSnapshotGuard) verifyRepository(ctx context.Context, record *repositoryRecord, current *plan.Release) error {
@@ -322,23 +377,43 @@ func (g *workspaceSnapshotGuard) verifyRepository(ctx context.Context, record *r
 			fmt.Errorf("E330: repository %s: acquiring snapshot validation lock: %w", record.repo.Name, err))
 	}
 	defer unlock()
-
-	head, err := record.git.HeadSHA(ctx)
+	revisionBefore, err := g.pins.nativeRevision(record.repo.Name)
 	if err != nil {
+		return snapshotError(record.repo.Name, fmt.Sprintf("reading native journal revision: %v", err))
+	}
+
+	head, headErr := record.git.HeadSHA(ctx)
+	var refs gitx.TagSnapshot
+	var refsErr error
+	if headErr == nil {
+		refs, refsErr = record.git.RelevantTagSnapshot(ctx, state.matcher)
+	}
+	native := nativeAdmission{exact: make(map[string]workspaceenv.NativeTagRef)}
+	var nativeErr error
+	if headErr == nil && refsErr == nil {
+		native, nativeErr = g.nativeAdmission(ctx, record, head)
+	}
+	revisionAfter, err := g.pins.nativeRevision(record.repo.Name)
+	if err != nil {
+		return snapshotError(record.repo.Name, fmt.Sprintf("rechecking native journal revision: %v", err))
+	}
+	if revisionBefore != revisionAfter {
+		return retryNativeObservation{}
+	}
+	if headErr != nil {
 		return config.WithDiagnostic(config.DiagnosticRepositoryInvalid,
-			fmt.Errorf("E330: repository %s: reading snapshot HEAD: %w", record.repo.Name, err))
+			fmt.Errorf("E330: repository %s: reading snapshot HEAD: %w", record.repo.Name, headErr))
+	}
+	if refsErr != nil {
+		return snapshotError(record.repo.Name, fmt.Sprintf("reading relevant tag refs: %v", refsErr))
+	}
+	if nativeErr != nil {
+		return nativeErr
 	}
 	if head != record.expectedHead {
-		if !admitCurrentExportedHead(record, current, head) {
+		if !native.headReached && !admitCurrentExportedHead(record, current, head) {
 			return snapshotError(record.repo.Name, fmt.Sprintf("HEAD moved from %s to %s", record.expectedHead, head))
 		}
-		record.git.Log.Debug().Str("revision", head).Msg("admitted nested source revision into fleet snapshot")
-		record.expectedHead = head
-	}
-
-	refs, err := record.git.RelevantTagSnapshot(ctx, state.matcher)
-	if err != nil {
-		return snapshotError(record.repo.Name, fmt.Sprintf("reading relevant tag refs: %v", err))
 	}
 	permissions := make(map[string]refAdmission, len(state.admitted)+4)
 	for name, admission := range state.admitted {
@@ -349,17 +424,29 @@ func (g *workspaceSnapshotGuard) verifyRepository(ctx context.Context, record *r
 			admitReleaseRefs(permissions, current, target)
 		}
 	}
+	for name, candidate := range native.exact {
+		actual, exists := refs[name]
+		if !exists || !nativeRefMatches(actual, candidate) {
+			return snapshotError(record.repo.Name, "native transition tag "+name+" is absent or differs from its exact recorded object")
+		}
+		permissions[name] = refAdmission{target: candidate.Commit, moving: candidate.Moving}
+	}
 
 	changed := changedTagRefs(state.expected, refs)
 	for _, name := range changed {
 		before, existed := state.expected[name]
 		after, exists := refs[name]
 		admission, admitted := permissions[name]
-		if !exists || !admitted || after.Commit() != admission.target || (existed && !admission.moving) {
+		if !exists || !admitted || after.Commit() != admission.target ||
+			(existed && !admission.moving) || nativeRefConflicts(name, after, native.exact) {
 			return snapshotError(record.repo.Name, describeRefChange(name, before, existed, after, exists))
 		}
 	}
 	state.expected = refs
+	if head != record.expectedHead {
+		record.git.Log.Debug().Str("revision", head).Msg("admitted nested source revision into fleet snapshot")
+		record.expectedHead = head
+	}
 	for _, name := range changed {
 		delete(state.admitted, name)
 	}

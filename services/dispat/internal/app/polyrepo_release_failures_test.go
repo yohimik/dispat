@@ -279,7 +279,7 @@ func TestWorkspacePinIndexesRejectIncompleteAndAmbiguousOwners(t *testing.T) {
 		{Name: ""},
 		{Name: "source-a"},
 	}}
-	assert.Equal(t, []string{"source-a", "source-z"}, workspacePinRepositories(workspace))
+	assert.Equal(t, []string{"control", "source-a", "source-z"}, workspacePinRepositories(workspace))
 	assert.Empty(t, workspacePinOwners(nil))
 
 	pl := &plan.Plan{Releases: map[string]*plan.Release{

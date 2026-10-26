@@ -196,8 +196,14 @@ checkout: the back-link there is an empty folder by design.
 Link pins are **advisory**. Two repositories cannot both record each other's current revision, so planning uses the
 revision actually checked out in each peer. A mismatch with a link pin does not fail the run.
 
-The snapshot is still fixed once composition finishes. The plan uses those captured heads, and a relevant head or
-tag moving before publication fails with `E330`.
+The snapshot is fixed once composition finishes. A successful native commit or link settlement in the same run can
+advance an exact relevant head and any release-tag refs it wrote, including when another repository's package consults
+that owner. Cross-owner admission requires the run's completed native-transition evidence, the exact live Git heads
+and any claimed tag objects; another package's bare exported pin is insufficient. A package's own full-commit export
+continues to admit only its own repository under the existing changed-tag checks. Neither path changes the plan or
+declares the package published. A relevant head or tag changed by anything else before publication still fails with
+`E330`. An unsettled native transition is waited on only for the bounded record interval; a timeout leaves its
+outcome unknown and fails closed.
 
 ### Which settings combine
 

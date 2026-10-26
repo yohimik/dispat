@@ -408,8 +408,8 @@ func (a *App) planUnderLock(ctx context.Context, opts ReleaseOptions, fleet *wor
 		}
 	}
 	if fleet != nil {
-		fleet.setSnapshotPlan(pl)
 		fleet.setLinkPlan(pl)
+		fleet.setSnapshotPlan(pl)
 	}
 	if blocked := a.releaseBlocked(pl); blocked != "" {
 		a.log.Error().Str("reason", blocked).Msg("refusing to release")

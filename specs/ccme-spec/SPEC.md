@@ -7281,7 +7281,7 @@ gitlinks from which those heads were resolved.
 
 The source head captured while validating a control gitlink is the initial `fleetHead` value used by planning. The
 engine MUST retain that exact observation; it MUST NOT later reread a moved head and silently substitute it as the
-initial pin boundary. A later observation is accepted only by the explicit native-record admission below.
+initial pin boundary. A later observation is accepted only by the explicit admission paths below.
 
 After all fleet `beforeAll` hooks and before the first package task, the engine MUST revalidate every participating
 repository against that input. For a package `P`, let `relevantPackages(P)` be the least set containing `P` and closed
@@ -7292,11 +7292,32 @@ cancellation, or when an enabled control checkpoint will record `P`. A changed r
 is `E330`; the engine MUST NOT publish that package from observations spanning two fleet states. A change in an
 unrelated repository after the fleet check does not invalidate a package whose input closure excludes it.
 
-An exact new head and release-tag ref produced by a successful native record step for the current owning package MAY
-advance the run's expected input. The engine MUST admit only an explicitly exported full lowercase 40- or 64-hex
-commit ID and the exact package and alias refs from that success. It MUST serialize publication and recording for
-packages in one repository so later packages observe that admitted transition; packages with different owners MAY
-retain their normal publication concurrency.
+An exact new head produced by a successful native `dispat commit` step for a planned package in this fixed run MAY
+advance the expected input of another package that consults that owner, whether or not that step requested a tag. A
+tagless native link settlement MAY likewise advance the exact head of each repository it actually changed. The
+engine MUST admit a contiguous sequence from the prior accepted head to the observed head, with no fork or gap, and
+verify every head advance against Git ancestry. Under this native-evidence path, a tagged completion MUST record the
+exact release ref and each alias written or verified at that head, including their ref objects and peeled commit
+targets. The guard MUST match each live ref to its last causally applicable recorded object; an earlier moving-alias
+object cannot justify a later or ambiguous state.
+Cross-owner native admission requires the planned package, version, owner route and completion of every requested
+native push. A bare pin from another package, a matching peeled target under a different ref object, or an unrelated
+Git mutation is insufficient. The current package's own explicit full-commit export remains an admission path only
+for its own repository, with any changed planned release and alias tags checked against live Git state. It
+does not establish publication completion or authorize another repository's input transition.
+
+A nested native command that can overlap another package's revalidation MUST announce its transition in the
+run-private coordinator before it mutates Git. A relevant reader that finds it pending waits for a bounded,
+cancellable interval without holding the snapshot or Git mutation lock, then checks the complete input closure
+again. A failed, missing or unfinished transition MUST NOT justify a changed input.
+The wait timing out means the transition is unsettled; it does not prove the writer crashed or that its Git effect
+did not occur.
+
+These records admit repository state to the fixed plan; they do not declare the package published, discharge a release
+record or add an edge to `publish.orderKinds`. Publication and recording for packages in one repository remain
+serialized; packages with different owners MAY retain their normal publication concurrency. The coordinator is
+inherited by configured scripts, so its files are consistency evidence within trusted release policy, not a security
+boundary against a malicious script running as the same user.
 Other Git commits or relevant ref mutations performed during build or hook commands are not admitted automatically:
 if they affect a later revalidation, the package fails with `E330` and requires a new plan.
 For §28, task transport commits MUST NOT become admitted native heads, intent or settlement evidence. Only

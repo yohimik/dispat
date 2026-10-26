@@ -92,7 +92,7 @@ func workspaceContextEnv(workspace *config.Workspace) []string {
 	var imports []string
 	var repositories []string
 	for _, repo := range workspace.Repositories {
-		if !repo.Control {
+		if repo.Name != "" {
 			repositories = append(repositories, repo.Name)
 		}
 		if !repo.Imported || repo.ConfigPath == "" || workspace.IsLinked() {
