@@ -20,6 +20,7 @@ const (
 	missingSweepFramePolicyError             = "execution: signed sweep frame has no pinned plan or ledger root"
 	missingSweepPinnedPackageErrorFormat     = "execution: sweep task %q has no pinned package"
 	invalidReleaseSyntheticTemplateError     = "execution: first-only release task has an invalid signed synthetic template"
+	missingChoreographyBindingLedgerRootOID  = ""
 )
 
 func freezeChoreographySweepPlan(pl *plan.Plan) *plan.Plan {
@@ -87,7 +88,8 @@ func (a *App) newReleaseChoreographyBindingCache(options releaseChoreographyBind
 	c, compiled, pl := options.Coordinator, options.Compiled, options.Plan
 	specs, templates := options.Tasks, options.Templates
 	persist, ledgerRootOID, workspaceVars := options.Persist, options.LedgerRootOID, options.WorkspaceVars
-	if a == nil || c == nil || compiled == nil || pl == nil || persist == nil || ledgerRootOID == "" {
+	if a == nil || c == nil || compiled == nil || pl == nil || persist == nil ||
+		ledgerRootOID == missingChoreographyBindingLedgerRootOID {
 		return nil, fmt.Errorf(missingReleaseFramePolicyError)
 	}
 	mailbox, err := c.ChoreographyMailbox()
@@ -192,8 +194,9 @@ func (a *App) newReleaseChoreographyBindingCache(options releaseChoreographyBind
 		if spec.ExecutorOwned {
 			return c.ResolveLocalChoreographyBindings(ctx, node, request, state)
 		}
-		return c.ResolveChoreographyBindings(ctx, node, request, state,
-			spec.TemplateDigest)
+		return c.ResolveChoreographyBindings(ctx, execution.ChoreographyBindingResolution{
+			Node: node, Request: request, State: state,
+			TemplateDigest: spec.TemplateDigest})
 	}, nil
 }
 
@@ -209,7 +212,8 @@ func (a *App) newSweepChoreographyBindingCache(options sweepChoreographyBindingC
 	func(context.Context, string, string) (execution.ChoreographyTaskBindings, error), error) {
 	c, work, specs := options.Coordinator, options.Work, options.Tasks
 	persist, ledgerRootOID := options.Persist, options.LedgerRootOID
-	if a == nil || c == nil || work == nil || work.pl == nil || persist == nil || ledgerRootOID == "" {
+	if a == nil || c == nil || work == nil || work.pl == nil || persist == nil ||
+		ledgerRootOID == missingChoreographyBindingLedgerRootOID {
 		return nil, fmt.Errorf(missingSweepFramePolicyError)
 	}
 	mailbox, err := c.ChoreographyMailbox()
@@ -266,9 +270,11 @@ func (a *App) newSweepChoreographyBindingCache(options sweepChoreographyBindingC
 		}
 		request := release.StageRequest{TaskID: taskID, Release: visible,
 			Stage: work.stage(), Dir: rel.Pkg.Dir, StaticEnv: rel.Pkg.Space.Env,
-			Env: release.ComputedSweepFrameEnv(frozenPlan, visible, spec.Package,
-				work.stage(), work.wsVars)}
-		return c.ResolveChoreographySweepBindings(ctx, node, request, state,
-			spec.TemplateDigest)
+			Env: release.ComputedSweepFrameEnv(release.ComputedSweepFrameEnvOptions{
+				Plan: frozenPlan, Visible: visible, Package: spec.Package,
+				Stage: work.stage(), WorkspaceVars: work.wsVars})}
+		return c.ResolveChoreographySweepBindings(ctx, execution.ChoreographyBindingResolution{
+			Node: node, Request: request, State: state,
+			TemplateDigest: spec.TemplateDigest})
 	}, nil
 }

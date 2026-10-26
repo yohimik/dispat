@@ -93,7 +93,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 	}
 	if err := a.prepareExplicitLocalSlots(); err != nil {
 		return nil, a.reportPreflightFailure(execution.NewDiagnostic(
-			execution.CodeConfiguration, execution.CategoryConfiguration, "%w", err))
+			execution.CodeConfiguration, execution.CategoryConfiguration, executionConfigurationCauseErrorFormat, err))
 	}
 	// A distributed run is named here, before the plan is fixed, so that the
 	// line naming the plan also names the run every assignment will carry.
@@ -108,8 +108,8 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 			(a.coordinator == nil || a.isCoordinatorClosed)
 		if cleanup == nil && a.returnJournal != nil {
 			if identity, err := a.returnJournal.read(); err == nil {
-				safe = len(identity.PreparedLocks) == 0 && identity.BootstrapOID == "" &&
-					identity.LedgerRootOID == ""
+				safe = len(identity.PreparedLocks) == choreographyNoEntriesCount && identity.BootstrapOID == choreographyAbsentIdentityText &&
+					identity.LedgerRootOID == choreographyAbsentIdentityText
 			}
 		}
 		// A successful bound v3 Close persists StopClaims and SealRun with no
@@ -117,8 +117,14 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 		// listener and locator retire. An unbound partial initialization has
 		// no such proof, even if legacy cleanup happened to return nil.
 		safe = safe && (!a.choreographyRetained || a.choreographyBound)
+		inert, inertErr := a.isUnboundChoreographyInert()
+		if inertErr != nil {
+			runErr = errors.Join(runErr, inertErr)
+		} else if inert && cleanup != nil && cleanup.isUnlocked && cleanup.unlockErr == nil {
+			safe = firstRunSafeRetirementState
+		}
 		if finishErr := a.finishFirstRunIdentity(safe); finishErr != nil {
-			a.logError(finishErr).Msg("first-node run identity remains for reconciliation")
+			a.logError(finishErr).Msg(firstRunRetainedLogText)
 			runErr = errors.Join(runErr, finishErr)
 		}
 	}()
@@ -134,7 +140,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 	cleanup = &releaseCleanup{unlock: unlock, BeforeUnlock: a.requireChoreographyQuiescent}
 	defer func() {
 		if cleanupErr := cleanup.finish(); cleanupErr != nil {
-			a.logError(cleanupErr).Msg("release cleanup retained its lock and evidence")
+			a.logError(cleanupErr).Msg(releaseCleanupRetainedLogText)
 		}
 	}()
 	beforePlanning, err := a.capturePrePlanningSources(ctx)
@@ -175,7 +181,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 		if provider, consumer, found := release.PublishReadinessDependency(pl); found {
 			err := config.WithDiagnostic(config.DiagnosticExecution,
 				fmt.Errorf(releaseDeferredPublishReadinessErrorFormat, consumer, provider, provider))
-			a.logError(err).Msg("refusing release before task effects")
+			a.logError(err).Msg(releaseBeforeEffectsRefusalLogText)
 			return nil, err
 		}
 	}
@@ -201,7 +207,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 		defer pinnedSources.Close()
 		if !samePinnedPlanningSources(beforePlanning, pinnedSources) {
 			return nil, a.reportPreflightFailure(fmt.Errorf(
-				"execution: source or configuration bytes changed while the release plan was computed"))
+				releasePlanningBytesChangedErrorText))
 		}
 	}
 	var pinnedInputs *execution.PinnedRunInputs
@@ -231,7 +237,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 	if returnChannel != nil {
 		defer func() {
 			if closeErr := returnChannel.close(); closeErr != nil {
-				a.log.Warn().Err(closeErr).Msg("return channel did not close cleanly")
+				a.log.Warn().Err(closeErr).Msg(returnChannelCloseFailureLogText)
 			}
 		}()
 	}
@@ -274,8 +280,13 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 		fleet.gh = gh
 	}
 	var choreographyBroker *execution.FirstNodeBroker
-	if coordinator != nil && len(compiled.TaskShapes()) != 0 {
-		choreographyBroker, err = a.bindReleaseChoreography(ctx, coordinator, pl, compiled, returnChannel)
+	if coordinator != nil && len(compiled.TaskShapes()) != choreographyNoEntriesCount {
+		choreographyBroker, err = a.bindReleaseChoreography(ctx, releaseChoreographyBindingOptions{
+			Coordinator:   coordinator,
+			Plan:          pl,
+			Compiled:      compiled,
+			ReturnChannel: returnChannel,
+		})
 		if err != nil {
 			a.logError(err).Msg("execution task branches could not be initialized")
 			return nil, err
@@ -287,7 +298,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 	hooks := &runHooks{cfg: a.cfg, runner: runner, root: a.root,
 		env: release.WorkspaceEnv(pl, a.log), log: a.log}
 	if err := a.runGatingHooks(ctx, hooks, fleet); err != nil {
-		if choreographyBroker != nil && coordinator.GraphRootOID != "" {
+		if choreographyBroker != nil && coordinator.GraphRootOID != choreographyAbsentIdentityText {
 			stopCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), release.RecordTimeout)
 			_, stopErr := choreographyBroker.StopClaims(stopCtx)
 			stop()
@@ -315,10 +326,19 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 	}
 
 	executor := a.newReleaseExecutor(pl, fleet, gh, runner, obs, coordinator)
+	executor.OnPublicationUnsettled = func(err error) {
+		a.publicationExclusionOnce.Do(func() { a.publicationExclusionErr = err })
+	}
 	completionCtx := ctx
 	var stopCompiledPicker func() error
 	if coordinator != nil && choreographyBroker != nil {
-		if err := a.bindReleaseExecutorChoreography(executor, pl, compiled, coordinator, choreographyBroker); err != nil {
+		if err := a.bindReleaseExecutorChoreography(releaseExecutorChoreographyOptions{
+			Executor:    executor,
+			Plan:        pl,
+			Compiled:    compiled,
+			Coordinator: coordinator,
+			Broker:      choreographyBroker,
+		}); err != nil {
 			return nil, err
 		}
 		// The effective graph contains each unreleasing prepared provider as
@@ -327,7 +347,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 		executor.PreparedTask = func(taskCtx context.Context, spec release.PreparedTaskSpec) error {
 			return coordinator.ExecutePreparedTask(taskCtx, spec.Package)
 		}
-		if coordinator.GraphRootOID != "" {
+		if coordinator.GraphRootOID != choreographyAbsentIdentityText {
 			if _, startErr := choreographyBroker.StartExecution(ctx); startErr != nil {
 				return nil, startErr
 			}
@@ -341,7 +361,7 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 				if stopCompiledPicker != nil {
 					stopErr := stopCompiledPicker()
 					if stopErr != nil {
-						a.log.Error().Err(stopErr).Msg("first-node compiled picker stopped before settlement")
+						a.log.Error().Err(stopErr).Msg(releasePickerUnsettledLogText)
 					}
 				}
 			}()
@@ -363,11 +383,22 @@ func (a *App) Release(ctx context.Context, opts ReleaseOptions) (returned map[st
 	var results map[string]*release.Result
 	if compiled != nil {
 		results, err = executor.RunCompiled(ctx, pl, compiled)
-		if err != nil {
-			return nil, err
-		}
 	} else {
 		results = executor.Run(ctx, pl)
+	}
+	if a.publicationExclusionErr != nil {
+		var stopErr error
+		if stopCompiledPicker != nil {
+			stopErr = stopCompiledPicker()
+			stopCompiledPicker = nil
+		}
+		recordErr := a.recordKnownPublishedWhileUnsettled(completionCtx, publicationUnsettledRecording{
+			plan: pl, results: results, hooks: hooks, github: gh, fleet: fleet,
+		})
+		return results, errors.Join(a.publicationExclusionErr, err, stopErr, recordErr)
+	}
+	if err != nil {
+		return nil, err
 	}
 	if stopCompiledPicker != nil {
 		if stopErr := stopCompiledPicker(); stopErr != nil {
@@ -450,10 +481,20 @@ const (
 )
 
 func (a *App) requireChoreographyQuiescent() error {
+	if a.publicationExclusionErr != nil {
+		return a.publicationExclusionErr
+	}
 	if !a.choreographyRetained {
 		return nil
 	}
 	if !a.choreographyBound {
+		inert, err := a.isUnboundChoreographyInert()
+		if err != nil {
+			return err
+		}
+		if inert {
+			return nil
+		}
 		return errors.New(choreographyUnboundLockErrorText)
 	}
 	if !a.isCoordinatorClosed {
@@ -465,15 +506,15 @@ func (a *App) requireChoreographyQuiescent() error {
 	if a.returnJournal != nil {
 		identity, err := a.returnJournal.read()
 		if err != nil {
-			return fmt.Errorf("execution: protected deferred release tag intents cannot be read before unlock: %w", err)
+			return fmt.Errorf(deferredTagIntentsUnreadableErrorFormat, err)
 		}
-		if len(identity.DeferredTags) != 0 {
+		if len(identity.DeferredTags) != choreographyNoEntriesCount {
 			checkCtx, cancel := context.WithTimeout(context.Background(), deferredTagCleanupTimeout)
 			defer cancel()
 			if err := a.verifyDeferredTagInventory(checkCtx, deferredTagInventoryCheck{
 				Identity: identity, Push: a.cfg.Commit.IsPushEnabled(),
-				RequireSnapshot: true}); err != nil {
-				return fmt.Errorf("execution: deferred release records are unsettled before unlock: %w", err)
+				RequireSnapshot: deferredReleaseSnapshotRequiredState}); err != nil {
+				return fmt.Errorf(deferredReleaseUnsettledErrorFormat, err)
 			}
 		}
 	}
@@ -574,7 +615,7 @@ func (a *App) acquireReleaseLocks(ctx context.Context) (*workspaceRecorder, func
 	lock := &release.Lock{Git: a.git, Remote: lockRemote, Log: a.log, Run: a.runID}
 	if a.returnJournal != nil {
 		lock.OnPrepared = func(_ context.Context, prepared release.PreparedLockIdentity) error {
-			return a.returnJournal.recordPreparedLock("", prepared)
+			return a.returnJournal.recordPreparedLock(choreographyAbsentIdentityText, prepared)
 		}
 	}
 	if err := lock.Acquire(ctx); err != nil {
@@ -870,7 +911,7 @@ func (a *App) newReleaseExecutor(pl *plan.Plan, fleet *workspaceRecorder, gh *gh
 		// one machine, and §28.6 requires those writes to be ordered.
 		executor.Remote = coordinator
 		executor.PublishGroup = publishByRepository
-		if coordinator.GraphRootOID != "" {
+		if coordinator.GraphRootOID != choreographyAbsentIdentityText {
 			executor.AfterNativeFrame = a.newRelevantInputs(pl, fleet, coordinator).afterNativeFrame
 		}
 	}

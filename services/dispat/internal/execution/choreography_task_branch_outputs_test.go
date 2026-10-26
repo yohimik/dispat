@@ -7,8 +7,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -54,7 +52,7 @@ func TestChoreographyCompletedTaskBranchDirectlyCarriesVerifiedOutput(t *testing
 			claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 				Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 				ExpectedOID: spec.ReservationOID, InputsDigest: spec.InputsDigest,
-				ProposalID: "branch-output-claim"}
+				PickupID: NewChoreographyPickupID(), ProposalID: "branch-output-claim"}
 			completeChoreographyFixtureClaim(t, persist, &claim)
 			acceptedClaim, err := broker.AcceptClaim(t.Context(), claim)
 			require.NoError(t, err)
@@ -93,8 +91,6 @@ func TestChoreographyCompletedTaskBranchDirectlyCarriesVerifiedOutput(t *testing
 			if scenario.absentOutput {
 				result.Outputs = nil
 			}
-			document, err := json.Marshal(result)
-			require.NoError(t, err)
 			carriedTreeOID := outputTreeOID
 			if scenario.tampered {
 				otherOID := plumbing.HashObject(t.Context(), strings.NewReader("undeclared bytes"))
@@ -109,20 +105,11 @@ func TestChoreographyCompletedTaskBranchDirectlyCarriesVerifiedOutput(t *testing
 			if scenario.emptyOutput {
 				carriedTreeOID = manifest.OutputTree
 			}
-			rawResultOID, err := fixture.mailbox.commitMessage(t.Context(), MessageResult,
-				document, nil, []gitx.TreeEntry{{Mode: gitx.TreeModeDir, Type: "tree",
-					OID: carriedTreeOID, Name: outputsDir}})
-			require.NoError(t, err)
-			pack, err := os.CreateTemp(t.TempDir(), "branch-output-*.pack")
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = pack.Close() })
-			require.NoError(t, fixture.git.ExportCommitPack(t.Context(), rawResultOID, pack))
-			proposal := ChoreographyResultProposal{ChoreographyRunBinding: binding,
-				Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
-				ClaimOID: acceptedClaim.OID, InputsDigest: claim.InputsDigest,
-				ProposalID: "branch-output-result", ResultDigest: rawResultOID}
-			proposal, err = PrepareChoreographyResult(t.Context(), proposal, pack, 1<<20)
-			require.NoError(t, err)
+			proposal, pack := prepareChoreographyFixturePickupResult(t, fixture,
+				choreographyFixturePickupResult{Claim: claim, Accepted: acceptedClaim,
+					Result: result, ProposalID: "branch-output-result",
+					Outputs: []gitx.TreeEntry{{Mode: gitx.TreeModeDir, Type: "tree",
+						OID: carriedTreeOID, Name: outputsDir}}})
 			acceptedResult, err := broker.AcceptResult(t.Context(), proposal, pack)
 			if scenario.wantError {
 				require.Error(t, err)
@@ -130,27 +117,29 @@ func TestChoreographyCompletedTaskBranchDirectlyCarriesVerifiedOutput(t *testing
 				return
 			}
 			require.NoError(t, err)
-			checkOutput := func() {
+			checkOutput := func(oid string) {
 				if scenario.emptyOutput {
 					command := exec.Command("git", "--git-dir", fixture.endpoint, "rev-parse",
-						spec.Branch+":outputs")
+						oid+":outputs")
 					seen, readErr := command.CombinedOutput()
 					require.NoError(t, readErr, "%s", seen)
 					require.Equal(t, manifest.OutputTree, strings.TrimSpace(string(seen)))
 					return
 				}
 				command := exec.Command("git", "--git-dir", fixture.endpoint, "show",
-					spec.Branch+":outputs/dist/artifact.txt")
+					oid+":outputs/dist/artifact.txt")
 				seen, readErr := command.CombinedOutput()
 				require.NoError(t, readErr, "%s", seen)
 				require.Equal(t, body, string(seen))
 			}
-			checkOutput() // The accepted Result receipt is already directly inspectable.
+			checkOutput(acceptedResult.OID)
+			require.Equal(t, acceptedClaim.OID, remoteChoreographyOID(t, fixture, spec.Branch),
+				"a side Result receipt does not elect the canonical winner")
 			require.NoError(t, broker.DecideAttempt(t.Context(), ChoreographyDecision{
 				ChoreographyRunBinding: binding, Task: spec.Task, Branch: spec.Branch,
 				Attempt: 1, Node: "node-a", ResultOID: acceptedResult.OID,
 				Succeeded: !scenario.failedResult}))
-			checkOutput() // Terminal keeps the same verified output tree.
+			checkOutput(spec.Branch)
 			coldPersist, err := NewGitChoreographyPersist(persist.opts)
 			require.NoError(t, err)
 			coldBroker, err := RecoverFirstNodeBroker(t.Context(), choreographyFixtureBrokerOptions(coldPersist))
@@ -189,7 +178,7 @@ func assertNoOutputResultBranch(t *testing.T, status string) {
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 		ExpectedOID: spec.ReservationOID, InputsDigest: spec.InputsDigest,
-		ProposalID: "no-output-claim"}
+		PickupID: NewChoreographyPickupID(), ProposalID: "no-output-claim"}
 	completeChoreographyFixtureClaim(t, persist, &claim)
 	acceptedClaim, err := broker.AcceptClaim(t.Context(), claim)
 	require.NoError(t, err)
@@ -198,20 +187,9 @@ func assertNoOutputResultBranch(t *testing.T, status string) {
 		PlanDigest: binding.PlanDigest, Task: spec.Task, Attempt: 1,
 		Node: "node-a", Branch: spec.Branch}, Assignment: acceptedClaim.OID,
 		Status: status}
-	document, err := json.Marshal(result)
-	require.NoError(t, err)
-	rawResultOID, err := fixture.mailbox.commitMessage(t.Context(), MessageResult, document, nil, nil)
-	require.NoError(t, err)
-	pack, err := os.CreateTemp(t.TempDir(), "no-output-*.pack")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pack.Close() })
-	require.NoError(t, fixture.git.ExportCommitPack(t.Context(), rawResultOID, pack))
-	proposal := ChoreographyResultProposal{ChoreographyRunBinding: binding,
-		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
-		ClaimOID: acceptedClaim.OID, InputsDigest: claim.InputsDigest,
-		ProposalID: "no-output-result", ResultDigest: rawResultOID}
-	proposal, err = PrepareChoreographyResult(t.Context(), proposal, pack, 1<<20)
-	require.NoError(t, err)
+	proposal, pack := prepareChoreographyFixturePickupResult(t, fixture,
+		choreographyFixturePickupResult{Claim: claim, Accepted: acceptedClaim,
+			Result: result, ProposalID: "no-output-result"})
 	acceptedResult, err := broker.AcceptResult(t.Context(), proposal, pack)
 	require.NoError(t, err)
 	succeeded := status == StatusSucceeded
@@ -242,7 +220,7 @@ func TestChoreographyCancelledNoOutputTaskRetainsSignedAckBranch(t *testing.T) {
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 		ExpectedOID: spec.ReservationOID, InputsDigest: spec.InputsDigest,
-		ProposalID: "no-output-cancel-claim"}
+		PickupID: NewChoreographyPickupID(), ProposalID: "no-output-cancel-claim"}
 	completeChoreographyFixtureClaim(t, persist, &claim)
 	acceptedClaim, err := broker.AcceptClaim(t.Context(), claim)
 	require.NoError(t, err)

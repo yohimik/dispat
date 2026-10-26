@@ -29,6 +29,8 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
+const withdrawalNoRejectionReason = ""
+
 // claimedTask is one task this node has taken on, as the poll goroutine can
 // reach it.
 //
@@ -74,28 +76,37 @@ type claimedTask struct {
 	withdrawn string
 }
 
-// registerClaim remembers one claimed task so that a withdrawal arriving on
-// the poll can reach it, and answers the removal of it.
+type workerClaimIdentity struct {
+	Branch   string
+	ClaimOID string
+}
+
 func (w *Worker) registerClaim(task *claimedTask) func() {
 	w.claims.Lock()
 	defer w.claims.Unlock()
 	if w.claimed == nil {
-		w.claimed = map[string]*claimedTask{}
+		w.claimed = map[workerClaimIdentity]*claimedTask{}
 	}
-	w.claimed[task.tip.Branch] = task
+	identity := workerClaimIdentity{Branch: task.tip.Branch, ClaimOID: task.claimed}
+	w.claimed[identity] = task
 	return func() {
 		w.claims.Lock()
 		defer w.claims.Unlock()
-		delete(w.claimed, task.tip.Branch)
+		if w.claimed[identity] == task {
+			delete(w.claimed, identity)
+		}
 	}
 }
 
-// findClaim answers the task claimed on one branch, and nil for a branch this
-// node has nothing running for.
-func (w *Worker) findClaim(branch string) *claimedTask {
+func (w *Worker) findWithdrawalClaim(tip ChainTip) *claimedTask {
 	w.claims.Lock()
 	defer w.claims.Unlock()
-	return w.claimed[branch]
+	for identity, task := range w.claimed {
+		if identity.Branch == tip.Branch && task.readExpectedTip() == tip.PreviousOID {
+			return task
+		}
+	}
+	return nil
 }
 
 // reportPhase records the part of the frame the work has reached, and whether
@@ -175,7 +186,7 @@ func (t *claimedTask) readExpectedTip() string {
 // needs no answer at all, since the attempt is closed and this node has
 // nothing running under it.
 func (w *Worker) observeWithdrawal(ctx context.Context, tip ChainTip) bool {
-	task := w.findClaim(tip.Branch)
+	task := w.findWithdrawalClaim(tip)
 	if task == nil {
 		w.Log.Debug().Str("branch", tip.Branch).Str("commit", tip.OID).
 			Msg("withdrawn work this node is not running")
@@ -220,8 +231,11 @@ func (w *Worker) writeCancellationAcknowledgement(ctx context.Context, task *cla
 	log zerolog.Logger) {
 	cancel, reached, isCommandStarted := task.readProgress()
 	phase := resolveCancelledPhase(reached)
-	written, err := w.returnTaskAck(ctx, task, cancel, phase, isCommandStarted)
+	written, err := w.returnTaskAck(ctx, taskAckReturnRequest{
+		Task: task, CancelOID: cancel, Phase: phase, CommandStarted: isCommandStarted,
+	})
 	if err != nil {
+		w.rememberTaskReturnFailure(err)
 		log.Error().Err(err).Str("code", CodeTransport).Str("category", CategoryTransportCleanup).
 			Msg("the cancelled task could not be acknowledged")
 		return
@@ -255,7 +269,8 @@ func (w *Worker) checkWithdrawal(ctx context.Context, answer ChainTip, tip Chain
 		return ReasonUnreadable
 	}
 	if reason := CheckHeaderVersion(HeaderVersionCheck{Header: message.Header,
-		Binding: Binding{Node: w.Node, Branch: tip.Branch}, Now: time.Now(), Version: assignment.Protocol}); reason != "" {
+		Binding: Binding{Node: w.Node, Branch: tip.Branch}, Now: time.Now(), Version: assignment.Protocol,
+		CausallyBound: assignment.Protocol == ChoreographyProtocolVersion}); reason != withdrawalNoRejectionReason {
 		return reason
 	}
 	if !IsTransitionLegal(answer.Previous, MessageCancel, PartyOrchestrator) ||

@@ -28,11 +28,19 @@ const (
 	ChoreographyBudgetSyncLock = "syncLock"
 )
 
+type ChoreographyEligibleNodeOptions struct {
+	Roster    []ChoreographyRuntimeNode
+	Platforms []string
+	Placement Placement
+	Weight    int
+}
+
 // EligibleChoreographyNodes applies the same platform and runOnly rules as
 // Pool over the retained post-preflight roster. A peer can reconstruct this
 // set without consulting node-local configuration or scanning the pool.
-func EligibleChoreographyNodes(roster []ChoreographyRuntimeNode,
-	platforms []string, placement Placement, weight int) []string {
+func EligibleChoreographyNodes(options ChoreographyEligibleNodeOptions) []string {
+	roster, platforms, placement, weight := options.Roster, options.Platforms, options.Placement, options.Weight
+
 	var eligible []string
 	for _, entry := range roster {
 		candidate := &poolNode{isLocal: entry.First}

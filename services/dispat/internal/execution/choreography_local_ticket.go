@@ -82,7 +82,8 @@ func (c *Coordinator) BeginChoreographyLocalTask(ctx context.Context,
 	if spec.Placement != PlacementOrchestrator && spec.Placement != PlacementAnyNode {
 		return nil, fmt.Errorf(choreographyLocalFirstNodeIneligibleErrorText)
 	}
-	c.registerChoreographyResult(taskID, nil, nil, choreographyLocalOutputCaptureDisabledState)
+	c.registerChoreographyResult(choreographyResultRegistration{Task: taskID,
+		Produces: choreographyLocalOutputCaptureDisabledState})
 	receipt, err := c.ClaimChoreographyLocalTask(ctx, taskID, lease)
 	if err != nil {
 		return nil, err
@@ -152,8 +153,9 @@ func acceptFirstLocalClaim(ctx context.Context, b *FirstNodeBroker,
 		// The signed newer ledger head fences the previous exact proposal.
 		// Reoffer only the claim for this same immutable Assignment.
 		claim.ExpectedLedgerOID = receipt.FenceOID
-		claim.ProposalID = returnProposalID(choreographyClaimKind, claim.Run, claim.Task,
-			claim.Attempt, claim.ExpectedOID+choreographyLocalProposalSeparatorText+claim.ExpectedLedgerOID)
+		claim.ProposalID = returnProposalID(returnProposalIdentity{Kind: choreographyClaimKind,
+			Run: claim.Run, Task: claim.Task, Attempt: claim.Attempt,
+			OID: claim.ExpectedOID + choreographyLocalProposalSeparatorText + claim.ExpectedLedgerOID})
 	}
 }
 
@@ -196,7 +198,9 @@ func (c *Coordinator) ReserveFirstLocalPool(ctx context.Context,
 		}
 		return func() {}, nil
 	}
-	lease, err := c.Pool.AcquireNearWeight(ctx, nil, PlacementOrchestrator, choreographyLocalAbsentIdentityText, spec.Weight)
+	lease, err := c.Pool.AcquireNearWeight(ctx, WeightedPlacementRequest{
+		Placement: PlacementOrchestrator, Preferred: choreographyLocalAbsentIdentityText, Weight: spec.Weight,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -260,8 +264,9 @@ func (t *ChoreographyLocalTicket) Finish(ctx context.Context, taskSucceeded bool
 		proposal := ChoreographyResultProposal{ChoreographyRunBinding: t.binding,
 			Task: t.task, Attempt: t.attempt, Node: c.Local.Name, Branch: t.branch,
 			ClaimOID: t.claim, InputsDigest: t.inputsDigest,
-			ResultDigest: t.resultOID, ProposalID: returnProposalID(choreographyResultKind,
-				t.binding.Run, t.task, t.attempt, t.resultOID)}
+			ResultDigest: t.resultOID, ProposalID: returnProposalID(returnProposalIdentity{
+				Kind: choreographyResultKind, Run: t.binding.Run, Task: t.task,
+				Attempt: t.attempt, OID: t.resultOID})}
 		prepared, err := PrepareChoreographyResult(ctx, proposal, pack, maxPack)
 		if err != nil {
 			return err

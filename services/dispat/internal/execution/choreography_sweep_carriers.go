@@ -9,6 +9,17 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
+const (
+	choreographySweepCarrierMissingIdentity      = ""
+	choreographySweepCarrierNoInputs             = 0
+	choreographySweepCarrierSourceFound          = true
+	choreographySweepCarrierResultSeen           = true
+	choreographySweepCarrierSourceMissing        = false
+	choreographySweepCarrierAdmissionUnavailable = "execution: sweep output admission is unavailable"
+	choreographySweepCarrierMissingResultFormat  = "execution: sweep path export %s lacks its admitted result"
+	choreographySweepCarrierOutsideClosureFormat = "execution: sweep path export %s names a repository outside its input closure"
+)
+
 // A sweep export is indexed by the exact value the first node admitted into
 // the plan. The signed form remains separate: it describes a path within a
 // declared output root, not an absolute path in the first node's checkout.
@@ -35,9 +46,9 @@ func (c *Coordinator) sweepAssignmentInputs(outputs []plan.Output,
 	sources []Source) ([]ExportedValue, []AssignmentInput, error) {
 	exports := formatExports(outputs)
 	if c.sweepOutputs == nil {
-		return exports, nil, fmt.Errorf("execution: sweep output admission is unavailable")
+		return exports, nil, fmt.Errorf(choreographySweepCarrierAdmissionUnavailable)
 	}
-	inputs := make([]AssignmentInput, 0)
+	inputs := make([]AssignmentInput, choreographySweepCarrierNoInputs)
 	seen := make(map[string]bool)
 	for i, output := range outputs {
 		entry, ok := c.sweepOutputs.carriedExport(output)
@@ -46,29 +57,29 @@ func (c *Coordinator) sweepAssignmentInputs(outputs []plan.Output,
 		}
 		set := entry.set
 		ref := entry.signed.DeclaredPath
-		if set == nil || set.manifest == nil || set.resultOID == "" || ref == nil ||
+		if set == nil || set.manifest == nil || set.resultOID == choreographySweepCarrierMissingIdentity || ref == nil ||
 			ref.Repository != set.repositoryName || ref.Package != set.packageName ||
-			entry.signed.Value != "" || set.manifest.Digest == "" {
-			return nil, nil, fmt.Errorf("execution: sweep path export %s lacks its admitted result", output.Name)
+			entry.signed.Value != choreographySweepCarrierMissingIdentity || set.manifest.Digest == choreographySweepCarrierMissingIdentity {
+			return nil, nil, fmt.Errorf(choreographySweepCarrierMissingResultFormat, output.Name)
 		}
 		exports[i] = entry.signed
 		if seen[set.resultOID] {
 			continue
 		}
-		path := ""
-		found := false
+		path := choreographySweepCarrierMissingIdentity
+		found := choreographySweepCarrierSourceMissing
 		for _, source := range sources {
 			if source.Name == set.repositoryName {
-				path, found = source.Path, true
+				path, found = source.Path, choreographySweepCarrierSourceFound
 				break
 			}
 		}
 		if !found {
-			return nil, nil, fmt.Errorf("execution: sweep path export %s names a repository outside its input closure", output.Name)
+			return nil, nil, fmt.Errorf(choreographySweepCarrierOutsideClosureFormat, output.Name)
 		}
 		inputs = append(inputs, AssignmentInput{Task: set.task, Package: set.packageName,
 			Commit: set.resultOID, Digest: set.manifest.Digest, Path: path})
-		seen[set.resultOID] = true
+		seen[set.resultOID] = choreographySweepCarrierResultSeen
 	}
 	return exports, inputs, nil
 }

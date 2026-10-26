@@ -16,8 +16,10 @@
 #
 # The mailbox is the repository being released. The workflow passes the same
 # DISPAT_CI_WORKER_REPOSITORY to this script and the orchestrator's --worker
-# link. The orchestrator uses its checkout's credential; the worker polls the same
-# repository over https with a read-only token of its own,
+# link. The orchestrator uses its checkout's credential; the worker reads the same
+# repository and creates its own pending/output/failed refs over https with a
+# contents-write token of its own. Host rules must protect canonical and release
+# refs from that token.
 # DISPAT_CI_WORKER_TOKEN, which the job mints from a GitHub App, never the
 # job's GITHUB_TOKEN. Results return through a runner-owned SSH loopback tunnel.
 #

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 )
 
 const (
@@ -26,6 +27,8 @@ const (
 	choreographyReplaySealed                      = true
 	choreographyReplayReadyFrame                  = true
 	choreographyReplayTerminal                    = true
+	choreographyReplayPickupSettled               = true
+	choreographyReplayPickupContactLost           = true
 	choreographyReplayFailed                      = false
 	choreographyReplayPending                     = true
 	choreographyReplayNotPending                  = false
@@ -201,6 +204,11 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 			if task.claim != choreographyReplayMissingIdentity {
 				return fmt.Errorf(choreographyReplaySealClaimError)
 			}
+			for _, pickup := range task.pickups {
+				if !pickup.settled {
+					return fmt.Errorf(choreographyReplaySealClaimError)
+				}
+			}
 			if !event.Aborted && !task.terminal {
 				return fmt.Errorf(choreographyReplaySealTaskError)
 			}
@@ -213,6 +221,49 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 		return fmt.Errorf(choreographyReplayUnknownTaskError)
 	}
 	switch event.Kind {
+	case ChoreographyPickupSettled:
+		pickup := task.pickups[event.PickupID]
+		if pickup == nil || pickup.settled || pickup.claimOID != event.ClaimOID ||
+			pickup.resultReceiptOID == choreographyReplayMissingIdentity ||
+			pickup.resultReceiptOID != event.ResultReceiptOID ||
+			pickup.resultOutputOID != event.OutputOID ||
+			pickup.attempt != event.Attempt || pickup.node != event.Node ||
+			event.TaskOID != task.tip || event.PriorTaskOID != task.tip ||
+			event.Budget != task.spec.Budget || event.Weight != task.spec.Weight ||
+			event.GraphRootOID != b.graphRootOID ||
+			!task.terminal && task.claim == pickup.claimOID {
+			return fmt.Errorf(choreographyReplayDecisionError)
+		}
+		b.used[task.spec.Budget] -= task.spec.Weight
+		b.nodeUsed[pickup.node] -= task.spec.Weight
+		pickup.settled = choreographyReplayPickupSettled
+		pickup.settlementDigest = event.ProposalDigest
+		if task.claim == pickup.claimOID {
+			task.claim, task.cancel, task.result, task.owner =
+				choreographyReplayMissingIdentity, choreographyReplayMissingIdentity,
+				choreographyReplayMissingIdentity, choreographyReplayMissingIdentity
+		}
+		return nil
+	case ChoreographyPickupContactLost:
+		pickup := task.pickups[event.PickupID]
+		if pickup == nil || pickup.settled || pickup.contactLost || task.terminal ||
+			task.attempt >= maxPlacementAttempts ||
+			task.spec.ExecutorOwned || !task.spec.RetryAfterUncertainAttempt || task.claim != event.ClaimOID ||
+			pickup.claimOID != event.ClaimOID || pickup.attempt != event.Attempt ||
+			pickup.node != event.Node || pickup.cancelOID == choreographyReplayMissingIdentity ||
+			pickup.cancelOID != task.cancel || pickup.resultReceiptOID != choreographyReplayMissingIdentity ||
+			pickup.cancelReplyDeadlineUTC != event.CancelReplyDeadlineUTC ||
+			event.CancelReplyDeadlineUTC == choreographyReplayMissingIdentity ||
+			event.TaskOID != task.tip || event.PriorTaskOID != task.tip ||
+			event.GraphRootOID != b.graphRootOID {
+			return fmt.Errorf(choreographyReplayClaimError)
+		}
+		pickup.contactLost = choreographyReplayPickupContactLost
+		task.claim, task.cancel, task.result, task.owner =
+			choreographyReplayMissingIdentity, choreographyReplayMissingIdentity,
+			choreographyReplayMissingIdentity, choreographyReplayMissingIdentity
+		task.attempt++
+		return nil
 	case ChoreographyFrameReady:
 		expectedInputs, expectedErr := b.readyInputsDigest(task)
 		if task.spec.Virtual || task.remaining != choreographyReplayNoEdges || task.terminal ||
@@ -253,7 +304,7 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 			!b.nodeEligible(task.spec, event.Node) ||
 			event.MembershipEpochOID != b.memberEpoch[event.Node] ||
 			event.CapacityAuthorityID != b.members[event.Node].AuthorityID ||
-			event.LeaseIntentID != nodeSlotLeaseID(NodeSlotIntent{Run: b.binding.Run, Task: event.Task, Attempt: event.Attempt}) ||
+			event.LeaseIntentID != nodeSlotLeaseID(NodeSlotIntent{Run: b.binding.Run, Task: event.Task, Attempt: event.Attempt, PickupID: event.PickupID}) ||
 			event.LeaseWeight != task.spec.Weight ||
 			(event.GraphRootOID != choreographyReplayMissingIdentity && event.GraphRootOID != b.graphRootOID) ||
 			(task.offeredNode != choreographyReplayMissingIdentity && task.offeredNode != event.Node) ||
@@ -263,11 +314,72 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 			return fmt.Errorf(choreographyReplayClaimError)
 		}
 		task.claim, task.tip, task.owner = event.TaskOID, event.TaskOID, event.Node
+		if event.PickupID != choreographyReplayMissingIdentity {
+			if task.pickups == nil {
+				task.pickups = make(map[string]*indexedChoreographyPickup)
+			}
+			if task.pickups[event.PickupID] != nil {
+				return fmt.Errorf(choreographyReplayClaimError)
+			}
+			task.pickups[event.PickupID] = &indexedChoreographyPickup{
+				id: event.PickupID, attempt: event.Attempt, node: event.Node,
+				claimOID: event.TaskOID, assignmentOID: event.AssignmentOID,
+				leaseIntentID: event.LeaseIntentID, deadlineUTC: event.PickupDeadlineUTC}
+		}
 		task.inputsDigest = event.InputsDigest
 		b.used[task.spec.Budget] += task.spec.Weight
 		b.nodeUsed[event.Node] += task.spec.Weight
 		return nil
 	case ChoreographyResultAccepted, ChoreographyAckAccepted:
+		if event.Kind == ChoreographyAckAccepted && event.PickupID != choreographyReplayMissingIdentity &&
+			event.ResultReceiptOID != choreographyReplayMissingIdentity {
+			pickup := task.pickups[event.PickupID]
+			if pickup == nil || !pickup.contactLost || pickup.cancelOID == choreographyReplayMissingIdentity ||
+				pickup.claimOID != event.ClaimOID || pickup.attempt != event.Attempt ||
+				pickup.node != event.Node || pickup.resultReceiptOID != choreographyReplayMissingIdentity ||
+				event.TaskOID != task.tip || event.PriorTaskOID != task.tip ||
+				event.GraphRootOID != b.graphRootOID ||
+				event.ProposalDigest == choreographyReplayMissingIdentity ||
+				event.ProposalID == choreographyReplayMissingIdentity {
+				return fmt.Errorf(choreographyReplayReplyError)
+			}
+			pickup.resultReceiptOID = event.ResultReceiptOID
+			return nil
+		}
+		if event.Kind == ChoreographyAckAccepted && event.PickupID != choreographyReplayMissingIdentity {
+			pickup := task.pickups[event.PickupID]
+			if pickup == nil || pickup.claimOID != event.ClaimOID ||
+				pickup.attempt != event.Attempt || pickup.node != event.Node ||
+				pickup.cancelOID == choreographyReplayMissingIdentity ||
+				pickup.cancelOID != event.PriorTaskOID ||
+				pickup.resultReceiptOID != choreographyReplayMissingIdentity ||
+				task.claim != pickup.claimOID || task.cancel != pickup.cancelOID ||
+				event.ProposalDigest == choreographyReplayMissingIdentity ||
+				event.ProposalID == choreographyReplayMissingIdentity {
+				return fmt.Errorf(choreographyReplayReplyError)
+			}
+			pickup.resultReceiptOID = event.TaskOID
+			task.result, task.tip = event.TaskOID, event.TaskOID
+			return nil
+		}
+		if event.Kind == ChoreographyResultAccepted && event.PickupID != choreographyReplayMissingIdentity {
+			pickup := task.pickups[event.PickupID]
+			if pickup == nil || pickup.claimOID != event.ClaimOID ||
+				pickup.cancelOID != choreographyReplayMissingIdentity ||
+				pickup.attempt != event.Attempt || pickup.node != event.Node ||
+				pickup.resultReceiptOID != choreographyReplayMissingIdentity ||
+				event.TaskOID != task.tip ||
+				event.ResultReceiptOID == choreographyReplayMissingIdentity ||
+				event.ProposalDigest == choreographyReplayMissingIdentity ||
+				event.ProposalID == choreographyReplayMissingIdentity {
+				return fmt.Errorf(choreographyReplayReplyError)
+			}
+			pickup.resultReceiptOID, pickup.resultOutputOID = event.ResultReceiptOID, event.OutputOID
+			if task.claim == event.ClaimOID {
+				task.result, task.resultOutputOID = event.ResultReceiptOID, event.OutputOID
+			}
+			return nil
+		}
 		if task.claim == choreographyReplayMissingIdentity || task.result != choreographyReplayMissingIdentity || task.terminal ||
 			task.attempt != event.Attempt || task.owner != event.Node ||
 			event.ProposalDigest == choreographyReplayMissingIdentity || event.ProposalID == choreographyReplayMissingIdentity ||
@@ -280,10 +392,26 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 	case ChoreographyCancelIssued:
 		if task.claim == choreographyReplayMissingIdentity || task.result != choreographyReplayMissingIdentity || task.cancel != choreographyReplayMissingIdentity ||
 			task.terminal || task.attempt != event.Attempt || task.owner != event.Node ||
-			task.claim != event.PriorTaskOID {
+			task.claim != event.PriorTaskOID || event.ClaimOID != choreographyReplayMissingIdentity &&
+			event.ClaimOID != event.PriorTaskOID {
 			return fmt.Errorf(choreographyReplayCancelError)
 		}
+		if event.PickupID != choreographyReplayMissingIdentity {
+			if _, err := time.Parse(time.RFC3339, event.CancelReplyDeadlineUTC); err != nil {
+				return fmt.Errorf(choreographyReplayCancelError)
+			}
+		}
 		task.cancel, task.tip = event.TaskOID, event.TaskOID
+		for _, pickup := range task.pickups {
+			if pickup.claimOID == event.PriorTaskOID {
+				if event.PickupID != pickup.id || event.ClaimOID != pickup.claimOID {
+					return fmt.Errorf(choreographyReplayCancelError)
+				}
+				pickup.cancelOID = event.TaskOID
+				pickup.cancelReplyDeadlineUTC = event.CancelReplyDeadlineUTC
+				break
+			}
+		}
 		return nil
 	case ChoreographyQueueFenced:
 		if task.claim != choreographyReplayMissingIdentity || task.queueFence != choreographyReplayMissingIdentity || task.terminal ||
@@ -294,6 +422,52 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 		task.queueFence, task.queueOffered, task.tip = event.TaskOID, event.PriorTaskOID, event.TaskOID
 		return nil
 	case ChoreographyRetryReady, ChoreographyTerminal:
+		if event.PickupID != choreographyReplayMissingIdentity {
+			pickup := task.pickups[event.PickupID]
+			if pickup == nil || pickup.settled || pickup.claimOID != event.ClaimOID ||
+				pickup.resultReceiptOID != event.ResultReceiptOID ||
+				pickup.resultOutputOID != event.OutputOID ||
+				pickup.attempt != event.Attempt || pickup.node != event.Node ||
+				event.PriorTaskOID != task.tip || event.Package != task.spec.Package ||
+				event.Budget != task.spec.Budget || event.Weight != task.spec.Weight ||
+				task.terminal || event.Kind == ChoreographyRetryReady &&
+				(event.Succeeded || !task.spec.RetryAfterUncertainAttempt || pickup.attempt >= maxPlacementAttempts ||
+					event.PackageOutcome != choreographyReplayMissingIdentity) {
+				return fmt.Errorf(choreographyReplayDecisionError)
+			}
+			if err := b.validatePackageOutcome(event.Package, event.PackageOutcome); err != nil {
+				return err
+			}
+			b.used[task.spec.Budget] -= task.spec.Weight
+			b.nodeUsed[pickup.node] -= task.spec.Weight
+			pickup.settled = choreographyReplayPickupSettled
+			task.tip = event.TaskOID
+			if task.claim == pickup.claimOID {
+				task.claim, task.cancel, task.result, task.owner =
+					choreographyReplayMissingIdentity, choreographyReplayMissingIdentity,
+					choreographyReplayMissingIdentity, choreographyReplayMissingIdentity
+			}
+			if event.Kind == ChoreographyRetryReady {
+				task.attempt++
+				task.resultOutputOID = choreographyNoAcceptedResultOutputOID
+				task.frameReady, task.preparedInputOID = choreographyReplayFrameNotReady,
+					choreographyReplayMissingIdentity
+				return nil
+			}
+			task.terminal, task.succeeded = choreographyReplayTerminal, event.Succeeded
+			task.resultOutputOID = pickup.resultOutputOID
+			if err := b.applyPackageOutcome(event.Package, event.PackageOutcome); err != nil {
+				return err
+			}
+			if task.spec.Package != choreographyReplayMissingIdentity &&
+				event.PackageOutcome == choreographyReplayMissingIdentity &&
+				!task.spec.ExecutorOwned && task.spec.Kind != string(KindPrepare) {
+				task.pendingPackageSettlement = choreographyReplayPending
+			} else {
+				b.discharge(task)
+			}
+			return nil
+		}
 		if task.spec.LocalAuthority {
 			if event.Kind != ChoreographyTerminal || task.remaining != choreographyReplayNoEdges || task.terminal ||
 				event.ResultReceiptOID != choreographyReplayMissingIdentity || event.Package != task.spec.Package ||
@@ -367,6 +541,7 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 			return err
 		}
 		if task.spec.Package != choreographyReplayMissingIdentity && event.PackageOutcome == choreographyReplayMissingIdentity &&
+			!task.spec.ExecutorOwned && task.spec.Kind != string(KindPrepare) &&
 			event.ResultReceiptOID != choreographyReplayMissingIdentity {
 			task.pendingPackageSettlement = choreographyReplayPending
 		} else {

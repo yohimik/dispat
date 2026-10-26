@@ -87,10 +87,12 @@ func TestChoreographyAcceptedCallbackIgnoresBusyAndStaleClaims(t *testing.T) {
 		Persist:         persist})
 	require.NoError(t, err)
 	b.executionStarted = true
+	pickupID := NewChoreographyPickupID()
 	proposal := ChoreographyClaimProposal{ChoreographyRunBinding: binding, Task: spec.Task, Attempt: 1,
 		Node: "peer", Branch: spec.Branch, ExpectedOID: spec.ReservationOID, ExpectedLedgerOID: persist.head,
 		GraphRootOID: persist.root, MembershipEpochOID: "initial-epoch", CapacityAuthorityID: "11111111111111111111111111111111",
-		LeaseIntentID: nodeSlotLeaseID(NodeSlotIntent{Run: binding.Run, Task: spec.Task, Attempt: 1}), LeaseWeight: 1,
+		LeaseIntentID: nodeSlotLeaseID(NodeSlotIntent{Run: binding.Run, Task: spec.Task, Attempt: 1, PickupID: pickupID}), LeaseWeight: 1,
+		PickupID:     pickupID,
 		InputsDigest: inputsDigest, TemplateDigest: templateDigest, BindingsDigest: bindingsDigest,
 		Bindings: bindings, ProposalID: "accepted"}
 	staleProposal := proposal

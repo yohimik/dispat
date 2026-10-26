@@ -28,7 +28,13 @@ func TestSweepChoreographySpecsKeepNoopProviderGate(t *testing.T) {
 		{Task: "a:run", Kind: execution.KindRun, Placement: execution.PlacementWorker},
 		{Task: "c:run", Kind: execution.KindRun, Placement: execution.PlacementAnyNode},
 	}
-	specs, budgets, err := sweepChoreographySpecs(pl, []string{"a", "b", "c"}, tasks, roster, 2)
+	specs, budgets, err := sweepChoreographySpecs(sweepChoreographySpecOptions{
+		Plan:          pl,
+		Covered:       []string{"a", "b", "c"},
+		Tasks:         tasks,
+		Roster:        roster,
+		BuildCapacity: 2,
+	})
 	require.NoError(t, err)
 	require.Equal(t, []string{"peer"}, specs[0].EligibleNodes)
 	require.Equal(t, []string{"a:run"}, specs[1].Predecessors)
@@ -40,7 +46,12 @@ func TestSweepChoreographySpecsKeepNoopProviderGate(t *testing.T) {
 		Name: execution.ChoreographyBudgetBuild, Capacity: 2,
 	}}, budgets)
 
-	_, _, err = sweepChoreographySpecs(pl, []string{"a", "b", "c"},
-		append(tasks, execution.ReservationTask{Task: "outside:run", Kind: execution.KindRun}), roster, 2)
+	_, _, err = sweepChoreographySpecs(sweepChoreographySpecOptions{
+		Plan:          pl,
+		Covered:       []string{"a", "b", "c"},
+		Tasks:         append(tasks, execution.ReservationTask{Task: "outside:run", Kind: execution.KindRun}),
+		Roster:        roster,
+		BuildCapacity: 2,
+	})
 	require.ErrorContains(t, err, "outside covered")
 }

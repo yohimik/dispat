@@ -14,21 +14,34 @@ const missingCompiledTaskTemplateErrorFormat = "execution: compiled task %q has 
 func compileReleaseChoreographyTemplates(coordinator *execution.Coordinator,
 	compiled *release.CompiledTaskGraph, specs []execution.ChoreographyTaskSpec) ([]execution.ChoreographyCompiledTemplate, error) {
 	if coordinator == nil || compiled == nil {
-		return nil, fmt.Errorf("execution: release template compiler has no coordinator or graph")
+		return nil, fmt.Errorf(choreographyIncompleteReleaseTemplateCompilerErrorText)
 	}
-	return compileReleaseChoreographyTemplatesWithInputs(compiled, specs,
-		coordinator.DispatchSources(), coordinator.DispatchShell(),
-		coordinator.Timeouts.Task, coordinator.Limits)
+	return compileReleaseChoreographyTemplatesWithInputs(releaseChoreographyTemplateOptions{
+		Compiled:    compiled,
+		Tasks:       specs,
+		Sources:     coordinator.DispatchSources(),
+		Shell:       coordinator.DispatchShell(),
+		TaskTimeout: coordinator.Timeouts.Task,
+		Limits:      coordinator.Limits,
+	})
 }
 
-func compileReleaseChoreographyTemplatesWithInputs(compiled *release.CompiledTaskGraph,
-	specs []execution.ChoreographyTaskSpec, sources func(string) []execution.Source,
-	shell func(string) []string, taskTimeout time.Duration,
-	limits execution.TransferLimits) ([]execution.ChoreographyCompiledTemplate, error) {
+type releaseChoreographyTemplateOptions struct {
+	Compiled    *release.CompiledTaskGraph
+	Tasks       []execution.ChoreographyTaskSpec
+	Sources     func(string) []execution.Source
+	Shell       func(string) []string
+	TaskTimeout time.Duration
+	Limits      execution.TransferLimits
+}
+
+func compileReleaseChoreographyTemplatesWithInputs(options releaseChoreographyTemplateOptions) ([]execution.ChoreographyCompiledTemplate, error) {
+	compiled, specs, sources, shell, taskTimeout, limits := options.Compiled, options.Tasks, options.Sources, options.Shell, options.TaskTimeout, options.Limits
+
 	if compiled == nil {
-		return nil, fmt.Errorf("execution: release template compiler has no graph")
+		return nil, fmt.Errorf(choreographyMissingReleaseTemplateGraphErrorText)
 	}
-	templates := make([]execution.ChoreographyCompiledTemplate, 0, len(specs))
+	templates := make([]execution.ChoreographyCompiledTemplate, choreographyNoEntriesCount, len(specs))
 	firstOnly := make(map[string]bool)
 	for _, shape := range compiled.TaskShapes() {
 		firstOnly[shape.ID] = shape.FirstOnly
@@ -48,8 +61,14 @@ func compileReleaseChoreographyTemplatesWithInputs(compiled *release.CompiledTas
 				return nil, fmt.Errorf(missingCompiledTaskTemplateErrorFormat, spec.Task, requestErr)
 			}
 			var err error
-			template, err = execution.CompileStageTemplateWithInputs(*spec, request,
-				sources, shell, int(taskTimeout.Seconds()), limits)
+			template, err = execution.CompileStageTemplateWithInputs(execution.ChoreographyStageTemplateOptions{
+				Spec:            *spec,
+				Request:         request,
+				SourcesFor:      sources,
+				ShellFor:        shell,
+				DeadlineSeconds: int(taskTimeout.Seconds()),
+				Limits:          limits,
+			})
 			if err != nil {
 				return nil, fmt.Errorf(missingCompiledTaskTemplateErrorFormat, spec.Task, err)
 			}
@@ -67,21 +86,34 @@ func compileReleaseChoreographyTemplatesWithInputs(compiled *release.CompiledTas
 func compileSweepChoreographyTemplates(coordinator *execution.Coordinator,
 	work *scriptWork, specs []execution.ChoreographyTaskSpec) ([]execution.ChoreographyCompiledTemplate, error) {
 	if coordinator == nil {
-		return nil, fmt.Errorf("execution: sweep template compiler has no coordinator or plan")
+		return nil, fmt.Errorf(choreographyIncompleteSweepTemplateCompilerErrorText)
 	}
-	return compileSweepChoreographyTemplatesWithInputs(work, specs,
-		coordinator.DispatchSources(), coordinator.DispatchShell(),
-		coordinator.Timeouts.Task, coordinator.Limits)
+	return compileSweepChoreographyTemplatesWithInputs(sweepChoreographyTemplateOptions{
+		Work:        work,
+		Tasks:       specs,
+		Sources:     coordinator.DispatchSources(),
+		Shell:       coordinator.DispatchShell(),
+		TaskTimeout: coordinator.Timeouts.Task,
+		Limits:      coordinator.Limits,
+	})
 }
 
-func compileSweepChoreographyTemplatesWithInputs(work *scriptWork,
-	specs []execution.ChoreographyTaskSpec, sources func(string) []execution.Source,
-	shell func(string) []string, taskTimeout time.Duration,
-	limits execution.TransferLimits) ([]execution.ChoreographyCompiledTemplate, error) {
+type sweepChoreographyTemplateOptions struct {
+	Work        *scriptWork
+	Tasks       []execution.ChoreographyTaskSpec
+	Sources     func(string) []execution.Source
+	Shell       func(string) []string
+	TaskTimeout time.Duration
+	Limits      execution.TransferLimits
+}
+
+func compileSweepChoreographyTemplatesWithInputs(options sweepChoreographyTemplateOptions) ([]execution.ChoreographyCompiledTemplate, error) {
+	work, specs, sources, shell, taskTimeout, limits := options.Work, options.Tasks, options.Sources, options.Shell, options.TaskTimeout, options.Limits
+
 	if work == nil || work.pl == nil {
-		return nil, fmt.Errorf("execution: sweep template compiler has no coordinator or plan")
+		return nil, fmt.Errorf(choreographyIncompleteSweepTemplateCompilerErrorText)
 	}
-	templates := make([]execution.ChoreographyCompiledTemplate, 0, len(specs))
+	templates := make([]execution.ChoreographyCompiledTemplate, choreographyNoEntriesCount, len(specs))
 	for index := range specs {
 		spec := &specs[index]
 		if spec.Virtual {
@@ -89,17 +121,25 @@ func compileSweepChoreographyTemplatesWithInputs(work *scriptWork,
 		}
 		rel := work.pl.Releases[spec.Package]
 		if rel == nil || rel.Pkg == nil || rel.Pkg.Space == nil {
-			return nil, fmt.Errorf("execution: sweep task %q has no package policy", spec.Task)
+			return nil, fmt.Errorf(choreographyMissingSweepTaskPolicyErrorFormat, spec.Task)
 		}
 		commands, found := rel.Pkg.Space.Script(work.name)
 		if !found {
-			return nil, fmt.Errorf("execution: sweep task %q has no declared script", spec.Task)
+			return nil, fmt.Errorf(choreographyMissingSweepTaskScriptErrorFormat, spec.Task)
 		}
 		request := release.StageRequest{TaskID: spec.Task, Release: rel,
 			Stage: work.stage(), Dir: rel.Pkg.Dir, StaticEnv: rel.Pkg.Space.Env,
 			Frame: release.StageFrame{Commands: script.AppendArgsToLast(commands, work.args)}}
-		template, err := execution.CompileSweepTemplateWithInputs(*spec, request,
-			work.name, work.roots, sources, shell, int(taskTimeout.Seconds()), limits)
+		template, err := execution.CompileSweepTemplateWithInputs(execution.ChoreographySweepTemplateOptions{
+			Spec:            *spec,
+			Request:         request,
+			Script:          work.name,
+			Roots:           work.roots,
+			Sources:         sources,
+			Shell:           shell,
+			DeadlineSeconds: int(taskTimeout.Seconds()),
+			Limits:          limits,
+		})
 		if err != nil {
 			return nil, err
 		}

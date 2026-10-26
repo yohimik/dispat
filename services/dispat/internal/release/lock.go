@@ -175,7 +175,7 @@ func (l *Lock) Acquire(ctx context.Context) error {
 			Run: l.Run, Remote: l.Remote, LocalTag: l.localTag, Object: oid,
 		}); err != nil {
 			l.dropAttempt(ctx)
-			return fmt.Errorf("recording the release lock attempt before its remote push: %w", err)
+			return fmt.Errorf(releasePreparedLockJournalErrorFormat, err)
 		}
 	}
 	l.Log.Trace().Str("tag", LockTagName).Str("attempt", l.localTag).

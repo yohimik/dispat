@@ -6,7 +6,6 @@
 package execution
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"testing"
@@ -38,12 +37,12 @@ func TestColdNodeSlotReleasesOnlyAfterSignedPreclaimEpochFence(t *testing.T) {
 			proposal := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 				Task: task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 				ExpectedOID: spec.ReservationOID, ExpectedLedgerOID: head.OID,
-				InputsDigest: spec.InputsDigest, ProposalID: "lost-preclaim"}
+				InputsDigest: spec.InputsDigest, PickupID: NewChoreographyPickupID(), ProposalID: "lost-preclaim"}
 			completeChoreographyFixtureClaim(t, persist, &proposal)
 			query, err := FormatClaimReceiptQuery(proposal)
 			require.NoError(t, err)
 			lease, acquired, err := authority.TryReserve(ctx, NodeSlotIntent{Run: binding.Run,
-				Task: task, Attempt: 1, Weight: 1, Recovery: &NodeSlotRecoveryLocator{
+				Task: task, Attempt: 1, PickupID: proposal.PickupID, Weight: 1, Recovery: &NodeSlotRecoveryLocator{
 					Binding: binding, CanonicalEndpoint: canonical.endpoint, BootstrapOID: bootstrapOID,
 					TaskBranch: spec.Branch, Kind: KindBuild,
 					ExpectedTaskOID: spec.ReservationOID, GraphRootOID: persist.opts.GraphRootOID,
@@ -73,19 +72,11 @@ func TestColdNodeSlotReleasesOnlyAfterSignedPreclaimEpochFence(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, held, 1, "an accepted claim still owns physical capacity")
 				result := Result{Header: assignment.Header, Assignment: claim.OID, Status: StatusSucceeded}
-				resultDoc, err := json.Marshal(result)
+				_, err = peer.mailbox.Reread(ctx, spec.Branch)
 				require.NoError(t, err)
-				resultOID, err := peer.mailbox.commitMessage(ctx, MessageResult, resultDoc, nil, nil)
-				require.NoError(t, err)
-				pack, err := os.CreateTemp(t.TempDir(), "result-*.pack")
-				require.NoError(t, err)
-				defer pack.Close()
-				require.NoError(t, peer.git.ExportCommitPack(ctx, resultOID, pack))
-				input := ChoreographyResultProposal{ChoreographyRunBinding: binding,
-					Task: task, Attempt: 1, Node: "node-a", Branch: spec.Branch, ClaimOID: claim.OID,
-					InputsDigest: proposal.InputsDigest, ProposalID: "lost-result", ResultDigest: resultOID}
-				prepared, err := PrepareChoreographyResult(ctx, input, pack, 1<<20)
-				require.NoError(t, err)
+				prepared, pack := prepareChoreographyFixturePickupResult(t, peer,
+					choreographyFixturePickupResult{Claim: proposal, Accepted: claim,
+						Result: result, ProposalID: "lost-result"})
 				resultReceipt, err := broker.AcceptResult(ctx, prepared, pack)
 				require.NoError(t, err)
 				require.True(t, resultReceipt.Accepted)
@@ -95,7 +86,7 @@ func TestColdNodeSlotReleasesOnlyAfterSignedPreclaimEpochFence(t *testing.T) {
 				require.Len(t, held, 1, "a result receipt without a signed decision holds capacity")
 				require.NoError(t, broker.DecideAttempt(ctx, ChoreographyDecision{
 					ChoreographyRunBinding: binding, Task: task, Branch: spec.Branch, Attempt: 1,
-					ResultOID: resultReceipt.OID, Succeeded: true}))
+					Node: "node-a", ResultOID: resultReceipt.OID, Succeeded: true}))
 				if mode == "https-loss-fallback" {
 					polls := 0
 					channel := &workerReturnChannel{binding: binding, client: &fakeWorkerReturn{

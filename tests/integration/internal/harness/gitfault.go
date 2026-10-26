@@ -39,6 +39,7 @@ import (
 // is the point: no assertion in this suite may depend on how Git or the
 // operating system phrases a failure.
 const GitFaultMarker = "dispat integration git fault"
+const gitFaultHeldPIDFile = "held-pid"
 
 // GitFault is one Git failure injected into the dispat process under test: a
 // glob over the arguments, which of the matching invocations it applies to,
@@ -234,7 +235,7 @@ func (f *GitFault) IsHeld() bool {
 // without resuming a remote write after the parent process has died.
 func (f *GitFault) HeldPID() int {
 	f.t.Helper()
-	data, err := os.ReadFile(filepath.Join(f.dir, "held-pid"))
+	data, err := os.ReadFile(filepath.Join(f.dir, gitFaultHeldPIDFile))
 	require.NoError(f.t, err)
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 	require.NoError(f.t, err)

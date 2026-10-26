@@ -65,7 +65,15 @@ func (c *CompiledTaskGraph) AccumulatePreparedTaskOutputs(taskID string,
 
 // ComputedSweepFrameEnv renders a sweep's inherited signed outputs while
 // retaining the run command's provider-version policy from its pinned plan.
-func ComputedSweepFrameEnv(pl *plan.Plan, visible *plan.Release, pkg, stage string,
-	workspaceVars []string) []string {
-	return computedReleaseEnv(visible, workspaceVars, liveProviderUpdates(pkg, pl, nil), stage)
+type ComputedSweepFrameEnvOptions struct {
+	Plan          *plan.Plan
+	Visible       *plan.Release
+	Package       string
+	Stage         string
+	WorkspaceVars []string
+}
+
+func ComputedSweepFrameEnv(opts ComputedSweepFrameEnvOptions) []string {
+	return computedReleaseEnv(opts.Visible, opts.WorkspaceVars,
+		liveProviderUpdates(opts.Package, opts.Plan, nil), opts.Stage)
 }

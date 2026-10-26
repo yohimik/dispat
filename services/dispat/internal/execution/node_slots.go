@@ -28,10 +28,11 @@ const nodeSlotDocumentLimitBytes = 4 << 10
 // identity does not include Weight: a retry with a changed weight is still
 // the same unresolved attempt, never a second slot reservation.
 type NodeSlotIntent struct {
-	Run     string `json:"run"`
-	Task    string `json:"task"`
-	Attempt int    `json:"attempt"`
-	Weight  int    `json:"weight"`
+	Run      string `json:"run"`
+	Task     string `json:"task"`
+	Attempt  int    `json:"attempt"`
+	Weight   int    `json:"weight"`
+	PickupID string `json:"pickupId,omitempty"`
 	// Recovery is the exact signed peer claim identity captured before a
 	// distributed proposal leaves this process. NativeRecovery is the signed
 	// first-node task root captured before its local effect. Exactly one is
@@ -229,6 +230,7 @@ func (a *NodeSlotAuthority) AuthorityID() string {
 func (a *NodeSlotAuthority) TryReserve(ctx context.Context, intent NodeSlotIntent) (NodeSlotLease, bool, error) {
 	if a == nil || intent.Run == nodeSlotAbsentIdentityText || intent.Task == nodeSlotAbsentIdentityText || len(intent.Run)+len(intent.Task) > nodeSlotMaximumIntentIdentityBytes ||
 		intent.Attempt < nodeSlotMinimumAttemptCount || intent.Weight < nodeSlotMinimumWeight || intent.Weight > a.capacity ||
+		!validNodeSlotPickup(intent) ||
 		(intent.Recovery != nil && intent.NativeRecovery != nil) ||
 		(intent.Recovery != nil && !validNodeSlotRecovery(intent)) ||
 		(intent.NativeRecovery != nil && !validNodeSlotNativeRecovery(intent)) {
@@ -571,12 +573,18 @@ func (a *NodeSlotAuthority) readLease(id string) (NodeSlotLease, error) {
 	}
 	if lease.ID != id || id != nodeSlotLeaseID(lease.Intent) || lease.Intent.Weight <= nodeSlotNoOccupiedWeight ||
 		lease.Intent.Weight > a.capacity ||
+		!validNodeSlotPickup(lease.Intent) ||
 		(lease.Intent.Recovery != nil && lease.Intent.NativeRecovery != nil) ||
 		(lease.Intent.Recovery != nil && !validNodeSlotRecovery(lease.Intent)) ||
 		(lease.Intent.NativeRecovery != nil && !validNodeSlotNativeRecovery(lease.Intent)) {
 		return NodeSlotLease{}, fmt.Errorf(nodeSlotInvalidLeaseErrorText)
 	}
 	return lease, nil
+}
+
+func validNodeSlotPickup(intent NodeSlotIntent) bool {
+	return intent.PickupID == nodeSlotAbsentIdentityText ||
+		validSlotHex(intent.PickupID, choreographyPickupIDHexChars)
 }
 
 func validNodeSlotRecovery(intent NodeSlotIntent) bool {
@@ -619,7 +627,8 @@ func validNodeSlotNativeRecovery(intent NodeSlotIntent) bool {
 
 func equalNodeSlotLease(a, b NodeSlotLease) bool {
 	if a.ID != b.ID || a.Intent.Run != b.Intent.Run || a.Intent.Task != b.Intent.Task ||
-		a.Intent.Attempt != b.Intent.Attempt || a.Intent.Weight != b.Intent.Weight {
+		a.Intent.Attempt != b.Intent.Attempt || a.Intent.Weight != b.Intent.Weight ||
+		a.Intent.PickupID != b.Intent.PickupID {
 		return nodeSlotIdentityInvalidState
 	}
 	if (a.Intent.Recovery == nil) != (b.Intent.Recovery == nil) ||
@@ -740,10 +749,11 @@ func readSlotDocument(path string, value any) (bool, error) {
 
 func nodeSlotLeaseID(intent NodeSlotIntent) string {
 	identity, _ := json.Marshal(struct {
-		Run     string `json:"run"`
-		Task    string `json:"task"`
-		Attempt int    `json:"attempt"`
-	}{intent.Run, intent.Task, intent.Attempt})
+		Run      string `json:"run"`
+		Task     string `json:"task"`
+		Attempt  int    `json:"attempt"`
+		PickupID string `json:"pickupId,omitempty"`
+	}{Run: intent.Run, Task: intent.Task, Attempt: intent.Attempt, PickupID: intent.PickupID})
 	sum := sha256.Sum256(identity)
 	return hex.EncodeToString(sum[:])
 }

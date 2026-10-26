@@ -15,7 +15,8 @@ import (
 // any consumer receives them.
 func TestChoreographySuccessfulProducerCannotOmitDeclaredOutputs(t *testing.T) {
 	c := &Coordinator{Run: "run", Generation: "generation", PlanDigest: "plan"}
-	c.registerChoreographyResult("core:build", []string{"dist"}, nil, true)
+	c.registerChoreographyResult(choreographyResultRegistration{Task: "core:build",
+		Roots: []string{"dist"}, Produces: true})
 	proposal := ChoreographyResultProposal{ChoreographyRunBinding: ChoreographyRunBinding{
 		Run: "run", Generation: "generation", PlanDigest: "plan"}, Task: "core:build"}
 	result := Result{Status: StatusSucceeded}

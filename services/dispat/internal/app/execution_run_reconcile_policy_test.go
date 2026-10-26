@@ -17,26 +17,41 @@ func TestRetainedCompleteGraphPolicyRequiresRecomputedTaskAndPackageCausality(t 
 		Predecessors: []string{"alpha:build"}, Platforms: []string{"linux/amd64"}}
 	policy := execution.ChoreographyPackagePolicy{Package: "beta", Direct: []string{"alpha"}}
 	require.NoError(t, verifyRetainedChoreographyPolicy(
-		[]execution.ChoreographyTaskSpec{task}, []execution.ChoreographyTaskSpec{task},
-		[]execution.ChoreographyPackagePolicy{policy}, []execution.ChoreographyPackagePolicy{policy}))
+		retainedChoreographyPolicyOptions{
+			RecomputedTasks:    []execution.ChoreographyTaskSpec{task},
+			SignedTasks:        []execution.ChoreographyTaskSpec{task},
+			RecomputedPackages: []execution.ChoreographyPackagePolicy{policy},
+			SignedPackages:     []execution.ChoreographyPackagePolicy{policy},
+		}))
 	emptySerializedPolicy := policy
 	emptySerializedPolicy.Providers = []string{}
 	emptySerializedPolicy.Blocking = map[string]bool{}
 	require.NoError(t, verifyRetainedChoreographyPolicy(
-		[]execution.ChoreographyTaskSpec{task}, []execution.ChoreographyTaskSpec{task},
-		[]execution.ChoreographyPackagePolicy{emptySerializedPolicy},
-		[]execution.ChoreographyPackagePolicy{policy}),
+		retainedChoreographyPolicyOptions{
+			RecomputedTasks:    []execution.ChoreographyTaskSpec{task},
+			SignedTasks:        []execution.ChoreographyTaskSpec{task},
+			RecomputedPackages: []execution.ChoreographyPackagePolicy{emptySerializedPolicy},
+			SignedPackages:     []execution.ChoreographyPackagePolicy{policy},
+		}),
 		"omitted empty JSON fields and allocated empty collections have the same signed policy")
 	changedTask := task
 	changedTask.Predecessors = []string{"other:build"}
 	require.ErrorContains(t, verifyRetainedChoreographyPolicy(
-		[]execution.ChoreographyTaskSpec{task}, []execution.ChoreographyTaskSpec{changedTask},
-		[]execution.ChoreographyPackagePolicy{policy}, []execution.ChoreographyPackagePolicy{policy}),
+		retainedChoreographyPolicyOptions{
+			RecomputedTasks:    []execution.ChoreographyTaskSpec{task},
+			SignedTasks:        []execution.ChoreographyTaskSpec{changedTask},
+			RecomputedPackages: []execution.ChoreographyPackagePolicy{policy},
+			SignedPackages:     []execution.ChoreographyPackagePolicy{policy},
+		}),
 		"task \"beta:build\" differs")
 	changedPolicy := policy
 	changedPolicy.Direct = []string{"other"}
 	require.ErrorContains(t, verifyRetainedChoreographyPolicy(
-		[]execution.ChoreographyTaskSpec{task}, []execution.ChoreographyTaskSpec{task},
-		[]execution.ChoreographyPackagePolicy{policy}, []execution.ChoreographyPackagePolicy{changedPolicy}),
+		retainedChoreographyPolicyOptions{
+			RecomputedTasks:    []execution.ChoreographyTaskSpec{task},
+			SignedTasks:        []execution.ChoreographyTaskSpec{task},
+			RecomputedPackages: []execution.ChoreographyPackagePolicy{policy},
+			SignedPackages:     []execution.ChoreographyPackagePolicy{changedPolicy},
+		}),
 		"package policy differs")
 }

@@ -10,7 +10,36 @@ import (
 	"time"
 )
 
-const firstLocalEventWaitInterval = 2 * time.Second
+const (
+	firstLocalEventWaitInterval        = 2 * time.Second
+	firstLocalNoIdentity               = ""
+	firstLocalNoEvents                 = 0
+	firstLocalFirstEventIncrement      = 1
+	firstLocalMinimumWeight            = 1
+	firstLocalSlotCapacity             = 1
+	firstLocalPageSize                 = 32
+	firstLocalImmediatePollInterval    = time.Duration(0)
+	firstLocalAuthorityError           = "execution: first-local task lacks its exact signed authority"
+	firstLocalMailboxError             = "execution: first-local mailbox cannot verify the offered assignment"
+	firstLocalAssignmentErrorFormat    = "execution: authenticating first-local assignment: %w"
+	firstLocalFrameError               = "execution: first-local assignment is not an executable v3 frame"
+	firstLocalStageError               = "execution: first-local assignment names no configured stage"
+	firstLocalAttemptSeenError         = "execution: first-local attempt was already started"
+	firstLocalBrokerRunError           = "execution: first-local broker has a different signed run"
+	firstLocalBootstrapReaderError     = "execution: first-local task has no authenticated bootstrap reader"
+	firstLocalBootstrapReadErrorFormat = "execution: reading first-local task bootstrap: %w"
+	firstLocalBootstrapMismatchError   = "execution: first-local task bootstrap differs from signed run"
+	firstLocalUnsettledErrorFormat     = "execution: first-local task remains unsettled: %w"
+	firstLocalReadTaskEventErrorFormat = "execution: reading exact first-local task finality: %w"
+	firstLocalEventOrderError          = "execution: first-local task event is not signed and ordered"
+	firstLocalDifferentClaimantError   = "execution: first-local finality names a different claimant"
+	firstLocalBlockedError             = "execution: offered first-local task became blocked"
+	firstLocalReadEventPageErrorFormat = "execution: reading first-local finality: %w"
+	firstLocalPageOrderError           = "execution: first-local finality page is not contiguous"
+	firstLocalEventGapError            = "execution: first-local finality has an event gap"
+	firstLocalSealedError              = "execution: run sealed before first-local task settled"
+	firstLocalReadTaskRefErrorFormat   = "execution: reading exact first-local task ref: %w"
+)
 
 // RunAssignedLocal runs one durable first-node offer through the same claim,
 // result and cancellation path as a remote worker. The caller gives
@@ -19,36 +48,36 @@ const firstLocalEventWaitInterval = 2 * time.Second
 func (w *Worker) RunAssignedLocal(ctx context.Context, assignmentOID string,
 	offerCursor ChoreographyEventCursor, broker *FirstNodeBroker) error {
 	if w == nil || w.Mailbox == nil || w.Cache == nil || w.Seen == nil ||
-		w.ReturnSigner == nil || w.NodeSlots == nil || w.Report.AuthorityID == "" ||
-		w.Report.AuthorityID != w.NodeSlots.AuthorityID() || assignmentOID == "" ||
-		w.Report.Limits.MaxManifestBytes <= 0 || w.Report.Limits.MaxPackBytes <= 0 ||
-		offerCursor.OID == "" || offerCursor.Sequence == 0 {
-		return fmt.Errorf("execution: first-local task lacks its exact signed authority")
+		w.ReturnSigner == nil || w.NodeSlots == nil || w.Report.AuthorityID == firstLocalNoIdentity ||
+		w.Report.AuthorityID != w.NodeSlots.AuthorityID() || assignmentOID == firstLocalNoIdentity ||
+		w.Report.Limits.MaxManifestBytes <= firstLocalNoEvents || w.Report.Limits.MaxPackBytes <= firstLocalNoEvents ||
+		offerCursor.OID == firstLocalNoIdentity || offerCursor.Sequence == firstLocalNoEvents {
+		return fmt.Errorf(firstLocalAuthorityError)
 	}
 	carriers, ok := w.Mailbox.(slotMailboxx)
-	if !ok || w.Report.Limits.MaxManifestBytes <= 0 {
-		return fmt.Errorf("execution: first-local mailbox cannot verify the offered assignment")
+	if !ok || w.Report.Limits.MaxManifestBytes <= firstLocalNoEvents {
+		return fmt.Errorf(firstLocalMailboxError)
 	}
 	view, err := carriers.OpenCarriedAssignment(ctx, assignmentOID, w.Report.Limits.MaxManifestBytes)
 	if err != nil {
-		return fmt.Errorf("execution: authenticating first-local assignment: %w", err)
+		return fmt.Errorf(firstLocalAssignmentErrorFormat, err)
 	}
 	assignment := view.Assignment
 	if assignment.Protocol != ChoreographyProtocolVersion || assignment.Node != w.Node ||
 		!isFrameKind(assignment.Kind) || assignment.Permits.Publish || assignment.Permits.NativeRefs ||
-		assignment.Run == "" || assignment.Task == "" || assignment.Branch == "" || assignment.Weight < 1 {
-		return fmt.Errorf("execution: first-local assignment is not an executable v3 frame")
+		assignment.Run == firstLocalNoIdentity || assignment.Task == firstLocalNoIdentity || assignment.Branch == firstLocalNoIdentity || assignment.Weight < firstLocalMinimumWeight {
+		return fmt.Errorf(firstLocalFrameError)
 	}
 	if assignment.Kind == KindStage && !isStageName(assignment.Stage) {
-		return fmt.Errorf("execution: first-local assignment names no configured stage")
+		return fmt.Errorf(firstLocalStageError)
 	}
 	if w.Seen.IsSeen(assignment.Run, assignment.Task, assignment.Attempt) {
-		return fmt.Errorf("execution: first-local attempt was already started")
+		return fmt.Errorf(firstLocalAttemptSeenError)
 	}
 	if broker == nil || broker.binding != (ChoreographyRunBinding{Run: assignment.Run,
 		Generation: assignment.Generation, PlanDigest: assignment.PlanDigest,
 		GraphDigest: assignment.GraphDigest}) {
-		return fmt.Errorf("execution: first-local broker has a different signed run")
+		return fmt.Errorf(firstLocalBrokerRunError)
 	}
 	client, err := DirectChoreographyReturn(broker)
 	if err != nil {
@@ -56,13 +85,16 @@ func (w *Worker) RunAssignedLocal(ctx context.Context, assignmentOID string,
 	}
 	gitMailbox, ok := w.Mailbox.(*GitMailbox)
 	if !ok {
-		return fmt.Errorf("execution: first-local task has no authenticated bootstrap reader")
+		return fmt.Errorf(firstLocalBootstrapReaderError)
 	}
 	bootstrap, err := gitMailbox.ReadChoreographyBootstrap(ctx, assignment.BootstrapOID,
 		w.Report.Limits.MaxManifestBytes, w.Report.Limits.MaxPackBytes)
-	if err != nil || bootstrap.ChoreographyRunBinding != broker.binding ||
+	if err != nil {
+		return fmt.Errorf(firstLocalBootstrapReadErrorFormat, err)
+	}
+	if bootstrap.ChoreographyRunBinding != broker.binding ||
 		bootstrap.CoordinationEndpoint != w.Endpoint {
-		return fmt.Errorf("execution: first-local task bootstrap differs from signed run: %w", err)
+		return fmt.Errorf(firstLocalBootstrapMismatchError)
 	}
 	channel := &workerReturnChannel{binding: broker.binding, endpoint: assignment.ReturnEndpoint,
 		certSHA256: assignment.ReturnCertSHA256, bootstrapOID: assignment.BootstrapOID,
@@ -72,14 +104,14 @@ func (w *Worker) RunAssignedLocal(ctx context.Context, assignmentOID string,
 		w.running.Wait()
 		w.closeReturnChannels()
 	}()
-	w.slots = make(chan struct{}, 1)
+	w.slots = make(chan struct{}, firstLocalSlotCapacity)
 	cursor := offerCursor
-	timer := time.NewTimer(0)
+	timer := time.NewTimer(firstLocalImmediatePollInterval)
 	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("execution: first-local task remains unsettled: %w", ctx.Err())
+			return fmt.Errorf(firstLocalUnsettledErrorFormat, ctx.Err())
 		case <-timer.C:
 		}
 		w.settlePendingReturnClaims(ctx)
@@ -96,66 +128,66 @@ func (w *Worker) RunAssignedLocal(ctx context.Context, assignmentOID string,
 			stopWait()
 			if err != nil {
 				if ctx.Err() != nil {
-					return fmt.Errorf("execution: first-local task remains unsettled: %w", ctx.Err())
+					return fmt.Errorf(firstLocalUnsettledErrorFormat, ctx.Err())
 				}
 				if !waitTimedOut && !errors.Is(err, context.DeadlineExceeded) {
-					return fmt.Errorf("execution: reading exact first-local task finality: %w", err)
+					return fmt.Errorf(firstLocalReadTaskEventErrorFormat, err)
 				}
 				// A bounded wait expired: retry an exact pending proposal or
 				// observe a Cancel without scanning the run-wide ledger.
-				timer.Reset(0)
+				timer.Reset(firstLocalImmediatePollInterval)
 				continue
 			}
-			if next.OID == "" || next.Sequence <= cursor.Sequence || event.Sequence != next.Sequence ||
+			if next.OID == firstLocalNoIdentity || next.Sequence <= cursor.Sequence || event.Sequence != next.Sequence ||
 				event.Task != assignment.Task {
-				return fmt.Errorf("execution: first-local task event is not signed and ordered")
+				return fmt.Errorf(firstLocalEventOrderError)
 			}
 			cursor = next
 			if event.Attempt == assignment.Attempt {
 				switch event.Kind {
 				case ChoreographyTerminal, ChoreographyRetryReady:
-					if event.Node != w.Node || event.TaskOID == "" {
-						return fmt.Errorf("execution: first-local finality names a different claimant")
+					if event.Node != w.Node || event.TaskOID == firstLocalNoIdentity {
+						return fmt.Errorf(firstLocalDifferentClaimantError)
 					}
 					return nil
 				case ChoreographyBlocked:
-					return fmt.Errorf("execution: offered first-local task became blocked")
+					return fmt.Errorf(firstLocalBlockedError)
 				}
 			}
-			timer.Reset(0)
+			timer.Reset(firstLocalImmediatePollInterval)
 			continue
 		}
 		page, err := client.PollEvents(ctx, ChoreographyEventRequest{
-			ChoreographyRunBinding: broker.binding, Node: w.Node, Cursor: cursor, MaxEvents: 32})
+			ChoreographyRunBinding: broker.binding, Node: w.Node, Cursor: cursor, MaxEvents: firstLocalPageSize})
 		if err != nil {
-			return fmt.Errorf("execution: reading first-local finality: %w", err)
+			return fmt.Errorf(firstLocalReadEventPageErrorFormat, err)
 		}
-		if page.Cursor.OID == "" || page.Cursor.Sequence != cursor.Sequence+uint64(len(page.Events)) ||
-			(len(page.Events) == 0 && page.Cursor.OID != cursor.OID) {
-			return fmt.Errorf("execution: first-local finality page is not contiguous")
+		if page.Cursor.OID == firstLocalNoIdentity || page.Cursor.Sequence != cursor.Sequence+uint64(len(page.Events)) ||
+			(len(page.Events) == firstLocalNoEvents && page.Cursor.OID != cursor.OID) {
+			return fmt.Errorf(firstLocalPageOrderError)
 		}
 		for index, event := range page.Events {
-			if event.Sequence != cursor.Sequence+uint64(index)+1 {
-				return fmt.Errorf("execution: first-local finality has an event gap")
+			if event.Sequence != cursor.Sequence+uint64(index)+firstLocalFirstEventIncrement {
+				return fmt.Errorf(firstLocalEventGapError)
 			}
 			if event.Task == assignment.Task && event.Attempt == assignment.Attempt {
 				switch event.Kind {
 				case ChoreographyTerminal, ChoreographyRetryReady:
-					if event.Node != w.Node || event.TaskOID == "" {
-						return fmt.Errorf("execution: first-local finality names a different claimant")
+					if event.Node != w.Node || event.TaskOID == firstLocalNoIdentity {
+						return fmt.Errorf(firstLocalDifferentClaimantError)
 					}
 					return nil
 				case ChoreographyBlocked:
-					return fmt.Errorf("execution: offered first-local task became blocked")
+					return fmt.Errorf(firstLocalBlockedError)
 				}
 			}
 			if event.Kind == ChoreographyRunSealed {
-				return fmt.Errorf("execution: run sealed before first-local task settled")
+				return fmt.Errorf(firstLocalSealedError)
 			}
 		}
 		cursor = page.Cursor
 		if page.More {
-			timer.Reset(0)
+			timer.Reset(firstLocalImmediatePollInterval)
 		} else {
 			timer.Reset(minimumPollInterval)
 		}
@@ -166,7 +198,7 @@ func (w *Worker) inspectAssignedLocalRef(ctx context.Context, assignmentOID stri
 	assignment Assignment) error {
 	heads, err := w.Mailbox.ObserveManyExact(ctx, []string{assignment.Branch})
 	if err != nil {
-		return fmt.Errorf("execution: reading exact first-local task ref: %w", err)
+		return fmt.Errorf(firstLocalReadTaskRefErrorFormat, err)
 	}
 	for _, head := range heads {
 		tip, err := w.Mailbox.Inspect(ctx, head)

@@ -305,7 +305,7 @@ func (s *sweep) execute(ctx context.Context, pkg string) {
 				cancel()
 				if settleErr != nil {
 					s.recordSettlementError(pkg, settleErr)
-					res.failed = true
+					res.failed = sweepTaskFailedState
 					return
 				}
 			}
@@ -323,30 +323,30 @@ func (s *sweep) execute(ctx context.Context, pkg string) {
 	if s.localSlots != nil {
 		var slotErr error
 		slot, slotErr = waitLocalSweepSlot(ctx, s.localSlots, execution.NodeSlotIntent{
-			Run: s.localRun, Task: pkg + ":" + s.work.stage(), Attempt: 1,
+			Run: s.localRun, Task: pkg + choreographyTaskPartSeparatorText + s.work.stage(), Attempt: choreographyInitialAttemptCount,
 			Weight: s.pl.Releases[pkg].Pkg.BuildWeight,
 		}, s.slotWait)
 		if slotErr != nil {
-			res.failed = true
-			annotateError(log.Error().Err(slotErr), slotErr).Msg("package could not take local node capacity")
+			res.failed = sweepTaskFailedState
+			annotateError(log.Error().Err(slotErr), slotErr).Msg(sweepCapacityUnavailableLogText)
 			return
 		}
 	}
 	runErr := t(ctx)
 	if s.localSlots != nil {
-		status := "succeeded"
+		status := choreographySucceededOutcomeName
 		if runErr != nil {
-			status = "failed"
+			status = choreographyFailedOutcomeName
 		}
-		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), compiledSweepSettlementTimeoutSeconds*time.Second)
 		settleErr := s.localSlots.ReleaseLocalSettled(settleCtx, slot.ID,
 			execution.NodeSlotLocalCompletion{Run: s.localRun,
-				Task: pkg + ":" + s.work.stage(), Attempt: 1, Status: status})
+				Task: pkg + choreographyTaskPartSeparatorText + s.work.stage(), Attempt: choreographyInitialAttemptCount, Status: status})
 		cancel()
 		runErr = errors.Join(runErr, settleErr)
 	}
 	if s.taskOutcomeSettled != nil {
-		status := release.PackageOutcome("")
+		status := release.PackageOutcome(choreographyAbsentIdentityText)
 		if runErr != nil {
 			status = release.OutcomeFailed
 		}
@@ -373,7 +373,7 @@ func (s *sweep) recordSettlementError(pkg string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.settlementErr == nil {
-		s.settlementErr = fmt.Errorf("execution: settling signed sweep task %s: %w", pkg, err)
+		s.settlementErr = fmt.Errorf(sweepTaskSettlementErrorFormat, pkg, err)
 		s.stopSettlement(s.settlementErr)
 	}
 }

@@ -11,6 +11,18 @@ import (
 	"slices"
 )
 
+const (
+	choreographyInputMissingIdentity             = ""
+	choreographyInputFirstIndex                  = 0
+	choreographyInputPriorIndexOffset            = 1
+	choreographyInputOrderBefore                 = -1
+	choreographyInputOrderAfter                  = 1
+	choreographyInputOrderEqual                  = 0
+	choreographyInputInvalidIdentityError        = "execution: invalid ready-input identity"
+	choreographyInputEmptyPredecessorError       = "execution: empty ready predecessor"
+	choreographyInputConflictingPredecessorError = "execution: repeated ready predecessor has conflicting finality"
+)
+
 // ChoreographyInputFinality binds one immediate predecessor's exact settled
 // identity. Pure virtual gates have no Git object and use their deterministic
 // derived status; native and command vertices name their signed final object.
@@ -25,26 +37,26 @@ type ChoreographyInputFinality struct {
 // edges, once when that task becomes ready, and includes the pinned run identity.
 func ChoreographyReadyInputsDigest(binding ChoreographyRunBinding, task string,
 	predecessors []ChoreographyInputFinality) (string, error) {
-	if !binding.valid() || task == "" {
-		return "", fmt.Errorf("execution: invalid ready-input identity")
+	if !binding.valid() || task == choreographyInputMissingIdentity {
+		return choreographyInputMissingIdentity, fmt.Errorf(choreographyInputInvalidIdentityError)
 	}
 	ordered := append([]ChoreographyInputFinality(nil), predecessors...)
 	slices.SortFunc(ordered, func(a, b ChoreographyInputFinality) int {
 		if a.Task < b.Task {
-			return -1
+			return choreographyInputOrderBefore
 		}
 		if a.Task > b.Task {
-			return 1
+			return choreographyInputOrderAfter
 		}
-		return 0
+		return choreographyInputOrderEqual
 	})
 	for index, predecessor := range ordered {
-		if predecessor.Task == "" {
-			return "", fmt.Errorf("execution: empty ready predecessor")
+		if predecessor.Task == choreographyInputMissingIdentity {
+			return choreographyInputMissingIdentity, fmt.Errorf(choreographyInputEmptyPredecessorError)
 		}
-		if index > 0 && ordered[index-1].Task == predecessor.Task &&
-			ordered[index-1] != predecessor {
-			return "", fmt.Errorf("execution: repeated ready predecessor has conflicting finality")
+		if index > choreographyInputFirstIndex && ordered[index-choreographyInputPriorIndexOffset].Task == predecessor.Task &&
+			ordered[index-choreographyInputPriorIndexOffset] != predecessor {
+			return choreographyInputMissingIdentity, fmt.Errorf(choreographyInputConflictingPredecessorError)
 		}
 	}
 	data, err := json.Marshal(struct {
@@ -53,7 +65,7 @@ func ChoreographyReadyInputsDigest(binding ChoreographyRunBinding, task string,
 		Predecessors []ChoreographyInputFinality `json:"predecessors"`
 	}{binding, task, ordered})
 	if err != nil {
-		return "", err
+		return choreographyInputMissingIdentity, err
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil

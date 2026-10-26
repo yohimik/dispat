@@ -44,7 +44,8 @@ func (g *GitChoreographyPersist) verifyAcceptedClaimEvent(ctx context.Context,
 		claim.CapacityAuthorityID != event.CapacityAuthorityID ||
 		claim.LeaseIntentID != event.LeaseIntentID || claim.LeaseWeight != event.LeaseWeight ||
 		claim.LeaseWeight != g.tasks[event.Task].Weight ||
-		claim.LeaseIntentID != nodeSlotLeaseID(NodeSlotIntent{Run: claim.Run, Task: claim.Task, Attempt: claim.Attempt}) {
+		claim.PickupID != event.PickupID ||
+		claim.LeaseIntentID != nodeSlotLeaseID(NodeSlotIntent{Run: claim.Run, Task: claim.Task, Attempt: claim.Attempt, PickupID: claim.PickupID}) {
 		return fmt.Errorf(choreographyClaimReplayIdentityError)
 	}
 	if err := VerifyChoreographyClaimIdentity(g.opts.JoinPolicy, claim); err != nil {

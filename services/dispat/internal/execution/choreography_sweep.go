@@ -11,13 +11,25 @@ import (
 	"slices"
 )
 
+const (
+	choreographySweepMissingIdentity  = ""
+	choreographySweepNoTasks          = 0
+	choreographySweepTaskSeen         = true
+	choreographySweepOrderBefore      = -1
+	choreographySweepOrderAfter       = 1
+	choreographySweepOrderEqual       = 0
+	choreographySweepDigestVersion    = 1
+	choreographySweepMissingPlanError = "execution: sweep graph lacks a pinned plan or script"
+	choreographySweepInvalidTaskError = "execution: invalid or repeated sweep task"
+)
+
 // DigestSweepTasks binds a distributed `dispat run` sweep's selected script
 // and compiled task identities to the pinned plan digest. The plan digest
 // already covers its provider graph and source/config inputs; each reached
 // package contributes exactly one task with its resolved placement.
 func DigestSweepTasks(planDigest, script string, tasks []ReservationTask) (string, error) {
-	if planDigest == "" || script == "" {
-		return "", fmt.Errorf("execution: sweep graph lacks a pinned plan or script")
+	if planDigest == choreographySweepMissingIdentity || script == choreographySweepMissingIdentity {
+		return choreographySweepMissingIdentity, fmt.Errorf(choreographySweepMissingPlanError)
 	}
 	type entry struct {
 		Task      string    `json:"task"`
@@ -25,13 +37,13 @@ func DigestSweepTasks(planDigest, script string, tasks []ReservationTask) (strin
 		Placement Placement `json:"placement"`
 		Platforms []string  `json:"platforms"`
 	}
-	entries := make([]entry, 0, len(tasks))
+	entries := make([]entry, choreographySweepNoTasks, len(tasks))
 	seen := map[string]bool{}
 	for _, task := range tasks {
-		if task.Task == "" || task.Kind != KindRun || seen[task.Task] {
-			return "", fmt.Errorf("execution: invalid or repeated sweep task")
+		if task.Task == choreographySweepMissingIdentity || task.Kind != KindRun || seen[task.Task] {
+			return choreographySweepMissingIdentity, fmt.Errorf(choreographySweepInvalidTaskError)
 		}
-		seen[task.Task] = true
+		seen[task.Task] = choreographySweepTaskSeen
 		platforms := slices.Clone(task.Platforms)
 		slices.Sort(platforms)
 		entries = append(entries, entry{Task: task.Task, Kind: task.Kind,
@@ -39,21 +51,21 @@ func DigestSweepTasks(planDigest, script string, tasks []ReservationTask) (strin
 	}
 	slices.SortFunc(entries, func(a, b entry) int {
 		if a.Task < b.Task {
-			return -1
+			return choreographySweepOrderBefore
 		}
 		if a.Task > b.Task {
-			return 1
+			return choreographySweepOrderAfter
 		}
-		return 0
+		return choreographySweepOrderEqual
 	})
 	data, err := json.Marshal(struct {
 		Version    int     `json:"version"`
 		PlanDigest string  `json:"planDigest"`
 		Script     string  `json:"script"`
 		Tasks      []entry `json:"tasks"`
-	}{Version: 1, PlanDigest: planDigest, Script: script, Tasks: entries})
+	}{Version: choreographySweepDigestVersion, PlanDigest: planDigest, Script: script, Tasks: entries})
 	if err != nil {
-		return "", err
+		return choreographySweepMissingIdentity, err
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil

@@ -99,6 +99,9 @@ func newExecutionQueuedRepository(t *testing.T, mailbox, label string,
 	repo.SeedPackage("packages", label)
 	cfg := libsConfig(executionRecordingScript+" && "+
 		repo.TsmarkScript("timeline.log", label, build), 1)
+	pinPackages(map[string]*models.RunOnly{
+		label: placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+	})(&cfg)
 	cfg.Execution = &models.ExecutionConfig{
 		SecretEnv: executionSecretEnv,
 		Workers:   []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
@@ -141,8 +144,8 @@ func TestExecutionTransportBranchesAreNotRejectedAssignments(t *testing.T) {
 }
 
 // TestExecutionResultReturnsWithoutPeerGitPush keeps the live one-build,
-// one-publication control for result settlement. A worker that cannot push
-// still returns its signed Result over the first node's return channel. The
+// one-publication control for result settlement. A worker whose canonical task
+// pushes are refused still returns its signed Result over the first node's return channel. The
 // exact lost-reply receipt lookup is tested by TestWorkerLostResultReplyUsesExactReceipt.
 func TestExecutionResultReturnsWithoutPeerGitPush(t *testing.T) {
 	rig := newExecutionRig(t, func(cfg *models.File) {
@@ -151,13 +154,13 @@ func TestExecutionResultReturnsWithoutPeerGitPush(t *testing.T) {
 		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 60, Cancel: 10}
 	})
 	fault := harness.NewGitFault(t, harness.GitFault{
-		Pattern: "*push*", Code: 128})
+		Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, fault.Env()...)
 
 	res := rig.release()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Zero(t, fault.Matches(), "the peer never pushed a claim or result")
+	assert.Zero(t, fault.Matches(), "the peer never pushed a canonical Claim or Result")
 	assert.Len(t, rig.runs(), 1, "the build ran exactly once: %v", rig.runs())
 	assert.Equal(t, map[string]string{"core": executionNode}, rig.nodesByPackage())
 	assert.NotEmpty(t, rig.repo.TagList(), "and the package was released")

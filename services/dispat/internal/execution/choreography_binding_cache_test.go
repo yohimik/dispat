@@ -59,10 +59,11 @@ func TestVerifiedResultInstallsAtTwoSignedDestinations(t *testing.T) {
 		return nil
 	}
 	for _, path := range []string{"packages/a", "packages/b", "packages/a"} {
-		err := appendVerifiedChoreographyInput(context.Background(), &bindings,
-			AssignmentInput{Task: "assets:build", Package: "assets", Commit: "signed-result",
-				Digest: "verified-manifest", Path: path},
-			"/canonical/mailbox", imported, seen, importCommit)
+		err := appendVerifiedChoreographyInput(context.Background(), choreographyVerifiedInputAppend{
+			Bindings: &bindings, Input: AssignmentInput{Task: "assets:build", Package: "assets",
+				Commit: "signed-result", Digest: "verified-manifest", Path: path},
+			SourceDir: "/canonical/mailbox", Imported: imported,
+			Seen: seen, ImportCommit: importCommit})
 		require.NoError(t, err)
 	}
 	require.Equal(t, 1, imports, "one immutable Result object is imported once")
@@ -169,6 +170,63 @@ func TestSignedBindingCacheUsesAcceptedOutputForPredecessorClaimIdentity(t *test
 	require.NoError(t, err)
 	require.Equal(t, []string{"raw-result-object"}, state.PredecessorTaskOIDs,
 		"a Claim names the accepted output carrier verified through the signed Result receipt")
+}
+
+func TestSignedBindingCacheReleasesFirstOnlyVersionAfterTerminalWithoutPackageSettlement(t *testing.T) {
+	feed := &bindingCacheEventReader{events: []ChoreographyEvent{{
+		Sequence: 1, LedgerOID: "ledger-version-terminal", Kind: ChoreographyTerminal,
+		Task: "consumer:0:", Package: "consumer", TaskOID: "version-terminal",
+		ResultReceiptOID: "version-result-receipt", OutputOID: "version-result",
+		Attempt: 1, Succeeded: true,
+	}}}
+	cache, err := NewChoreographyBindingCache(ChoreographyBindingCacheOptions{
+		Binding: ChoreographyRunBinding{Run: "run", Generation: "generation",
+			PlanDigest: "plan", GraphDigest: "graph"},
+		LedgerRootOID: "root", Reader: feed, Mailbox: &GitMailbox{}, MaxDocumentBytes: 1,
+		Tasks: []ChoreographyTaskSpec{{Task: "consumer:0:", Package: "consumer",
+			ExecutorOwned: true}, {Task: "consumer:1:", Package: "consumer",
+			Predecessors: []string{"consumer:0:"}}},
+		OutputContexts: map[string]ChoreographyBindingOutputContext{
+			"consumer:0:": {Package: "consumer"},
+		},
+		Accumulate: func(_ string, _ map[string][]plan.Output, own []plan.Output) ([]plan.Output, error) {
+			return own, nil
+		},
+	})
+	require.NoError(t, err)
+	cache.accepted["version-result-receipt"] = choreographyAcceptedBindingResult{oid: "version-result"}
+	state, err := cache.State(t.Context(), "consumer:1:")
+	require.NoError(t, err)
+	require.Equal(t, []string{"version-result"}, state.PredecessorTaskOIDs,
+		"a first-only version has passed the executor barrier when its signed terminal exists")
+}
+
+func TestSignedBindingCacheReleasesPreparedProviderAtTerminalWithoutPackageSettlement(t *testing.T) {
+	feed := &bindingCacheEventReader{events: []ChoreographyEvent{{
+		Sequence: 1, LedgerOID: "ledger-prepare-terminal", Kind: ChoreographyTerminal,
+		Task: "assets:prepare", Package: "assets", TaskOID: "prepare-terminal",
+		ResultReceiptOID: "prepare-result-receipt", OutputOID: "prepare-result",
+		Attempt: 1, Succeeded: true,
+	}}}
+	cache, err := NewChoreographyBindingCache(ChoreographyBindingCacheOptions{
+		Binding: ChoreographyRunBinding{Run: "run", Generation: "generation",
+			PlanDigest: "plan", GraphDigest: "graph"},
+		LedgerRootOID: "root", Reader: feed, Mailbox: &GitMailbox{}, MaxDocumentBytes: 1,
+		Tasks: []ChoreographyTaskSpec{{Task: "assets:prepare", Package: "assets",
+			Kind: string(KindPrepare)}, {Task: "ui:build", Package: "ui",
+			Predecessors: []string{"assets:prepare"}}},
+		OutputContexts: map[string]ChoreographyBindingOutputContext{
+			"assets:prepare": {Package: "assets"},
+		},
+		Accumulate: func(_ string, _ map[string][]plan.Output, own []plan.Output) ([]plan.Output, error) {
+			return own, nil
+		},
+	})
+	require.NoError(t, err)
+	cache.accepted["prepare-result-receipt"] = choreographyAcceptedBindingResult{oid: "prepare-result"}
+	state, err := cache.State(t.Context(), "ui:build")
+	require.NoError(t, err)
+	require.Equal(t, []string{"prepare-result"}, state.PredecessorTaskOIDs)
 }
 
 func TestSignedBindingCacheRefusesTerminalNamingAnotherResultReceipt(t *testing.T) {

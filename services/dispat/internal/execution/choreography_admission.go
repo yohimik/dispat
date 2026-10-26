@@ -63,8 +63,9 @@ type ChoreographyAuthorizedNode struct {
 // AdmissionDurationSeconds is signed before global hooks. The execution-start
 // ledger event fixes its absolute deadline once command execution is legal.
 type ChoreographyJoinPolicy struct {
-	AdmissionDurationSeconds int                          `json:"admissionDurationSeconds"`
-	Authorized               []ChoreographyAuthorizedNode `json:"authorized"`
+	AdmissionDurationSeconds   int                          `json:"admissionDurationSeconds"`
+	RetryAfterUncertainAttempt bool                         `json:"retryAfterUncertainAttempt,omitempty"`
+	Authorized                 []ChoreographyAuthorizedNode `json:"authorized"`
 }
 
 func (p ChoreographyJoinPolicy) Validate(canonicalEndpoint string) error {

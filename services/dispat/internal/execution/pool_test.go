@@ -99,7 +99,7 @@ func TestPoolWaitsForACapacitySlot(t *testing.T) {
 
 func TestPoolWeightedLocalLeaseFencesOrdinaryPlacement(t *testing.T) {
 	pool := NewPool(nil, nil, LocalNode{Name: "first", Capacity: 2}, zerolog.Nop())
-	held, err := pool.AcquireNearWeight(t.Context(), nil, PlacementOrchestrator, "", 2)
+	held, err := pool.AcquireNearWeight(t.Context(), WeightedPlacementRequest{Placement: PlacementOrchestrator, Weight: 2})
 	require.NoError(t, err)
 	require.Equal(t, "first", held.Node)
 
@@ -114,7 +114,7 @@ func TestPoolWeightedLocalLeaseFencesOrdinaryPlacement(t *testing.T) {
 	require.NoError(t, err)
 	ordinary.Release()
 
-	_, err = pool.AcquireNearWeight(t.Context(), nil, PlacementOrchestrator, "", 3)
+	_, err = pool.AcquireNearWeight(t.Context(), WeightedPlacementRequest{Placement: PlacementOrchestrator, Weight: 3})
 	require.Error(t, err, "a task heavier than the physical node must be refused")
 }
 

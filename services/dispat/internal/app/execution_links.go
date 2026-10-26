@@ -50,7 +50,7 @@ func (a *App) resolveWorkerLinks(ctx context.Context, started runKind) error {
 		if err != nil {
 			return a.reportExecutionRefusal(started, execution.NewDiagnostic(
 				execution.CodeConfiguration, execution.CategoryConfiguration,
-				"a worker link states no endpoint, and the release remote it would reach could not be resolved: %w",
+				workerDefaultEndpointUnavailableErrorFormat,
 				err), nil, nil)
 		}
 		remote = coordinationRemote{name: name, url: url}
@@ -59,9 +59,9 @@ func (a *App) resolveWorkerLinks(ctx context.Context, started runKind) error {
 	if err != nil {
 		return a.reportExecutionRefusal(started, err, nil, nil)
 	}
-	canonicalEndpoint := ""
+	canonicalEndpoint := choreographyAbsentIdentityText
 	for _, link := range links {
-		if canonicalEndpoint == "" {
+		if canonicalEndpoint == choreographyAbsentIdentityText {
 			canonicalEndpoint = link.Endpoint
 			continue
 		}

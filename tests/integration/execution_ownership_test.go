@@ -14,6 +14,10 @@ package integration
 // without anybody asking a remote again.
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +32,8 @@ import (
 // that what stops the second and the third is the lost exclusion rather than
 // the failure of the first.
 var executionOwnershipPackages = []string{"alpha", "beta", "gamma"}
+
+const executionLostLockUnsettledResultCode = "E229"
 
 // TestExecutionLostLockIsRememberedForEveryLaterTask: the first build to run
 // takes the release lock off the remote and then holds the node while other
@@ -68,7 +74,51 @@ func TestExecutionLostLockIsRememberedForEveryLaterTask(t *testing.T) {
 		"only the build that took the lock away ran: %v", rig.runs())
 	assert.Empty(t, executionReleaseTags(rig), "no version was recorded")
 	assert.False(t, remoteHoldsLock(t, rig.origin), "the lock this run lost is not re-created by it")
-	served := worker.stop(t)
+	events := executionLateJoinLedgerEvents(t, rig.mailbox)
+	var claim executionLateJoinLedgerEvent
+	for _, event := range events {
+		if event.Kind == "claim-accepted" && event.Task == "alpha:1:" {
+			require.Empty(t, claim.TaskOID, "the worker took only one alpha build claim")
+			claim = event
+		}
+		assert.False(t, event.Kind == "run-stopping" ||
+			event.Task == "alpha:1:" && (event.Kind == "result-accepted" ||
+				event.Kind == "ack-accepted" || event.Kind == "terminal"),
+			"lost ownership cannot sign a later settlement: %+v", event)
+	}
+	require.NotEmpty(t, claim.TaskOID, "the executed build retains its exact signed Claim")
+	assert.Equal(t, executionNode, claim.Node)
+	assert.NotEmpty(t, claim.AssignmentOID)
+	worker.proc.Signal(os.Interrupt)
+	served := worker.proc.Wait()
+	assert.NotEqual(t, 0, served.Code, "an accepted attempt without signed finality remains unresolved")
+	assert.True(t, harness.IsCodePresent(executionEvents(served), executionLostLockUnsettledResultCode),
+		"the worker reports the unresolved Result explicitly\nstdout:\n%s", served.Stdout)
+	claimBranchRetained := false
+	for _, branch := range executionProtocolRefs(t, rig.mailbox, "dispat-task-") {
+		claimBranchRetained = claimBranchRetained ||
+			strings.TrimSpace(bareGit(t, rig.mailbox, "rev-parse", "refs/heads/"+branch)) == claim.TaskOID
+	}
+	assert.True(t, claimBranchRetained, "the accepted task branch remains at its signed Claim for recovery")
+	var summaryPaths []string
+	err := filepath.WalkDir(worker.stateDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() && entry.Name() == "slots.json" && strings.Contains(path, "node-state") {
+			summaryPaths = append(summaryPaths, path)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Len(t, summaryPaths, 1, "the worker has one durable node-slot authority")
+	summary, err := os.ReadFile(summaryPaths[0])
+	require.NoError(t, err)
+	var occupied struct {
+		Used int `json:"used"`
+	}
+	require.NoError(t, json.Unmarshal(summary, &occupied))
+	assert.Equal(t, 1, occupied.Used, "the unresolved signed Claim retains its durable physical slot")
 	assert.NotContains(t, served.Stdout, `"message":"publication authorized"`)
 }
 

@@ -40,6 +40,11 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
+const (
+	sweepCarriedExportMissingValue      = ""
+	sweepCarriedExportMissingFileFormat = "typed export %s has no matching admitted file"
+)
+
 // SweepTask is one package's task of a command sweep, as the run hands it to
 // its coordinator.
 type SweepTask struct {
@@ -200,9 +205,9 @@ func (c *Coordinator) readSweepOutcome(ctx context.Context, task string, attempt
 		outcome.FailedPart = release.PartInputs
 		return outcome, err
 	}
-	if err := rehomeChoreographyExports(&result, sweep.Request.Release.Pkg.Repository,
-		sweep.Request.Release.Pkg.Name, owner.Dir,
-		cleanSweepRoots(sweep.Roots)); err != nil {
+	if err := rehomeChoreographyExports(choreographyExportRehomeOptions{Result: &result,
+		Repository: sweep.Request.Release.Pkg.Repository, Package: sweep.Request.Release.Pkg.Name,
+		SourceRoot: owner.Dir, Roots: cleanSweepRoots(sweep.Roots)}); err != nil {
 		outcome.FailedPart = release.PartOutputs
 		return outcome, err
 	}
@@ -213,8 +218,10 @@ func (c *Coordinator) readSweepOutcome(ctx context.Context, task string, attempt
 		return outcome, reportedErr
 	}
 	if partialContinue && result.Outputs == nil {
-		if err := validateSweepCarriedExports(result, signedExports,
-			sweep.Request.Release.Pkg.Repository, sweep.Request.Release.Pkg.Name); err != nil {
+		if err := validateSweepCarriedExports(sweepCarriedExportValidation{
+			Result: result, Signed: signedExports,
+			Repository: sweep.Request.Release.Pkg.Repository,
+			Package:    sweep.Request.Release.Pkg.Name}); err != nil {
 			outcome.Exports = nil
 			return outcome, errors.Join(reportedErr,
 				c.refuseSweepOutputs(task, result.Node, ReasonOutputIdentity, err))
@@ -267,8 +274,10 @@ func (c *Coordinator) admitSweepOutputs(ctx context.Context, task string, attemp
 	if err != nil {
 		return c.refuseSweepOutputs(task, result.Node, "", err)
 	}
-	if err := validateSweepCarriedExports(result, signedExports,
-		sweep.Request.Release.Pkg.Repository, sweep.Request.Release.Pkg.Name); err != nil {
+	if err := validateSweepCarriedExports(sweepCarriedExportValidation{
+		Result: result, Signed: signedExports,
+		Repository: sweep.Request.Release.Pkg.Repository,
+		Package:    sweep.Request.Release.Pkg.Name}); err != nil {
 		return c.refuseSweepOutputs(task, result.Node, ReasonOutputIdentity, err)
 	}
 	conflict, isConflicting := c.sweepOutputs.admit(&sweepSet{
@@ -291,16 +300,23 @@ func (c *Coordinator) admitSweepOutputs(ctx context.Context, task string, attemp
 // validateSweepCarriedExports binds every typed export to a file in this
 // admitted manifest. Declaring a root alone does not prove that the file a
 // later task will read was actually captured by the failed producer.
-func validateSweepCarriedExports(result Result, signed []ExportedValue, repository, packageName string) error {
-	for _, exported := range signed {
+type sweepCarriedExportValidation struct {
+	Result     Result
+	Signed     []ExportedValue
+	Repository string
+	Package    string
+}
+
+func validateSweepCarriedExports(validation sweepCarriedExportValidation) error {
+	for _, exported := range validation.Signed {
 		if exported.DeclaredPath == nil {
 			continue
 		}
 		ref := exported.DeclaredPath
-		if result.Protocol != ChoreographyProtocolVersion || exported.Value != "" ||
-			ref.Repository != repository || ref.Package != packageName ||
-			!manifestContainsDeclaredPath(result.Outputs, ref.Root, ref.Relative) {
-			return fmt.Errorf("typed export %s has no matching admitted file", exported.Name)
+		if validation.Result.Protocol != ChoreographyProtocolVersion || exported.Value != sweepCarriedExportMissingValue ||
+			ref.Repository != validation.Repository || ref.Package != validation.Package ||
+			!manifestContainsDeclaredPath(validation.Result.Outputs, ref.Root, ref.Relative) {
+			return fmt.Errorf(sweepCarriedExportMissingFileFormat, exported.Name)
 		}
 	}
 	return nil

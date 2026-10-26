@@ -98,7 +98,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) (runE
 	}
 	if err := a.prepareExplicitLocalSlots(); err != nil {
 		return a.reportSweepRefusal(execution.NewDiagnostic(
-			execution.CodeConfiguration, execution.CategoryConfiguration, "%w", err))
+			execution.CodeConfiguration, execution.CategoryConfiguration, executionConfigurationCauseErrorFormat, err))
 	}
 
 	// Who may start a sweep that reaches other machines, and whether it could
@@ -117,8 +117,14 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) (runE
 			safe := a.coordinatorCloseErr == nil &&
 				(a.coordinator == nil || a.isCoordinatorClosed) &&
 				(!a.choreographyRetained || a.choreographyBound)
+			inert, inertErr := a.isUnboundChoreographyInert()
+			if inertErr != nil {
+				runErr = errors.Join(runErr, inertErr)
+			} else if inert {
+				safe = firstRunSafeRetirementState
+			}
 			if finishErr := a.finishFirstRunIdentity(safe); finishErr != nil {
-				a.logError(finishErr).Msg("first-node sweep identity remains for reconciliation")
+				a.logError(finishErr).Msg(sweepIdentityRetainedLogText)
 				runErr = errors.Join(runErr, finishErr)
 			}
 		}()
@@ -196,7 +202,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) (runE
 		defer pinnedSources.Close()
 		if !samePinnedPlanningSources(beforePlanning, pinnedSources) {
 			return a.reportSweepRefusal(fmt.Errorf(
-				"execution: source or configuration bytes changed while the run plan was computed"))
+				sweepPlanningBytesChangedErrorText))
 		}
 		selection, options, err := a.pinnedSweepDocuments(name, opts, covered)
 		if err != nil {
@@ -224,7 +230,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) (runE
 	if returnChannel != nil {
 		defer func() {
 			if closeErr := returnChannel.close(); closeErr != nil {
-				a.log.Warn().Err(closeErr).Msg("return channel did not close cleanly")
+				a.log.Warn().Err(closeErr).Msg(returnChannelCloseFailureLogText)
 			}
 		}()
 	}
@@ -244,7 +250,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) (runE
 	}
 	dispatchCtx := ctx
 	var stopCompiledPicker func() error
-	if coordinator != nil && work.broker != nil && coordinator.GraphRootOID != "" {
+	if coordinator != nil && work.broker != nil && coordinator.GraphRootOID != choreographyAbsentIdentityText {
 		if _, startErr := work.broker.StartExecution(ctx); startErr != nil {
 			return a.reportSweepRefusal(startErr)
 		}
@@ -258,7 +264,7 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) (runE
 			if stopCompiledPicker != nil {
 				stopErr := stopCompiledPicker()
 				if stopErr != nil {
-					a.log.Error().Err(stopErr).Msg("first-node compiled sweep picker stopped before settlement")
+					a.log.Error().Err(stopErr).Msg(sweepPickerUnsettledLogText)
 				}
 			}
 		}()
@@ -268,18 +274,18 @@ func (a *App) RunScript(ctx context.Context, name string, opts RunOptions) (runE
 	if coordinator != nil && a.choreographyBound {
 		sweepPolicy.TaskOutcomeSettled = func(settleCtx context.Context, pkg string,
 			status release.PackageOutcome) error {
-			return coordinator.SettleChoreographyTask(settleCtx, pkg+":"+execution.KindRun, status)
+			return coordinator.SettleChoreographyTask(settleCtx, pkg+choreographyTaskPartSeparatorText+execution.KindRun, status)
 		}
 		sweepPolicy.TaskBlocked = func(settleCtx context.Context, pkg, blocker string) error {
 			if work.broker == nil {
-				return fmt.Errorf("execution: sweep has no signed blocked-outcome authority")
+				return fmt.Errorf(sweepMissingBlockedAuthorityErrorText)
 			}
 			return work.broker.AcceptBlocked(settleCtx, execution.ChoreographyBlockedOutcome{
 				ChoreographyRunBinding: execution.ChoreographyRunBinding{
 					Run: coordinator.Run, Generation: coordinator.Generation,
 					PlanDigest: coordinator.PlanDigest, GraphDigest: coordinator.GraphDigest,
 				},
-				Task: pkg + ":" + execution.KindRun, Package: pkg,
+				Task: pkg + choreographyTaskPartSeparatorText + execution.KindRun, Package: pkg,
 				BlockedBy: blocker, PackageOutcome: string(release.OutcomeSkipped),
 			})
 		}

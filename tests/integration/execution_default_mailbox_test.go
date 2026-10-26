@@ -206,6 +206,9 @@ func TestExecutionDefaultMailboxRefusesACredentialCarryingRemote(t *testing.T) {
 		rig := newExecutionRigOnOrigin(t, func(cfg *models.File) {
 			cfg.Scripts["tests"] = models.Script{executionSweepScript}
 			cfg.Execution.Workers = nil
+			pinPackages(map[string]*models.RunOnly{
+				"core": placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+			})(cfg)
 		})
 		rig.repo.Git("remote", "set-url", "--push", "origin", pushURL)
 
@@ -292,6 +295,9 @@ func TestExecutionWorkerFindsItsMailboxInItsCheckout(t *testing.T) {
 	rig := newExecutionRigOnOrigin(t, func(cfg *models.File) {
 		cfg.LogLevel = "debug"
 		cfg.Scripts["build"] = models.Script{executionRecordingScript}
+		pinPackages(map[string]*models.RunOnly{
+			"core": placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+		})(cfg)
 	})
 	checkout := t.TempDir()
 	gitIn(t, checkout, "", "init", "-q")

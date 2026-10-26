@@ -27,6 +27,7 @@ package integration
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -69,6 +70,7 @@ func newExecutionFaultPreparation(t *testing.T) *executionRig {
 	t.Helper()
 	rig := newExecutionPrepareWorkspace(t, func(_ *harness.Repo, cfg *models.File) {
 		cfg.Execution.Workers = cfg.Execution.Workers[:1]
+		cfg.Execution.Timeouts.Admission = executionFaultUnclaimedAdmissionSeconds
 		cfg.Execution.Timeouts.Task = executionFaultTaskTimeout
 		cfg.Execution.Timeouts.Cancel = 20
 		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker, Publish: models.RunOnlyBoth}
@@ -110,6 +112,9 @@ type executionGitFault struct {
 	isRetained bool
 	// noClaim expects signed terminal refusal when no task ref could be read.
 	noClaim bool
+	// unknownOutcome retains coordination identity when the Git client cannot
+	// prove whether an atomic task-and-ledger push was accepted remotely.
+	unknownOutcome bool
 	// newRig is the fixture this row needs, for the calls a workspace only
 	// makes when it prepares a provider or captures a declared output.
 	newRig func(*testing.T) *executionRig
@@ -166,7 +171,7 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 		"a preparation cannot be offered": {
 			pattern: "*push*--force-with-lease=refs/heads/dispat-task-*:[0-9a-f]*",
 			nth:     1, isOnward: true,
-			code: 1, diagnostic: executionIntegrityCode, newRig: newExecutionFaultPreparation,
+			code: 1, unknownOutcome: true, newRig: newExecutionFaultPreparation,
 		},
 		"the answer cannot be retrieved once": {
 			pattern: "*fetch*dispat-task-*", nth: 1,
@@ -188,11 +193,25 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			fault := harness.NewGitFault(t, harness.GitFault{
 				Pattern: row.pattern, Nth: row.nth, Onward: row.isOnward, ArmAfter: row.armAfter})
 
-			res := rig.release(fault.Env()...)
+			res := rig.repo.StartReleaseEnv(rig.env(fault.Env()...), "release",
+				"--return-endpoint", rig.returnURL).WaitForDiagnostic(90*time.Second, func() {
+				t.Logf("first-node Git fault signed ledger: %+v", executionLateJoinLedgerEvents(t, rig.mailbox))
+			})
 			reply := stopAll(t, []*executionWorker{worker})[0]
 
 			require.Equal(t, row.code, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.Positive(t, fault.Matches(), "the fault reached the invocation it names")
+			if row.unknownOutcome {
+				assert.True(t, harness.IsCodePresent(executionEvents(res), executionRetainedCode),
+					"an unknown task-and-ledger push retains its run for exact reconciliation\nstdout:\n%s", res.Stdout)
+				assert.True(t, remoteHoldsLock(t, rig.origin), "the unresolved run keeps its owned release lock")
+				assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-task-"),
+					"canonical task refs remain inspectable")
+				assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
+					"the signed ledger remains inspectable")
+				assert.Empty(t, executionReleasedPackages(res), "no package was published")
+				return
+			}
 			assert.Equal(t, 0, reply.Code, "the node carried on serving")
 			if row.code == 0 {
 				assert.NotEmpty(t, rig.repo.TagList(), "a call that is retried costs a tick and nothing else")

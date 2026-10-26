@@ -46,11 +46,29 @@ const workspaceContextPrefix = "DISPAT_INTERNAL_WORKSPACE_"
 // is the last thing it does, and it must not be cancelled by the same signal.
 const taskReportTimeout = 30 * time.Second
 
+const (
+	taskTypedExportLogCodeKey                 = "code"
+	taskTypedExportLogCategoryKey             = "category"
+	taskTypedExportVerificationFailureMessage = "the task's typed prior exports could not be verified"
+	taskFailedSweepNoOutputs                  = 0
+	taskFailedSweepOutputLogKey               = "output"
+	taskFailedSweepReasonLogKey               = "reason"
+	taskFailedSweepPrivateExportOmitted       = "failed sweep did not capture a private file export; the value is omitted"
+	taskPrivatePathOutside                    = false
+	taskPrivatePathInside                     = true
+	taskPrivatePathParent                     = ".."
+	taskNoTypedExportValue                    = ""
+	taskRequiresStoppedProcessGroup           = true
+)
+
 // taskOutcome is what running one frame produced, in the shape a result
 // message states it.
 type taskOutcome struct {
 	status     string
 	failedPart string
+	// unsettledEffects keeps the accepted physical lease when a command's
+	// owned process group could not be proved stopped.
+	unsettledEffects bool
 	// exit is the exit status of the command that failed the frame, 0 when
 	// the failure was not a command's (an input, a deadline, a refusal).
 	exit    int
@@ -98,7 +116,7 @@ func resolveTaskDeadline(ctx context.Context, seconds int) (context.Context, con
 // whose script exited non-zero are the same thing to the run that dispatched
 // it: a task that did not succeed, reported as one, on a node that carries on
 // serving.
-func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Logger) taskOutcome {
+func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Logger) (outcome taskOutcome) {
 	assignment := task.assignment
 	task.reportPhase(release.PartInputs, false)
 	if assignment.Package == nil || assignment.Frame == nil || len(assignment.Repositories) == 0 {
@@ -108,11 +126,19 @@ func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Log
 	}
 	dir := filepath.Join(w.StateDir, taskWorkDir,
 		formatTaskFolder(assignment.Run, assignment.Task, assignment.Attempt))
-	defer w.clearTaskDir(dir, log)
+	defer func() {
+		if !outcome.unsettledEffects {
+			w.clearTaskDir(dir, log)
+		}
+	}()
 	// The task branch fetch brought the exact source commits as direct
 	// Assignment parents. Their identities were verified before the claim.
 	checkout := NewCheckout(w.Cache, filepath.Join(dir, taskCheckoutDir), log)
-	defer checkout.Remove(context.WithoutCancel(ctx))
+	defer func() {
+		if !outcome.unsettledEffects {
+			checkout.Remove(context.WithoutCancel(ctx))
+		}
+	}()
 	if err := checkout.Materialize(ctx, assignment.Repositories); err != nil {
 		log.Error().Err(err).Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
 			Msg("the task's checkouts could not be materialized")
@@ -130,14 +156,14 @@ func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Log
 	if assignment.Protocol == ChoreographyProtocolVersion {
 		assignment, err = rehomeVerifiedTaskExports(assignment, checkout, proofs)
 		if err != nil {
-			log.Warn().Err(err).Str("code", CodeIntegrity).Str("category", CategoryIntegrity).
-				Msg("the task's typed prior exports could not be verified")
+			log.Warn().Err(err).Str(taskTypedExportLogCodeKey, CodeIntegrity).Str(taskTypedExportLogCategoryKey, CategoryIntegrity).
+				Msg(taskTypedExportVerificationFailureMessage)
 			return taskOutcome{status: StatusFailed, failedPart: release.PartInputs,
 				reason: ReasonOutputIdentity}
 		}
 		task.assignment = assignment
 	}
-	outcome := w.runFrame(ctx, task, checkout.Dir(owner, assignment.Package.Dir), log)
+	outcome = w.runFrame(ctx, task, checkout.Dir(owner, assignment.Package.Dir), log)
 	outcome.strayWrites = checkout.CountStrayWrites(ctx, owner, formatDeclaredPaths(assignment))
 	if outcome.status != StatusSucceeded {
 		if assignment.Protocol == ChoreographyProtocolVersion && assignment.Kind == KindRun &&
@@ -145,13 +171,14 @@ func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Log
 			// A sweep configured to continue can consume a failed predecessor's
 			// verified partial files. Preserve the command's failed status and
 			// failing part even if collecting those files also fails.
-			if len(assignment.Outputs) != 0 {
+			if len(assignment.Outputs) != taskFailedSweepNoOutputs {
 				captured := w.captureTaskOutputs(ctx, assignment, checkout, installed, outcome, log)
 				outcome.outputs = captured.outputs
 			}
 			root := checkout.Dir(owner, resolveCapturePath(assignment))
-			outcome.transportExports = formatFailedSweepExports(outcome.exports, assignment,
-				root, checkout.root, outcome.outputs, log)
+			outcome.transportExports = formatFailedSweepExports(failedSweepExportOptions{
+				Outputs: outcome.exports, Assignment: assignment, SourceRoot: root,
+				CheckoutRoot: checkout.root, Manifest: outcome.outputs, Log: log})
 		}
 		return outcome
 	}
@@ -168,20 +195,28 @@ func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Log
 // path portable when the failed task captured the exact declared file. A
 // private checkout is removed after this function returns, so an unproven
 // path into it cannot be sent as a literal export to a later task.
-func formatFailedSweepExports(outputs []plan.Output, assignment Assignment,
-	sourceRoot, checkoutRoot string, manifest *OutputManifest, log zerolog.Logger) []ExportedValue {
-	plain := formatExports(outputs)
-	typed := formatDeclaredTaskExports(outputs, assignment, sourceRoot)
-	portable := make([]ExportedValue, 0, len(plain))
+type failedSweepExportOptions struct {
+	Outputs      []plan.Output
+	Assignment   Assignment
+	SourceRoot   string
+	CheckoutRoot string
+	Manifest     *OutputManifest
+	Log          zerolog.Logger
+}
+
+func formatFailedSweepExports(opts failedSweepExportOptions) []ExportedValue {
+	plain := formatExports(opts.Outputs)
+	typed := formatDeclaredTaskExports(opts.Outputs, opts.Assignment, opts.SourceRoot)
+	portable := make([]ExportedValue, taskFailedSweepNoOutputs, len(plain))
 	for index, value := range plain {
 		ref := typed[index].DeclaredPath
-		if ref != nil && manifestContainsDeclaredPath(manifest, ref.Root, ref.Relative) {
+		if ref != nil && manifestContainsDeclaredPath(opts.Manifest, ref.Root, ref.Relative) {
 			portable = append(portable, typed[index])
 			continue
 		}
-		if privateTaskPath(value.Value, checkoutRoot) {
-			log.Warn().Str("output", value.Name).Str("reason", string(ReasonOutputIdentity)).
-				Msg("failed sweep did not capture a private file export; the value is omitted")
+		if privateTaskPath(value.Value, opts.CheckoutRoot) {
+			opts.Log.Warn().Str(taskFailedSweepOutputLogKey, value.Name).Str(taskFailedSweepReasonLogKey, string(ReasonOutputIdentity)).
+				Msg(taskFailedSweepPrivateExportOmitted)
 			continue
 		}
 		portable = append(portable, value)
@@ -191,27 +226,27 @@ func formatFailedSweepExports(outputs []plan.Output, assignment Assignment,
 
 func privateTaskPath(value, checkoutRoot string) bool {
 	if !filepath.IsAbs(value) {
-		return false
+		return taskPrivatePathOutside
 	}
 	inside := func(root, candidate string) bool {
 		relative, err := filepath.Rel(root, candidate)
-		return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+		return err == nil && relative != taskPrivatePathParent && !strings.HasPrefix(relative, taskPrivatePathParent+string(filepath.Separator))
 	}
 	if inside(filepath.Clean(checkoutRoot), filepath.Clean(value)) {
-		return true
+		return taskPrivatePathInside
 	}
 	root, err := filepath.EvalSymlinks(checkoutRoot)
 	if err != nil {
-		return false
+		return taskPrivatePathOutside
 	}
 	if inside(root, filepath.Clean(value)) {
-		return true
+		return taskPrivatePathInside
 	}
 	resolved, err := filepath.EvalSymlinks(value)
 	if err != nil {
 		parent, parentErr := filepath.EvalSymlinks(filepath.Dir(value))
 		if parentErr != nil {
-			return false
+			return taskPrivatePathOutside
 		}
 		resolved = filepath.Join(parent, filepath.Base(value))
 	}
@@ -236,7 +271,7 @@ func formatDeclaredTaskExports(outputs []plan.Output, assignment Assignment, sou
 		if !ok {
 			continue
 		}
-		exports[i].Value = ""
+		exports[i].Value = taskNoTypedExportValue
 		exports[i].DeclaredPath = &ExportedDeclaredPath{Repository: assignment.Package.Repository,
 			Package: assignment.Package.Name, Root: ref.Root, Relative: ref.Relative}
 	}
@@ -310,7 +345,7 @@ func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
 		// phase is recorded before the first process begins.
 		task.reportPhase(part.name, part.name == release.PartCommands)
 		sequence := release.Sequence{
-			Runner:   &script.ShellRunner{Shell: assignment.Shell, Log: log},
+			Runner:   &script.ShellRunner{Shell: assignment.Shell, Log: log, RequireStoppedGroup: taskRequiresStoppedProcessGroup},
 			Dir:      dir,
 			Stage:    part.stage,
 			Commands: part.commands,
@@ -328,7 +363,8 @@ func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
 		}
 		log.Warn().Err(err).Str("stage", part.stage).Str("part", part.name).Msg("stage failed")
 		return taskOutcome{status: StatusFailed, failedPart: part.name, exit: resolveExitStatus(err),
-			exports: produced.Outputs}
+			unsettledEffects: errors.Is(err, script.ErrProcessGroupUnsettled),
+			exports:          produced.Outputs}
 	}
 	return taskOutcome{status: StatusSucceeded, exports: produced.Outputs}
 }

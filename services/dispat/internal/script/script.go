@@ -48,10 +48,29 @@ type ShellRunner struct {
 	// pipes after its process exited or its context was cancelled (see
 	// exec.Cmd.WaitDelay). Zero means the 5s default.
 	WaitDelay time.Duration
+	// RequireStoppedGroup is for commands whose completion permits a signed
+	// task result or cancellation acknowledgement. The owned process group
+	// must be gone before Run returns a settled outcome.
+	RequireStoppedGroup bool
 	// Log records execution metadata at trace level. The zero
 	// Logger writes nowhere, which is what the callers that have none get.
 	Log zerolog.Logger
 }
+
+const (
+	strictProcessGroupUnsettledError = "script process group remains unsettled"
+	strictProcessGroupStoppedError   = "script left a background process that was stopped"
+	strictScriptWaitDelay            = 150 * time.Millisecond
+)
+
+var (
+	// ErrProcessGroupUnsettled means Run could not prove that the owned process
+	// group stopped. A caller must retain its physical task lease.
+	ErrProcessGroupUnsettled = errors.New(strictProcessGroupUnsettledError)
+	// ErrProcessGroupStopped means a shell exited while descendants remained;
+	// strict execution stopped them, so the command cannot count as success.
+	ErrProcessGroupStopped = errors.New(strictProcessGroupStoppedError)
+)
 
 var _ Runnerx = (*ShellRunner)(nil)
 
@@ -80,11 +99,16 @@ func (r *ShellRunner) Run(ctx context.Context, dir, command string, env []string
 	if cmd.WaitDelay == 0 {
 		cmd.WaitDelay = 5 * time.Second
 	}
+	if r.RequireStoppedGroup && cmd.WaitDelay > strictScriptWaitDelay {
+		cmd.WaitDelay = strictScriptWaitDelay
+	}
 	// Record execution context and timing without copying a shell command
 	// that may contain literal credentials into the log.
 	started := time.Now()
 	err := cmd.Run()
-	if errors.Is(err, exec.ErrWaitDelay) {
+	if r.RequireStoppedGroup {
+		err = settleOwnedProcessGroup(cmd, err)
+	} else if errors.Is(err, exec.ErrWaitDelay) {
 		err = nil
 	}
 	if ev := r.Log.Trace(); ev.Enabled() {

@@ -91,19 +91,19 @@ func (c *CompiledTaskGraph) NewOutcomeEvaluator() *OutcomeEvaluator {
 func (e *OutcomeEvaluator) ValidateOutcome(pkg, rawStatus string) error {
 	status := PackageOutcome(rawStatus)
 	if e == nil || e.graph == nil || e.graph.plan.Releases[pkg] == nil {
-		return fmt.Errorf("release: package outcome names no planned release %q", pkg)
+		return fmt.Errorf(releaseOutcomeUnplannedPackageErrorFormat, pkg)
 	}
 	switch status {
 	case OutcomePublished, OutcomeFailed, OutcomeSkipped, OutcomeRecordBlocked, OutcomeCancelled:
 	default:
-		return fmt.Errorf("release: invalid settled package outcome %q", status)
+		return fmt.Errorf(releaseOutcomeInvalidStatusErrorFormat, status)
 	}
 	prior := e.outcomes[pkg]
 	if prior == status {
 		return nil
 	}
-	if prior != "" && prior != OutcomePending && !(prior == OutcomePublished && status == OutcomeRecordBlocked) {
-		return fmt.Errorf("release: package %s changed settled outcome from %s to %s", pkg, prior, status)
+	if prior != releaseRuntimeAbsentIdentityText && prior != OutcomePending && !(prior == OutcomePublished && status == OutcomeRecordBlocked) {
+		return fmt.Errorf(releaseOutcomeChangedStatusErrorFormat, pkg, prior, status)
 	}
 	return nil
 }
@@ -117,7 +117,7 @@ func (e *OutcomeEvaluator) Apply(pkg string, status PackageOutcome) error {
 	}
 	e.outcomes[pkg] = status
 	if status.dead() {
-		e.anyDead = true
+		e.anyDead = releaseOutcomeDeadProviderState
 	}
 	return nil
 }
@@ -131,12 +131,12 @@ func (e *OutcomeEvaluator) ApplyOutcome(pkg, status string) error {
 
 func (e *OutcomeEvaluator) ShouldSkip(pkg string) (bool, string, error) {
 	if e == nil || e.graph == nil || e.graph.plan.Releases[pkg] == nil {
-		return false, "", fmt.Errorf("release: skip admission names no planned release %q", pkg)
+		return releaseOutcomeSkipDeclinedState, releaseRuntimeAbsentIdentityText, fmt.Errorf(releaseOutcomeSkipUnplannedPackageErrorFormat, pkg)
 	}
 	// The ordinary successful path does not need a transitive provider walk.
 	// Do not cache an empty closure that could become relevant after a failure.
 	if !e.anyDead {
-		return false, "", nil
+		return releaseOutcomeSkipDeclinedState, releaseRuntimeAbsentIdentityText, nil
 	}
 	policy, exists := e.policies[pkg]
 	if !exists {

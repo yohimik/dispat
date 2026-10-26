@@ -5,8 +5,6 @@ package execution
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
@@ -17,12 +15,55 @@ import (
 func newCompiledCancellationFixture(t *testing.T) (*mailboxFixture, *GitChoreographyPersist,
 	*FirstNodeBroker, ChoreographyRunBinding, ChoreographyTaskSpec, ChoreographyAssignmentReceipt) {
 	t.Helper()
-	fixture, persist, binding, spec := newChoreographyLedgerFixture(t)
+	fixture, persist, binding, spec := newChoreographyLedgerFixtureWithSettings(t,
+		choreographyLedgerFixtureSettings{AuthorityID: "0123456789abcdef0123456789abcdef",
+			AdmissionSeconds:           choreographyTestAdmissionSeconds,
+			RetryAfterUncertainAttempt: true})
 	broker, err := RecoverFirstNodeBroker(t.Context(), choreographyFixtureBrokerOptions(persist))
 	require.NoError(t, err)
 	return fixture, persist, broker, binding, spec,
 		ChoreographyAssignmentReceipt{AssignmentOID: spec.ReservationOID,
 			Cursor: choreographyFixtureStartCursor(t, persist)}
+}
+
+func TestChoreographyUnknownCancelRetryKeepsFirstSignedReplyDeadline(t *testing.T) {
+	fixture, persist, binding, spec := newChoreographyLedgerFixture(t)
+	opts := choreographyFixtureBrokerOptions(persist)
+	broker, err := RecoverFirstNodeBroker(t.Context(), opts)
+	require.NoError(t, err)
+	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
+		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
+		ExpectedOID: spec.ReservationOID, InputsDigest: spec.InputsDigest,
+		PickupID: NewChoreographyPickupID(), ProposalID: "cancel-unknown-claim"}
+	completeChoreographyFixtureClaim(t, persist, &claim)
+	accepted, err := broker.AcceptClaim(t.Context(), claim)
+	require.NoError(t, err)
+	cancel := ChoreographyCancellation{ChoreographyRunBinding: binding,
+		Task: spec.Task, Branch: spec.Branch, Attempt: claim.Attempt,
+		Node: claim.Node, AssignmentOID: accepted.AssignmentOID, ClaimOID: accepted.OID}
+	transport := &choreographyAtomicUnknownTransport{transportx: fixture.mailbox.remote}
+	fixture.mailbox.remote = transport
+	_, err = broker.CancelClaim(t.Context(), cancel)
+	require.ErrorIs(t, err, gitx.ErrPushUnknown)
+	require.NotNil(t, persist.pending)
+	firstDeadline := persist.pending.mutation.Event.CancelReplyDeadlineUTC
+	require.NotEmpty(t, firstDeadline)
+	require.Equal(t, accepted.OID, remoteChoreographyOID(t, fixture, spec.Branch))
+	// A retry's newly proposed local policy value cannot replace the exact
+	// deadline already bound to the unresolved signed Cancel mutation.
+	broker.cancelResponseDuration += time.Second
+	cancelOID, err := broker.CancelClaim(t.Context(), cancel)
+	require.NoError(t, err)
+	require.NotEmpty(t, cancelOID)
+	require.Nil(t, persist.pending)
+	require.Equal(t, firstDeadline, broker.tasks[spec.Task].pickups[claim.PickupID].cancelReplyDeadlineUTC)
+	require.Equal(t, cancelOID, remoteChoreographyOID(t, fixture, spec.Branch))
+	coldPersist, err := NewGitChoreographyPersist(persist.opts)
+	require.NoError(t, err)
+	opts.Persist = coldPersist
+	cold, err := RecoverFirstNodeBroker(t.Context(), opts)
+	require.NoError(t, err)
+	require.Equal(t, firstDeadline, cold.tasks[spec.Task].pickups[claim.PickupID].cancelReplyDeadlineUTC)
 }
 
 func TestCompiledNoClaimExpiryRetainsCanonicalTaskRefWithoutRetry(t *testing.T) {
@@ -55,7 +96,7 @@ func TestCompiledCancellationRequiresExactAckBeforeRetry(t *testing.T) {
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 		ExpectedOID: offered.AssignmentOID, ExpectedLedgerOID: offered.Cursor.OID,
-		InputsDigest: spec.InputsDigest, ProposalID: "claim-cancel"}
+		InputsDigest: spec.InputsDigest, PickupID: NewChoreographyPickupID(), ProposalID: "claim-cancel"}
 	completeChoreographyFixtureClaim(t, persist, &claim)
 	receipt, err := broker.AcceptClaim(t.Context(), claim)
 	require.NoError(t, err)
@@ -90,12 +131,62 @@ func TestCompiledCancellationRequiresExactAckBeforeRetry(t *testing.T) {
 			page.Events[2].Kind, page.Events[3].Kind})
 }
 
+func TestCompiledPickupCancellationRetainsExactAckFinalityAcrossColdReplay(t *testing.T) {
+	_, persist, broker, binding, spec, offered := newCompiledCancellationFixture(t)
+	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
+		Task: spec.Task, Attempt: choreographyGitFirstAttempt, Node: "node-a",
+		Branch: spec.Branch, ExpectedOID: offered.AssignmentOID,
+		ExpectedLedgerOID: offered.Cursor.OID, InputsDigest: spec.InputsDigest,
+		PickupID: NewChoreographyPickupID(), ProposalID: "pickup-cancel-claim"}
+	completeChoreographyFixtureClaim(t, persist, &claim)
+	accepted, err := broker.AcceptClaim(t.Context(), claim)
+	require.NoError(t, err)
+	cancelOID, err := broker.CancelClaim(t.Context(), ChoreographyCancellation{
+		ChoreographyRunBinding: binding, Task: spec.Task, Branch: spec.Branch,
+		Attempt: claim.Attempt, Node: claim.Node,
+		AssignmentOID: accepted.AssignmentOID, ClaimOID: accepted.OID})
+	require.NoError(t, err)
+	acked, err := broker.AcceptAck(t.Context(), ChoreographyAckProposal{
+		ChoreographyRunBinding: binding, Task: spec.Task, Branch: spec.Branch,
+		Attempt: claim.Attempt, Node: claim.Node,
+		AssignmentOID: accepted.AssignmentOID, CancelOID: cancelOID,
+		ProposalID: "pickup-cancel-ack", Phase: PhaseAuthorizationWait})
+	require.NoError(t, err)
+	require.Equal(t, claim.PickupID, acked.PickupID)
+	require.NoError(t, broker.DecideAttempt(t.Context(), ChoreographyDecision{
+		ChoreographyRunBinding: binding, Task: spec.Task, Branch: spec.Branch,
+		Attempt: claim.Attempt, Node: claim.Node, ResultOID: acked.OID,
+		Retry: true}))
+	require.True(t, broker.tasks[spec.Task].pickups[claim.PickupID].settled)
+	page, err := persist.ReadEvents(t.Context(), accepted.Cursor, 3)
+	require.NoError(t, err)
+	require.Len(t, page.Events, 3)
+	require.Equal(t, ChoreographyCancelIssued, page.Events[0].Kind)
+	require.Equal(t, ChoreographyAckAccepted, page.Events[1].Kind)
+	require.Equal(t, ChoreographyRetryReady, page.Events[2].Kind)
+	for _, event := range page.Events {
+		require.Equal(t, claim.PickupID, event.PickupID)
+		require.Equal(t, accepted.OID, event.ClaimOID)
+	}
+	feed := &RetainedChoreographyFeed{reader: persist,
+		maxDocumentBytes: choreographyPickupProofDocumentLimit}
+	require.NoError(t, feed.VerifyAttemptFinality(t.Context(), ChoreographyAttemptFinalityProof{
+		Event: page.Events[2], ReceiptOID: acked.OID,
+		ClaimOID: accepted.OID, AssignmentOID: accepted.AssignmentOID}))
+	coldPersist, err := NewGitChoreographyPersist(persist.opts)
+	require.NoError(t, err)
+	cold, err := RecoverFirstNodeBroker(t.Context(), choreographyFixtureBrokerOptions(coldPersist))
+	require.NoError(t, err)
+	require.Equal(t, 0, cold.used[spec.Budget])
+	require.True(t, cold.tasks[spec.Task].pickups[claim.PickupID].settled)
+}
+
 func TestCompiledCancelWithoutAckCannotSealOrRetry(t *testing.T) {
 	_, persist, broker, binding, spec, offered := newCompiledCancellationFixture(t)
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 		ExpectedOID: offered.AssignmentOID, ExpectedLedgerOID: offered.Cursor.OID,
-		InputsDigest: spec.InputsDigest, ProposalID: "claim-no-ack"}
+		InputsDigest: spec.InputsDigest, PickupID: NewChoreographyPickupID(), ProposalID: "claim-no-ack"}
 	completeChoreographyFixtureClaim(t, persist, &claim)
 	receipt, err := broker.AcceptClaim(t.Context(), claim)
 	require.NoError(t, err)
@@ -161,7 +252,7 @@ func TestRetainedResultVerifierUsesSignedClaimAndAssignment(t *testing.T) {
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 		ExpectedOID: offered.AssignmentOID, ExpectedLedgerOID: offered.Cursor.OID,
-		InputsDigest: spec.InputsDigest, ProposalID: "retained-result"}
+		InputsDigest: spec.InputsDigest, PickupID: NewChoreographyPickupID(), ProposalID: "retained-result"}
 	completeChoreographyFixtureClaim(t, persist, &claim)
 	claim.resolvedBindings = &bindings
 	receipt, err := broker.AcceptClaim(t.Context(), claim)
@@ -169,14 +260,16 @@ func TestRetainedResultVerifierUsesSignedClaimAndAssignment(t *testing.T) {
 	assignmentParents, err := fixture.mailbox.plumbing.CommitParents(t.Context(), receipt.AssignmentOID)
 	require.NoError(t, err)
 	require.Equal(t, []string{spec.ReservationOID, source.Snapshot}, assignmentParents)
-	proposal := ChoreographyResultProposal{ChoreographyRunBinding: binding,
-		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
-		ClaimOID: receipt.OID, InputsDigest: claim.InputsDigest}
 	result := Result{Header: Header{Protocol: ChoreographyProtocolVersion,
 		Kind: KindBuild, Run: binding.Run, Generation: binding.Generation,
 		PlanDigest: binding.PlanDigest, Task: spec.Task, Attempt: 1,
 		Node: "node-a", Branch: spec.Branch}, Assignment: receipt.OID,
 		Status: StatusSucceeded}
+	proposal, pack := prepareChoreographyFixturePickupResult(t, fixture,
+		choreographyFixturePickupResult{Claim: claim, Accepted: receipt,
+			Result: result, ProposalID: "retained-carried-result"})
+	result.PickupID, result.PendingBranch, result.PendingOID, result.OutcomeBranch =
+		claim.PickupID, proposal.PendingBranch, proposal.PendingOID, proposal.OutcomeBranch
 	require.NoError(t, fixture.mailbox.VerifyChoreographyResultFromClaim(t.Context(),
 		ChoreographyResultClaimProof{Proposal: proposal, Result: result,
 			Store: fixture.git, MaxDocumentBytes: 1 << 20}))
@@ -185,17 +278,6 @@ func TestRetainedResultVerifierUsesSignedClaimAndAssignment(t *testing.T) {
 		ChoreographyResultClaimProof{Proposal: proposal, Result: result,
 			Store: fixture.git, MaxDocumentBytes: 1 << 20}), "retained signed command frame")
 	result.Node = "node-a"
-	resultDocument, err := json.Marshal(result)
-	require.NoError(t, err)
-	resultOID, err := fixture.mailbox.commitMessage(t.Context(), MessageResult, resultDocument, nil, nil)
-	require.NoError(t, err)
-	pack, err := os.CreateTemp(t.TempDir(), "carried-result-*.pack")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pack.Close() })
-	require.NoError(t, fixture.git.ExportCommitPack(t.Context(), resultOID, pack))
-	proposal.ProposalID, proposal.ResultDigest = "retained-carried-result", resultOID
-	proposal, err = PrepareChoreographyResult(t.Context(), proposal, pack, 1<<20)
-	require.NoError(t, err)
 	persist.opts.VerifyResult = func(ctx context.Context, p ChoreographyResultProposal,
 		result Result, store *gitx.LocalGitx) error {
 		return fixture.mailbox.VerifyChoreographyResultFromClaim(ctx,
@@ -229,7 +311,7 @@ func TestCarriedSourceClaimCancelSurvivesColdBrokerReplay(t *testing.T) {
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 		ExpectedOID: offered.AssignmentOID, ExpectedLedgerOID: offered.Cursor.OID,
-		InputsDigest: spec.InputsDigest, ProposalID: "carried-source-cancel"}
+		InputsDigest: spec.InputsDigest, PickupID: NewChoreographyPickupID(), ProposalID: "carried-source-cancel"}
 	completeChoreographyFixtureClaim(t, persist, &claim)
 	accepted, err := broker.AcceptClaim(t.Context(), claim)
 	require.NoError(t, err)
@@ -248,4 +330,66 @@ func TestCarriedSourceClaimCancelSurvivesColdBrokerReplay(t *testing.T) {
 	require.Equal(t, accepted.OID, recovered.tasks[spec.Task].claim)
 	require.Equal(t, cancelOID, recovered.tasks[spec.Task].cancel)
 	require.Equal(t, 1, recovered.nodeUsed["node-a"])
+}
+
+func TestPreparedSweepClaimCanBeCancelledAfterColdBrokerReplay(t *testing.T) {
+	fixture, persist, binding, spec := newChoreographyLedgerFixtureWithSettings(t,
+		choreographyLedgerFixtureSettings{AuthorityID: "0123456789abcdef0123456789abcdef",
+			AdmissionSeconds: choreographyTestAdmissionSeconds,
+			Tasks: []ChoreographyTaskSpec{{Task: "core:run", Kind: KindRun,
+				Package: "core", NeedsPreparedInput: true}}})
+	bootstrap, err := fixture.mailbox.ReadChoreographyBootstrap(t.Context(),
+		persist.opts.BootstrapOID, 1<<20, 1<<20)
+	require.NoError(t, err)
+	require.Len(t, bootstrap.PinnedInputs.Repositories, 1)
+	full := ChoreographyTaskBindings{Repositories: bootstrap.PinnedInputs.Repositories}
+	full.Repositories[0].Path = "."
+	carrier := ChoreographyPreparedCarrier{ChoreographyRunBinding: binding,
+		GraphRootOID: persist.opts.GraphRootOID, Task: spec.Task,
+		TemplateDigest: spec.TemplateDigest, Bindings: full}
+	carrierOID, err := fixture.mailbox.PrepareChoreographyPreparedCarrier(t.Context(), carrier, 1<<20)
+	require.NoError(t, err)
+	full.PreparedInputOID = carrierOID
+	opts := choreographyFixtureBrokerOptions(persist)
+	opts.OutcomePolicy = preparedBrokerPolicy{}
+	opts.ResolveBindings = func(context.Context, string, string) (ChoreographyTaskBindings, error) {
+		return full, nil
+	}
+	broker, err := RecoverFirstNodeBroker(t.Context(), opts)
+	require.NoError(t, err)
+	inputsDigest, _, err := broker.ExpectedInputIdentity(spec.Task)
+	require.NoError(t, err)
+	proposal := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
+		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
+		ExpectedOID: spec.ReservationOID, InputsDigest: inputsDigest,
+		PickupID: NewChoreographyPickupID(), ProposalID: "first-prepared-sweep-claim"}
+	completeChoreographyFixtureClaim(t, persist, &proposal)
+	first, err := broker.AcceptClaim(t.Context(), proposal)
+	require.NoError(t, err)
+	require.True(t, first.Refused)
+	proposal.Bindings.PreparedInputOID = carrierOID
+	proposal.BindingsDigest, err = DigestChoreographyTaskBindings(proposal.Bindings)
+	require.NoError(t, err)
+	proposal.ExpectedLedgerOID = first.FenceOID
+	proposal.ProposalID = "exact-prepared-sweep-claim"
+	accepted, err := broker.AcceptClaim(t.Context(), proposal)
+	require.NoError(t, err)
+	require.True(t, accepted.Accepted)
+	restarted, err := NewGitChoreographyPersist(persist.opts)
+	require.NoError(t, err)
+	opts.Persist = restarted
+	cold, err := RecoverFirstNodeBroker(t.Context(), opts)
+	require.NoError(t, err)
+	_, err = cold.CancelClaim(t.Context(), ChoreographyCancellation{
+		ChoreographyRunBinding: binding, Task: spec.Task,
+		Branch: spec.Branch, Attempt: proposal.Attempt, Node: proposal.Node,
+		AssignmentOID: proposal.ExpectedOID, ClaimOID: accepted.OID})
+	require.Error(t, err)
+	require.Empty(t, cold.tasks[spec.Task].cancel)
+	_, err = cold.CancelClaim(t.Context(), ChoreographyCancellation{
+		ChoreographyRunBinding: binding, Task: spec.Task,
+		Branch: spec.Branch, Attempt: proposal.Attempt, Node: proposal.Node,
+		AssignmentOID: accepted.AssignmentOID, ClaimOID: accepted.OID})
+	require.NoError(t, err)
+	require.NotEmpty(t, cold.tasks[spec.Task].cancel)
 }

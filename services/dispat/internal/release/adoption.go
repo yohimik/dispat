@@ -13,10 +13,8 @@ package release
 // it when it holds something else. Adopting without that check would enrol an
 // artefact nobody in this repository produced.
 //
-// A publish command is a shell command, and dispat cannot read why it failed.
-// The verifier answers that too: a destination that does not hold the version
-// means the command failed for a reason of its own, which stays an ordinary
-// publish failure.
+// A failed command or an absent destination read cannot fence a queued upload.
+// An unresolved native publication keeps its signed claim and release exclusion.
 
 import (
 	"bytes"
@@ -53,8 +51,8 @@ const (
 	// verdictUnasked: no verifier applies, or it could not reach the
 	// destination. The publish failure stands as it is.
 	verdictUnasked adoptionVerdict = iota
-	// verdictAbsent: the destination does not hold the version, so the
-	// publish failed for a reason of its own.
+	// verdictAbsent: the destination does not yet hold the version; an
+	// earlier request may still complete after this read.
 	verdictAbsent
 	// verdictMatch: the destination holds this run's artefact.
 	verdictMatch
@@ -77,11 +75,11 @@ func (e *adoptionRefused) Error() string {
 func (e *adoptionRefused) DiagnosticCode() string { return plan.CodeAdoptionRefused }
 
 // reconcilePublication decides a failed publish command under §19.4, and
-// answers what the task fails with: nothing when the version is adopted, an
-// E198 when it is refused, and the original failure otherwise.
+// adopts a verified match. Other verdicts retain exclusion while the exact
+// request may still complete, including an E198 identity mismatch.
 func (tc *taskCtx) reconcilePublication(ctx context.Context, what string, publishErr error) (string, error) {
 	if ctx.Err() != nil || tc.rel.Pkg.Space.AdoptPublished.IsDisabled || isOutcomeUnknown(publishErr) {
-		return what, publishErr
+		return what, tc.unsettledPublication(publishErr)
 	}
 	verdict, evidence := tc.verifyPublished(ctx)
 	switch verdict {
@@ -92,9 +90,9 @@ func (tc *taskCtx) reconcilePublication(ctx context.Context, what string, publis
 	case verdictMismatch:
 		tc.refusePublications()
 		return "publish refused: the destination holds this version as another artefact",
-			&adoptionRefused{tag: tc.rel.TagName(), reason: evidence}
+			tc.unsettledPublication(&adoptionRefused{tag: tc.rel.TagName(), reason: evidence})
 	default:
-		return what, publishErr
+		return what, tc.unsettledPublication(publishErr)
 	}
 }
 

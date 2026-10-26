@@ -20,29 +20,29 @@ import (
 func (a *App) bindFirstLocalWorker(c *execution.Coordinator,
 	broker *execution.FirstNodeBroker, verifyFirst func(context.Context) error) error {
 	if a.returnJournal == nil || a.localNodeSlots == nil || c == nil || broker == nil ||
-		verifyFirst == nil || c.Signer == nil || len(c.Links) == 0 {
-		return fmt.Errorf("execution: first-local choreography cannot establish its authority")
+		verifyFirst == nil || c.Signer == nil || len(c.Links) == choreographyNoEntriesCount {
+		return fmt.Errorf(choreographyMissingLocalAuthorityErrorText)
 	}
-	stateDir := filepath.Join(a.returnJournal.dir, "first-local")
-	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		return fmt.Errorf("execution: preparing first-local task state: %w", err)
+	stateDir := filepath.Join(a.returnJournal.dir, choreographyLocalStateDirectoryName)
+	if err := os.MkdirAll(stateDir, choreographyLocalDirectoryMode); err != nil {
+		return fmt.Errorf(choreographyLocalStateCreationErrorFormat, err)
 	}
 	if err := syncRunDirectory(a.returnJournal.dir); err != nil {
-		return fmt.Errorf("execution: persisting first-local task state: %w", err)
+		return fmt.Errorf(choreographyLocalStatePersistenceErrorFormat, err)
 	}
 	mailbox, err := c.ChoreographyMailbox()
 	if err != nil {
 		return err
 	}
-	report := execution.FormatNodeReport("", a.git.GitVersion(context.Background()),
+	report := execution.FormatNodeReport(choreographyAbsentIdentityText, a.git.GitVersion(context.Background()),
 		c.Local.Capacity, c.Limits)
 	report.AuthorityID = a.localNodeSlots.AuthorityID()
 	slots := a.localNodeSlots
-	endpoint := c.Links[0].Endpoint
+	endpoint := c.Links[choreographyFirstEndpointIndex].Endpoint
 	c.LocalChoreographer = func(ctx context.Context, assignmentOID string,
 		cursor execution.ChoreographyEventCursor) error {
 		key := sha256.Sum256([]byte(assignmentOID))
-		seenPath := filepath.Join(stateDir, "seen-"+hex.EncodeToString(key[:])+".json")
+		seenPath := filepath.Join(stateDir, choreographySeenFilePrefixText+hex.EncodeToString(key[:])+choreographySeenFileExtensionText)
 		seen, err := execution.LoadSeenSet(seenPath, time.Now())
 		if err != nil {
 			return err
@@ -53,15 +53,15 @@ func (a *App) bindFirstLocalWorker(c *execution.Coordinator,
 			NodeSlots: slots, Cache: a.git, Seen: seen, Log: a.log,
 			TransferTimeout: time.Duration(a.cfg.Execution.ResolveTransfer().Timeout) * time.Second,
 			VerifyOwner: func() error {
-				checkCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				checkCtx, cancel := context.WithTimeout(context.Background(), choreographyOwnershipCheckTimeoutSeconds*time.Second)
 				defer cancel()
 				return verifyFirst(checkCtx)
 			},
 		}
 		err = worker.RunAssignedLocal(ctx, assignmentOID, cursor, broker)
 		if err != nil {
-			a.log.Error().Err(err).Str("assignment", assignmentOID).
-				Msg("first-local worker could not settle its offered task")
+			a.log.Error().Err(err).Str(choreographyAssignmentLogKey, assignmentOID).
+				Msg(choreographyLocalTaskUnsettledLogText)
 		}
 		return err
 	}

@@ -103,7 +103,7 @@ printf 'native-cancel-finished %s\n' "$DISPAT_PACKAGE" >> "$DISPAT_IT_EXECUTION_
 		cfg.Scripts["onfail"] = models.Script{executionOnFailScript}
 	})
 	firstHome, peerHome := t.TempDir(), t.TempDir()
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	peer := rig.startWorker(executionWorkerConfig(rig.mailbox), 60,
 		append(peerGit.Env(), "HOME="+peerHome,
 			"XDG_CONFIG_HOME="+filepath.Join(peerHome, "config"))...)
@@ -147,7 +147,7 @@ func TestChoreographyCompiledReleaseReconcilesCompletedGeneration(t *testing.T) 
 				cfg.Scripts["build"] = models.Script{executionRecordingScript}
 			})
 			firstHome, peerHome := t.TempDir(), t.TempDir()
-			peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+			peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 			peer := rig.startWorker(executionWorkerConfig(rig.mailbox), 90,
 				append(peerGit.Env(), "HOME="+peerHome,
 					"XDG_CONFIG_HOME="+filepath.Join(peerHome, "config"))...)
@@ -389,9 +389,9 @@ func TestChoreographyCompiledReleaseRetainsRecordBlockedGeneration(t *testing.T)
 }
 
 // A real worker executes the ordinary build through the signed return
-// channel, while the first node retains every publication and Git push. The
-// peer's Git wrapper rejects pushes, so a mistaken coordination or release
-// push cannot be hidden by a shared bare remote in this one-host fixture.
+// channel, while the first node retains canonical task and publication authority.
+// The peer's Git wrapper rejects canonical task pushes, so its worker-owned
+// pending and outcome refs cannot hide a mistaken task push in this fixture.
 func TestChoreographyCompiledReleaseDelegatesBuildButPublishesOnFirstNode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the distributed durable node-slot backend is not available on Windows")
@@ -405,7 +405,7 @@ func TestChoreographyCompiledReleaseDelegatesBuildButPublishesOnFirstNode(t *tes
 			`printf '%s %s %s\n' probe-publish "$DISPAT_PACKAGE" ` +
 				`"${DISPAT_EXECUTION_NODE:-orchestrator}" >> "$DISPAT_IT_EXECUTION_LOG"`}
 	})
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	firstHome := t.TempDir()
 	peerHome := t.TempDir()
 	peer := rig.startWorker(executionWorkerConfig(rig.mailbox), 60,
@@ -424,14 +424,14 @@ func TestChoreographyCompiledReleaseDelegatesBuildButPublishesOnFirstNode(t *tes
 	published := executionProbeValues(rig, "publish")
 	require.NotEmpty(t, published["core"], "the first node did not publish core: %v", rig.runs())
 	require.NotEqual(t, executionNode, published["core"], "the peer performed publication")
-	require.Zero(t, peerGit.Matches(), "the peer attempted an engine Git push")
+	require.Zero(t, peerGit.Matches(), "the peer attempted a canonical task Git push")
 	require.Len(t, rig.repo.TagList(), 1, "the first node did not publish one release tag")
 	require.False(t, remoteHoldsLock(t, rig.origin), "the release lock was not cleaned")
 }
 
 // The package's beforeAll vertex executes only on the first node, settles a
 // signed native ticket, and releases the peer build only afterward. The peer
-// has no Git push capability even while the native prelude is active.
+// has no canonical task push capability even while the native prelude is active.
 func TestChoreographyCompiledReleaseSettlesFirstOnlyPreludeBeforePeerBuild(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the distributed durable node-slot backend is not available on Windows")
@@ -449,7 +449,7 @@ func TestChoreographyCompiledReleaseSettlesFirstOnlyPreludeBeforePeerBuild(t *te
 		space.Flow.BeforeAll = []string{"prelude"}
 		cfg.Spaces["libs"] = space
 	})
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	firstHome, peerHome := t.TempDir(), t.TempDir()
 	peer := rig.startWorker(executionWorkerConfig(rig.mailbox), 60,
 		append(peerGit.Env(), "HOME="+peerHome,
@@ -463,7 +463,7 @@ func TestChoreographyCompiledReleaseSettlesFirstOnlyPreludeBeforePeerBuild(t *te
 	require.True(t, strings.HasPrefix(string(content), "probe-native core\n"),
 		"first-only prelude did not precede peer frame: %s", content)
 	require.Equal(t, executionNode, rig.nodesByPackage()["core"])
-	require.Zero(t, peerGit.Matches(), "the peer attempted an engine Git push")
+	require.Zero(t, peerGit.Matches(), "the peer attempted a canonical task Git push")
 	require.True(t, rig.repo.IsTagged("core@0.1.0"))
 	require.False(t, remoteHoldsLock(t, rig.origin))
 }
@@ -617,7 +617,7 @@ func TestChoreographyCompiledReleasePreparesUnreleasedProviderBeforeConsumer(t *
 	placed := rig.nodesByPackage()
 	require.Equal(t, executionNode, placed["assets"], "provider preparation did not run on the peer")
 	require.Equal(t, executionNode, placed["ui"], "consumer build did not run on the peer")
-	require.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(res))
+	require.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(t, rig.mailbox))
 	require.True(t, rig.repo.IsTagged("assets@"+executionPrepareBaseline))
 	require.False(t, rig.repo.IsTagged("assets@1.1.0"))
 	require.True(t, rig.repo.IsTagged("ui@1.1.0"))

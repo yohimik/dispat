@@ -17,131 +17,137 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 )
 
 const (
-	choreographyFailurePartPrelude                                               = "prelude"
-	choreographyFailurePartInputs                                                = "inputs"
-	choreographyFailurePartFrame                                                 = "frame"
-	choreographyFailurePartSnapshot                                              = "snapshot"
-	choreographyFailurePartPlacement                                             = "placement"
-	choreographyFailureDigestHexSize                                             = sha256.Size * 2
-	choreographyOfferBlockedPackageError                                         = "execution: compiled offer names blocked package"
-	choreographyPreparedIdentityMismatchError                                    = "execution: claim prepared input differs from signed ready-frame identity"
-	choreographyResolvedPreparedMismatchFormat                                   = "execution: task %q prepared input differs from first-node state: proposed %q, resolved %q"
-	choreographyResolvedPredecessorMismatchFormat                                = "execution: task %q predecessor result identities differ from first-node state: proposed %q, resolved %q"
-	choreographyNoAcceptedResultOutputOID                                        = ""
-	choreographyBrokerAbsentState                                                = ""
-	choreographyBrokerNoTasks                                                    = 0
-	choreographyBrokerNoTaskWeight                                               = 0
-	choreographyBrokerFirstEligibleNodeIndex                                     = 0
-	choreographyBrokerNoEligibleNodes                                            = 0
-	choreographyBrokerNoPredecessors                                             = 0
-	choreographyBrokerNoQueueEntries                                             = 0
-	choreographyBrokerFirstQueueIndex                                            = 0
-	choreographyBrokerNextQueueIndex                                             = 1
-	choreographyBrokerNoGraphVisits                                              = 0
-	choreographyBrokerNoBindings                                                 = 0
-	choreographyBrokerFirstAttempt                                               = 1
-	choreographyBrokerOneEligibleNode                                            = 1
-	choreographyBrokerMinimumCapacitySlots                                       = 1
-	choreographyBrokerMinimumTaskWeight                                          = 1
-	choreographyBrokerNoClaimableEdges                                           = 0
-	choreographyBrokerLocalFailureValid                                          = true
-	choreographyBrokerLocalFailureInvalid                                        = false
-	choreographyBrokerTaskTerminal                                               = true
-	choreographyBrokerTaskSucceeded                                              = true
-	choreographyBrokerTaskFrameReady                                             = true
-	choreographyBrokerTaskFrameUnready                                           = false
-	choreographyBrokerRunStopping                                                = true
-	choreographyBrokerSignedRefusal                                              = true
-	choreographyBrokerNodeEligible                                               = true
-	choreographyBrokerNodeIneligible                                             = false
-	choreographyBrokerReceiptNotFound                                            = false
-	choreographyBrokerPackageDead                                                = true
-	choreographyBrokerPackageSettlementPending                                   = true
-	choreographyBrokerPackageLive                                                = false
-	choreographyBrokerOutcomeFailed                                              = "failed"
-	choreographyBrokerOutcomeSkipped                                             = "skipped"
-	choreographyBrokerOutcomeCancelled                                           = "cancelled"
-	choreographyBrokerOutcomeRecordBlocked                                       = "record-blocked"
-	choreographyBrokerClaimWonTheQueuedAssignmentError                           = "execution: claim won the queued assignment"
-	choreographyBrokerFatalChoreographyInputBindingError                         = "execution: fatal choreography input binding"
-	choreographyBrokerResultWonTheCancellationRaceError                          = "execution: result won the cancellation race"
-	choreographyBrokerCompiledOfferHasNoAssignmentError                          = "execution: compiled offer has no assignment"
-	choreographyBrokerCompiledOfferDiffersFromReadyTaskError                     = "execution: compiled offer differs from ready task"
-	choreographyBrokerCompiledTaskIsBlockedByPreparedProviderNamedErrorFormat    = "execution: compiled task is blocked by prepared provider %s"
-	choreographyBrokerCompiledOfferNamesBlockedPackageCauseErrorFormat           = "execution: compiled offer names blocked package: %w"
-	choreographyBrokerCompiledSlotDoesNotMatchSelectedNodeError                  = "execution: compiled slot does not match selected node"
-	choreographyBrokerCompiledAssignmentHasNoDurableReceiptError                 = "execution: compiled assignment has no durable receipt"
-	choreographyBrokerCancellationDoesNotNameAnActiveClaimError                  = "execution: cancellation does not name an active claim"
-	choreographyBrokerCancellationHasNoDurableTaskRefError                       = "execution: cancellation has no durable task ref"
-	choreographyBrokerQueueFenceDoesNotNameAnUnclaimedOfferError                 = "execution: queue fence does not name an unclaimed offer"
-	choreographyBrokerQueueFenceHasNoDurableTaskRefError                         = "execution: queue fence has no durable task ref"
-	choreographyBrokerQueueDecisionDoesNotNameAnUnclaimedOfferError              = "execution: queue decision does not name an unclaimed offer"
-	choreographyBrokerQueueDecisionHasNoDurableTaskRefError                      = "execution: queue decision has no durable task ref"
-	choreographyBrokerIncompleteFirstNodeBrokerConfigurationError                = "execution: incomplete first-node broker configuration"
-	choreographyBrokerInvalidStageBudgetError                                    = "execution: invalid stage budget"
-	choreographyBrokerInvalidNodeCapacityError                                   = "execution: invalid node capacity"
-	choreographyBrokerAdmittedNodeNamedHasInconsistentSignedCapacityErrorFormat  = "execution: admitted node %q has inconsistent signed capacity"
-	choreographyBrokerDuplicateCompiledTemplateNamedErrorFormat                  = "execution: duplicate compiled template %q"
-	choreographyBrokerPackageTaskNamedHasNoSharedOutcomePolicyErrorFormat        = "execution: package task %q has no shared outcome policy"
-	choreographyBrokerInvalidIndexedTaskNamedErrorFormat                         = "execution: invalid indexed task %q"
-	choreographyBrokerDuplicateIndexedTaskNamedErrorFormat                       = "execution: duplicate indexed task %q"
-	choreographyBrokerTaskNamedCannotFitNodeNamedErrorFormat                     = "execution: task %q cannot fit node %q"
-	choreographyBrokerInvalidPredecessorNamedOfNamedErrorFormat                  = "execution: invalid predecessor %q of %q"
-	choreographyBrokerIndexedTaskGraphHasACycleError                             = "execution: indexed task graph has a cycle"
-	choreographyBrokerClaimDiffersFromPinnedRunOrCompleteGraphRootError          = "execution: claim differs from pinned run or complete graph root"
-	choreographyBrokerClaimLeaseIdentityDiffersFromTheExactTaskAttemptError      = "execution: claim lease identity differs from the exact task attempt"
-	choreographyBrokerDurableClaimReceiptHasAnotherExactProposalIdentityError    = "execution: durable claim receipt has another exact proposal identity"
-	choreographyBrokerClaimIsOutsideTheSignedRunGraphOrAdmittedNodeError         = "execution: claim is outside the signed run, graph or admitted node"
-	choreographyBrokerClaimBelongsToAnotherPinnedRunError                        = "execution: claim belongs to another pinned run"
-	choreographyBrokerClaimNamesAnotherCompleteCompiledGraphRootError            = "execution: claim names another complete compiled graph root"
-	choreographyBrokerResolvedInputsDifferFromSignedPredecessorFinalityError     = "execution: resolved inputs differ from signed predecessor finality"
-	choreographyBrokerResolvedInputDigestIsEmptyError                            = "execution: resolved input digest is empty"
-	choreographyBrokerClaimDoesNotMatchTheIndexedTaskError                       = "execution: claim does not match the indexed task"
-	choreographyBrokerClaimSuppliesUnverifiedCompiledTemplateOrFilledInputsError = "execution: claim supplies unverified compiled template or filled inputs"
-	choreographyBrokerClaimSExactInputIdentityDigestDiffersError                 = "execution: claim's exact input identity digest differs"
-	choreographyBrokerClaimOmitsSignedPredecessorIdentitiesError                 = "execution: claim omits signed predecessor identities"
-	choreographyBrokerClaimPredecessorNamedIsNotLogicallyFinalErrorFormat        = "execution: claim predecessor %q is not logically final"
-	choreographyBrokerClaimPredecessorNamedNamesAnotherSignedResultErrorFormat   = "execution: claim predecessor %q names another signed result"
-	choreographyBrokerFatalBindingCauseFormat                                    = "%w: %v"
-	choreographyBrokerPersistenceReturnedAMismatchedClaimError                   = "execution: persistence returned a mismatched claim"
-	choreographyBrokerNodeNamedHasNoCurrentAdmittedAuthorityErrorFormat          = "execution: node %q has no current admitted authority"
-	choreographyBrokerJoinDiffersFromPinnedCompleteGraphError                    = "execution: join differs from pinned complete graph"
-	choreographyBrokerJoiningNodeIsOutsideLateAdmissionPolicyError               = "execution: joining node is outside late admission policy"
-	choreographyBrokerSettledJoinReceiptHasAnotherCapacityAuthorityError         = "execution: settled join receipt has another capacity authority"
-	choreographyBrokerJoinReceiptQueryDiffersFromBrokerIdentityError             = "execution: join receipt query differs from broker identity"
-	choreographyBrokerInputPredecessorIsNotFinalError                            = "execution: input predecessor is not final"
-	choreographyBrokerTaskInputIdentityHasNoBrokerError                          = "execution: task input identity has no broker"
-	choreographyBrokerTaskNamedIsNotReadyForExactInputIdentityErrorFormat        = "execution: task %q is not ready for exact input identity"
-	choreographyBrokerReadyFrameHasNoExactInputIdentityError                     = "execution: ready frame has no exact input identity"
-	choreographyBrokerTaskNamedCannotPublishAReadyFrameErrorFormat               = "execution: task %q cannot publish a ready frame"
-	choreographyBrokerReadyFrameDiffersFromSignedPredecessorInputsError          = "execution: ready frame differs from signed predecessor inputs"
-	choreographyBrokerResultPayloadIsMissingError                                = "execution: result payload is missing"
-	choreographyBrokerResultBelongsToAnotherPinnedRunError                       = "execution: result belongs to another pinned run"
-	choreographyBrokerProposalIdReusedForAnotherResultError                      = "execution: proposal ID reused for another result"
-	choreographyBrokerPersistedResultRequiresRunStateReconciliationError         = "execution: persisted result requires run-state reconciliation"
-	choreographyBrokerResultDoesNotAnswerTheActiveClaimError                     = "execution: result does not answer the active claim"
-	choreographyBrokerPersistenceReturnedAMismatchedResultError                  = "execution: persistence returned a mismatched result"
-	choreographyBrokerInvalidCancellationAcknowledgementError                    = "execution: invalid cancellation acknowledgement"
-	choreographyBrokerReusedAcknowledgementIdentityError                         = "execution: reused acknowledgement identity"
-	choreographyBrokerAcknowledgementHasNoActiveAttemptError                     = "execution: acknowledgement has no active attempt"
-	choreographyBrokerPersistedAcknowledgementDiffersError                       = "execution: persisted acknowledgement differs"
-	choreographyBrokerInvalidAttemptDecisionError                                = "execution: invalid attempt decision"
-	choreographyBrokerPersistenceReturnedNoDecisionCommitError                   = "execution: persistence returned no decision commit"
-	choreographyBrokerLocalAuthorityOutcomeIsNotAdmissibleError                  = "execution: local authority outcome is not admissible"
-	choreographyBrokerPackageOutcomeHasNoSharedEvaluatorError                    = "execution: package outcome has no shared evaluator"
-	choreographyBrokerBlockedTaskIsNotAdmissibleError                            = "execution: blocked task is not admissible"
-	choreographyBrokerLocalFailureHasNoInertDelegatedTaskError                   = "execution: local failure has no inert delegated task"
-	choreographyBrokerInvalidLocalFailureEvidenceError                           = "execution: invalid local failure evidence"
-	choreographyBrokerPreparedTaskNamesAnotherFailureCauseError                  = "execution: prepared task names another failure cause"
-	choreographyBrokerBlockedTaskNamesAnotherSettledPackageError                 = "execution: blocked task names another settled package"
-	choreographyBrokerBlockedTaskNamesAnotherPreparedProviderError               = "execution: blocked task names another prepared provider"
-	choreographyBrokerBlockedTaskHasNoSharedOutcomeEvaluatorError                = "execution: blocked task has no shared outcome evaluator"
-	choreographyBrokerBlockedTaskDiffersFromSharedSkipPolicyError                = "execution: blocked task differs from shared skip policy"
-	choreographyBrokerReceiptQueryBelongsToAnotherRunError                       = "execution: receipt query belongs to another run"
-	choreographyBrokerReceiptQueryNamesAnotherTaskRefError                       = "execution: receipt query names another task ref"
+	choreographyBrokerZeroCancelResponseDuration                                 time.Duration = 0
+	choreographyFailurePartPrelude                                                             = "prelude"
+	choreographyFailurePartInputs                                                              = "inputs"
+	choreographyFailurePartFrame                                                               = "frame"
+	choreographyFailurePartSnapshot                                                            = "snapshot"
+	choreographyFailurePartPlacement                                                           = "placement"
+	choreographyFailureDigestHexSize                                                           = sha256.Size * 2
+	choreographyOfferBlockedPackageError                                                       = "execution: compiled offer names blocked package"
+	choreographyPreparedIdentityMismatchError                                                  = "execution: claim prepared input differs from signed ready-frame identity"
+	choreographyResolvedPreparedMismatchFormat                                                 = "execution: task %q prepared input differs from first-node state: proposed %q, resolved %q"
+	choreographyResolvedPredecessorMismatchFormat                                              = "execution: task %q predecessor result identities differ from first-node state: proposed %q, resolved %q"
+	choreographyNoAcceptedResultOutputOID                                                      = ""
+	choreographyBrokerAbsentState                                                              = ""
+	choreographyBrokerNoTasks                                                                  = 0
+	choreographyBrokerNoTaskWeight                                                             = 0
+	choreographyBrokerFirstEligibleNodeIndex                                                   = 0
+	choreographyBrokerNoEligibleNodes                                                          = 0
+	choreographyBrokerNoPredecessors                                                           = 0
+	choreographyBrokerNoQueueEntries                                                           = 0
+	choreographyBrokerFirstQueueIndex                                                          = 0
+	choreographyBrokerNextQueueIndex                                                           = 1
+	choreographyBrokerNoGraphVisits                                                            = 0
+	choreographyBrokerNoBindings                                                               = 0
+	choreographyBrokerFirstAttempt                                                             = 1
+	choreographyBrokerOneEligibleNode                                                          = 1
+	choreographyBrokerMinimumCapacitySlots                                                     = 1
+	choreographyBrokerMinimumTaskWeight                                                        = 1
+	choreographyBrokerNoClaimableEdges                                                         = 0
+	choreographyBrokerLocalFailureValid                                                        = true
+	choreographyBrokerLocalFailureInvalid                                                      = false
+	choreographyBrokerTaskTerminal                                                             = true
+	choreographyBrokerTaskSucceeded                                                            = true
+	choreographyBrokerTaskFrameReady                                                           = true
+	choreographyBrokerTaskFrameUnready                                                         = false
+	choreographyBrokerRunStopping                                                              = true
+	choreographyBrokerSignedRefusal                                                            = true
+	choreographyBrokerNodeEligible                                                             = true
+	choreographyBrokerNodeIneligible                                                           = false
+	choreographyBrokerReceiptNotFound                                                          = false
+	choreographyBrokerPackageDead                                                              = true
+	choreographyBrokerPackageSettlementPending                                                 = true
+	choreographyBrokerPackageLive                                                              = false
+	choreographyBrokerOutcomeFailed                                                            = "failed"
+	choreographyBrokerOutcomeSkipped                                                           = "skipped"
+	choreographyBrokerOutcomeCancelled                                                         = "cancelled"
+	choreographyBrokerOutcomeRecordBlocked                                                     = "record-blocked"
+	choreographyBrokerClaimWonTheQueuedAssignmentError                                         = "execution: claim won the queued assignment"
+	choreographyBrokerFatalChoreographyInputBindingError                                       = "execution: fatal choreography input binding"
+	choreographyBrokerResultWonTheCancellationRaceError                                        = "execution: result won the cancellation race"
+	choreographyBrokerTaskAlreadyFinalBeforeCancellationError                                  = "execution: logical task finality won the cancellation race"
+	choreographyBrokerCompiledOfferHasNoAssignmentError                                        = "execution: compiled offer has no assignment"
+	choreographyBrokerCompiledOfferDiffersFromReadyTaskError                                   = "execution: compiled offer differs from ready task"
+	choreographyBrokerCompiledTaskIsBlockedByPreparedProviderNamedErrorFormat                  = "execution: compiled task is blocked by prepared provider %s"
+	choreographyBrokerCompiledOfferNamesBlockedPackageCauseErrorFormat                         = "execution: compiled offer names blocked package: %w"
+	choreographyBrokerCompiledSlotDoesNotMatchSelectedNodeError                                = "execution: compiled slot does not match selected node"
+	choreographyBrokerCompiledAssignmentHasNoDurableReceiptError                               = "execution: compiled assignment has no durable receipt"
+	choreographyBrokerCancellationDoesNotNameAnActiveClaimError                                = "execution: cancellation does not name an active claim"
+	choreographyBrokerCancellationHasNoDurableTaskRefError                                     = "execution: cancellation has no durable task ref"
+	choreographyBrokerQueueFenceDoesNotNameAnUnclaimedOfferError                               = "execution: queue fence does not name an unclaimed offer"
+	choreographyBrokerQueueFenceHasNoDurableTaskRefError                                       = "execution: queue fence has no durable task ref"
+	choreographyBrokerQueueDecisionDoesNotNameAnUnclaimedOfferError                            = "execution: queue decision does not name an unclaimed offer"
+	choreographyBrokerQueueDecisionHasNoDurableTaskRefError                                    = "execution: queue decision has no durable task ref"
+	choreographyBrokerIncompleteFirstNodeBrokerConfigurationError                              = "execution: incomplete first-node broker configuration"
+	choreographyBrokerInvalidStageBudgetError                                                  = "execution: invalid stage budget"
+	choreographyBrokerInvalidNodeCapacityError                                                 = "execution: invalid node capacity"
+	choreographyBrokerAdmittedNodeNamedHasInconsistentSignedCapacityErrorFormat                = "execution: admitted node %q has inconsistent signed capacity"
+	choreographyBrokerDuplicateCompiledTemplateNamedErrorFormat                                = "execution: duplicate compiled template %q"
+	choreographyBrokerPackageTaskNamedHasNoSharedOutcomePolicyErrorFormat                      = "execution: package task %q has no shared outcome policy"
+	choreographyBrokerInvalidIndexedTaskNamedErrorFormat                                       = "execution: invalid indexed task %q"
+	choreographyBrokerDuplicateIndexedTaskNamedErrorFormat                                     = "execution: duplicate indexed task %q"
+	choreographyBrokerTaskNamedCannotFitNodeNamedErrorFormat                                   = "execution: task %q cannot fit node %q"
+	choreographyBrokerInvalidPredecessorNamedOfNamedErrorFormat                                = "execution: invalid predecessor %q of %q"
+	choreographyBrokerIndexedTaskGraphHasACycleError                                           = "execution: indexed task graph has a cycle"
+	choreographyBrokerClaimDiffersFromPinnedRunOrCompleteGraphRootError                        = "execution: claim differs from pinned run or complete graph root"
+	choreographyBrokerClaimLeaseIdentityDiffersFromTheExactTaskAttemptError                    = "execution: claim lease identity differs from the exact task attempt"
+	choreographyBrokerDurableClaimReceiptHasAnotherExactProposalIdentityError                  = "execution: durable claim receipt has another exact proposal identity"
+	choreographyBrokerClaimIsOutsideTheSignedRunGraphOrAdmittedNodeError                       = "execution: claim is outside the signed run, graph or admitted node"
+	choreographyBrokerClaimBelongsToAnotherPinnedRunError                                      = "execution: claim belongs to another pinned run"
+	choreographyBrokerClaimNamesAnotherCompleteCompiledGraphRootError                          = "execution: claim names another complete compiled graph root"
+	choreographyBrokerResolvedInputsDifferFromSignedPredecessorFinalityError                   = "execution: resolved inputs differ from signed predecessor finality"
+	choreographyBrokerResolvedInputDigestIsEmptyError                                          = "execution: resolved input digest is empty"
+	choreographyBrokerClaimDoesNotMatchTheIndexedTaskError                                     = "execution: claim does not match the indexed task"
+	choreographyBrokerClaimSuppliesUnverifiedCompiledTemplateOrFilledInputsError               = "execution: claim supplies unverified compiled template or filled inputs"
+	choreographyBrokerClaimSExactInputIdentityDigestDiffersError                               = "execution: claim's exact input identity digest differs"
+	choreographyBrokerClaimOmitsSignedPredecessorIdentitiesError                               = "execution: claim omits signed predecessor identities"
+	choreographyBrokerClaimPredecessorNamedIsNotLogicallyFinalErrorFormat                      = "execution: claim predecessor %q is not logically final"
+	choreographyBrokerClaimPredecessorNamedNamesAnotherSignedResultErrorFormat                 = "execution: claim predecessor %q names another signed result"
+	choreographyBrokerFatalBindingCauseFormat                                                  = "%w: %v"
+	choreographyBrokerPersistenceReturnedAMismatchedClaimError                                 = "execution: persistence returned a mismatched claim"
+	choreographyBrokerNodeNamedHasNoCurrentAdmittedAuthorityErrorFormat                        = "execution: node %q has no current admitted authority"
+	choreographyBrokerJoinDiffersFromPinnedCompleteGraphError                                  = "execution: join differs from pinned complete graph"
+	choreographyBrokerJoiningNodeIsOutsideLateAdmissionPolicyError                             = "execution: joining node is outside late admission policy"
+	choreographyBrokerSettledJoinReceiptHasAnotherCapacityAuthorityError                       = "execution: settled join receipt has another capacity authority"
+	choreographyBrokerJoinReceiptQueryDiffersFromBrokerIdentityError                           = "execution: join receipt query differs from broker identity"
+	choreographyBrokerInputPredecessorIsNotFinalError                                          = "execution: input predecessor is not final"
+	choreographyBrokerTaskInputIdentityHasNoBrokerError                                        = "execution: task input identity has no broker"
+	choreographyBrokerTaskNamedIsNotReadyForExactInputIdentityErrorFormat                      = "execution: task %q is not ready for exact input identity"
+	choreographyBrokerReadyFrameHasNoExactInputIdentityError                                   = "execution: ready frame has no exact input identity"
+	choreographyBrokerTaskNamedCannotPublishAReadyFrameErrorFormat                             = "execution: task %q cannot publish a ready frame"
+	choreographyBrokerReadyFrameDiffersFromSignedPredecessorInputsError                        = "execution: ready frame differs from signed predecessor inputs"
+	choreographyBrokerResultPayloadIsMissingError                                              = "execution: result payload is missing"
+	choreographyBrokerCompiledPickupIdentityRequiredError                                      = "execution: compiled executable claim requires an exact pickup identity"
+	choreographyBrokerResultBelongsToAnotherPinnedRunError                                     = "execution: result belongs to another pinned run"
+	choreographyBrokerProposalIdReusedForAnotherResultError                                    = "execution: proposal ID reused for another result"
+	choreographyBrokerPersistedResultRequiresRunStateReconciliationError                       = "execution: persisted result requires run-state reconciliation"
+	choreographyBrokerResultDoesNotAnswerTheActiveClaimError                                   = "execution: result does not answer the active claim"
+	choreographyBrokerPersistenceReturnedAMismatchedResultError                                = "execution: persistence returned a mismatched result"
+	choreographyBrokerInvalidCancellationAcknowledgementError                                  = "execution: invalid cancellation acknowledgement"
+	choreographyBrokerReusedAcknowledgementIdentityError                                       = "execution: reused acknowledgement identity"
+	choreographyBrokerAcknowledgementHasNoActiveAttemptError                                   = "execution: acknowledgement has no active attempt"
+	choreographyBrokerPersistedAcknowledgementDiffersError                                     = "execution: persisted acknowledgement differs"
+	choreographyBrokerInvalidAttemptDecisionError                                              = "execution: invalid attempt decision"
+	choreographyBrokerPersistenceReturnedNoDecisionCommitError                                 = "execution: persistence returned no decision commit"
+	choreographyBrokerLocalAuthorityOutcomeIsNotAdmissibleError                                = "execution: local authority outcome is not admissible"
+	choreographyBrokerPackageOutcomeHasNoSharedEvaluatorError                                  = "execution: package outcome has no shared evaluator"
+	choreographyBrokerBlockedTaskIsNotAdmissibleError                                          = "execution: blocked task is not admissible"
+	choreographyBrokerLocalFailureHasNoInertDelegatedTaskError                                 = "execution: local failure has no inert delegated task"
+	choreographyBrokerInvalidLocalFailureEvidenceError                                         = "execution: invalid local failure evidence"
+	choreographyBrokerPreparedTaskNamesAnotherFailureCauseError                                = "execution: prepared task names another failure cause"
+	choreographyBrokerBlockedTaskNamesAnotherSettledPackageError                               = "execution: blocked task names another settled package"
+	choreographyBrokerBlockedTaskNamesAnotherPreparedProviderError                             = "execution: blocked task names another prepared provider"
+	choreographyBrokerBlockedTaskHasNoSharedOutcomeEvaluatorError                              = "execution: blocked task has no shared outcome evaluator"
+	choreographyBrokerBlockedTaskDiffersFromSharedSkipPolicyError                              = "execution: blocked task differs from shared skip policy"
+	choreographyBrokerReceiptQueryBelongsToAnotherRunError                                     = "execution: receipt query belongs to another run"
+	choreographyBrokerReceiptQueryNamesAnotherTaskRefError                                     = "execution: receipt query names another task ref"
 )
 
 var errChoreographyClaimWon = errors.New(choreographyBrokerClaimWonTheQueuedAssignmentError)
@@ -154,28 +160,34 @@ var ErrChoreographyBindingFatal = errors.New(choreographyBrokerFatalChoreography
 // ledger: a Result was accepted before its exact Cancel task CAS could land.
 var ErrChoreographyResultWon = errors.New(choreographyBrokerResultWonTheCancellationRaceError)
 
+// ErrChoreographyTaskAlreadyFinal asks a lagging observer to consume the
+// signed terminal event rather than cancel an obsolete pickup identity.
+var ErrChoreographyTaskAlreadyFinal = errors.New(choreographyBrokerTaskAlreadyFinalBeforeCancellationError)
+
 // ChoreographyTaskSpec is one task independently reconstructed by every
 // participant. The first node also binds it to the precreated Git task ref.
 type ChoreographyTaskSpec struct {
-	Task               string
-	Package            string
-	Kind               string
-	Stage              string
-	Recording          bool
-	Branch             string
-	ReservationOID     string
-	InputsDigest       string
-	Virtual            bool
-	LocalAuthority     bool
-	ExecutorOwned      bool
-	NeedsPreparedInput bool
-	Budget             string
-	Weight             int
-	Placement          Placement
-	Platforms          []string
-	TemplateDigest     string
-	Predecessors       []string
-	EligibleNodes      []string
+	Task                       string
+	Package                    string
+	Kind                       string
+	Stage                      string
+	Recording                  bool
+	Branch                     string
+	ReservationOID             string
+	InputsDigest               string
+	Virtual                    bool
+	LocalAuthority             bool
+	ExecutorOwned              bool
+	RetryAfterUncertainAttempt bool `json:"retryAfterUncertainAttempt,omitempty"`
+	NeedsPreparedInput         bool
+	Budget                     string
+	Weight                     int
+	Placement                  Placement
+	Platforms                  []string
+	TemplateDigest             string
+	Predecessors               []string
+	PreparedProviders          []string
+	EligibleNodes              []string
 }
 
 // ChoreographyPersistable is the sole Git-writing capability. Only the first
@@ -186,7 +198,7 @@ type ChoreographyTaskSpec struct {
 // indexed graph or capacity ledger changes.
 type ChoreographyPersistable interface {
 	PersistAssignment(context.Context, ChoreographyAssignmentOffer) (ChoreographyAssignmentReceipt, error)
-	PersistCancel(context.Context, ChoreographyCancellation) (string, error)
+	PersistCancel(context.Context, ChoreographyCancellation) (ChoreographyCancellationReceipt, error)
 	PersistQueueFence(context.Context, ChoreographyQueueFence) (string, error)
 	PersistUnclaimedDecision(context.Context, ChoreographyDecision) (string, error)
 	PersistClaim(context.Context, ChoreographyClaimProposal) (ChoreographyReceipt, error)
@@ -260,12 +272,20 @@ type ChoreographyQueueFence struct {
 // that wins that CAS is handled as a result, never as an acknowledged stop.
 type ChoreographyCancellation struct {
 	ChoreographyRunBinding
-	Task          string
-	Branch        string
-	Attempt       int
-	Node          string
-	AssignmentOID string
-	ClaimOID      string
+	Task                   string
+	Branch                 string
+	Attempt                int
+	Node                   string
+	AssignmentOID          string
+	ClaimOID               string
+	CancelReplyDeadlineUTC string
+}
+
+// ChoreographyCancellationReceipt repeats the deadline in the exact signed
+// Cancel. An unresolved push retry must reuse that original deadline.
+type ChoreographyCancellationReceipt struct {
+	OID                    string
+	CancelReplyDeadlineUTC string
 }
 
 // ChoreographyLocalOutcome is asserted only by the first node after its
@@ -341,6 +361,7 @@ type FirstNodeBrokerOptions struct {
 	VerifyNodeJoin            func(context.Context, ChoreographyJoinProposal) error
 	OutcomePolicy             ChoreographyOutcomePolicyx
 	Persist                   ChoreographyPersistable
+	CancelResponseDuration    time.Duration
 }
 
 type indexedChoreographyTask struct {
@@ -366,6 +387,24 @@ type indexedChoreographyTask struct {
 	pendingPackageSettlement bool
 	frameReady               bool
 	preparedInputOID         string
+	pickups                  map[string]*indexedChoreographyPickup
+}
+
+type indexedChoreographyPickup struct {
+	id                     string
+	attempt                int
+	node                   string
+	claimOID               string
+	assignmentOID          string
+	leaseIntentID          string
+	resultReceiptOID       string
+	resultOutputOID        string
+	cancelOID              string
+	cancelReplyDeadlineUTC string
+	contactLost            bool
+	settled                bool
+	settlementDigest       string
+	deadlineUTC            string
 }
 
 // choreographyPredecessorIdentity retains the accepted raw Result for a
@@ -436,6 +475,10 @@ func (b *FirstNodeBroker) CancelClaim(ctx context.Context,
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	task := b.tasks[c.Task]
+	if c.ChoreographyRunBinding == b.binding && task != nil && task.terminal &&
+		c.Branch == task.spec.Branch {
+		return choreographyBrokerAbsentState, ErrChoreographyTaskAlreadyFinal
+	}
 	if task != nil && task.result != choreographyBrokerAbsentState && task.claim == c.ClaimOID &&
 		task.spec.Branch == c.Branch && task.attempt == c.Attempt {
 		return choreographyBrokerAbsentState, ErrChoreographyResultWon
@@ -449,15 +492,27 @@ func (b *FirstNodeBroker) CancelClaim(ctx context.Context,
 	if task.cancel != choreographyBrokerAbsentState {
 		return task.cancel, nil
 	}
-	oid, err := b.persist.PersistCancel(ctx, c)
+	deadline := time.Now().UTC().Add(b.cancelResponseDuration)
+	if deadline.Year() > choreographyPickupLastUTCYear {
+		return choreographyBrokerAbsentState, fmt.Errorf(choreographyBrokerInvalidCancellationAcknowledgementError)
+	}
+	c.CancelReplyDeadlineUTC = deadline.Format(time.RFC3339Nano)
+	receipt, err := b.persist.PersistCancel(ctx, c)
 	if err != nil {
 		return choreographyBrokerAbsentState, err
 	}
-	if oid == choreographyBrokerAbsentState {
+	if receipt.OID == choreographyBrokerAbsentState || receipt.CancelReplyDeadlineUTC == choreographyBrokerAbsentState {
 		return choreographyBrokerAbsentState, fmt.Errorf(choreographyBrokerCancellationHasNoDurableTaskRefError)
 	}
-	task.cancel, task.tip = oid, oid
-	return oid, nil
+	task.cancel, task.tip = receipt.OID, receipt.OID
+	for _, pickup := range task.pickups {
+		if pickup.claimOID == c.ClaimOID {
+			pickup.cancelOID = receipt.OID
+			pickup.cancelReplyDeadlineUTC = receipt.CancelReplyDeadlineUTC
+			break
+		}
+	}
+	return receipt.OID, nil
 }
 
 // FenceUnclaimedOffer closes the task-ref Claim CAS before failure hooks run.
@@ -540,47 +595,60 @@ func (b *FirstNodeBroker) DecideUnclaimedOffer(ctx context.Context,
 // then asks its Git backend to persist before issuing a receipt. Its mutex
 // serializes competing claims and decisions, not script execution.
 type FirstNodeBroker struct {
-	mu                   sync.Mutex
-	nativeInputLane      sync.RWMutex
-	binding              ChoreographyRunBinding
-	graphRootOID         string
-	joinPolicy           ChoreographyJoinPolicy
-	templates            map[string]ChoreographyCompiledTemplate
-	members              map[string]ChoreographyRuntimeNode
-	memberEpoch          map[string]string
-	draining             map[string]bool
-	firstNode            string
-	tasks                map[string]*indexedChoreographyTask
-	nodeCaps             map[string]int
-	nodeUsed             map[string]int
-	budgets              map[string]int
-	used                 map[string]int
-	budgetWake           chan struct{}
-	resolveInputs        func(context.Context, string) (string, error)
-	resolveBindings      func(context.Context, string, string) (ChoreographyTaskBindings, error)
-	onClaimAccepted      func(ChoreographyTaskSpec, ChoreographyTaskBindings)
-	onFatalBinding       func(error)
-	validateJoinReport   func(*NodeReport) error
-	verifyNodeJoin       func(context.Context, ChoreographyJoinProposal) error
-	outcomePolicy        ChoreographyOutcomePolicyx
-	packageState         map[string]string
-	sealed               bool
-	stopping             bool
-	signedStop           bool
-	executionStarted     bool
-	admissionDeadlineUTC string
-	invalidated          bool
-	fault                error
-	persist              ChoreographyPersistable
+	mu                     sync.Mutex
+	nativeInputLane        sync.RWMutex
+	binding                ChoreographyRunBinding
+	graphRootOID           string
+	joinPolicy             ChoreographyJoinPolicy
+	templates              map[string]ChoreographyCompiledTemplate
+	members                map[string]ChoreographyRuntimeNode
+	memberEpoch            map[string]string
+	draining               map[string]bool
+	firstNode              string
+	tasks                  map[string]*indexedChoreographyTask
+	nodeCaps               map[string]int
+	nodeUsed               map[string]int
+	budgets                map[string]int
+	used                   map[string]int
+	budgetWake             chan struct{}
+	resolveInputs          func(context.Context, string) (string, error)
+	resolveBindings        func(context.Context, string, string) (ChoreographyTaskBindings, error)
+	onClaimAccepted        func(ChoreographyTaskSpec, ChoreographyTaskBindings)
+	onFatalBinding         func(error)
+	validateJoinReport     func(*NodeReport) error
+	verifyNodeJoin         func(context.Context, ChoreographyJoinProposal) error
+	outcomePolicy          ChoreographyOutcomePolicyx
+	packageState           map[string]string
+	sealed                 bool
+	stopping               bool
+	signedStop             bool
+	cancelResponseDuration time.Duration
+	executionStarted       bool
+	admissionDeadlineUTC   string
+	invalidated            bool
+	fault                  error
+	persist                ChoreographyPersistable
 }
 
 func NewFirstNodeBroker(opts FirstNodeBrokerOptions) (*FirstNodeBroker, error) {
+	if err := validateChoreographyRetryPolicy(opts.JoinPolicy, opts.Tasks); err != nil {
+		return nil, err
+	}
+	if opts.CancelResponseDuration == choreographyBrokerZeroCancelResponseDuration {
+		opts.CancelResponseDuration = taskReportTimeout
+	}
+	if opts.CancelResponseDuration < time.Second ||
+		opts.CancelResponseDuration > time.Duration(maxChoreographyAdmissionSeconds)*time.Second ||
+		opts.CancelResponseDuration%time.Second != choreographyBrokerZeroCancelResponseDuration {
+		return nil, fmt.Errorf(choreographyBrokerIncompleteFirstNodeBrokerConfigurationError)
+	}
 	if !opts.Binding.valid() || opts.GraphRootOID == choreographyBrokerAbsentState || opts.InitialMembershipEpochOID == choreographyBrokerAbsentState ||
 		opts.Persist == nil || len(opts.Tasks) == choreographyBrokerNoTasks {
 		return nil, fmt.Errorf(choreographyBrokerIncompleteFirstNodeBrokerConfigurationError)
 	}
 	b := &FirstNodeBroker{binding: opts.Binding, graphRootOID: opts.GraphRootOID,
-		joinPolicy: opts.JoinPolicy, templates: make(map[string]ChoreographyCompiledTemplate, len(opts.Templates)),
+		cancelResponseDuration: opts.CancelResponseDuration,
+		joinPolicy:             opts.JoinPolicy, templates: make(map[string]ChoreographyCompiledTemplate, len(opts.Templates)),
 		members: make(map[string]ChoreographyRuntimeNode), memberEpoch: make(map[string]string),
 		draining:  make(map[string]bool),
 		firstNode: opts.FirstNode, tasks: make(map[string]*indexedChoreographyTask, len(opts.Tasks)),
@@ -733,6 +801,7 @@ func (b *FirstNodeBroker) completeVirtual(first *indexedChoreographyTask) {
 		for _, childName := range task.children {
 			child := b.tasks[childName]
 			if blocker := task.preparedBlockedBy; blocker != choreographyBrokerAbsentState &&
+				choreographyPreparedProviderFor(child.spec, blocker) &&
 				(child.preparedBlockedBy == choreographyBrokerAbsentState || blocker < child.preparedBlockedBy) {
 				child.preparedBlockedBy = blocker
 			}
@@ -756,7 +825,7 @@ func (b *FirstNodeBroker) AcceptClaim(ctx context.Context, p ChoreographyClaimPr
 	if err := VerifyChoreographyClaimIdentity(b.joinPolicy, p); err != nil {
 		return ChoreographyReceipt{}, err
 	}
-	if p.LeaseIntentID != nodeSlotLeaseID(NodeSlotIntent{Run: p.Run, Task: p.Task, Attempt: p.Attempt}) {
+	if p.LeaseIntentID != nodeSlotLeaseID(NodeSlotIntent{Run: p.Run, Task: p.Task, Attempt: p.Attempt, PickupID: p.PickupID}) {
 		return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerClaimLeaseIdentityDiffersFromTheExactTaskAttemptError)
 	}
 	query, err := FormatClaimReceiptQuery(p)
@@ -776,6 +845,17 @@ func (b *FirstNodeBroker) AcceptClaim(ctx context.Context, p ChoreographyClaimPr
 		if old.Accepted {
 			b.mu.Lock()
 			task := b.tasks[p.Task]
+			if task != nil && p.PickupID != choreographyBrokerAbsentState {
+				if task.pickups == nil {
+					task.pickups = make(map[string]*indexedChoreographyPickup)
+				}
+				if task.pickups[p.PickupID] == nil {
+					task.pickups[p.PickupID] = &indexedChoreographyPickup{
+						id: p.PickupID, attempt: p.Attempt, node: p.Node,
+						claimOID: old.OID, assignmentOID: old.AssignmentOID,
+						leaseIntentID: p.LeaseIntentID, deadlineUTC: old.PickupDeadlineUTC}
+				}
+			}
 			if task != nil && task.claim == choreographyBrokerAbsentState && task.tip == p.ExpectedOID &&
 				task.attempt == p.Attempt && task.remaining == choreographyBrokerNoClaimableEdges && !task.terminal {
 				task.claim, task.tip, task.owner = old.OID, old.OID, p.Node
@@ -797,6 +877,11 @@ func (b *FirstNodeBroker) AcceptClaim(ctx context.Context, p ChoreographyClaimPr
 		precheckTask == nil || !b.nodeEligible(precheckTask.spec, p.Node) {
 		b.mu.Unlock()
 		return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerClaimIsOutsideTheSignedRunGraphOrAdmittedNodeError)
+	}
+	if !precheckTask.spec.ExecutorOwned && precheckTask.spec.TemplateDigest != choreographyBrokerAbsentState &&
+		p.PickupID == choreographyBrokerAbsentState {
+		b.mu.Unlock()
+		return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerCompiledPickupIdentityRequiredError)
 	}
 	if !b.executionStarted {
 		b.mu.Unlock()
@@ -870,6 +955,9 @@ func (b *FirstNodeBroker) AcceptClaim(ctx context.Context, p ChoreographyClaimPr
 	}
 	if task.claim != choreographyBrokerAbsentState || p.ExpectedOID != task.tip {
 		return b.persist.PersistRefusal(ctx, p, ChoreographyRefusalBusy)
+	}
+	if p.PickupID != choreographyBrokerAbsentState && task.pickups[p.PickupID] != nil {
+		return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerDurableClaimReceiptHasAnotherExactProposalIdentityError)
 	}
 	if b.used[task.spec.Budget]+task.spec.Weight > b.budgets[task.spec.Budget] {
 		return b.persist.PersistRefusal(ctx, p, ChoreographyRefusalBudgetCapacity)
@@ -954,6 +1042,27 @@ func (b *FirstNodeBroker) AcceptClaim(ctx context.Context, p ChoreographyClaimPr
 	}
 	receipt, err := b.persist.PersistClaim(ctx, p)
 	if err != nil {
+		if errors.Is(err, errChoreographyAtomicRefused) {
+			if b.onFatalBinding != nil {
+				b.onFatalBinding(err)
+			}
+			if _, stopErr := b.persist.StopClaims(ctx); stopErr != nil {
+				b.fault = errors.Join(err, stopErr)
+				b.wakeBudgetWaiters()
+				return ChoreographyReceipt{}, b.fault
+			}
+			b.stopping = choreographyBrokerRunStopping
+			b.wakeBudgetWaiters()
+			return b.persist.PersistRefusal(ctx, p, ChoreographyRefusalStopping)
+		}
+		if errors.Is(err, gitx.ErrPushUnknown) {
+			// The exact task and ledger CAS may still land after readback.
+			// Keep its pending identity and every physical lease fenced, but
+			// wake task observers so the run fails boundedly instead of waiting
+			// for a task event that cannot safely be synthesized.
+			b.fault = err
+			b.wakeBudgetWaiters()
+		}
 		return ChoreographyReceipt{}, err
 	}
 	if !receipt.Accepted || receipt.Kind != choreographyClaimKind || receipt.ChoreographyRunBinding != b.binding || receipt.Task != p.Task ||
@@ -964,6 +1073,15 @@ func (b *FirstNodeBroker) AcceptClaim(ctx context.Context, p ChoreographyClaimPr
 	task.claim = receipt.OID
 	task.tip = receipt.OID
 	task.owner = p.Node
+	if p.PickupID != choreographyBrokerAbsentState {
+		if task.pickups == nil {
+			task.pickups = make(map[string]*indexedChoreographyPickup)
+		}
+		task.pickups[p.PickupID] = &indexedChoreographyPickup{
+			id: p.PickupID, attempt: p.Attempt, node: p.Node,
+			claimOID: receipt.OID, assignmentOID: receipt.AssignmentOID,
+			leaseIntentID: p.LeaseIntentID, deadlineUTC: receipt.PickupDeadlineUTC}
+	}
 	b.used[task.spec.Budget] += task.spec.Weight
 	b.nodeUsed[p.Node] += task.spec.Weight
 	if p.resolvedBindings != nil && b.onClaimAccepted != nil {
@@ -1212,9 +1330,30 @@ func (b *FirstNodeBroker) AcceptResult(ctx context.Context, p ChoreographyResult
 			return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerProposalIdReusedForAnotherResultError)
 		}
 		task := b.tasks[p.Task]
+		if p.PickupID != choreographyBrokerAbsentState {
+			if task == nil || task.pickups[p.PickupID] == nil ||
+				task.pickups[p.PickupID].claimOID != p.ClaimOID {
+				return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerPersistedResultRequiresRunStateReconciliationError)
+			}
+			pickup := task.pickups[p.PickupID]
+			if pickup.resultReceiptOID == choreographyBrokerAbsentState {
+				pickup.resultReceiptOID, pickup.resultOutputOID = old.OID, p.ResultDigest
+				b.wakeBudgetWaiters()
+			}
+			if pickup.resultReceiptOID != old.OID {
+				return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerPersistedResultRequiresRunStateReconciliationError)
+			}
+			if task.claim == p.ClaimOID {
+				task.result, task.resultOutputOID = old.OID, p.ResultDigest
+			}
+			return old, nil
+		}
 		if task != nil && task.result == choreographyBrokerAbsentState && task.claim == p.ClaimOID &&
 			task.attempt == p.Attempt && task.owner == p.Node {
-			task.result, task.tip, task.resultOutputOID = old.OID, old.OID, p.ResultDigest
+			task.result, task.resultOutputOID = old.OID, p.ResultDigest
+			if p.PickupID == choreographyBrokerAbsentState {
+				task.tip = old.OID
+			}
 		}
 		if task == nil || task.result != old.OID {
 			return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerPersistedResultRequiresRunStateReconciliationError)
@@ -1222,6 +1361,39 @@ func (b *FirstNodeBroker) AcceptResult(ctx context.Context, p ChoreographyResult
 		return old, nil
 	}
 	task := b.tasks[p.Task]
+	if task != nil && !task.spec.ExecutorOwned &&
+		task.spec.TemplateDigest != choreographyBrokerAbsentState &&
+		p.PickupID == choreographyBrokerAbsentState {
+		return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerCompiledPickupIdentityRequiredError)
+	}
+	if p.PickupID != choreographyBrokerAbsentState {
+		pickup := (*indexedChoreographyPickup)(nil)
+		if task != nil {
+			pickup = task.pickups[p.PickupID]
+		}
+		if pickup == nil || pickup.resultReceiptOID != choreographyBrokerAbsentState ||
+			pickup.cancelOID != choreographyBrokerAbsentState ||
+			pickup.claimOID != p.ClaimOID || pickup.attempt != p.Attempt ||
+			pickup.node != p.Node || p.Branch != task.spec.Branch ||
+			p.InputsDigest != task.inputsDigest {
+			return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerResultDoesNotAnswerTheActiveClaimError)
+		}
+		receipt, err := b.persist.PersistResult(ctx, p, payload)
+		if err != nil {
+			return ChoreographyReceipt{}, err
+		}
+		if !receipt.Accepted || receipt.Kind != choreographyResultKind ||
+			receipt.ProposalDigest != query.ProposalDigest || receipt.PickupID != p.PickupID ||
+			receipt.OID == choreographyBrokerAbsentState {
+			return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerPersistenceReturnedAMismatchedResultError)
+		}
+		pickup.resultReceiptOID, pickup.resultOutputOID = receipt.OID, p.ResultDigest
+		b.wakeBudgetWaiters()
+		if task.claim == p.ClaimOID {
+			task.result, task.resultOutputOID = receipt.OID, p.ResultDigest
+		}
+		return receipt, nil
+	}
 	if task == nil || task.terminal || task.result != choreographyBrokerAbsentState || task.claim == choreographyBrokerAbsentState || task.cancel != choreographyBrokerAbsentState ||
 		p.Branch != task.spec.Branch || p.InputsDigest != task.inputsDigest ||
 		p.Attempt != task.attempt || p.ClaimOID != task.claim || p.Node != task.owner {
@@ -1238,7 +1410,9 @@ func (b *FirstNodeBroker) AcceptResult(ctx context.Context, p ChoreographyResult
 	}
 	task.result = receipt.OID
 	task.resultOutputOID = p.ResultDigest
-	task.tip = receipt.OID
+	if p.PickupID == choreographyBrokerAbsentState {
+		task.tip = receipt.OID
+	}
 	return receipt, nil
 }
 
@@ -1266,6 +1440,28 @@ func (b *FirstNodeBroker) AcceptAck(ctx context.Context, p ChoreographyAckPropos
 		return old, nil
 	}
 	task := b.tasks[p.Task]
+	if task != nil && task.spec.Branch == p.Branch {
+		for _, pickup := range task.pickups {
+			if pickup.cancelOID != p.CancelOID || pickup.attempt != p.Attempt ||
+				pickup.node != p.Node || !pickup.contactLost {
+				continue
+			}
+			if pickup.resultReceiptOID != choreographyBrokerAbsentState || pickup.settled {
+				return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerAcknowledgementHasNoActiveAttemptError)
+			}
+			receipt, persistErr := b.persist.PersistAck(ctx, p)
+			if persistErr != nil {
+				return ChoreographyReceipt{}, persistErr
+			}
+			if !receipt.Accepted || receipt.Kind != MessageAck ||
+				receipt.PickupID != pickup.id || receipt.OID == choreographyBrokerAbsentState {
+				return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerPersistedAcknowledgementDiffersError)
+			}
+			pickup.resultReceiptOID = receipt.OID
+			b.wakeBudgetWaiters()
+			return receipt, nil
+		}
+	}
 	if task == nil || task.terminal || task.spec.Branch != p.Branch || task.attempt != p.Attempt ||
 		task.owner != p.Node || task.claim == choreographyBrokerAbsentState || task.cancel == choreographyBrokerAbsentState ||
 		p.CancelOID != task.cancel || task.result != choreographyBrokerAbsentState {
@@ -1279,6 +1475,14 @@ func (b *FirstNodeBroker) AcceptAck(ctx context.Context, p ChoreographyAckPropos
 		receipt.Node != p.Node || receipt.Branch != p.Branch || receipt.ProposalID != p.ProposalID || receipt.ProposalDigest != query.ProposalDigest || receipt.OID == choreographyBrokerAbsentState {
 		return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerPersistedAcknowledgementDiffersError)
 	}
+	if receipt.PickupID != choreographyBrokerAbsentState {
+		pickup := task.pickups[receipt.PickupID]
+		if pickup == nil || pickup.claimOID != task.claim ||
+			pickup.cancelOID != p.CancelOID || pickup.resultReceiptOID != choreographyBrokerAbsentState {
+			return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerPersistedAcknowledgementDiffersError)
+		}
+		pickup.resultReceiptOID = receipt.OID
+	}
 	task.result, task.tip, task.resultOutputOID = receipt.OID, receipt.OID, choreographyNoAcceptedResultOutputOID
 	return receipt, nil
 }
@@ -1291,6 +1495,16 @@ func (b *FirstNodeBroker) DecideAttempt(ctx context.Context, d ChoreographyDecis
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	task := b.tasks[d.Task]
+	if task != nil {
+		for _, pickup := range task.pickups {
+			if pickup.resultReceiptOID == d.ResultOID {
+				if task.terminal || !d.Succeeded && task.claim != pickup.claimOID {
+					return b.settleLosingPickup(ctx, task, pickup, d)
+				}
+				return b.decidePickupAttempt(ctx, task, pickup, d)
+			}
+		}
+	}
 	if d.ChoreographyRunBinding != b.binding || task == nil || d.Branch != task.spec.Branch || task.result == choreographyBrokerAbsentState ||
 		task.terminal || d.Attempt != task.attempt || d.ResultOID != task.result || d.Unclaimed ||
 		d.Retry && (d.Succeeded || task.attempt >= maxPlacementAttempts) {
@@ -1323,7 +1537,8 @@ func (b *FirstNodeBroker) DecideAttempt(ctx context.Context, d ChoreographyDecis
 	if err := b.applyPackageOutcome(task.spec.Package, d.PackageOutcome); err != nil {
 		return err
 	}
-	if task.spec.Package != choreographyBrokerAbsentState && d.PackageOutcome == choreographyBrokerAbsentState {
+	if task.spec.Package != choreographyBrokerAbsentState && d.PackageOutcome == choreographyBrokerAbsentState &&
+		!task.spec.ExecutorOwned && task.spec.Kind != string(KindPrepare) {
 		task.pendingPackageSettlement = choreographyBrokerPackageSettlementPending
 	} else {
 		b.discharge(task)
@@ -1358,11 +1573,11 @@ func (b *FirstNodeBroker) AcceptLocalOutcome(ctx context.Context, outcome Choreo
 	task.claim = choreographyBrokerAbsentState
 	b.used[task.spec.Budget] -= task.spec.Weight
 	b.nodeUsed[outcome.Node] -= task.spec.Weight
-	b.wakeBudgetWaiters()
 	if err := b.applyPackageOutcome(task.spec.Package, outcome.PackageOutcome); err != nil {
 		return err
 	}
 	b.discharge(task)
+	b.wakeBudgetWaiters()
 	return nil
 }
 
@@ -1405,7 +1620,9 @@ func (b *FirstNodeBroker) discharge(task *indexedChoreographyTask) {
 		if blocker == choreographyBrokerAbsentState && task.spec.Kind == string(KindPrepare) && !task.succeeded {
 			blocker = task.spec.Package
 		}
-		if blocker != choreographyBrokerAbsentState && (next.preparedBlockedBy == choreographyBrokerAbsentState || blocker < next.preparedBlockedBy) {
+		if blocker != choreographyBrokerAbsentState &&
+			choreographyPreparedProviderFor(next.spec, blocker) &&
+			(next.preparedBlockedBy == choreographyBrokerAbsentState || blocker < next.preparedBlockedBy) {
 			next.preparedBlockedBy = blocker
 		}
 		next.remaining--
@@ -1490,6 +1707,7 @@ func (b *FirstNodeBroker) AcceptBlocked(ctx context.Context,
 		return err
 	}
 	b.discharge(task)
+	b.wakeBudgetWaiters()
 	return nil
 }
 

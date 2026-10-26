@@ -108,6 +108,25 @@ type GitMailbox struct {
 // ready/go and cancellation path); carrier parents are deliberately excluded.
 const maxChainDepth = 8
 
+const (
+	choreographyMailboxMissingCarrierOID          = ""
+	choreographyMailboxNoCarrierParents           = 0
+	choreographyMailboxFirstParentIndex           = 0
+	choreographyMailboxFinalParentOffset          = 1
+	choreographyMailboxMinimumAttempt             = 1
+	choreographyMailboxReservationRootParentCount = 0
+	choreographyMailboxBootstrapParentCount       = 1
+	choreographyMailboxHistoryPhasesPerAttempt    = 6
+	choreographyMailboxCarrierSeen                = true
+	choreographyMailboxProbeNeedsCarriersError    = "execution: pinned probe needs source carriers"
+	choreographyMailboxRepeatedProbeCarrierError  = "execution: repeated or missing probe carrier"
+	choreographyMailboxBootstrapDuplicateError    = "execution: bootstrap duplicates a source snapshot"
+	choreographyMailboxCarrierSetMismatchError    = "execution: probe carriers differ from signed snapshots"
+	choreographyMailboxSourceParentOrderError     = "execution: probe source parents are out of order"
+	choreographyMailboxBootstrapParentOrderError  = "execution: probe bootstrap parent is out of order"
+	choreographyMailboxUnsignedProbeCarrierError  = "execution: probe carrier is unsigned"
+)
+
 // NewGitMailbox opens a mailbox on one endpoint, with git as both the
 // transport and the local object store.
 //
@@ -152,41 +171,41 @@ func (m *GitMailbox) PrepareAssignment(ctx context.Context, message *Assignment)
 // the signed probe. A v3 probe also carries its signed bootstrap as the last
 // parent. The first parent remains a source commit for the probe chain.
 func (m *GitMailbox) PreparePinnedProbe(ctx context.Context, message *Assignment, parents []string) (string, error) {
-	if message == nil || message.Kind != KindProbe || message.PinnedInputs == nil || len(parents) == 0 {
-		return "", fmt.Errorf("execution: pinned probe needs source carriers")
+	if message == nil || message.Kind != KindProbe || message.PinnedInputs == nil || len(parents) == choreographyMailboxNoCarrierParents {
+		return choreographyMailboxMissingCarrierOID, fmt.Errorf(choreographyMailboxProbeNeedsCarriersError)
 	}
 	want := make(map[string]bool, len(message.PinnedInputs.Repositories))
 	for _, repo := range message.PinnedInputs.Repositories {
-		if repo.Snapshot == "" || want[repo.Snapshot] {
-			return "", fmt.Errorf("execution: repeated or missing probe carrier")
+		if repo.Snapshot == choreographyMailboxMissingCarrierOID || want[repo.Snapshot] {
+			return choreographyMailboxMissingCarrierOID, fmt.Errorf(choreographyMailboxRepeatedProbeCarrierError)
 		}
-		want[repo.Snapshot] = true
+		want[repo.Snapshot] = choreographyMailboxCarrierSeen
 	}
-	if message.BootstrapOID != "" {
+	if message.BootstrapOID != choreographyMailboxMissingCarrierOID {
 		if want[message.BootstrapOID] {
-			return "", fmt.Errorf("execution: bootstrap duplicates a source snapshot")
+			return choreographyMailboxMissingCarrierOID, fmt.Errorf(choreographyMailboxBootstrapDuplicateError)
 		}
-		want[message.BootstrapOID] = true
+		want[message.BootstrapOID] = choreographyMailboxCarrierSeen
 	}
 	if len(want) != len(parents) {
-		return "", fmt.Errorf("execution: probe carriers differ from signed snapshots")
+		return choreographyMailboxMissingCarrierOID, fmt.Errorf(choreographyMailboxCarrierSetMismatchError)
 	}
 	for index, repo := range message.PinnedInputs.Repositories {
 		if parents[index] != repo.Snapshot {
-			return "", fmt.Errorf("execution: probe source parents are out of order")
+			return choreographyMailboxMissingCarrierOID, fmt.Errorf(choreographyMailboxSourceParentOrderError)
 		}
 	}
-	if message.BootstrapOID != "" && parents[len(parents)-1] != message.BootstrapOID {
-		return "", fmt.Errorf("execution: probe bootstrap parent is out of order")
+	if message.BootstrapOID != choreographyMailboxMissingCarrierOID && parents[len(parents)-choreographyMailboxFinalParentOffset] != message.BootstrapOID {
+		return choreographyMailboxMissingCarrierOID, fmt.Errorf(choreographyMailboxBootstrapParentOrderError)
 	}
 	for _, oid := range parents {
 		if !want[oid] {
-			return "", fmt.Errorf("execution: probe carrier is unsigned")
+			return choreographyMailboxMissingCarrierOID, fmt.Errorf(choreographyMailboxUnsignedProbeCarrierError)
 		}
 	}
 	document, err := json.Marshal(message)
 	if err != nil {
-		return "", err
+		return choreographyMailboxMissingCarrierOID, err
 	}
 	return m.commitMessage(ctx, MessageAssignment, document, parents, nil)
 }
@@ -362,11 +381,11 @@ func (m *GitMailbox) OpenCarriedAssignment(ctx context.Context, assignmentOID st
 			return nil, &Rejection{Reason: ReasonChain}
 		}
 	}
-	reservationOID := parents[0]
+	reservationOID := parents[choreographyMailboxFirstParentIndex]
 	if assignment.Protocol == ChoreographyProtocolVersion {
 		// A retry offer extends the same logical task branch after its signed
 		// decision. Follow only the bounded first-parent attempt history.
-		for steps := 0; steps < maxPlacementAttempts*4; steps++ {
+		for steps := choreographyMailboxNoCarrierParents; steps < maxPlacementAttempts*choreographyMailboxHistoryPhasesPerAttempt; steps++ {
 			prior, err := m.readTree(ctx, reservationOID)
 			if err != nil {
 				return nil, err
@@ -375,7 +394,8 @@ func (m *GitMailbox) OpenCarriedAssignment(ctx context.Context, assignmentOID st
 				break
 			}
 			if prior.kind != choreographyDecisionKind && prior.kind != choreographyClaimKind &&
-				prior.kind != choreographyResultKind && prior.kind != MessageAck && prior.kind != MessageAssignment {
+				prior.kind != choreographyResultKind && prior.kind != MessageAck &&
+				prior.kind != MessageCancel && prior.kind != MessageAssignment {
 				return nil, &Rejection{Reason: ReasonChain}
 			}
 			priorBytes, err := m.Read(ctx, ChainTip{OID: reservationOID, Kind: prior.kind,
@@ -390,15 +410,15 @@ func (m *GitMailbox) OpenCarriedAssignment(ctx context.Context, assignmentOID st
 			if json.Unmarshal(priorBytes, &identity) != nil ||
 				identity.Run != assignment.Run || identity.Generation != assignment.Generation ||
 				identity.PlanDigest != assignment.PlanDigest || identity.Task != assignment.Task ||
-				identity.Branch != assignment.Branch || identity.Attempt < 1 ||
+				identity.Branch != assignment.Branch || identity.Attempt < choreographyMailboxMinimumAttempt ||
 				identity.Attempt > assignment.Attempt {
 				return nil, &Rejection{Reason: ReasonChain}
 			}
 			ancestors, err := m.plumbing.CommitParents(ctx, reservationOID)
-			if err != nil || len(ancestors) == 0 {
+			if err != nil || len(ancestors) == choreographyMailboxNoCarrierParents {
 				return nil, &Rejection{Reason: ReasonChain}
 			}
-			reservationOID = ancestors[0]
+			reservationOID = ancestors[choreographyMailboxFirstParentIndex]
 		}
 	}
 	reservationTree, err := m.readTree(ctx, reservationOID)
@@ -409,8 +429,8 @@ func (m *GitMailbox) OpenCarriedAssignment(ctx context.Context, assignmentOID st
 		return nil, &Rejection{Reason: ReasonChain}
 	}
 	reservationParents, err := m.plumbing.CommitParents(ctx, reservationOID)
-	if err != nil || assignment.Protocol != ChoreographyProtocolVersion && len(reservationParents) != 0 ||
-		assignment.Protocol == ChoreographyProtocolVersion && len(reservationParents) != 1 {
+	if err != nil || assignment.Protocol != ChoreographyProtocolVersion && len(reservationParents) != choreographyMailboxReservationRootParentCount ||
+		assignment.Protocol == ChoreographyProtocolVersion && len(reservationParents) != choreographyMailboxBootstrapParentCount {
 		return nil, &Rejection{Reason: ReasonChain}
 	}
 	reservationBytes, err := m.Read(ctx, ChainTip{OID: reservationOID, Kind: reservationTree.kind, document: reservationTree.document, signature: reservationTree.signature}, maxBytes)
@@ -432,7 +452,7 @@ func (m *GitMailbox) OpenCarriedAssignment(ctx context.Context, assignmentOID st
 		return nil, &Rejection{Reason: ReasonChain}
 	}
 	if assignment.Protocol == ChoreographyProtocolVersion {
-		if reservation.BootstrapOID == "" || reservationParents[0] != reservation.BootstrapOID ||
+		if reservation.BootstrapOID == choreographyMailboxMissingCarrierOID || reservationParents[choreographyMailboxFirstParentIndex] != reservation.BootstrapOID ||
 			reservation.MaxAttempts != maxPlacementAttempts || assignment.Attempt > reservation.MaxAttempts {
 			return nil, &Rejection{Reason: ReasonChain}
 		}
@@ -440,8 +460,8 @@ func (m *GitMailbox) OpenCarriedAssignment(ctx context.Context, assignmentOID st
 		if err != nil || bootstrap.kind != choreographyBootstrapKind {
 			return nil, &Rejection{Reason: ReasonChain}
 		}
-		if assignment.BootstrapOID != reservation.BootstrapOID || assignment.GraphDigest == "" ||
-			assignment.Weight <= 0 {
+		if assignment.BootstrapOID != reservation.BootstrapOID || assignment.GraphDigest == choreographyMailboxMissingCarrierOID ||
+			assignment.Weight <= choreographyMailboxNoCarrierParents {
 			return nil, &Rejection{Reason: ReasonChain}
 		}
 	}

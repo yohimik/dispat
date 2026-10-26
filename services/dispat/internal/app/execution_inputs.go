@@ -61,6 +61,19 @@ const defaultChangelogFile = "CHANGELOG.md"
 
 const compiledRelevantInputChangedErrorFormat = "%d file(s) this package's build read changed after it was built (%s): the artefact does not describe the repository any more, so the publication is withheld and a new plan is required"
 
+const (
+	compiledRelevantNoIdentity        = ""
+	compiledRelevantNoPaths           = 0
+	compiledRelevantPathListSeparator = ", "
+	compiledRelevantPackageSelected   = true
+	compiledOutputRootPathSeparator   = "/"
+	compiledOutputRootWildcardMarkers = "*?["
+	compiledOutputRootWholeRepository = "."
+	compiledOutputRootNoInclude       = ""
+	compiledOutputRootExactMatch      = true
+	compiledOutputRootNoMatch         = false
+)
+
 // resolvePrePublishCheck is the callback the executor runs after a package's
 // beforePublish hook and immediately before its publish command.
 //
@@ -187,7 +200,7 @@ func (r *relevantInputs) checkRelevantInputs(ctx context.Context, rel *plan.Rele
 	if git == nil {
 		return nil
 	}
-	if r.coordinator != nil && r.coordinator.GraphRootOID != "" {
+	if r.coordinator != nil && r.coordinator.GraphRootOID != compiledRelevantNoIdentity {
 		return r.checkCompiledRelevantInputs(ctx, git, root, rel)
 	}
 	head, err := git.HeadSHA(ctx)
@@ -204,14 +217,14 @@ func (r *relevantInputs) checkRelevantInputs(ctx context.Context, rel *plan.Rele
 	if err != nil {
 		return r.refuse(rel, err)
 	}
-	if len(changed) == 0 {
+	if len(changed) == compiledRelevantNoPaths {
 		r.app.log.Debug().Str("package", rel.Pkg.Name).Str("head", head).
 			Msg("the repository moved, and nothing this package was built from moved with it")
 		return nil
 	}
-	if r.coordinator != nil && r.coordinator.GraphRootOID != "" {
+	if r.coordinator != nil && r.coordinator.GraphRootOID != compiledRelevantNoIdentity {
 		oldPreparedOID := r.coordinator.PreparedSnapshot(rel.Pkg.Name)
-		if oldPreparedOID != "" {
+		if oldPreparedOID != compiledRelevantNoIdentity {
 			if err := r.coordinator.InvalidatePackagePreparedInput(ctx,
 				execution.ChoreographyPreparedInputChange{Repository: rel.Pkg.Repository,
 					Package: rel.Pkg.Name, OldPreparedOID: oldPreparedOID, NewPreparedOID: head}); err != nil {
@@ -221,7 +234,7 @@ func (r *relevantInputs) checkRelevantInputs(ctx context.Context, rel *plan.Rele
 	}
 	return r.refuse(rel, fmt.Errorf(
 		compiledRelevantInputChangedErrorFormat,
-		len(changed), strings.Join(changed, ", ")))
+		len(changed), strings.Join(changed, compiledRelevantPathListSeparator)))
 }
 
 // checkCompiledRelevantInputs compares the accepted build's prepared tree to
@@ -258,14 +271,19 @@ func (r *relevantInputs) checkCompiledRelevantInputsWithCapture(ctx context.Cont
 		return r.refuse(rel, err)
 	}
 	pathspecs := r.formatRelevantPathspecs(root, rel)
-	if len(pathspecs) == 0 {
+	if len(pathspecs) == compiledRelevantNoPaths {
 		return nil
 	}
 	changed, err := git.ChangedPathsBetween(ctx, baseline, current, pathspecs)
 	if err != nil {
 		return r.refuse(rel, err)
 	}
-	if len(changed) == 0 {
+	changed, err = r.filterAdmittedOutputChanges(ctx, compiledOutputChangeFilter{
+		Git: git, Root: root, Release: rel, CurrentSnapshot: current, Changed: changed})
+	if err != nil {
+		return r.refuse(rel, err)
+	}
+	if len(changed) == compiledRelevantNoPaths {
 		return nil
 	}
 	if accepted {
@@ -277,7 +295,94 @@ func (r *relevantInputs) checkCompiledRelevantInputsWithCapture(ctx context.Cont
 	}
 	return r.refuse(rel, fmt.Errorf(
 		compiledRelevantInputChangedErrorFormat,
-		len(changed), strings.Join(changed, ", ")))
+		len(changed), strings.Join(changed, compiledRelevantPathListSeparator)))
+}
+
+type compiledOutputChangeFilter struct {
+	Git             *gitx.LocalGitx
+	Root            string
+	Release         *plan.Release
+	CurrentSnapshot string
+	Changed         []string
+}
+
+type compiledAdmittedOutputRoot struct {
+	packageName string
+	root        string
+	repoPath    string
+}
+
+// filterAdmittedOutputChanges removes only the exact installed tree of a
+// verified signed Result. Merely declaring a generated path is insufficient:
+// native writes and hooks that change its bytes still reach the input fence.
+func (r *relevantInputs) filterAdmittedOutputChanges(ctx context.Context,
+	check compiledOutputChangeFilter) ([]string, error) {
+	if len(check.Changed) == compiledRelevantNoPaths {
+		return check.Changed, nil
+	}
+	var roots []compiledAdmittedOutputRoot
+	for _, name := range r.resolveRelevantPackages(check.Release) {
+		relevant := r.plan.Releases[name]
+		if relevant == nil || relevant.Pkg.Repository != check.Release.Pkg.Repository {
+			continue
+		}
+		folder := relativeRepositoryPath(check.Root, relevant.Pkg.Dir)
+		for _, root := range relevant.Pkg.Space.BuildOutputs {
+			repoPath := path.Join(folder, root)
+			if r.sharedIncludeOverlapsOutputRoot(repoPath) {
+				continue
+			}
+			roots = append(roots, compiledAdmittedOutputRoot{
+				packageName: name, root: root, repoPath: repoPath})
+		}
+	}
+	checked := make(map[string]bool, len(roots))
+	matching := make(map[string]bool, len(roots))
+	relevantChanges := make([]string, compiledRelevantNoPaths, len(check.Changed))
+	for _, changed := range check.Changed {
+		installed := compiledOutputRootNoMatch
+		for _, root := range roots {
+			if changed != root.repoPath && !strings.HasPrefix(changed,
+				root.repoPath+compiledOutputRootPathSeparator) {
+				continue
+			}
+			if !checked[root.repoPath] {
+				var err error
+				matching[root.repoPath], err = r.coordinator.IsCurrentAdmittedOutputRoot(ctx,
+					execution.AdmittedOutputRootCheck{Package: root.packageName, Root: root.root,
+						RepositoryPath: root.repoPath, CurrentSnapshot: check.CurrentSnapshot,
+						CurrentRepository: check.Git})
+				if err != nil {
+					return nil, err
+				}
+				checked[root.repoPath] = compiledOutputRootExactMatch
+			}
+			if matching[root.repoPath] {
+				installed = compiledOutputRootExactMatch
+				break
+			}
+		}
+		if !installed {
+			relevantChanges = append(relevantChanges, changed)
+		}
+	}
+	return relevantChanges, nil
+}
+
+func (r *relevantInputs) sharedIncludeOverlapsOutputRoot(root string) bool {
+	for _, include := range r.app.cfg.Commit.Include {
+		if include == compiledOutputRootNoInclude {
+			continue
+		}
+		include = path.Clean(include)
+		if include == compiledOutputRootWholeRepository ||
+			strings.ContainsAny(include, compiledOutputRootWildcardMarkers) ||
+			include == root || strings.HasPrefix(include, root+compiledOutputRootPathSeparator) ||
+			strings.HasPrefix(root, include+compiledOutputRootPathSeparator) {
+			return compiledOutputRootExactMatch
+		}
+	}
+	return compiledOutputRootNoMatch
 }
 
 // afterNativeFrame runs before a native writer releases its repository lane.
@@ -327,11 +432,11 @@ func (r *relevantInputs) afterNativeFrame(ctx context.Context, _, writer string)
 func (r *relevantInputs) resolveChangedInputs(ctx context.Context, git *gitx.LocalGitx,
 	root string, rel *plan.Release, head string) ([]string, error) {
 	baseline := r.coordinator.PreparedSnapshot(rel.Pkg.Name)
-	if baseline == "" {
+	if baseline == compiledRelevantNoIdentity {
 		baseline = r.app.plannedHeads[rel.Pkg.Repository]
 	}
 	pathspecs := r.formatRelevantPathspecs(root, rel)
-	if len(pathspecs) == 0 {
+	if len(pathspecs) == compiledRelevantNoPaths {
 		return nil, nil
 	}
 	changed, err := git.ChangedPathsBetween(ctx, baseline, head, pathspecs)
@@ -367,12 +472,12 @@ func (r *relevantInputs) formatRelevantPathspecs(root string, rel *plan.Release)
 		}
 		exclusions = append(exclusions, ":(exclude)"+path.Join(folder, resolveChangelogFile(relevant)))
 	}
-	if r.coordinator != nil && r.coordinator.GraphRootOID != "" && r.fleet == nil {
+	if r.coordinator != nil && r.coordinator.GraphRootOID != compiledRelevantNoIdentity && r.fleet == nil {
 		// A shared include (commonly a workspace lockfile) is captured by
 		// every build even when it lies outside every package folder.
 		folders = append(folders, r.app.cfg.Commit.Include...)
 	}
-	if len(folders) == 0 {
+	if len(folders) == compiledRelevantNoPaths {
 		return nil
 	}
 	sort.Strings(folders)
@@ -383,7 +488,7 @@ func (r *relevantInputs) formatRelevantPathspecs(root string, rel *plan.Release)
 // resolveChangelogFile is the file one package's changelog record writes, in
 // the spelling the recorder itself resolves it to.
 func resolveChangelogFile(rel *plan.Release) string {
-	if rel.Pkg.Changelog.File == "" {
+	if rel.Pkg.Changelog.File == compiledRelevantNoIdentity {
 		return defaultChangelogFile
 	}
 	return filepath.ToSlash(rel.Pkg.Changelog.File)
@@ -397,15 +502,15 @@ func resolveChangelogFile(rel *plan.Release) string {
 // says about the release, whether or not the graph makes the sibling a
 // provider.
 func (r *relevantInputs) resolveRelevantPackages(rel *plan.Release) []string {
-	relevant := map[string]bool{rel.Pkg.Name: true}
+	relevant := map[string]bool{rel.Pkg.Name: compiledRelevantPackageSelected}
 	collectProviderClosure(r.plan, rel.Pkg.Name, relevant)
 	group := rel.Pkg.VersionGroupIdentity()
 	for name, other := range r.plan.Releases {
-		if group != "" && other.Pkg.VersionGroupIdentity() == group {
-			relevant[name] = true
+		if group != compiledRelevantNoIdentity && other.Pkg.VersionGroupIdentity() == group {
+			relevant[name] = compiledRelevantPackageSelected
 		}
 	}
-	names := make([]string, 0, len(relevant))
+	names := make([]string, compiledRelevantNoPaths, len(relevant))
 	for name := range relevant {
 		names = append(names, name)
 	}
@@ -420,7 +525,7 @@ func (r *relevantInputs) resolveOwner(rel *plan.Release) (*gitx.LocalGitx, strin
 	}
 	owner := r.fleet.byName[rel.Pkg.Repository]
 	if owner == nil {
-		return nil, ""
+		return nil, compiledRelevantNoIdentity
 	}
 	return owner.git, owner.repo.Root
 }

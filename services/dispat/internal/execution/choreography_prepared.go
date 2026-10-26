@@ -13,6 +13,18 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
+const (
+	choreographyPreparedMissingIdentity          = ""
+	choreographyPreparedNoLoginCommands          = 0
+	choreographyPreparedNoTasks                  = 0
+	choreographyPreparedVisiting                 = true
+	choreographyPreparedVisited                  = true
+	choreographyPreparedMissingTaskErrorFormat   = "execution: failed preparation %s has no canonical task"
+	choreographyPreparedDiscoveryUnavailable     = "execution: prepared-provider discovery is unavailable"
+	choreographyPreparedMissingPackageFormat     = "execution: prepared provider %s has no package"
+	choreographyPreparedProviderCycleErrorFormat = "execution: prepared-provider closure contains a cycle at %s"
+)
+
 // BlockPreparedTask persists no-claim finality when a provider fails before
 // it can return a Result. Its branch CAS and ledger event precede release of
 // the preparation future, so a consumer cannot infer success from a missing
@@ -27,14 +39,14 @@ func (c *Coordinator) BlockPreparedTask(ctx context.Context, packageName string)
 	task := broker.tasks[taskID]
 	if task == nil || task.spec.Kind != string(KindPrepare) || task.spec.Package != packageName {
 		broker.mu.Unlock()
-		return fmt.Errorf("execution: failed preparation %s has no canonical task", packageName)
+		return fmt.Errorf(choreographyPreparedMissingTaskErrorFormat, packageName)
 	}
 	if task.terminal {
 		broker.mu.Unlock()
 		return nil
 	}
 	blocker := task.preparedBlockedBy
-	if blocker == "" {
+	if blocker == choreographyPreparedMissingIdentity {
 		blocker = packageName
 	}
 	broker.mu.Unlock()
@@ -72,7 +84,7 @@ type ChoreographyPreparedDiscovery struct {
 // closure before initial branch creation, without running any provider.
 func (c *Coordinator) ChoreographyPreparedTasks(stages []release.ReservationStage) ([]ChoreographyPreparedTask, error) {
 	if c == nil {
-		return nil, fmt.Errorf("execution: prepared-provider discovery is unavailable")
+		return nil, fmt.Errorf(choreographyPreparedDiscoveryUnavailable)
 	}
 	return DiscoverChoreographyPreparedTasks(stages, ChoreographyPreparedDiscovery{
 		Inputs: c.dispatch.Inputs, Prepare: c.dispatch.Prepare})
@@ -83,7 +95,7 @@ func (c *Coordinator) ChoreographyPreparedTasks(stages []release.ReservationStag
 func DiscoverChoreographyPreparedTasks(stages []release.ReservationStage,
 	options ChoreographyPreparedDiscovery) ([]ChoreographyPreparedTask, error) {
 	if options.Inputs == nil || options.Prepare == nil {
-		return nil, fmt.Errorf("execution: prepared-provider discovery is unavailable")
+		return nil, fmt.Errorf(choreographyPreparedDiscoveryUnavailable)
 	}
 	prepared := make(map[string]*ChoreographyPreparedTask)
 	visiting := make(map[string]bool)
@@ -102,7 +114,7 @@ func DiscoverChoreographyPreparedTasks(stages []release.ReservationStage,
 				}
 				if frame == nil || frame.Request.Release == nil || frame.Request.Release.Pkg == nil ||
 					frame.Request.Release.Pkg.Space == nil {
-					return fmt.Errorf("execution: prepared provider %s has no package", input.Package)
+					return fmt.Errorf(choreographyPreparedMissingPackageFormat, input.Package)
 				}
 				space := frame.Request.Release.Pkg.Space
 				entry = &ChoreographyPreparedTask{Package: input.Package,
@@ -110,22 +122,22 @@ func DiscoverChoreographyPreparedTasks(stages []release.ReservationStage,
 					Weight:  frame.Request.Release.Pkg.BuildWeight,
 					ReservationTask: ReservationTask{Task: formatPrepareTask(input.Package), Kind: KindPrepare,
 						Platforms: space.BuildPlatforms,
-						Placement: ResolveStagePlacement(StageBuild, space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0)}}
+						Placement: ResolveStagePlacement(StageBuild, space.RunOnly.ResolveBuild(), len(space.LoginScript) > choreographyPreparedNoLoginCommands)}}
 				prepared[input.Package] = entry
 			}
-			if target.Task != "" || target.Stage != "" {
+			if target.Task != choreographyPreparedMissingIdentity || target.Stage != choreographyPreparedMissingIdentity {
 				entry.Consumers = append(entry.Consumers, target)
 			}
 			if visiting[input.Package] {
-				return fmt.Errorf("execution: prepared-provider closure contains a cycle at %s", input.Package)
+				return fmt.Errorf(choreographyPreparedProviderCycleErrorFormat, input.Package)
 			}
 			if !visited[input.Package] {
-				visiting[input.Package] = true
+				visiting[input.Package] = choreographyPreparedVisiting
 				if err := visit(input.Package, ChoreographyPreparedConsumer{Task: entry.Task}); err != nil {
 					return err
 				}
 				delete(visiting, input.Package)
-				visited[input.Package] = true
+				visited[input.Package] = choreographyPreparedVisited
 			}
 		}
 		return nil
@@ -139,7 +151,7 @@ func DiscoverChoreographyPreparedTasks(stages []release.ReservationStage,
 			return nil, err
 		}
 	}
-	result := make([]ChoreographyPreparedTask, 0, len(prepared))
+	result := make([]ChoreographyPreparedTask, choreographyPreparedNoTasks, len(prepared))
 	for _, entry := range prepared {
 		sort.Slice(entry.Consumers, func(i, j int) bool {
 			a, b := entry.Consumers[i], entry.Consumers[j]

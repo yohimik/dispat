@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
@@ -57,7 +58,7 @@ const (
 func (a *App) reconcileCompletedRelease(ctx context.Context,
 	journal *firstRunJournal, identity firstRunIdentity) error {
 	settings := a.cfg.Execution
-	if settings == nil || settings.SecretEnv == "" {
+	if settings == nil || settings.SecretEnv == retainedRunAbsentValueText {
 		return fmt.Errorf(retainedReleaseMissingSecretReferenceErrorFormat, identity.Run)
 	}
 	signer, err := execution.NewSigner(os.Getenv(settings.SecretEnv))
@@ -65,14 +66,14 @@ func (a *App) reconcileCompletedRelease(ctx context.Context,
 		return fmt.Errorf(retainedReleaseSigningKeyUnavailableErrorFormat, err)
 	}
 	limits := formatTransferLimits(settings)
-	local := execution.NewGitMailbox("", a.git, signer, a.log)
+	local := execution.NewGitMailbox(retainedRunAbsentValueText, a.git, signer, a.log)
 	bootstrap, err := local.ReadChoreographyBootstrap(ctx, identity.BootstrapOID,
 		int64(limits.MaxManifestBytes), limits.MaxPackBytes)
 	if err != nil {
 		return fmt.Errorf(retainedReleaseBootstrapUnauthenticErrorFormat, err)
 	}
 	binding := bootstrap.ChoreographyRunBinding
-	if bootstrap.Mode != "compilation" || binding.Run != identity.Run ||
+	if bootstrap.Mode != retainedRunCompilationModeName || binding.Run != identity.Run ||
 		binding.Generation != identity.Generation ||
 		bootstrap.ReturnEndpoint != identity.Endpoint ||
 		bootstrap.ReturnCertSHA256 != identity.CertPin {
@@ -110,10 +111,14 @@ func (a *App) reconcileCompletedRelease(ctx context.Context,
 	if err != nil {
 		return fmt.Errorf(retainedReleaseRosterPolicyErrorFormat, err)
 	}
+	applyChoreographyRetrySafety(recomputedSpecs, bootstrap.JoinPolicy.RetryAfterUncertainAttempt)
 	specs := retained.Carrier.Tasks
-	if err := verifyRetainedChoreographyPolicy(recomputedSpecs, specs,
-		releaseChoreographyPackagePolicies(private.compiled),
-		retained.Carrier.PackagePolicies); err != nil {
+	if err := verifyRetainedChoreographyPolicy(retainedChoreographyPolicyOptions{
+		RecomputedTasks:    recomputedSpecs,
+		SignedTasks:        specs,
+		RecomputedPackages: releaseChoreographyPackagePolicies(private.compiled),
+		SignedPackages:     retained.Carrier.PackagePolicies,
+	}); err != nil {
 		return err
 	}
 	verifyFirst := func(context.Context) error {
@@ -146,7 +151,7 @@ func (a *App) reconcileCompletedRelease(ctx context.Context,
 		return err
 	}
 	nodes := make(map[string]int, len(roster.Nodes))
-	first := ""
+	first := retainedRunAbsentValueText
 	for _, node := range roster.Nodes {
 		nodes[node.Name] = node.Capacity
 		if node.First {
@@ -163,7 +168,8 @@ func (a *App) reconcileCompletedRelease(ctx context.Context,
 		JoinPolicy:                bootstrap.JoinPolicy, FirstNode: first,
 		Tasks: specs, Templates: retained.Carrier.Templates, Members: roster.Nodes,
 		NodeCapacity: nodes, Budgets: budgets,
-		OutcomePolicy: private.compiled.NewOutcomeEvaluator(), Persist: persist,
+		CancelResponseDuration: time.Duration(a.cfg.Execution.ResolveTimeouts().Cancel) * time.Second,
+		OutcomePolicy:          private.compiled.NewOutcomeEvaluator(), Persist: persist,
 	}); err != nil {
 		return fmt.Errorf(retainedReleaseBrokerReplayErrorFormat, err)
 	}
@@ -171,11 +177,24 @@ func (a *App) reconcileCompletedRelease(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	if err := a.verifyRetainedReleaseEffects(ctx, identity, binding, mailbox,
-		bootstrap.PinnedInputs.Repositories, private, specs, localEffects); err != nil {
+	if err := a.verifyRetainedReleaseEffects(ctx, retainedReleaseEffectOptions{
+		Identity:     identity,
+		Binding:      binding,
+		Mailbox:      mailbox,
+		Repositories: bootstrap.PinnedInputs.Repositories,
+		Plan:         private,
+		Tasks:        specs,
+		Events:       localEffects,
+	}); err != nil {
 		return err
 	}
-	if err := a.recoverPriorRunNodeSlots(ctx, identity, roster, mailbox, signer, limits); err != nil {
+	if err := a.recoverPriorRunNodeSlots(ctx, priorRunNodeSlotRecoveryOptions{
+		Identity: identity,
+		Roster:   roster,
+		Mailbox:  mailbox,
+		Signer:   signer,
+		Limits:   limits,
+	}); err != nil {
 		return err
 	}
 	// The lock may already have been deleted when the process died. Exact
@@ -186,15 +205,23 @@ func (a *App) reconcileCompletedRelease(ctx context.Context,
 	return journal.markCompleted()
 }
 
+type retainedReleaseEffectOptions struct {
+	Identity     firstRunIdentity
+	Binding      execution.ChoreographyRunBinding
+	Mailbox      *execution.GitMailbox
+	Repositories []execution.AssignmentRepository
+	Plan         *peerReleasePlan
+	Tasks        []execution.ChoreographyTaskSpec
+	Events       []execution.ChoreographyEvent
+}
+
 // verifyRetainedReleaseEffects compares each successful signed native record
 // with the exact destination held in this run's write-ahead lock journal.
 // A receipt ref may have been removed after the durable release tag landed;
 // the tag's live object and peeled target are the surviving native record.
-func (a *App) verifyRetainedReleaseEffects(ctx context.Context, identity firstRunIdentity,
-	binding execution.ChoreographyRunBinding, mailbox *execution.GitMailbox,
-	repositories []execution.AssignmentRepository,
-	private *peerReleasePlan, specs []execution.ChoreographyTaskSpec,
-	events []execution.ChoreographyEvent) error {
+func (a *App) verifyRetainedReleaseEffects(ctx context.Context, options retainedReleaseEffectOptions) error {
+	identity, binding, mailbox, repositories := options.Identity, options.Binding, options.Mailbox, options.Repositories
+	private, specs, events := options.Plan, options.Tasks, options.Events
 	byTask := make(map[string]execution.ChoreographyTaskSpec, len(specs))
 	for _, spec := range specs {
 		byTask[spec.Task] = spec
@@ -209,7 +236,7 @@ func (a *App) verifyRetainedReleaseEffects(ctx context.Context, identity firstRu
 		if seen[event.Task] {
 			return fmt.Errorf(retainedReleaseDuplicateEffectErrorFormat, event.Task)
 		}
-		seen[event.Task] = true
+		seen[event.Task] = retainedReleaseObservedEffectState
 		outcome, err := mailbox.ReadChoreographyLocalOutcome(ctx, binding, event, spec)
 		if err != nil {
 			return fmt.Errorf(retainedReleaseEffectUnauthenticErrorFormat, event.Task, err)
@@ -227,7 +254,7 @@ func (a *App) verifyRetainedReleaseEffects(ctx context.Context, identity firstRu
 		}
 		mode := releaseRecordingMode(commit)
 		isDeferred := private.app.workspace == nil && commit.IsEnabled() &&
-			(spec.Kind == "publish" || spec.Kind == "record")
+			(spec.Kind == retainedRunPublishStageName || spec.Kind == retainedRunRecordStageName)
 		if isDeferred {
 			mode = releaseEffectDeferredFinalizeMode
 		}
@@ -247,18 +274,18 @@ func (a *App) verifyRetainedReleaseEffects(ctx context.Context, identity firstRu
 			if deferred[evidence.Tag] {
 				return fmt.Errorf(retainedReleaseDuplicateDeferredTagErrorFormat, evidence.Tag)
 			}
-			deferred[evidence.Tag] = true
+			deferred[evidence.Tag] = retainedReleaseObservedEffectState
 			intent, prepared := identity.DeferredTags[evidence.Tag]
 			if !prepared || intent.Tag != evidence.Tag ||
-				(commit.IsPushEnabled() && (evidence.ReceiptObject == "" ||
-					evidence.ReceiptCommit == "" || intent.ReceiptObject != evidence.ReceiptObject ||
+				(commit.IsPushEnabled() && (evidence.ReceiptObject == retainedRunAbsentValueText ||
+					evidence.ReceiptCommit == retainedRunAbsentValueText || intent.ReceiptObject != evidence.ReceiptObject ||
 					intent.ReceiptCommit != evidence.ReceiptCommit)) ||
-				(!commit.IsPushEnabled() && (evidence.ReceiptObject != "" || evidence.ReceiptCommit != "")) {
+				(!commit.IsPushEnabled() && (evidence.ReceiptObject != retainedRunAbsentValueText || evidence.ReceiptCommit != retainedRunAbsentValueText)) {
 				return fmt.Errorf(retainedReleaseDeferredTagReceiptMismatchErrorFormat, evidence.Tag)
 			}
 			continue
 		}
-		if evidence.RecordingMode == "local-only" {
+		if evidence.RecordingMode == retainedRunLocalRecordingModeName {
 			// A local-only tag is never checked through a possibly changed
 			// remote alias. Its checkout is the exact retained repository path.
 			path, err := pinnedLiveRepositoryPath(a.root, repositories, evidence.Repository)
@@ -270,7 +297,7 @@ func (a *App) verifyRetainedReleaseEffects(ctx context.Context, identity firstRu
 			if err != nil {
 				return fmt.Errorf(retainedReleaseLocalTagReadErrorFormat, evidence.Tag, err)
 			}
-			if object == "" || object != evidence.TagObject {
+			if object == retainedRunAbsentValueText || object != evidence.TagObject {
 				return fmt.Errorf(retainedReleaseLocalTagMismatchErrorFormat, evidence.Tag)
 			}
 			target, err := git.ResolveCommit(ctx, evidence.Tag)
@@ -283,26 +310,26 @@ func (a *App) verifyRetainedReleaseEffects(ctx context.Context, identity firstRu
 			continue
 		}
 		prepared, ok := identity.PreparedLocks[evidence.Repository]
-		if !ok || prepared.Remote == "" || prepared.Run != identity.Run {
+		if !ok || prepared.Remote == retainedRunAbsentValueText || prepared.Run != identity.Run {
 			return fmt.Errorf(retainedReleaseDestinationMissingErrorFormat, event.Task)
 		}
 		object, err := a.git.RemoteTagObject(ctx, prepared.Remote, evidence.Tag)
 		if err != nil {
 			return fmt.Errorf(retainedReleaseTagReadErrorFormat, evidence.Tag, err)
 		}
-		if object == "" || evidence.TagObject != "" && object != evidence.TagObject {
+		if object == retainedRunAbsentValueText || evidence.TagObject != retainedRunAbsentValueText && object != evidence.TagObject {
 			return fmt.Errorf(retainedReleaseTagMismatchErrorFormat, evidence.Tag)
 		}
 		target, err := a.git.RemoteTagCommit(ctx, prepared.Remote, evidence.Tag)
 		want := evidence.TagTarget
-		if want == "" {
+		if want == retainedRunAbsentValueText {
 			want = evidence.ReceiptCommit
 		}
 		if err != nil {
 			return fmt.Errorf(retainedReleaseTargetReadErrorFormat, evidence.Tag, err)
 		}
-		if want == "" || target != want ||
-			evidence.PreparedTarget != "" && target != evidence.PreparedTarget {
+		if want == retainedRunAbsentValueText || target != want ||
+			evidence.PreparedTarget != retainedRunAbsentValueText && target != evidence.PreparedTarget {
 			return fmt.Errorf(retainedReleaseTargetMismatchErrorFormat, evidence.Tag)
 		}
 	}
@@ -317,24 +344,24 @@ func pinnedLiveRepositoryPath(root string, repositories []execution.AssignmentRe
 		if repository.Name != name {
 			continue
 		}
-		if repository.Path != "" && !filepath.IsLocal(repository.Path) {
-			return "", fmt.Errorf(retainedReleaseUnsafeRepositoryPathErrorFormat, name)
+		if repository.Path != retainedRunAbsentValueText && !filepath.IsLocal(repository.Path) {
+			return retainedRunAbsentValueText, fmt.Errorf(retainedReleaseUnsafeRepositoryPathErrorFormat, name)
 		}
 		base, err := filepath.EvalSymlinks(root)
 		if err != nil {
-			return "", err
+			return retainedRunAbsentValueText, err
 		}
 		candidate, err := filepath.EvalSymlinks(filepath.Join(base, repository.Path))
 		if err != nil {
-			return "", err
+			return retainedRunAbsentValueText, err
 		}
 		relative, err := filepath.Rel(base, candidate)
-		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return "", fmt.Errorf(retainedReleaseEscapedRepositoryPathErrorFormat, name)
+		if err != nil || relative == retainedRunParentDirectoryName || strings.HasPrefix(relative, retainedRunParentDirectoryName+string(filepath.Separator)) {
+			return retainedRunAbsentValueText, fmt.Errorf(retainedReleaseEscapedRepositoryPathErrorFormat, name)
 		}
 		return candidate, nil
 	}
-	return "", fmt.Errorf(retainedReleaseMissingRepositoryErrorFormat, name)
+	return retainedRunAbsentValueText, fmt.Errorf(retainedReleaseMissingRepositoryErrorFormat, name)
 }
 
 func requireNormalRetainedSeal(ctx context.Context, persist *execution.GitChoreographyPersist) (
@@ -343,18 +370,18 @@ func requireNormalRetainedSeal(ctx context.Context, persist *execution.GitChoreo
 	var last execution.ChoreographyEvent
 	var local []execution.ChoreographyEvent
 	for {
-		page, err := persist.ReadEvents(ctx, cursor, 32)
+		page, err := persist.ReadEvents(ctx, cursor, retainedRunEventPageSizeCount)
 		if err != nil {
 			return nil, fmt.Errorf(retainedReleaseFinalityReadErrorFormat, err)
 		}
-		if len(page.Events) == 0 && page.More || page.Cursor.Sequence < cursor.Sequence ||
+		if len(page.Events) == retainedRunNoEntriesCount && page.More || page.Cursor.Sequence < cursor.Sequence ||
 			page.Cursor.Sequence != cursor.Sequence+uint64(len(page.Events)) {
 			return nil, fmt.Errorf(retainedReleaseFinalityGapError)
 		}
-		if len(page.Events) != 0 {
-			last = page.Events[len(page.Events)-1]
+		if len(page.Events) != retainedRunNoEntriesCount {
+			last = page.Events[len(page.Events)-retainedRunLastEventOffsetCount]
 			for _, event := range page.Events {
-				if event.Kind == execution.ChoreographyTerminal && event.ResultReceiptOID == "" {
+				if event.Kind == execution.ChoreographyTerminal && event.ResultReceiptOID == retainedRunAbsentValueText {
 					local = append(local, event)
 				}
 			}

@@ -16,6 +16,7 @@ func TestCompiledClaimRejectsSwappedGenericStageForExactTaskID(t *testing.T) {
 	require.NoError(t, err)
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
+		PickupID:    NewChoreographyPickupID(),
 		ExpectedOID: spec.ReservationOID, InputsDigest: spec.InputsDigest,
 		ProposalID: "swapped-stage-claim"}
 	completeChoreographyFixtureClaim(t, persist, &claim)

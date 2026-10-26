@@ -9,15 +9,16 @@ import (
 )
 
 const (
-	choreographyResultReadNoIdentity               = ""
-	choreographyResultReadNoBytes                  = 0
-	choreographyResultReadFirstAttempt             = 1
-	choreographyResultReadFirstParentIndex         = 0
-	choreographyResultReadRawParentIndex           = 1
-	choreographyResultReadDecisionParentCount      = 1
-	choreographyResultReadReceiptParentCount       = 2
-	choreographyResultReadIncompleteAcceptedError  = "execution: incomplete accepted-result event"
-	choreographyResultReadIncompleteCompletedError = "execution: incomplete signed completed-result query"
+	choreographyResultReadNoIdentity                = ""
+	choreographyResultReadNoBytes                   = 0
+	choreographyResultReadFirstAttempt              = 1
+	choreographyResultReadFirstParentIndex          = 0
+	choreographyResultReadRawParentIndex            = 1
+	choreographyResultReadDecisionParentCount       = 1
+	choreographyResultReadPickupDecisionParentCount = 2
+	choreographyResultReadReceiptParentCount        = 2
+	choreographyResultReadIncompleteAcceptedError   = "execution: incomplete accepted-result event"
+	choreographyResultReadIncompleteCompletedError  = "execution: incomplete signed completed-result query"
 )
 
 type ChoreographyCompletedResultQuery struct {
@@ -36,15 +37,19 @@ func (m *GitMailbox) ReadChoreographyAcceptedResult(ctx context.Context,
 		event.Attempt < choreographyResultReadFirstAttempt || event.Node == choreographyResultReadNoIdentity || maxBytes <= choreographyResultReadNoBytes {
 		return Result{}, fmt.Errorf(choreographyResultReadIncompleteAcceptedError)
 	}
-	parents, err := m.plumbing.CommitParents(ctx, event.TaskOID)
+	receiptOID := event.TaskOID
+	if event.ResultReceiptOID != choreographyResultReadNoIdentity {
+		receiptOID = event.ResultReceiptOID
+	}
+	parents, err := m.plumbing.CommitParents(ctx, receiptOID)
 	if err != nil || len(parents) != choreographyResultReadReceiptParentCount || parents[choreographyResultReadRawParentIndex] != event.OutputOID {
 		return Result{}, &Rejection{Reason: ReasonChain}
 	}
-	tree, err := m.readTree(ctx, event.TaskOID)
+	tree, err := m.readTree(ctx, receiptOID)
 	if err != nil || tree.kind != choreographyResultKind {
 		return Result{}, &Rejection{Reason: ReasonChain}
 	}
-	data, err := m.Read(ctx, ChainTip{OID: event.TaskOID, Kind: tree.kind,
+	data, err := m.Read(ctx, ChainTip{OID: receiptOID, Kind: tree.kind,
 		document: tree.document, signature: tree.signature}, maxBytes)
 	if err != nil {
 		return Result{}, err
@@ -54,6 +59,8 @@ func (m *GitMailbox) ReadChoreographyAcceptedResult(ctx context.Context,
 		proposed.ChoreographyRunBinding != binding || proposed.Task != event.Task ||
 		proposed.Attempt != event.Attempt || proposed.Node != event.Node ||
 		proposed.ResultDigest != event.OutputOID || proposed.ClaimOID != parents[choreographyResultReadFirstParentIndex] ||
+		(event.ClaimOID != choreographyResultReadNoIdentity && proposed.ClaimOID != event.ClaimOID) ||
+		(event.PickupID != choreographyResultReadNoIdentity && proposed.PickupID != event.PickupID) ||
 		proposed.Branch != FormatChoreographyTaskBranch(binding.Run, event.Task) {
 		return Result{}, &Rejection{Reason: ReasonChain}
 	}
@@ -77,8 +84,14 @@ func (m *GitMailbox) ReadChoreographyAcceptedResult(ctx context.Context,
 	if _, err := m.exactChoreographyOutputEntry(ctx, event.OutputOID, result); err != nil {
 		return Result{}, err
 	}
-	if _, err := m.exactChoreographyOutputEntry(ctx, event.TaskOID, result); err != nil {
+	if _, err := m.exactChoreographyOutputEntry(ctx, receiptOID, result); err != nil {
 		return Result{}, err
+	}
+	if event.PickupID != choreographyResultReadNoIdentity {
+		if err := m.VerifyChoreographyPickupResult(ctx, ChoreographyPickupResultProof{
+			Proposal: proposed, Result: result, MaxDocumentBytes: maxBytes}); err != nil {
+			return Result{}, err
+		}
 	}
 	return result, nil
 }
@@ -97,7 +110,16 @@ func (m *GitMailbox) ReadChoreographyCompletedResult(ctx context.Context,
 		return Result{}, fmt.Errorf(choreographyResultReadIncompleteCompletedError)
 	}
 	decision, err := m.plumbing.CommitParents(ctx, event.TaskOID)
-	if err != nil || len(decision) != choreographyResultReadDecisionParentCount || decision[choreographyResultReadFirstParentIndex] != event.ResultReceiptOID {
+	if err != nil {
+		return Result{}, err
+	}
+	if event.PickupID == choreographyResultReadNoIdentity &&
+		(len(decision) != choreographyResultReadDecisionParentCount ||
+			decision[choreographyResultReadFirstParentIndex] != event.ResultReceiptOID) ||
+		event.PickupID != choreographyResultReadNoIdentity &&
+			(len(decision) != choreographyResultReadPickupDecisionParentCount ||
+				decision[choreographyResultReadFirstParentIndex] != event.PriorTaskOID ||
+				decision[choreographyResultReadRawParentIndex] != event.ResultReceiptOID) {
 		return Result{}, &Rejection{Reason: ReasonChain}
 	}
 	decisionTree, err := m.readTree(ctx, event.TaskOID)
@@ -135,7 +157,9 @@ func (m *GitMailbox) ReadChoreographyCompletedResult(ctx context.Context,
 		proposed.ChoreographyRunBinding != query.Binding || proposed.Task != query.Task ||
 		proposed.Attempt != event.Attempt || proposed.Node != event.Node ||
 		proposed.Branch != FormatChoreographyTaskBranch(query.Binding.Run, query.Task) ||
-		proposed.ResultDigest != event.OutputOID || proposed.ClaimOID != receipt[choreographyResultReadFirstParentIndex] {
+		proposed.ResultDigest != event.OutputOID || proposed.ClaimOID != receipt[choreographyResultReadFirstParentIndex] ||
+		(event.PickupID != choreographyResultReadNoIdentity &&
+			(proposed.PickupID != event.PickupID || proposed.ClaimOID != event.ClaimOID)) {
 		return Result{}, &Rejection{Reason: ReasonChain}
 	}
 	resultTree, err := m.readTree(ctx, event.OutputOID)

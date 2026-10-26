@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"math"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/spf13/pflag"
@@ -33,6 +34,39 @@ func TestLoadExecutionBoundsAdmissionAtSignedProtocolMaximum(t *testing.T) {
 	}), "pkgs/core")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "execution.timeouts.admission must be <=")
+}
+
+func TestLoadExecutionPackCeilingKeepsExactIntegerBoundary(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		value    any
+		expected int64
+		want     string
+	}{
+		{"largest probeable quoted integer", strconv.FormatInt(math.MaxInt64-1, 10), math.MaxInt64 - 1, ""},
+		{"unprobeable quoted integer", strconv.FormatInt(math.MaxInt64, 10), 0,
+			"execution.transfer.maxPackBytes must be <= 9223372036854775806"},
+		// JSON numeric scalars reach the weak decoder as float64, so values at
+		// this boundary cannot retain their exact integer representation.
+		{"unprobeable numeric scalar", int64(math.MaxInt64), 0,
+			"execution.transfer.maxPackBytes must be"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeModelRepo(t, executionConfig(&ExecutionConfig{
+				Transfer: &ExecutionTransferConfig{MaxPackBytes: 1},
+			}), "pkgs/core")
+			path := filepath.Join(root, "dispat.json")
+			require.NoError(t, applyConfigEdit(path,
+				[]string{"execution", "transfer", "maxPackBytes"}, test.value))
+			loaded, err := Load(path, nil)
+			if test.want != "" {
+				require.ErrorContains(t, err, test.want)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.expected, loaded.Execution.Transfer.MaxPackBytes)
+		})
+	}
 }
 
 // The execution key is refused at load or it is not refused at all: nothing
@@ -85,6 +119,11 @@ func TestLoadExecutionAcceptedShapes(t *testing.T) {
 			assert.Equal(t, "Build-A", loaded.Execution.Workers[0].Name)
 			assert.True(t, loaded.Execution.IsDistributed())
 			assert.Equal(t, 2, loaded.Execution.ResolveConcurrency())
+		}},
+		"explicit uncertain attempt retry declaration": {&ExecutionConfig{
+			RetryAfterUncertainAttempt: true,
+		}, func(t *testing.T, loaded *File) {
+			assert.True(t, loaded.Execution.RetryAfterUncertainAttempt)
 		}},
 		"a serving worker": {&ExecutionConfig{
 			Name:      "build-a",
@@ -198,9 +237,6 @@ func TestLoadExecutionRejections(t *testing.T) {
 		"a negative Git pack ceiling": {
 			&ExecutionConfig{Transfer: &ExecutionTransferConfig{MaxPackBytes: -3}},
 			"execution.transfer.maxPackBytes must be >= 0, got -3"},
-		"a Git pack ceiling that cannot be probed": {
-			&ExecutionConfig{Transfer: &ExecutionTransferConfig{MaxPackBytes: math.MaxInt64}},
-			"execution.transfer.maxPackBytes must be <= 9223372036854775806"},
 		"a node name that is not one": {
 			&ExecutionConfig{Name: "build a"}, `execution.name "build a" is not a node name`},
 		"a node name git could not write into a branch name": {

@@ -51,7 +51,7 @@ func runWorkerForeignWithdrawalAfterResultLeaseLoss(t *testing.T, scenario forei
 		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 10, Task: 4, Cancel: 5}
 	})
 	pushReject, resultGate := harness.NewGitFaultChain(t,
-		harness.GitFault{Pattern: "*push*", Code: 128},
+		harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128},
 		harness.GitFault{Pattern: "*commit-tree*dispat transport result*", Nth: 1, Hold: true})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60, pushReject.Env()...)
 	defer resultGate.Resume()
@@ -113,5 +113,5 @@ func runWorkerForeignWithdrawalAfterResultLeaseLoss(t *testing.T, scenario forei
 	assert.NotContains(t, executionChain(t, rig.mailbox, branch), "ack")
 	assert.Empty(t, executionReleaseTags(rig))
 	assert.Len(t, rig.runs(), 1, "the build finished once before its report lost the lease")
-	assert.Zero(t, pushReject.Matches(), "a peer attempted an engine Git push")
+	assert.Zero(t, pushReject.Matches(), "a peer attempted a canonical task Git push")
 }

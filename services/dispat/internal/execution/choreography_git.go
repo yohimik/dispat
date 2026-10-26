@@ -199,6 +199,9 @@ type GitChoreographyPersist struct {
 }
 
 func NewGitChoreographyPersist(opts GitChoreographyOptions) (*GitChoreographyPersist, error) {
+	if err := validateChoreographyRetryPolicy(opts.JoinPolicy, opts.Tasks); err != nil {
+		return nil, err
+	}
 	if opts.Mailbox == nil || opts.Mailbox.plumbing == nil || opts.VerifyFirst == nil ||
 		opts.VerifyResult == nil || opts.MaxPackBytes < choreographyGitMinimumPositiveBytes ||
 		!opts.Binding.valid() || opts.GraphRootOID == choreographyGitAbsentState || opts.InitializationCompleteOID == choreographyGitAbsentState ||
@@ -500,8 +503,13 @@ func (g *GitChoreographyPersist) PersistClaim(ctx context.Context, p Choreograph
 				Run: p.Run, PlanDigest: p.PlanDigest, Task: p.Task,
 				Attempt: p.Attempt, Generation: p.Generation, Node: p.Node,
 				Branch: p.Branch, IssuedAt: time.Now().UTC().Format(time.RFC3339)}
-			assignment, bindErr := BindChoreographyCompiledTemplate(template, *p.resolvedBindings,
-				header, g.opts.BootstrapOID, p.GraphDigest)
+			assignment, bindErr := BindChoreographyCompiledTemplate(ChoreographyTemplateBindingOptions{
+				Template:     template,
+				Bindings:     *p.resolvedBindings,
+				Header:       header,
+				BootstrapOID: g.opts.BootstrapOID,
+				GraphDigest:  p.GraphDigest,
+			})
 			if bindErr != nil {
 				return ChoreographyReceipt{}, bindErr
 			}
@@ -514,6 +522,21 @@ func (g *GitChoreographyPersist) PersistClaim(ctx context.Context, p Choreograph
 			if err != nil {
 				return ChoreographyReceipt{}, err
 			}
+		}
+	}
+	pickupDeadlineUTC := choreographyGitAbsentState
+	if p.PickupID != choreographyGitAbsentState {
+		if assignmentOID == choreographyGitAbsentState {
+			return ChoreographyReceipt{}, fmt.Errorf(choreographyGitCompiledClaimHasNoFirstNodeResolvedEffectiveBindingsError)
+		}
+		view, readErr := m.OpenCarriedAssignment(ctx, assignmentOID, returnReplyLimit)
+		if readErr != nil {
+			return ChoreographyReceipt{}, readErr
+		}
+		pickupDeadlineUTC, err = choreographyPickupDeadline(view.Assignment.IssuedAt,
+			view.Assignment.DeadlineSeconds)
+		if err != nil {
+			return ChoreographyReceipt{}, err
 		}
 	}
 	document, err := json.Marshal(p)
@@ -541,8 +564,10 @@ func (g *GitChoreographyPersist) PersistClaim(ctx context.Context, p Choreograph
 			MembershipEpochOID:  p.MembershipEpochOID,
 			CapacityAuthorityID: p.CapacityAuthorityID,
 			LeaseIntentID:       p.LeaseIntentID, LeaseWeight: p.LeaseWeight,
-			PriorTaskOID:   p.ExpectedOID,
-			ProposalDigest: digest, ProposalID: p.ProposalID,
+			PickupID:          p.PickupID,
+			PickupDeadlineUTC: pickupDeadlineUTC,
+			PriorTaskOID:      p.ExpectedOID,
+			ProposalDigest:    digest, ProposalID: p.ProposalID,
 			InputsDigest: p.InputsDigest},
 	}); err != nil {
 		return ChoreographyReceipt{}, err
@@ -552,7 +577,9 @@ func (g *GitChoreographyPersist) PersistClaim(ctx context.Context, p Choreograph
 		Task: p.Task, Attempt: p.Attempt, Node: p.Node, Branch: p.Branch,
 		ProposalID: p.ProposalID, ProposalDigest: digest, OID: newOID,
 		GraphRootOID: p.GraphRootOID, AssignmentOID: assignmentOID,
-		Accepted: choreographyGitReceiptAccepted, Cursor: g.acceptedCursor(digest)}, nil
+		PickupID:          p.PickupID,
+		PickupDeadlineUTC: pickupDeadlineUTC,
+		Accepted:          choreographyGitReceiptAccepted, Cursor: g.acceptedCursor(digest)}, nil
 }
 
 // PersistRefusal durably fences a well-formed but currently unclaimable
@@ -742,9 +769,18 @@ func (g *GitChoreographyPersist) PersistResult(ctx context.Context, p Choreograp
 		MaxDocumentBytes: g.opts.MaxPackBytes}); err != nil {
 		return ChoreographyReceipt{}, err
 	}
+	if p.PickupID != choreographyGitAbsentState {
+		if err := m.VerifyChoreographyPickupResult(ctx, ChoreographyPickupResultProof{
+			Proposal: p, Result: result, MaxDocumentBytes: g.opts.MaxPackBytes}); err != nil {
+			return ChoreographyReceipt{}, err
+		}
+	}
 	outputs, err := m.exactChoreographyOutputEntry(ctx, p.ResultDigest, result)
 	if err != nil {
 		return ChoreographyReceipt{}, err
+	}
+	if p.PickupID != choreographyGitAbsentState {
+		return g.persistPickupResult(ctx, p, digest, outputs)
 	}
 	record, err := json.Marshal(p)
 	if err != nil {
@@ -764,7 +800,8 @@ func (g *GitChoreographyPersist) PersistResult(ctx context.Context, p Choreograp
 		Event: ChoreographyEvent{Kind: ChoreographyResultAccepted,
 			Task: p.Task, Attempt: p.Attempt, Node: p.Node, TaskOID: newOID,
 			PriorTaskOID:   p.ClaimOID,
-			ProposalDigest: digest, ProposalID: p.ProposalID, OutputOID: p.ResultDigest},
+			ProposalDigest: digest, ProposalID: p.ProposalID, OutputOID: p.ResultDigest,
+			PickupID: p.PickupID},
 	}); err != nil {
 		return ChoreographyReceipt{}, err
 	}
@@ -772,6 +809,7 @@ func (g *GitChoreographyPersist) PersistResult(ctx context.Context, p Choreograp
 		Kind: choreographyResultKind,
 		Task: p.Task, Attempt: p.Attempt, Node: p.Node, Branch: p.Branch,
 		ProposalID: p.ProposalID, ProposalDigest: digest, OID: newOID,
+		PickupID: p.PickupID,
 		Accepted: choreographyGitReceiptAccepted, Cursor: g.acceptedCursor(digest)}, nil
 }
 
@@ -779,45 +817,67 @@ func (g *GitChoreographyPersist) PersistResult(ctx context.Context, p Choreograp
 // new exact task tip in the ledger. A Result that wins the task CAS prevents
 // this cancellation from being reported as a stopped command.
 func (g *GitChoreographyPersist) PersistCancel(ctx context.Context,
-	c ChoreographyCancellation) (string, error) {
+	c ChoreographyCancellation) (ChoreographyCancellationReceipt, error) {
 	if err := g.opts.VerifyFirst(ctx); err != nil {
-		return choreographyGitAbsentState, err
+		return ChoreographyCancellationReceipt{}, err
 	}
+	pendingIdentity, pendingOID := choreographyGitAbsentState, choreographyGitAbsentState
+	g.mu.Lock()
+	if pending := g.pending; pending != nil &&
+		pending.mutation.Event.Kind == ChoreographyCancelIssued &&
+		pending.mutation.Event.Task == c.Task &&
+		pending.mutation.Event.Attempt == c.Attempt &&
+		pending.mutation.Event.Node == c.Node &&
+		pending.mutation.Event.ClaimOID == c.ClaimOID &&
+		pending.mutation.TaskBranch == c.Branch &&
+		pending.mutation.OldTaskOID == c.ClaimOID {
+		c.CancelReplyDeadlineUTC = pending.mutation.Event.CancelReplyDeadlineUTC
+		pendingIdentity, pendingOID = pending.mutation.Identity, pending.mutation.NewTaskOID
+	}
+	g.mu.Unlock()
 	if c.ChoreographyRunBinding != g.opts.Binding || c.Task == choreographyGitAbsentState || c.Attempt < choreographyGitFirstAttempt ||
 		c.Node == choreographyGitAbsentState || c.ClaimOID == choreographyGitAbsentState || c.AssignmentOID == choreographyGitAbsentState ||
 		g.tasks[c.Task].Branch != c.Branch {
-		return choreographyGitAbsentState, fmt.Errorf(choreographyGitInvalidCompiledCancellationError)
+		return ChoreographyCancellationReceipt{}, fmt.Errorf(choreographyGitInvalidCompiledCancellationError)
+	}
+	if _, err := time.Parse(time.RFC3339, c.CancelReplyDeadlineUTC); err != nil {
+		return ChoreographyCancellationReceipt{}, fmt.Errorf(choreographyGitInvalidCompiledCancellationError)
 	}
 	m := g.opts.Mailbox
 	view, err := m.OpenCarriedAssignment(ctx, c.AssignmentOID, returnReplyLimit)
 	if err != nil {
-		return choreographyGitAbsentState, err
+		return ChoreographyCancellationReceipt{}, err
 	}
 	a := view.Assignment
 	if a.Protocol != ChoreographyProtocolVersion || a.Run != c.Run ||
 		a.Generation != c.Generation || a.PlanDigest != c.PlanDigest ||
 		a.GraphDigest != c.GraphDigest || a.Task != c.Task ||
 		a.Branch != c.Branch || a.Attempt != c.Attempt || a.Node != c.Node {
-		return choreographyGitAbsentState, fmt.Errorf(choreographyGitCancellationAssignmentDiffersFromActiveAttemptError)
+		return ChoreographyCancellationReceipt{}, fmt.Errorf(choreographyGitCancellationAssignmentDiffersFromActiveAttemptError)
 	}
 	parents, err := m.plumbing.CommitParents(ctx, c.ClaimOID)
 	if err != nil || len(parents) != choreographyGitClaimCarrierParentCount || parents[choreographyGitFirstParentIndex] != c.AssignmentOID {
-		return choreographyGitAbsentState, fmt.Errorf(choreographyGitCancellationClaimIsNotDescendedFromOfferedAssignmentError)
+		return ChoreographyCancellationReceipt{}, fmt.Errorf(choreographyGitCancellationClaimIsNotDescendedFromOfferedAssignmentError)
 	}
-	header := a.Header
-	header.IssuedAt = time.Now().UTC().Format(time.RFC3339)
-	withdrawal := Withdrawal{Header: header, Assignment: c.AssignmentOID, Tip: c.ClaimOID}
-	document, err := json.Marshal(withdrawal)
+	pickupID, err := m.readChoreographyClaimPickupID(ctx, c.ClaimOID)
 	if err != nil {
-		return choreographyGitAbsentState, err
+		return ChoreographyCancellationReceipt{}, err
 	}
-	sum := sha256.Sum256(document)
-	identity := hex.EncodeToString(sum[:])
-	oid := g.pendingTaskOID(identity)
-	if oid == choreographyGitAbsentState {
+	identity, oid := pendingIdentity, pendingOID
+	if identity == choreographyGitAbsentState {
+		header := a.Header
+		header.IssuedAt = time.Now().UTC().Format(time.RFC3339)
+		withdrawal := Withdrawal{Header: header, Assignment: c.AssignmentOID, Tip: c.ClaimOID,
+			CancelReplyDeadlineUTC: c.CancelReplyDeadlineUTC}
+		document, marshalErr := json.Marshal(withdrawal)
+		if marshalErr != nil {
+			return ChoreographyCancellationReceipt{}, marshalErr
+		}
+		sum := sha256.Sum256(document)
+		identity = hex.EncodeToString(sum[:])
 		oid, err = m.commitMessage(ctx, MessageCancel, document, []string{c.ClaimOID}, nil)
 		if err != nil {
-			return choreographyGitAbsentState, err
+			return ChoreographyCancellationReceipt{}, err
 		}
 	}
 	if err := g.persistAtomic(ctx, choreographyLedgerMutation{
@@ -825,11 +885,14 @@ func (g *GitChoreographyPersist) PersistCancel(ctx context.Context,
 		OldTaskOID: c.ClaimOID, NewTaskOID: oid,
 		Event: ChoreographyEvent{Kind: ChoreographyCancelIssued, Task: c.Task,
 			Attempt: c.Attempt, Node: c.Node, TaskOID: oid,
-			PriorTaskOID: c.ClaimOID},
+			PriorTaskOID: c.ClaimOID, ClaimOID: c.ClaimOID, PickupID: pickupID,
+			CancelReplyDeadlineUTC: c.CancelReplyDeadlineUTC,
+			GraphRootOID:           g.opts.GraphRootOID},
 	}); err != nil {
-		return choreographyGitAbsentState, err
+		return ChoreographyCancellationReceipt{}, err
 	}
-	return oid, nil
+	return ChoreographyCancellationReceipt{OID: oid,
+		CancelReplyDeadlineUTC: c.CancelReplyDeadlineUTC}, nil
 }
 
 // PersistQueueFence revokes a final unclaimed offer before any failure hook.
@@ -966,8 +1029,11 @@ func (g *GitChoreographyPersist) PersistAck(ctx context.Context, p ChoreographyA
 	}
 	m := g.opts.Mailbox
 	head, err := m.Reread(ctx, p.Branch)
-	if err != nil || head.OID != p.CancelOID {
+	if err != nil {
 		return ChoreographyReceipt{}, fmt.Errorf(choreographyGitCancellationRefIsNotAtTheObservedCancelError)
+	}
+	if head.OID != p.CancelOID {
+		return g.persistPickupSideAck(ctx, p, digest, head.OID)
 	}
 	tip, err := m.Inspect(ctx, head)
 	if err != nil || tip.Kind != MessageCancel {
@@ -983,6 +1049,10 @@ func (g *GitChoreographyPersist) PersistAck(ctx context.Context, p ChoreographyA
 		withdrawal.Task != p.Task || withdrawal.Attempt != p.Attempt || withdrawal.Branch != p.Branch ||
 		withdrawal.Node != p.Node {
 		return ChoreographyReceipt{}, fmt.Errorf(choreographyGitCancellationDoesNotMatchAcknowledgementError)
+	}
+	pickupID, err := m.readChoreographyClaimPickupID(ctx, withdrawal.Tip)
+	if err != nil {
+		return ChoreographyReceipt{}, err
 	}
 	oid := g.pendingTaskOID(digest)
 	if oid == choreographyGitAbsentState {
@@ -1003,14 +1073,16 @@ func (g *GitChoreographyPersist) PersistAck(ctx context.Context, p ChoreographyA
 		OldTaskOID: p.CancelOID, NewTaskOID: oid,
 		Event: ChoreographyEvent{Kind: ChoreographyAckAccepted,
 			Task: p.Task, Attempt: p.Attempt, Node: p.Node, TaskOID: oid,
-			PriorTaskOID:   p.CancelOID,
+			PriorTaskOID: p.CancelOID, ClaimOID: withdrawal.Tip,
+			PickupID:       pickupID,
+			GraphRootOID:   g.opts.GraphRootOID,
 			ProposalDigest: digest, ProposalID: p.ProposalID},
 	}); err != nil {
 		return ChoreographyReceipt{}, err
 	}
 	return ChoreographyReceipt{ChoreographyRunBinding: p.ChoreographyRunBinding, Kind: MessageAck,
 		Task: p.Task, Attempt: p.Attempt, Node: p.Node, Branch: p.Branch, ProposalID: p.ProposalID,
-		ProposalDigest: digest, OID: oid,
+		ProposalDigest: digest, OID: oid, PickupID: pickupID, GraphRootOID: g.opts.GraphRootOID,
 		Accepted: choreographyGitReceiptAccepted, Cursor: g.acceptedCursor(digest)}, nil
 }
 
@@ -1035,6 +1107,9 @@ func (g *GitChoreographyPersist) PersistDecision(ctx context.Context, d Choreogr
 	spec := g.tasks[d.Task]
 	if spec.Task == choreographyGitAbsentState || spec.Branch != branch {
 		return choreographyGitAbsentState, fmt.Errorf(choreographyGitDecisionNamesNoCanonicalTaskRefError)
+	}
+	if d.Retry && !spec.RetryAfterUncertainAttempt {
+		return choreographyGitAbsentState, fmt.Errorf(choreographyGitInvalidTaskDecisionError)
 	}
 	if err := validateChoreographyPackageOutcome(ChoreographyPackageOutcomeCheck{
 		Task: spec, Outcome: d.PackageOutcome, Succeeded: d.Succeeded, Retry: d.Retry}); err != nil {
@@ -1061,6 +1136,30 @@ func (g *GitChoreographyPersist) PersistDecision(ctx context.Context, d Choreogr
 	}
 	if d.Retry {
 		outputEntries = nil
+	}
+	if resultTree.kind == choreographyResultKind {
+		receiptBytes, readErr := m.Read(ctx, ChainTip{OID: d.ResultOID, Kind: resultTree.kind,
+			document: resultTree.document, signature: resultTree.signature}, g.opts.MaxPackBytes)
+		if readErr != nil {
+			return choreographyGitAbsentState, readErr
+		}
+		var proposal ChoreographyResultProposal
+		if strictJSON(receiptBytes, &proposal) != nil {
+			return choreographyGitAbsentState, fmt.Errorf(choreographyGitDecisionNamesNoSettledResultOrAcknowledgementError)
+		}
+		if proposal.PickupID != choreographyGitAbsentState {
+			return g.persistPickupDecision(ctx, choreographyPickupDecisionOptions{
+				Decision: d, Document: document, Identity: identity,
+				Spec: spec, OutputOID: outputOID, OutputEntries: outputEntries,
+				Proposal: proposal})
+		}
+	} else if resultTree.kind == MessageAck {
+		if oid, handled, err := g.persistPickupAckDecision(ctx, choreographyPickupAckDecisionOptions{
+			Decision: d, Document: document, Identity: identity, Spec: spec}); err != nil {
+			return choreographyGitAbsentState, err
+		} else if handled {
+			return oid, nil
+		}
 	}
 	oid := g.pendingTaskOID(identity)
 	if oid == choreographyGitAbsentState {
@@ -1312,10 +1411,15 @@ func (g *GitChoreographyPersist) LookupReceipt(ctx context.Context, q Choreograp
 	}
 	if accepted, found := g.accepted[q.ProposalDigest]; found {
 		event := g.events[accepted.Sequence-choreographyGitLedgerSequenceOffset]
+		receiptOID := event.TaskOID
+		if (q.Kind == choreographyResultKind || q.Kind == MessageAck) &&
+			event.ResultReceiptOID != choreographyGitAbsentState {
+			receiptOID = event.ResultReceiptOID
+		}
 		kindMatches := q.Kind == choreographyClaimKind && event.Kind == ChoreographyClaimAccepted ||
 			q.Kind == choreographyResultKind && event.Kind == ChoreographyResultAccepted ||
 			q.Kind == MessageAck && event.Kind == ChoreographyAckAccepted
-		if !kindMatches || candidateOID != choreographyGitAbsentState && candidateOID != event.TaskOID || event.Task != q.Task ||
+		if !kindMatches || candidateOID != choreographyGitAbsentState && candidateOID != receiptOID || event.Task != q.Task ||
 			event.Attempt != q.Attempt || event.Node != q.Node ||
 			event.ProposalID != q.ProposalID ||
 			q.Branch != FormatChoreographyTaskBranch(q.Run, q.Task) {
@@ -1324,9 +1428,21 @@ func (g *GitChoreographyPersist) LookupReceipt(ctx context.Context, q Choreograp
 		return ChoreographyReceipt{ChoreographyRunBinding: q.ChoreographyRunBinding,
 			Kind: q.Kind, Task: q.Task, Attempt: q.Attempt,
 			Node: q.Node, Branch: q.Branch, ProposalID: q.ProposalID,
-			ProposalDigest: q.ProposalDigest, OID: event.TaskOID,
+			ProposalDigest: q.ProposalDigest, OID: receiptOID,
 			GraphRootOID: event.GraphRootOID, AssignmentOID: event.AssignmentOID,
+			PickupID: event.PickupID,
 			Accepted: choreographyGitReceiptAccepted, Cursor: accepted}, choreographyGitReceiptAccepted, nil
+	}
+	for _, index := range g.taskEvents[q.Task] {
+		event := g.events[index]
+		if event.ProposalID == q.ProposalID &&
+			((q.Kind == choreographyResultKind && event.Kind == ChoreographyResultAccepted) ||
+				(q.Kind == choreographyClaimKind && event.Kind == ChoreographyClaimAccepted) ||
+				(q.Kind == MessageAck && event.Kind == ChoreographyAckAccepted)) &&
+			event.ProposalDigest != q.ProposalDigest {
+			return ChoreographyReceipt{}, choreographyGitReceiptMissing,
+				fmt.Errorf(choreographyGitProposalIdReusedOnTaskRefError)
+		}
 	}
 	if candidateOID != choreographyGitAbsentState {
 		return ChoreographyReceipt{}, choreographyGitReceiptMissing, fmt.Errorf(choreographyGitTaskProposalHasNoSignedLedgerAcceptanceError)

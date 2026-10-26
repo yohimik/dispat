@@ -61,3 +61,28 @@ func TestTypedPriorExportRequiresInstalledSignedProviderFile(t *testing.T) {
 	_, err = rehomeVerifiedTaskExports(mono, checkout, proofs)
 	require.ErrorContains(t, err, "no matching installed output")
 }
+
+func TestTypedPriorExportSelectsOwnPackageCopyOfOneVerifiedResult(t *testing.T) {
+	root := t.TempDir()
+	for _, folder := range []string{"src", "src/packages/core"} {
+		file := filepath.Join(root, folder, "dist", "base")
+		require.NoError(t, os.MkdirAll(filepath.Dir(file), 0o700))
+		require.NoError(t, os.WriteFile(file, []byte("verified"), 0o600))
+	}
+	assignment := Assignment{Package: &AssignmentPackage{Name: "core", Repository: "source", Dir: "packages/core"},
+		Repositories: []AssignmentRepository{{Name: "source", Path: "src"}},
+		Exports: []ExportedValue{{Name: "DIST_BASE", DeclaredPath: &ExportedDeclaredPath{
+			Repository: "source", Package: "core", Root: "dist", Relative: "base"}}}}
+	manifest := &OutputManifest{Roots: []string{"dist"}, Entries: []ManifestEntry{{Path: "dist/base"}}}
+	proofs := []verifiedTaskInput{
+		{input: AssignmentInput{Task: "core:1:", Package: "core", Commit: "signed-result", Digest: "signed-manifest", Path: "src"}, manifest: manifest},
+		{input: AssignmentInput{Task: "core:1:", Package: "core", Commit: "signed-result", Digest: "signed-manifest", Path: "src/packages/core"}, manifest: manifest},
+	}
+	checked, err := rehomeVerifiedTaskExports(assignment, &Checkout{root: root}, proofs)
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(root, "src", "packages", "core", "dist", "base"), checked.Exports[0].Value)
+
+	proofs[1].input.Commit = "different-result"
+	_, err = rehomeVerifiedTaskExports(assignment, &Checkout{root: root}, proofs)
+	require.ErrorContains(t, err, verifiedTaskExportAmbiguousInputError)
+}

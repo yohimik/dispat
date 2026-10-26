@@ -4,8 +4,6 @@
 package execution
 
 import (
-	"encoding/json"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,26 +11,15 @@ import (
 
 func acceptPackageFixtureResult(t *testing.T, fixture *mailboxFixture,
 	broker *FirstNodeBroker, binding ChoreographyRunBinding, spec ChoreographyTaskSpec,
-	claim ChoreographyReceipt, inputsDigest, proposalID, status string) ChoreographyReceipt {
+	claim ChoreographyReceipt, claimProposal ChoreographyClaimProposal, proposalID, status string) ChoreographyReceipt {
 	t.Helper()
 	result := Result{Header: Header{Protocol: ChoreographyProtocolVersion,
 		Kind: KindBuild, Run: binding.Run, Generation: binding.Generation,
 		PlanDigest: binding.PlanDigest, Task: spec.Task, Attempt: 1,
 		Node: "node-a", Branch: spec.Branch}, Assignment: claim.OID, Status: status}
-	document, err := json.Marshal(result)
-	require.NoError(t, err)
-	rawOID, err := fixture.mailbox.commitMessage(t.Context(), MessageResult, document, nil, nil)
-	require.NoError(t, err)
-	pack, err := os.CreateTemp(t.TempDir(), "package-result-*.pack")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pack.Close() })
-	require.NoError(t, fixture.git.ExportCommitPack(t.Context(), rawOID, pack))
-	proposal := ChoreographyResultProposal{ChoreographyRunBinding: binding,
-		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
-		ClaimOID: claim.OID, InputsDigest: inputsDigest,
-		ProposalID: proposalID, ResultDigest: rawOID}
-	proposal, err = PrepareChoreographyResult(t.Context(), proposal, pack, 1<<20)
-	require.NoError(t, err)
+	proposal, pack := prepareChoreographyFixturePickupResult(t, fixture,
+		choreographyFixturePickupResult{Claim: claimProposal, Accepted: claim,
+			Result: result, ProposalID: proposalID})
 	accepted, err := broker.AcceptResult(t.Context(), proposal, pack)
 	require.NoError(t, err)
 	return accepted
@@ -52,12 +39,12 @@ func TestChoreographyCapacityOneParallelFailureDefersPackageEdgesAfterSignedTask
 	firstClaim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: first.Task, Attempt: 1, Node: "node-a", Branch: first.Branch,
 		ExpectedOID: first.ReservationOID, InputsDigest: first.InputsDigest,
-		ProposalID: "first-claim"}
+		PickupID: NewChoreographyPickupID(), ProposalID: "first-claim"}
 	completeChoreographyFixtureClaim(t, persist, &firstClaim)
 	acceptedFirst, err := broker.AcceptClaim(t.Context(), firstClaim)
 	require.NoError(t, err)
 	acceptedResult := acceptPackageFixtureResult(t, fixture, broker, binding, first,
-		acceptedFirst, firstClaim.InputsDigest, "first-result", StatusFailed)
+		acceptedFirst, firstClaim, "first-result", StatusFailed)
 	require.NoError(t, broker.DecideAttempt(t.Context(), ChoreographyDecision{
 		ChoreographyRunBinding: binding, Task: first.Task, Branch: first.Branch,
 		Attempt: 1, Node: "node-a", ResultOID: acceptedResult.OID,
@@ -70,13 +57,13 @@ func TestChoreographyCapacityOneParallelFailureDefersPackageEdgesAfterSignedTask
 	secondClaim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: second.Task, Attempt: 1, Node: "node-a", Branch: second.Branch,
 		ExpectedOID: second.ReservationOID, InputsDigest: second.InputsDigest,
-		ProposalID: "second-claim"}
+		PickupID: NewChoreographyPickupID(), ProposalID: "second-claim"}
 	completeChoreographyFixtureClaim(t, persist, &secondClaim)
 	acceptedSecond, err := broker.AcceptClaim(t.Context(), secondClaim)
 	require.NoError(t, err, "the sibling can use the one physical slot before package settlement")
 	require.True(t, acceptedSecond.Accepted)
 	secondResult := acceptPackageFixtureResult(t, fixture, broker, binding, second,
-		acceptedSecond, secondClaim.InputsDigest, "second-result", StatusFailed)
+		acceptedSecond, secondClaim, "second-result", StatusFailed)
 	require.NoError(t, broker.DecideAttempt(t.Context(), ChoreographyDecision{
 		ChoreographyRunBinding: binding, Task: second.Task, Branch: second.Branch,
 		Attempt: 1, Node: "node-a", ResultOID: secondResult.OID,

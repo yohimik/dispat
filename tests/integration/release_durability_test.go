@@ -363,13 +363,13 @@ func TestReceiptBehindTheHeadIsRecordedWhereItWasPlanned(t *testing.T) {
 // TestAdoptionRefusesAForeignArtefact is §19.4's third step. A record lost
 // after publication meets the registry's refusal on the next run, and the
 // artefact the registry holds is not the one this run built. The package
-// fails with E198, its tag is not written, and the run starts no further
-// publication; an independent package waiting to publish is cancelled rather
-// than published. With adoptPublished: false the refusal is an ordinary
-// publish failure and the verify script is never asked.
+// reports E198 inside E228, writes no tag, retains exclusion and starts no
+// further publication. With adoptPublished: false the verify script is never
+// asked, but the failed external request still retains exclusion.
 func TestAdoptionRefusesAForeignArtefact(t *testing.T) {
 	reg := newFileRegistry(t)
 	r := harness.New(t)
+	remote := r.AddBareRemote()
 	asked := filepath.Join(t.TempDir(), "asked")
 	cfg := harness.BaseFile(1)
 	cfg.Scripts = map[string]models.Script{
@@ -394,25 +394,48 @@ func TestAdoptionRefusesAForeignArtefact(t *testing.T) {
 	r.WriteConfigModel(cfg)
 	r.Commit("feat(zeta): an independent package")
 
-	refused := r.Release()
+	refused := r.CommandEnv(harness.LockEnabled)
 	require.NotZero(t, refused.Code, "stdout:\n%s\nstderr:\n%s", refused.Stdout, refused.Stderr)
-	assert.True(t, harness.IsCodePresentForPackage(refused.Events, "E198", "core"), "stdout:\n%s", refused.Stdout)
+	assert.Contains(t, refused.Stdout, "E228", "the failed request remains uncertain")
+	assert.Contains(t, refused.Stdout, "E198", "the verified foreign artefact is named")
 	assert.False(t, r.IsTagged("core@0.1.0"), "a foreign artefact is never enrolled")
 	assert.Equal(t, 0, reg.uploads(t, "zeta@0.1.0"), "no publication starts after E198")
-	assert.Contains(t, refused.Stdout, `"status":"cancelled"`)
+	assert.True(t, remoteHoldsLock(t, remote), "the uncertain request retains exclusion")
 	assert.FileExists(t, asked)
 
-	// Off: the refusal is the publish failure it always was.
+	// The retained lock above cannot be discarded to compare policy. Use a
+	// separate history to prove that disabling adoption skips verification.
+	offReg := newFileRegistry(t)
+	offRepo := harness.New(t)
+	offRemote := offRepo.AddBareRemote()
+	offCfg := harness.BaseFile(1)
+	offCfg.Scripts = map[string]models.Script{
+		"build":   {offReg.build()},
+		"slow":    {"sleep 2", offReg.build()},
+		"publish": {offReg.publish()},
+		"verify":  {"touch " + harness.ShQuote(asked), offReg.verify()},
+	}
+	offCfg.Spaces = map[string]models.SpaceConfig{"libs": {Path: models.PathList{"packages"}, Flow: buildPublish()}}
+	offRepo.WriteConfigModel(offCfg)
+	offRepo.SeedPackage("packages", "core")
+	offRepo.Commit("feat(core): first release")
+	offRepo.ReleaseOK()
+	offRepo.Git("tag", "-d", "core@0.1.0")
+	require.NoError(t, os.WriteFile(offReg.salt, []byte("second\n"), 0o644))
+	offRepo.SeedPackage("packages", "zeta")
+	offCfg.Packages = map[string]models.PackageConfig{"zeta": {Flow: &models.SpaceFlowConfig{Build: []string{"slow"}}}}
+	offCfg.Publish = &models.PublishConfig{AdoptPublished: models.AdoptPublishedOf(false)}
+	offRepo.WriteConfigModel(offCfg)
+	offRepo.Commit("feat(zeta): adoption disabled")
 	require.NoError(t, os.Remove(asked))
-	cfg.Publish = &models.PublishConfig{AdoptPublished: models.AdoptPublishedOf(false)}
-	r.WriteConfigModel(cfg)
-	r.Commit("chore: adoption off")
-	off := r.Release()
+	off := offRepo.CommandEnv(harness.LockEnabled)
 	require.NotZero(t, off.Code, "stdout:\n%s", off.Stdout)
 	assert.False(t, harness.IsCodePresent(off.Events, "E198"), "stdout:\n%s", off.Stdout)
 	assert.False(t, harness.IsCodePresent(off.Events, "W196"), "stdout:\n%s", off.Stdout)
+	assert.Contains(t, off.Stdout, "E228")
 	assert.NoFileExists(t, asked)
-	assert.Equal(t, 1, reg.uploads(t, "zeta@0.1.0"), "with adoption off nothing stops the independent package")
+	assert.Equal(t, 0, offReg.uploads(t, "zeta@0.1.0"), "uncertainty stops independent publication")
+	assert.True(t, remoteHoldsLock(t, offRemote))
 }
 
 // TestAdoptionThroughTheNpmRegistryIntegrity is the built-in check. With no
@@ -424,11 +447,11 @@ func TestAdoptionThroughTheNpmRegistryIntegrity(t *testing.T) {
 		t.Skip("the npm stand-in is a POSIX shell script")
 	}
 	for _, c := range []struct {
-		name, held, code string
-		isTagged         bool
+		name, held string
+		isTagged   bool
 	}{
-		{name: "a matching integrity is adopted", held: "sha512-built", code: "W196", isTagged: true},
-		{name: "another integrity is refused", held: "sha512-other", code: "E198"},
+		{name: "a matching integrity is adopted", held: "sha512-built", isTagged: true},
+		{name: "another integrity is refused", held: "sha512-other"},
 		{name: "a version the registry does not hold stays a publish failure", held: ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -461,9 +484,12 @@ func TestAdoptionThroughTheNpmRegistryIntegrity(t *testing.T) {
 			} else {
 				assert.NotZero(t, res.Code)
 			}
-			for _, code := range []string{"W196", "E198"} {
-				assert.Equal(t, code == c.code, harness.IsCodePresentForPackage(res.Events, code, "core"),
-					"%s, stdout:\n%s", code, res.Stdout)
+			assert.Equal(t, c.isTagged, harness.IsCodePresentForPackage(res.Events, "W196", "core"),
+				"stdout:\n%s", res.Stdout)
+			if !c.isTagged {
+				assert.Contains(t, res.Stdout, "E228", "the failed external request remains uncertain")
+				assert.Equal(t, c.held != "", strings.Contains(res.Stdout, "E198"),
+					"a foreign integrity is named, while absence proves no mismatch")
 			}
 		})
 	}

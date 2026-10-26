@@ -82,7 +82,9 @@ type App struct {
 	// history, nil in a composed workspace (where the recorder holds one per
 	// repository) and nil under a bypass. It is kept because ownership is a
 	// question a distributed run asks again later, not only once.
-	releaseLock *release.Lock
+	releaseLock              *release.Lock
+	publicationExclusionOnce sync.Once
+	publicationExclusionErr  error
 	// ownership is the gate every new effect of this release passes: each
 	// publication, local or delegated, and each assignment of a distributed
 	// run. It is opened once the locks are held and is nil for a run that

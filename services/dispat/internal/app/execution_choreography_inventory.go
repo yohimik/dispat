@@ -18,19 +18,26 @@ func (a *App) releaseChoreographyInventory(c *execution.Coordinator,
 	pl *plan.Plan, compiled *release.CompiledTaskGraph) (
 	[]execution.ChoreographyTaskSpec, []execution.ChoreographyCompiledTemplate,
 	[]execution.ChoreographyPackagePolicy, string, error) {
-	if a == nil || c == nil || pl == nil || compiled == nil || c.Local.Capacity <= 0 {
-		return nil, nil, nil, "", fmt.Errorf("execution: preflight compiled inventory lacks pinned plan or first-node capacity")
+	if a == nil || c == nil || pl == nil || compiled == nil || c.Local.Capacity <= choreographyNoCapacityCount {
+		return nil, nil, nil, choreographyAbsentIdentityText, fmt.Errorf(choreographyIncompleteReleaseInventoryErrorText)
 	}
 	provisional := []execution.ChoreographyRuntimeNode{{Name: c.Local.Name,
-		Capacity: c.Local.Capacity, First: true, AuthorityID: c.Local.AuthorityID}}
+		Capacity: c.Local.Capacity, First: choreographyFirstNodeState, AuthorityID: c.Local.AuthorityID}}
 	specs, err := releaseChoreographySpecs(pl, compiled, provisional)
 	if err != nil {
-		return nil, nil, nil, "", err
+		return nil, nil, nil, choreographyAbsentIdentityText, err
 	}
-	templates, err := compileReleaseChoreographyTemplatesWithInputs(compiled, specs,
-		a.resolveInputSources(pl), a.resolveShell, c.Timeouts.Task, c.Limits)
+	applyChoreographyRetrySafety(specs, c.JoinPolicy.RetryAfterUncertainAttempt)
+	templates, err := compileReleaseChoreographyTemplatesWithInputs(releaseChoreographyTemplateOptions{
+		Compiled:    compiled,
+		Tasks:       specs,
+		Sources:     a.resolveInputSources(pl),
+		Shell:       a.resolveShell,
+		TaskTimeout: c.Timeouts.Task,
+		Limits:      c.Limits,
+	})
 	if err != nil {
-		return nil, nil, nil, "", err
+		return nil, nil, nil, choreographyAbsentIdentityText, err
 	}
 	policies := releaseChoreographyPackagePolicies(compiled)
 	binding := execution.ChoreographyRunBinding{Run: c.Run, Generation: c.Generation,
@@ -42,24 +49,46 @@ func (a *App) releaseChoreographyInventory(c *execution.Coordinator,
 	return specs, templates, policies, digest, err
 }
 
-func (a *App) sweepChoreographyInventory(c *execution.Coordinator,
-	work *scriptWork, covered []string, tasks []execution.ReservationTask,
-	onError, semanticGraphDigest string) (
+type sweepChoreographyInventoryOptions struct {
+	Coordinator         *execution.Coordinator
+	Work                *scriptWork
+	Covered             []string
+	Tasks               []execution.ReservationTask
+	OnError             string
+	SemanticGraphDigest string
+}
+
+func (a *App) sweepChoreographyInventory(options sweepChoreographyInventoryOptions) (
 	[]execution.ChoreographyTaskSpec, []execution.ChoreographyCompiledTemplate,
 	[]execution.ChoreographyPackagePolicy, string, error) {
-	if a == nil || c == nil || work == nil || work.pl == nil || c.Local.Capacity <= 0 {
-		return nil, nil, nil, "", fmt.Errorf("execution: preflight sweep inventory lacks pinned plan or first-node capacity")
+	c, work, covered, tasks, onError, semanticGraphDigest := options.Coordinator, options.Work, options.Covered, options.Tasks, options.OnError, options.SemanticGraphDigest
+
+	if a == nil || c == nil || work == nil || work.pl == nil || c.Local.Capacity <= choreographyNoCapacityCount {
+		return nil, nil, nil, choreographyAbsentIdentityText, fmt.Errorf(choreographyIncompleteSweepInventoryErrorText)
 	}
 	provisional := []execution.ChoreographyRuntimeNode{{Name: c.Local.Name,
-		Capacity: c.Local.Capacity, First: true, AuthorityID: c.Local.AuthorityID}}
-	specs, _, err := sweepChoreographySpecs(work.pl, covered, tasks, provisional, a.cfg.BuildConcurrency)
+		Capacity: c.Local.Capacity, First: choreographyFirstNodeState, AuthorityID: c.Local.AuthorityID}}
+	specs, _, err := sweepChoreographySpecs(sweepChoreographySpecOptions{
+		Plan:          work.pl,
+		Covered:       covered,
+		Tasks:         tasks,
+		Roster:        provisional,
+		BuildCapacity: a.cfg.BuildConcurrency,
+	})
 	if err != nil {
-		return nil, nil, nil, "", err
+		return nil, nil, nil, choreographyAbsentIdentityText, err
 	}
-	templates, err := compileSweepChoreographyTemplatesWithInputs(work, specs,
-		a.resolveInputSources(work.pl), a.resolveShell, c.Timeouts.Task, c.Limits)
+	applyChoreographyRetrySafety(specs, c.JoinPolicy.RetryAfterUncertainAttempt)
+	templates, err := compileSweepChoreographyTemplatesWithInputs(sweepChoreographyTemplateOptions{
+		Work:        work,
+		Tasks:       specs,
+		Sources:     a.resolveInputSources(work.pl),
+		Shell:       a.resolveShell,
+		TaskTimeout: c.Timeouts.Task,
+		Limits:      c.Limits,
+	})
 	if err != nil {
-		return nil, nil, nil, "", err
+		return nil, nil, nil, choreographyAbsentIdentityText, err
 	}
 	policies := sweepChoreographyPackagePolicies(work.pl, covered, onError)
 	binding := execution.ChoreographyRunBinding{Run: c.Run, Generation: c.Generation,

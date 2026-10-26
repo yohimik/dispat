@@ -7,6 +7,7 @@ is the option reference.
 ```yaml
 execution:
   concurrency: 2
+  retryAfterUncertainAttempt: false
   name: orchestrator
   endpoint: git@github.com:acme/project.git
   secretEnv: DISPAT_EXECUTION_SECRET
@@ -37,7 +38,8 @@ explicit shared node capacity remains available.
 
 `--distribution-mode=compilation` is the only supported mode for `release`, `run` and `status`. The
 orchestrator computes the plan and compiles one task ref per executable logical task before work starts. Workers
-select eligible ready tasks from that fixed graph; the orchestrator validates their exact claims and alone pushes Git refs. The mode is
+select eligible ready tasks from that fixed graph; the orchestrator validates their exact claims and alone advances
+canonical task, ledger and release refs. Workers create their own pending and outcome branches. The mode is
 an invocation choice; there is no static node role field. The future `interpretation` and `hybrid` values are
 refused before task effects.
 When remote workers participate, `release` and `run` require `--return-endpoint=https://host:port`.
@@ -61,8 +63,9 @@ a transported checkout is never read for authority either.
 | Key           | Type                        | Default           | Description                                                                                          |
 |---------------|-----------------------------|-------------------|------------------------------------------------------------------------------------------------------|
 | `concurrency` | int                         | `1`               | How many claimed command tasks this node runs at once, across runs. Must be at least 1.              |
+| `retryAfterUncertainAttempt` | boolean | `false` | Assert that delegated commands can safely repeat after an attempt whose external effects are uncertain. |
 | `name`        | string                      | none              | This node's identity when it serves tasks. Required by `dispat worker`.                               |
-| `endpoint`    | string                      | the release remote | The repository this node reads its work from when it serves tasks. Without it, `dispat worker` reads the release remote of the checkout it runs in. |
+| `endpoint`    | string                      | the release remote | The repository this node reads work from and writes its own pickup branches to when it serves tasks. Without it, `dispat worker` uses the release remote of the checkout it runs in. |
 | `secretEnv`   | string                      | none              | The name of the environment variable holding the shared signing secret. Required with `workers`, and required by `dispat worker`. |
 | `identityKeyEnv` | string | none | On a late worker, names the environment variable holding its base64url Ed25519 private seed. |
 | `workers` | array of `{name, endpoint, lateJoin, identityPublicKey}` | empty | Preauthorized peer nodes. `lateJoin: true` requires a pinned independent public key and permits admission after tasks start. |
@@ -79,6 +82,16 @@ workers.
 On an orchestrator, this also limits the local node in the task pool. Stages pinned with `runOnly: orchestrator` wait
 for that capacity. The value must be at least `1`; here, `0` does not mean the number of CPUs.
 
+### `retryAfterUncertainAttempt`
+
+This is an explicit assertion by the first node that every delegated command in the run is safe to execute again
+after an earlier pickup whose external effects are uncertain. The default is `false`. When enabled, the signed
+bootstrap and logical task graph bind the choice; an admitted worker cannot change it. A task can move to another
+authorized worker only after the first node has signed its Cancel, waited the bounded reply grace and recorded
+contact loss. The old physical pickup remains charged until its exact signed finality. A late old result cannot
+replace the first verified winner. Do not enable this for a publish or build script that can make an unverified,
+non-idempotent external change.
+
 ### `name`
 
 This node's identity when it serves tasks, written from letters, digits, dots, underscores and hyphens, with no two
@@ -91,8 +104,9 @@ repository peer: a node name and a repository identity are separate vocabularies
 ### `endpoint`
 
 This is the credential-free Git URL of the repository holding the run's coordination refs and pinned Git inputs.
-Only the orchestrator pushes refs. A worker reads exact inputs and returns claims and results to the
-orchestrator through the authenticated non-Git channel. By default, the coordination repository is the repository
+Only the orchestrator advances canonical coordination and release refs. A worker reads exact inputs, creates its
+own pending/output/failed branches and returns claims and results through the authenticated non-Git channel.
+By default, the coordination repository is the repository
 being released; a worker link can name a separate one. dispat accepts an
 `https`, `ssh`, or `file` URL, an absolute path, and the scp-like `[user@]host:path` form.
 
@@ -152,7 +166,7 @@ line per such link names the remote it reaches.
 A link that states an `endpoint` names a coordination repository for this run. All links in one run must resolve
 to the same exact canonical Git endpoint; a different endpoint is refused before locks or task effects. It is a
 list of objects rather than a map so node names keep the case the file wrote them in. The orchestrator makes exact
-predecessor result objects available to the consumer node and alone pushes the necessary Git refs.
+predecessor result objects available to the consumer node and alone advances canonical task, ledger and release refs.
 
 An empty or absent list preserves local execution, and a present but empty list means what an absent one means.
 

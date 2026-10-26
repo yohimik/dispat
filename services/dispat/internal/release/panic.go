@@ -3,21 +3,9 @@
 
 package release
 
-// A task that panics.
-//
-// Every task of a release runs in a goroutine of its own, and a panic that
-// leaves a goroutine ends the whole process: whatever else was in flight, the
-// records of what already published and the release lock the run holds all go
-// with it, and the next run meets a lock nobody will ever give back. So a
-// panic is contained where the task starts, turned into that task's outcome,
-// and the run is stopped the way an interrupt stops it, with one difference:
-// the run itself is not interrupted. Its closing phase, its records and its
-// unlock still run, and it ends as a failed run.
-//
-// A published package is never reported failed, a panic included (§17): once
-// the publish frame returned success, the package is published and what the
-// panic cost is its record, which is reported as a critical and blocks its
-// consumers until it is repaired.
+// Containment preserves known publications and stops new work without losing
+// their durable records. A panic after an external request may have started
+// retains release exclusion until that request's outcome is settled (§17).
 
 import (
 	"context"
@@ -74,6 +62,13 @@ func (tc *taskCtx) containPanic(ctx context.Context, res *Result) {
 	tc.log.Error().Err(err).Msg(tc.stage.Name + " stopped by an internal error")
 	tc.log.Debug().Str("stack", string(debug.Stack())).Msg("internal error stack")
 	tc.stop(errTaskPanicked)
+	if tc.isPublicationAttempted && !tc.isPublished {
+		unsettled := tc.unsettledPublication(err)
+		if tc.unresolvedEffect {
+			tc.failLocalLifecycle(unsettled)
+			return
+		}
+	}
 	switch tc.settlePanic(res, err) {
 	case panicPublished:
 		ev := packageEvent(tc.t.pkg, tc.rel, EventPackagePublished)

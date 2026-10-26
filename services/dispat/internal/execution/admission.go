@@ -77,12 +77,13 @@ type outputRegistry struct {
 	mu       sync.Mutex
 	admitted map[string]*admittedOutputs
 	stages   map[string]*admittedOutputs
+	latest   map[string]*admittedOutputs
 }
 
 // newOutputRegistry opens an empty record.
 func newOutputRegistry() *outputRegistry {
 	return &outputRegistry{admitted: map[string]*admittedOutputs{},
-		stages: map[string]*admittedOutputs{}}
+		stages: map[string]*admittedOutputs{}, latest: map[string]*admittedOutputs{}}
 }
 
 // remember records one package's admitted set, replacing nothing: a package is
@@ -100,6 +101,15 @@ func (r *outputRegistry) rememberStage(packageName, stage string, admitted *admi
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.stages[stageOutputKey(packageName, stage)] = admitted
+	r.latest[packageName] = admitted
+}
+
+// findLatest returns the last verified output set installed for a package.
+// A later stage's complete root supersedes the build root at publication.
+func (r *outputRegistry) findLatest(packageName string) *admittedOutputs {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.latest[packageName]
 }
 
 func (r *outputRegistry) findStage(packageName, stage string) *admittedOutputs {

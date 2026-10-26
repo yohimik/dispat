@@ -73,7 +73,7 @@ func (w *Worker) reserveNodeSlot(ctx context.Context, assignment Assignment,
 	}
 	return w.NodeSlots.TryReserve(ctx, NodeSlotIntent{Run: assignment.Run,
 		Task: assignment.Task, Attempt: assignment.Attempt, Weight: assignment.Weight,
-		Recovery: locator})
+		PickupID: proposal.PickupID, Recovery: locator})
 }
 
 func (w *Worker) releaseNodeSlot(ctx context.Context, lease NodeSlotLease, evidenceOID string) error {
@@ -114,8 +114,15 @@ func addParked(index map[string]map[string]bool, key, branch string) {
 // parkRefusedClaim releases only the local slot. A capacity refusal is
 // reconsidered after an exact signed release of that node or budget, never
 // merely because the next mailbox polling tick arrived.
-func (w *Worker) parkRefusedClaim(channel *workerReturnChannel, branch string,
-	assignment Assignment, receipt ChoreographyReceipt) {
+type parkedClaimRequest struct {
+	Channel    *workerReturnChannel
+	Branch     string
+	Assignment Assignment
+	Receipt    ChoreographyReceipt
+}
+
+func (w *Worker) parkRefusedClaim(request parkedClaimRequest) {
+	channel, branch, assignment, receipt := request.Channel, request.Branch, request.Assignment, request.Receipt
 	switch receipt.RefusalReason {
 	case ChoreographyRefusalStale:
 		// The signed newer epoch fences this proposal. One reread may form a
@@ -163,7 +170,7 @@ func (w *Worker) parkRefusedClaim(channel *workerReturnChannel, branch string,
 func (w *Worker) wakeParked(run *parkedReturnRun, branch string, sequence uint64) bool {
 	entry := run.entries[branch]
 	if entry == nil || sequence <= entry.fence {
-		return false
+		return workerReturnParkedNotWoken
 	}
 	delete(run.entries, branch)
 	delete(run.notReady, branch)
@@ -220,7 +227,7 @@ func (w *Worker) pollParkedReturnClaims(ctx context.Context) bool {
 				break
 			}
 			if event.Kind != ChoreographyTerminal && event.Kind != ChoreographyRetryReady &&
-				event.Kind != ChoreographyBlocked {
+				event.Kind != ChoreographyPickupSettled && event.Kind != ChoreographyBlocked {
 				continue
 			}
 			if event.Kind != ChoreographyBlocked && event.Weight > workerReturnNoPackBudget {
@@ -245,19 +252,36 @@ func (w *Worker) pollParkedReturnClaims(ctx context.Context) bool {
 	return progress
 }
 
-func returnProposalID(kind MessageKind, run, task string, attempt int, oid string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s", kind, run, task, attempt, oid)))
+type returnProposalIdentity struct {
+	Kind    MessageKind
+	Run     string
+	Task    string
+	Attempt int
+	OID     string
+}
+
+func returnProposalID(identity returnProposalIdentity) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf(workerReturnProposalDigestFormat,
+		identity.Kind, identity.Run, identity.Task, identity.Attempt, identity.OID)))
 	return hex.EncodeToString(sum[:])
 }
 
-func (w *Worker) formatReturnClaim(binding ChoreographyRunBinding, ledgerOID string, tip ChainTip,
-	assignment Assignment) ChoreographyClaimProposal {
+type returnClaimRequest struct {
+	Binding    ChoreographyRunBinding
+	LedgerOID  string
+	Tip        ChainTip
+	Assignment Assignment
+}
+
+func (w *Worker) formatReturnClaim(request returnClaimRequest) ChoreographyClaimProposal {
+	binding, ledgerOID, tip, assignment := request.Binding, request.LedgerOID, request.Tip, request.Assignment
 	return ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: assignment.Task, Attempt: assignment.Attempt, Node: w.Node,
 		Branch: tip.Branch, ExpectedOID: tip.OID, ExpectedLedgerOID: ledgerOID,
 		InputsDigest: CompiledClaimInputDigest(tip.OID),
-		ProposalID: returnProposalID(choreographyClaimKind, assignment.Run,
-			assignment.Task, assignment.Attempt, tip.OID+"\x00"+ledgerOID)}
+		ProposalID: returnProposalID(returnProposalIdentity{Kind: choreographyClaimKind, Run: assignment.Run,
+			Task: assignment.Task, Attempt: assignment.Attempt,
+			OID: tip.OID + workerReturnProposalPartSeparator + ledgerOID})}
 }
 
 // submitReturnClaim first asks the first node to persist the exact claim.
@@ -365,15 +389,19 @@ func (w *Worker) settlePendingReturnClaims(ctx context.Context) bool {
 			}
 			delete(w.pendingReturn, branch)
 			<-w.slots
-			w.parkRefusedClaim(channel, branch, pending.assignment, receipt)
+			w.parkRefusedClaim(parkedClaimRequest{Channel: channel, Branch: branch,
+				Assignment: pending.assignment, Receipt: receipt})
 			if run := w.parkedReturn[pending.assignment.Run]; run == nil || run.entries[branch] == nil {
 				delete(w.slotForTask, branch)
 			}
 			progress = workerReturnProgress
 			continue
 		}
-		answered, done, err := w.startReturnedClaim(claimCtx, ctx, pending.tip, pending.assignment,
-			receipt.OID, pending.lease)
+		answered, done, err := w.startReturnedClaim(returnedClaimStart{
+			LookupContext: claimCtx, TaskContext: ctx, Tip: pending.tip,
+			Assignment: pending.assignment, ClaimOID: receipt.OID,
+			Held: []NodeSlotLease{pending.lease},
+		})
 		stopClaim()
 		if !done {
 			w.Log.Debug().Err(err).Str(workerReturnLogBranchField, branch).Msg(workerReturnClaimAwaitTaskMessage)
@@ -392,40 +420,72 @@ func (w *Worker) settlePendingReturnClaims(ctx context.Context) bool {
 // startReturnedClaim checks the current exact task ref before any script. A
 // Cancel observed before the accepted claim receipt must be acknowledged
 // without starting work; a lagging or unrelated ref leaves the slot fenced.
-func (w *Worker) startReturnedClaim(ctx, taskCtx context.Context, tip ChainTip,
-	assignment Assignment, claim string, held ...NodeSlotLease) (bool, bool, error) {
+type returnedClaimStart struct {
+	LookupContext context.Context
+	TaskContext   context.Context
+	Tip           ChainTip
+	Assignment    Assignment
+	ClaimOID      string
+	Held          []NodeSlotLease
+}
+
+func (w *Worker) startReturnedClaim(request returnedClaimStart) (bool, bool, error) {
+	ctx, taskCtx := request.LookupContext, request.TaskContext
+	tip, assignment, claim, held := request.Tip, request.Assignment, request.ClaimOID, request.Held
 	head, err := w.Mailbox.Reread(ctx, tip.Branch)
 	if err != nil || head.OID == workerReturnNoIdentity {
-		return false, false, err
+		return workerReturnClaimNotAnswered, workerReturnClaimStateUnknown, err
+	}
+	if head.OID == claim {
+		if assignment.GraphRootOID != workerReturnNoIdentity {
+			pickup := &claimedTask{assignment: assignment, tip: tip, claimed: claim}
+			if len(held) != workerReturnNoEntries {
+				pickup.slotLease = held[workerReturnFirstHeldLeaseIndex]
+			}
+			if _, err := w.ensurePickupPending(ctx, pickup); err != nil {
+				return workerReturnClaimNotAnswered, workerReturnClaimStateUnknown, err
+			}
+			// Publishing the pending ref may outlast a concurrent Cancel. Check
+			// authority again after that remote write and before starting work.
+			head, err = w.Mailbox.Reread(ctx, tip.Branch)
+			if err != nil || head.OID == workerReturnNoIdentity {
+				return workerReturnClaimNotAnswered, workerReturnClaimStateUnknown, err
+			}
+		}
 	}
 	if head.OID == claim {
 		// The bounded claim lookup ends when this function returns. The
 		// command must inherit the serving run's context instead, or the
 		// successful claim cancels its own materialization immediately.
 		started, err := w.startClaimedTask(taskCtx, tip, assignment, claim, held...)
-		return started, true, err
-	}
-	answer, err := w.Mailbox.Inspect(ctx, head)
-	if err != nil || answer.Kind != MessageCancel || answer.PreviousOID != claim {
-		return false, false, err
-	}
-	if reason := w.checkWithdrawal(ctx, answer, tip, claim, assignment); reason != workerReturnNoIdentity {
-		w.reportRejection(answer, reason)
-		return false, false, fmt.Errorf(workerReturnWithdrawalErrorFormat, reason)
+		return started, workerReturnClaimStateHandled, err
 	}
 	ackTask := &claimedTask{assignment: assignment, tip: tip, claimed: claim,
 		finalityCtx: taskCtx}
 	if len(held) != workerReturnNoEntries {
 		ackTask.slotLease = held[workerReturnFirstHeldLeaseIndex]
 	}
-	if _, err := w.returnTaskAck(ctx, ackTask, answer.OID, release.PartInputs, workerReturnUnconfirmedCommandStart); err != nil {
-		return false, false, err
+	answer, err := w.Mailbox.Inspect(ctx, head)
+	if err != nil || answer.Kind != MessageCancel || answer.PreviousOID != claim {
+		answer, err = w.readRetainedPickupCancellation(ctx, ackTask)
+	}
+	if err != nil || answer.Kind != MessageCancel || answer.PreviousOID != claim {
+		return workerReturnClaimNotAnswered, workerReturnClaimStateUnknown, err
+	}
+	if reason := w.checkWithdrawal(ctx, answer, tip, claim, assignment); reason != workerReturnNoIdentity {
+		w.reportRejection(answer, reason)
+		return workerReturnClaimNotAnswered, workerReturnClaimStateUnknown, fmt.Errorf(workerReturnWithdrawalErrorFormat, reason)
+	}
+	if _, err := w.returnTaskAck(ctx, taskAckReturnRequest{Task: ackTask,
+		CancelOID: answer.OID, Phase: release.PartInputs,
+		CommandStarted: workerReturnUnconfirmedCommandStart}); err != nil {
+		return workerReturnClaimNotAnswered, workerReturnClaimStateUnknown, err
 	}
 	if err := w.Seen.Record(assignment.Run, assignment.Task, assignment.Attempt, time.Now()); err != nil {
-		return false, false, err
+		return workerReturnClaimNotAnswered, workerReturnClaimStateUnknown, err
 	}
 	<-w.slots
-	return true, true, nil
+	return workerReturnClaimAnswered, workerReturnClaimStateHandled, nil
 }
 
 type boundedResultPackWriter struct {
@@ -435,16 +495,15 @@ type boundedResultPackWriter struct {
 
 func (w *boundedResultPackWriter) Write(p []byte) (int, error) {
 	if int64(len(p)) > w.remaining {
-		return 0, gitx.ErrTransportLimit
+		return workerReturnNoBytes, gitx.ErrTransportLimit
 	}
 	n, err := w.to.Write(p)
 	w.remaining -= int64(n)
 	return n, err
 }
 
-// returnTaskResult writes a signed local result object and streams its exact
-// reachable pack to the first node. It creates no peer Git ref. A lost reply
-// is settled only by the full proposal identity, never by changing the body.
+// returnTaskResult durably publishes the pickup outcome before submitting it
+// for canonical admission. A lost reply retains the same signed result.
 func (w *Worker) returnTaskResult(ctx context.Context, task *claimedTask, report Result,
 	carried []gitx.TreeEntry) (string, error) {
 	channel, err := w.returnChannelFor(task.assignment)
@@ -456,16 +515,12 @@ func (w *Worker) returnTaskResult(ctx context.Context, task *claimedTask, report
 		return workerReturnNoIdentity, fmt.Errorf(workerReturnPackUnavailableError)
 	}
 	report.Assignment = task.claimed
-	document, err := json.Marshal(report)
-	if err != nil {
-		return workerReturnNoIdentity, fmt.Errorf(workerReturnEncodeResultErrorFormat, err)
-	}
-	resultOID, err := formatMessageCommit(ctx, w.Cache, w.ReturnSigner, MessageResult,
-		document, nil, carried)
+	report, resultOID, err := w.prepareTaskResultCommit(ctx,
+		pickupOutcomeRequest{Task: task, Report: report, Carried: carried})
 	if err != nil {
 		return workerReturnNoIdentity, err
 	}
-	payload, err := os.CreateTemp(w.StateDir, "dispat-result-pack-*")
+	payload, err := os.CreateTemp(w.StateDir, workerReturnResultPackFilePattern)
 	if err != nil {
 		return workerReturnNoIdentity, fmt.Errorf(workerReturnOpenPackErrorFormat, err)
 	}
@@ -473,8 +528,14 @@ func (w *Worker) returnTaskResult(ctx context.Context, task *claimedTask, report
 		_ = payload.Close()
 		_ = os.Remove(payload.Name())
 	}()
-	if err := w.Cache.ExportCommitPack(ctx, resultOID,
-		&boundedResultPackWriter{to: payload, remaining: maxPack}); err != nil {
+	writer := &boundedResultPackWriter{to: payload, remaining: maxPack}
+	if report.PendingOID != workerReturnNoIdentity {
+		err = w.Cache.ExportCommitPackSince(ctx, gitx.CommitPackDeltaOptions{
+			CommitOID: resultOID, BaseOID: task.claimed, Writer: writer})
+	} else {
+		err = w.Cache.ExportCommitPack(ctx, resultOID, writer)
+	}
+	if err != nil {
 		return workerReturnNoIdentity, err
 	}
 	inputsDigest := task.assignment.InputsDigest
@@ -485,8 +546,11 @@ func (w *Worker) returnTaskResult(ctx context.Context, task *claimedTask, report
 		Task: task.assignment.Task, Attempt: task.assignment.Attempt, Node: w.Node,
 		Branch: task.tip.Branch, ClaimOID: task.claimed,
 		InputsDigest: inputsDigest, ResultDigest: resultOID,
-		ProposalID: returnProposalID(choreographyResultKind, task.assignment.Run,
-			task.assignment.Task, task.assignment.Attempt, resultOID)}
+		PickupID: report.PickupID, PendingBranch: report.PendingBranch,
+		PendingOID: report.PendingOID, OutcomeBranch: report.OutcomeBranch,
+		ProposalID: returnProposalID(returnProposalIdentity{Kind: choreographyResultKind,
+			Run: task.assignment.Run, Task: task.assignment.Task,
+			Attempt: task.assignment.Attempt, OID: resultOID})}
 	prepared, err := PrepareChoreographyResult(ctx, proposal, payload, maxPack)
 	if err != nil {
 		return workerReturnNoIdentity, err
@@ -535,11 +599,32 @@ func (w *Worker) returnTaskResult(ctx context.Context, task *claimedTask, report
 	return receipt.OID, nil
 }
 
+func (w *Worker) prepareTaskResultCommit(ctx context.Context,
+	request pickupOutcomeRequest) (Result, string, error) {
+	if request.Task.assignment.GraphRootOID != workerReturnNoIdentity {
+		return w.publishPickupOutcome(ctx, request)
+	}
+	document, err := json.Marshal(request.Report)
+	if err != nil {
+		return Result{}, workerReturnNoIdentity, fmt.Errorf(workerReturnEncodeResultErrorFormat, err)
+	}
+	oid, err := formatMessageCommit(ctx, w.Cache, w.ReturnSigner, MessageResult,
+		document, nil, request.Carried)
+	return request.Report, oid, err
+}
+
 // returnTaskAck is sent only after the command process group has stopped.
 // The exact observed Cancel object is part of the signed proposal, so a
 // different cancellation cannot be substituted after an unanswered reply.
-func (w *Worker) returnTaskAck(ctx context.Context, task *claimedTask, cancel, phase string,
-	commandStarted bool) (string, error) {
+type taskAckReturnRequest struct {
+	Task           *claimedTask
+	CancelOID      string
+	Phase          string
+	CommandStarted bool
+}
+
+func (w *Worker) returnTaskAck(ctx context.Context, request taskAckReturnRequest) (string, error) {
+	task, cancel, phase, commandStarted := request.Task, request.CancelOID, request.Phase, request.CommandStarted
 	channel, err := w.returnChannelFor(task.assignment)
 	if err != nil {
 		return workerReturnNoIdentity, err
@@ -547,12 +632,15 @@ func (w *Worker) returnTaskAck(ctx context.Context, task *claimedTask, cancel, p
 	if w.ReturnSigner == nil || cancel == workerReturnNoIdentity {
 		return workerReturnNoIdentity, fmt.Errorf(workerReturnCancelIdentityError)
 	}
+	if err := w.recordCancelledPickup(ctx, task); err != nil {
+		return workerReturnNoIdentity, err
+	}
 	proposal := ChoreographyAckProposal{ChoreographyRunBinding: channel.binding,
 		Task: task.assignment.Task, Attempt: task.assignment.Attempt, Node: w.Node,
 		Branch: task.tip.Branch, CancelOID: cancel, AssignmentOID: task.tip.OID,
 		Phase: phase, CommandStarted: commandStarted,
-		ProposalID: returnProposalID(MessageAck, task.assignment.Run,
-			task.assignment.Task, task.assignment.Attempt, cancel)}
+		ProposalID: returnProposalID(returnProposalIdentity{Kind: MessageAck, Run: task.assignment.Run,
+			Task: task.assignment.Task, Attempt: task.assignment.Attempt, OID: cancel})}
 	query, err := FormatAckReceiptQuery(proposal)
 	if err != nil {
 		return workerReturnNoIdentity, err
@@ -588,6 +676,26 @@ func (w *Worker) returnTaskAck(ctx context.Context, task *claimedTask, cancel, p
 	return receipt.OID, nil
 }
 
+func (w *Worker) recordCancelledPickup(ctx context.Context, task *claimedTask) error {
+	if task.assignment.GraphRootOID == workerReturnNoIdentity {
+		return nil
+	}
+	state, err := w.ensurePickupPending(ctx, task)
+	if err != nil {
+		return err
+	}
+	if state.ResultOID != workerReturnNoIdentity {
+		return w.pushPickupRef(ctx, workerPickupRef{Branch: state.OutcomeBranch, OID: state.ResultOID})
+	}
+	_, _, err = w.publishPickupOutcome(ctx, pickupOutcomeRequest{
+		Task: task, Report: Result{
+			Header: w.formatReplyHeader(task.assignment.Header), Assignment: task.claimed,
+			Status:   StatusCancelled,
+			Platform: Platform{OS: w.Report.OS, Arch: w.Report.Arch, Dispat: w.Report.Dispat},
+		}})
+	return err
+}
+
 // awaitNodeSlotDecision keeps physical capacity until the first node's
 // signed logical finality releases its own capacity. ResultAccepted and
 // AckAccepted alone are receipts for an effect, not a retry or terminal
@@ -621,12 +729,19 @@ func (w *Worker) awaitNodeSlotDecision(ctx context.Context, task *claimedTask,
 				return fmt.Errorf(workerReturnLocalEventError)
 			}
 			cursor = next
-			if event.Kind != ChoreographyRetryReady && event.Kind != ChoreographyTerminal {
+			if event.Kind != ChoreographyRetryReady && event.Kind != ChoreographyTerminal &&
+				event.Kind != ChoreographyPickupSettled {
 				continue
 			}
 			if event.Attempt != task.assignment.Attempt || event.Node != w.Node ||
-				event.ResultReceiptOID != receipt.OID {
+				event.PickupID != task.slotLease.Intent.PickupID {
+				continue
+			}
+			if event.ResultReceiptOID != receipt.OID {
 				return fmt.Errorf(workerReturnLocalReleaseError)
+			}
+			if event.Kind == ChoreographyPickupSettled {
+				return w.settleClaimedNodeSlot(ctx, task, next.OID)
 			}
 			return w.settleClaimedNodeSlot(ctx, task, event.TaskOID)
 		}
@@ -666,10 +781,11 @@ func (w *Worker) awaitNodeSlotDecision(ctx context.Context, task *claimedTask,
 					return fmt.Errorf(workerReturnSequenceError)
 				}
 				if event.Task != task.assignment.Task || event.Attempt != task.assignment.Attempt ||
-					event.Node != w.Node {
+					event.Node != w.Node || event.PickupID != task.slotLease.Intent.PickupID {
 					continue
 				}
-				if event.Kind != ChoreographyRetryReady && event.Kind != ChoreographyTerminal {
+				if event.Kind != ChoreographyRetryReady && event.Kind != ChoreographyTerminal &&
+					event.Kind != ChoreographyPickupSettled {
 					continue
 				}
 				if event.ResultReceiptOID != receipt.OID {
@@ -681,6 +797,9 @@ func (w *Worker) awaitNodeSlotDecision(ctx context.Context, task *claimedTask,
 						ClaimOID: task.claimed, AssignmentOID: task.tip.OID}); err != nil {
 						return fmt.Errorf(workerReturnRetainedDecisionErrorFormat, err)
 					}
+				}
+				if event.Kind == ChoreographyPickupSettled {
+					return w.settleClaimedNodeSlot(ctx, task, page.Cursor.OID)
 				}
 				return w.settleClaimedNodeSlot(ctx, task, event.TaskOID)
 			}

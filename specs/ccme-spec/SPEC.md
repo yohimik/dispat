@@ -2990,8 +2990,10 @@ in the longest route between two peers (at most `Q - 1`, and at most 2 in a star
 identity in every index and cache key.
 
 For the execution profile of §28, let `Tk` be the run's tasks and `Dk` their precedence edges,
-`Wn` the execution nodes,
-`Po` the packages whose outputs some other task consumes, and `Fr` the accepted logical terminal events in a run.
+`Wn` the distinct execution nodes admitted at any time in the run,
+`Osets` the distinct admitted immutable output sets transported during the run, and `Fr` the accepted
+logical terminal events in a run. Different producing stages or accepted attempts can contribute distinct sets
+even when they belong to one package.
 For configured stages, `S_p` is one package's stages, standing in a cost for their number, and `C_p` the
 stage names its constraints state, a list counting each name it holds (*Configured stages in the compiled plan*, below).
 A `sum` over them runs over the packages `p`, as `sum(Hq + Aq)` runs over the repositories `q`.
@@ -3024,13 +3026,16 @@ In graph construction and readiness bounds, `Tk` includes zero-duration build an
 | Record comparison (§13.2)  | `O(T)` per repository | `O(T)` per repository | One inventory read under the lock; one ancestry question per record the input lacks |
 | Task graph and readiness (§28.3) | `O(Tk · (Tk + Dk))` | `O(Tk + Dk)` | Rescanning every task after each completion; indegree counters decrement each successor once |
 | Placement (§28.2)          | `O(Tk · Wn)`          | `O(Tk · Wn)`          | The node scan is charged for every task; indexed compatible free slots can trade additional state for fewer probes |
-| Output transfer (§28.5)    | up to `Tk · Po` transfers | at most `Po · Wn` transfers | One per distinct `(output set, node)`, not one per consumer task; verified bytes are not fetched again |
+| Output transfer (§28.5) | `O(Tk · Osets)` | `O(Osets · Wn)` | Unique first `(set, node)` fetches |
 | Event readiness (§28.4) | `O(Fr(Tk + Dk))` | `O(Fr + Dk)` | Apply each event and successor edge once. |
 
 The bold rows highlight common multiplicative costs; corrections, cancellation, provenance and retained indexes can
 also dominate. Each must be charged even when its final result is empty. Window classes safely share history reachability work. Propagation traversal is reusable
 only under the stricter conditions below; predicate hoisting and channel incidence inversion remain safe independently.
-The terminal-feed row counts in-memory event application for an explicit graph. It does not bound Git polling,
+The output-transfer row counts distinct first verified fetches, including first-node result admission, not
+repeat fetches after cache loss or recovery. Copying one cached set into several private task checkouts,
+transferred bytes and retry traffic are separate costs. The terminal-feed row counts in-memory event
+application for an explicit graph. It does not bound Git polling,
 network round trips, bytes transferred or restart replay latency. A verified cursor avoids a graph-wide scan
 on each terminal event; no per-tick network bound follows from the number of live refs alone.
 
@@ -3354,6 +3359,60 @@ implementation uses verified rank intervals and a shared author-prefix scan; the
 apply, and composed histories retain their general path. No workload distribution is specified,
 so these worst-case and family comparisons make no average-case planner claim.
 
+**dispat theory: distributed task execution in CCME.** The name denotes the semantic planner of §13, the
+fixed task-graph and authority rules of §28, the conditional task-time bounds below, and the durable-effect
+recovery obligations of §§19 and 28.6. It applies to a single-package repository, a monorepo, the control and
+source repositories of §27, and a linked repository family. Those topologies change how the pinned input is
+assembled and how much planning and transport cost it incurs; they do not change a fixed graph's work and span
+inequalities. A graph is fixed and finite for one run even when a node learns an external outcome only at runtime.
+An unknown outcome selects a specified edge or status in that graph; it does not authorize discovery of arbitrary
+new tasks. Hybrid execution (§28.3) compiles the known nonpush command paths and interprets first-only effect
+decisions as their prerequisites settle. This is a specialization of pinned inputs followed by runtime decisions,
+in the lineage of [partial evaluation](https://studwww.itu.dk/people/sestoft/pebook/); it does not claim to invent
+hybrid compilation or to eliminate the first node's durable authority.
+
+"Fully determined" has several different mathematical meanings here. Fixed valid history, configuration,
+repository inventory and policy determine one semantic `Plan(input)` and one canonical task graph (§17.2).
+If the complete initial execution state, all task outcomes, exact output bytes and exports, durations,
+node eligibility, the full ordered external input and event stream (including native and destination
+observations, membership, message delivery, crashes, restarts and recovery observations), and a total
+decision order are also fixed, a deterministic transition function determines one canonical execution trace.
+Deterministic scripts and effects can supply fixed output values from pinned inputs and predecessor outputs,
+conditional on that fixed external stream; they do not fix the stream.
+Fixing only status and duration does not fix a trace: two scripts can succeed at the same time yet produce different
+bytes. The tie rule defines a trace but need not minimize its makespan. With unlimited compatible capacity,
+the componentwise earliest start vector is unique and attains the exact minimum task makespan `Lk`, as
+proved below. The scalar optimal makespan can be unique as a value
+while many schedules attain it. A fixed ready priority can select one schedule without selecting one algorithm:
+a heap and a balanced tree can implement the same priority. With finite or overlapping capacities, the graph
+does not in general determine a unique minimizing schedule, and the bound below is an asymptotic order and factor,
+not an exact optimum or a theorem of unique implementation. Failure and external effects need the separate
+recovery premises below; no statistical rarity assumption removes a counterexample.
+
+One computational algorithm realizes the mode-independent planning contract, with §28.3 providing its normative
+execution detail. First, pin and authenticate the exact history, configuration, release-record inventory and
+repository identities for the chosen topology; reject an incoherent snapshot. The first node computes
+`Plan(input)` and compiles its complete task graph, including virtual relay and outcome edges. In interpretation,
+each other node recomputes those same functions from the pinned envelope. Index each vertex, its incoming
+count and outgoing edges, and the signed terminal outcome of each direct predecessor. In compilation,
+the first node initializes every node-neutral task descriptor and task ref; a node reads the compiled graph and
+selects a locally ready eligible command without semantic replanning. In interpretation, each node recomputes
+the same plan and graph before selecting. In either case the first node checks exact inputs, policy, capacity
+and current ledger epoch before accepting the node's proposed claim. In hybrid, use compiled pickup for known
+nonpush commands and interpret first-only effect decisions, passing only accepted outcomes across their
+shared graph. On a logical terminal event, update that task and each outgoing edge once; a retry event reopens
+the same logical task without discharging an edge. The first node alone persists claims, results, publication,
+records and recovery decisions. It derives the next invocation's residual plan from new immutable records.
+This is a valid algorithm across repository families because repository identity is part of every pinned key.
+For an explicit graph, each node's initial indexing and one replay of all terminal events cost
+`O(Tk + Dk + Fr)` under constant-time indexed updates; actual edge updates cost `O(Dk)` per node over one
+complete run. With `Wn` independently interpreting nodes, aggregate indexing can cost
+`O(Wn(Tk + Dk + Fr))`, plus separately counted claim, refusal, retry, membership and late-join events.
+Sorting ready choices, compatibility search,
+repeated independent planning, Git operations, bytes and effect settlement retain their separately charged
+costs. In particular, interpreting
+the same plan on `Wn` nodes can repeat planning work; it is not an end-to-end minimum-work claim.
+
 **The dispat theorem (bounds for a fixed task graph).** A task graph is a finite directed acyclic graph.
 There is no fixed upper limit on its task, edge or node counts; `Tk`, `Dk` and `Wn` remain input parameters,
 and constants in asymptotic claims do not depend on them.
@@ -3370,6 +3429,8 @@ already compiled graph with fixed durations, zero overhead and enough compatible
 ready task immediately. A finite one-pool capacity yields the factor and asymptotic bound of clause 2,
 not a general exact optimum. Semantic planning, graph compilation, scheduler bookkeeping memory and recovery
 have separate costs and no global minimum claim here.
+The zero transfer and scheduling time and immediate zero-duration closure used below are ideal schedule premises,
+not a wall-clock deadline or instantaneous cancellation guarantee for the §28 executor.
 
 1. **Lower bounds.** Suppose every positive-duration task consumes one of `s` identical slots throughout its
    execution, where `s` is a positive integer. Every schedule has makespan at least
@@ -3398,7 +3459,8 @@ have separate costs and no global minimum claim here.
 2. **One-pool list scheduling.** Assume `s` is a positive integer, every positive-duration task occupies exactly
    one of its interchangeable slots throughout, tasks are nonpreemptive, transfer and scheduling take no time,
    no owner lane or other capacity binds, and the schedule is work-conserving: a slot is idle only when no ready
-   task can use it. Then
+   task can use it. Every ready zero-duration task or relay and its resulting zero-time closure also complete
+   immediately, before time advances. Then
    `T <= Wk / s + (1 - 1/s) Lk <= (2 - 1/s) B`.
    Choose a task that finishes last. Trace backward by repeatedly choosing its latest-finishing immediate
    predecessor, stopping at a source. This schedule-dependent chain has duration at most `Lk`. Whenever none of
@@ -3415,8 +3477,9 @@ have separate costs and no global minimum claim here.
    Also, three independent unit jobs on two slots have `B = 3/2` but optimum 2: the lower bound need not be met.
 3. **Disjoint stage budgets.** Suppose every positive-duration task draws on exactly one of `q` disjoint,
    interchangeable stage pools, pool `j` has a positive integer `m_j` of slots, these are the only binding
-   capacities, and transfers, scheduling and unmodeled record overhead take no time. A schedule that never idles
-   a pool slot while a task for that pool is ready satisfies
+   capacities, and transfers, scheduling and unmodeled record overhead take no time. Every ready zero-duration
+   task or relay and its resulting zero-time closure complete immediately, before time advances. A schedule
+   that never idles a pool slot while a task for that pool is ready satisfies
    `T <= Lk + sum_j(W_j / m_j) <= (q + 1) max(Lk, max_j(W_j / m_j))`.
    Use the same last-finishing predecessor chain. At a time when no chain task runs, the next chain task is ready,
    so its pool is full. Charge that interval to the full pool. The total time chargeable to pool `j` is at most
@@ -3437,6 +3500,10 @@ have separate costs and no global minimum claim here.
    A bigger machine (vertical scaling) can increase `c`, `v`, or both. Adding machines (horizontal scaling)
    increases `h`. Extra cores do not shorten a fixed chain unless its tasks also run faster. An upgrade that
    does not accelerate a task, such as an I/O-bound task, supplies no such `v` for it.
+   This uniform `v` and `c` model does not imply unlimited vertical speedup: one physical machine has finite
+   usable slots, and attainable per-task gains depend on its hardware and the workload. Unaccelerated serial
+   work, memory waits and I/O waits still contribute to a critical path; the `Lk / v` formula applies only
+   when the upgrade accelerates every modeled task by that factor.
 
    On a chain `Wk = Lk`, every task waits for its predecessor. The chain lower bound and immediate dispatch
    both give exact task makespan `Lk / v`, independent of `h` and `c`: only faster execution of its tasks helps.
@@ -3445,11 +3512,53 @@ have separate costs and no global minimum claim here.
    successive batches. These tasks benefit from both faster tasks and more machines or slots, until packing
    and the one-task span limit remain. No fixed upper bound on `n` is assumed.
 
+   If node membership instead varies during execution, let `s(t)` be the nonnegative number of compatible
+   one-task slots actually admitted at time `t`. Any schedule that performs total slot work `Wslot` by `T`
+   satisfies `Wslot <= integral_0^T s(t) dt`, and precedence still gives `T >= Lk` when modeled durations
+   do not change. These are lower bounds only. Join delay, eligibility subsets, task packing, owner lanes,
+   validation and transport can leave admitted slots idle; clauses 2 and 4 supply no matching upper bound
+   or unique best online join schedule. A late node cannot improve work already completed or a fixed chain.
+
    For positive `Lk`, `Wk / Lk` is the slot count at which the work term of `B(h, c, v)` ceases to exceed span;
    it is a lower-bound threshold, not an exact runtime cap. More slots can still shorten a schedule that misses
    the bound. Under separate stage, recording and owner capacities, their load terms can dominate. A configured
    order shortens span only by removing a constraint on an actual longest chain; unordered stages need not be
    on such a chain or able to overlap through their surrounding dependencies.
+
+   There is a sufficient, possibly conservative, saturation point in the same ideal one-pool model. Let `w`
+   be the width of the task precedence poset, the greatest number of pairwise incomparable tasks. If
+   `h c >= w`, every ready task can start immediately, including zero-duration relays: the running tasks
+   together with the ready, unstarted tasks form an antichain and hence occupy at most `w` slots.
+   Earliest-start execution then takes exactly `Lk / v`. This does not identify the smallest saturating slot
+   count. It assumes zero transfer and setup time and does not extend to restricted placement or the
+   distributed resource model.
+
+   To include transport, fix a placement `P` and assign each precedence edge `e = (i, j)` a nonnegative
+   minimum mandatory delay `tau_e(P)` after `i` completes and before `j` can start, excluding scheduler wait
+   and time counted in task durations. For task duration `d_i / v`, let `Ltau(P)` be the greatest, over directed
+   paths, of the sum of their task durations and edge delays. Write `T_run` for elapsed time from run start,
+   before any counted task or mandatory transfer, through the last task completion. The start-time constraints
+   give `T_run >= Ltau(P)`
+   for every schedule using `P`. If all required transfers on one shared bottleneck carry `V(P)` bytes at
+   aggregate rate at most `R > 0` and complete within the measured run, also `T_run >= V(P) / R`. These are
+   separate lower bounds: their maximum is valid, but their sum need not be, since transfer and execution can
+   overlap. Thus `min_P max(Ltau(P), V(P) / R)` lower-bounds the best schedule over admissible placements when
+   the same bottleneck condition holds for each `P`. Adding optional, unused, cost-free machines cannot increase
+   the best makespan when every old placement remains admissible. A strict slowdown therefore needs a mandatory cost
+   or a changed admissible-placement rule.
+
+   One exact case makes that condition explicit. Take a positive integer `n` of independent tasks of equal
+   duration `d > 0`. Let positive integers `h` and `c` count identical machines and interchangeable slots
+   per machine, respectively, with uniform speed `v`. Require a serialized
+   control transfer of duration `a > 0` to each of the `h - 1` additional admitted machines, all before
+   any task starts, whether or not that machine receives work. With no other overhead, the minimum end-to-end
+   makespan is `T_run(h) = a(h - 1) + (d / v) ceil(n / (h c))`: the transfer is serial, and filling slots in
+   batches attains the compute term. For `h >= ceil(n / c)`, the compute term is `d / v`, so
+   `T_run(h + 1) - T_run(h) = a > 0`. More generally, if mandatory nonoverlapping overhead `C(h)` precedes
+   task execution and the optimal task time is `T_task(h)`, the minimum run time is `C(h) + T_task(h)`.
+   Adding machines then slows that optimum exactly when
+   `C(h + 1) - C(h) > T_task(h) - T_task(h + 1)`. Without those decomposition premises, this comparison is
+   not an end-to-end formula and no universal best machine count follows.
 5. **Recovery is a separate property.** The failure-free inequalities do not bound a run across failures,
    retries, outages or reconciliation. §19.1 and §19.3 require durable publication records and failure blocking;
    §17.2 recomputes a later plan from the records. A publication and its record are separate writes, so there
@@ -3476,6 +3585,22 @@ commits both systems, and a crash erases volatile run state. Correct recovery ne
 as completed and never blindly repeats a non-idempotent publication. Conditional progress is possible when
 destinations eventually respond, required tasks eventually succeed, and uncertain outcomes can be verified or
 safely deduplicated. Under these assumptions, every correct CCME recovery has the saga-class invariants:
+
+There are two separate necessity arguments. **Crash indistinguishability:** if the external effect is attempted
+before its local record, a crash can leave the same surviving local state whether the destination committed or
+did not commit. No algorithm reading only that state can safely choose both retry and skip: retry may duplicate
+the first history, while skip loses the second. A verified destination identity, atomic destination receipt or
+deduplicated request distinguishes or safely merges the histories. Reversing the writes does not solve it:
+a record written before an uncommitted effect falsely certifies publication. This argument needs no probability
+claim and holds for one task, so adding more schedulers or nodes cannot remove it.
+
+**Delayed-attempt indistinguishability:** even after an authoritative absence read, an older accepted request may
+still be in flight. Two executions can give that same read; in one the old request later commits, in the other it
+never does. A fresh non-idempotent request after the read duplicates only the former. A settled or fenced old
+attempt, or destination deduplication of the stable request identity, is therefore necessary for safe retry under
+asynchronous delivery. This argument does not rely on a process crash. It explains why an HTTP `404` at one
+instant is not proof that an older proposal can never land (§28.4). Together the arguments establish necessary
+observable evidence and ordering, not that every effect can be made safely retryable.
 
 For an irreversible external task, call the modeled admission *crash-ready* when it has a stable request or
 artefact identity, a durable path for the canonical record, and a declared way to settle an uncertain attempt.
@@ -3522,6 +3647,22 @@ stages in `A_p` are not resumed by the next release plan. Their effects need an 
 contract if completion after a crash is required. Arbitrary crashes or unverifiable outcomes supply no
 completion-time or retry-work bound, and this argument
 establishes no minimum auxiliary memory.
+
+**Conditional recovery sufficiency.** Assume an exact durable attempt identity, a destination operation that
+deduplicates that identity or can verify its settled effect, an immutable canonical record written only after
+that verification and before a success terminal or dependent admission, and a durable task decision bound
+to that record. A verified interim publication receipt can stand in only for the specific dependency gates
+§19.4 permits until the final tag is written. Induct over accepted decisions.
+Initially no record asserts an absent effect. A completed non-effect task changes no publication record; a
+verified publication may add only its matching record before its success decision; an uncertain attempt
+blocks conflicting work until it is settled or fenced. Each transition preserves record soundness and
+prevents a second unverified effect at
+the same identity. On restart, replaying exact records and decisions reconstructs the same invariant; it does
+not depend on volatile completion memory. If the finite residual graph is fairly retried and an eventual
+crash-free interval lets every required task, effect verification and record write succeed, topological
+induction completes every eligible remaining obligation. This proves safety and conditional discharge,
+not exactly-once physical execution of arbitrary shell commands, completion under perpetual failures,
+or a unique saga implementation. Classic compensations are unnecessary for effects this profile cannot undo.
 
 **Idempotent replay under stable inputs.** Fix the source revision, resolved configuration, toolchain, environment,
 task inputs and their identities. Suppose each build or stage is a deterministic function of those inputs and of
@@ -3595,6 +3736,15 @@ finish by time 3 if both start at zero, and also if the shorter task starts at t
 unique graph representation or executor. With finite slots or other binding capacities, readiness alone does
 not decide which competing task starts first, and clause 2 gives the stated bound rather than exact `Lk`.
 
+The same exact result has a second proof through path constraints, independent of the event-dispatch induction.
+For each edge `j -> i`, feasibility requires `S_i >= S_j + d_j`, and each source has `S_i >= 0`.
+Summing these inequalities along any source-to-`i` path shows that `S_i` is at least that path's duration before
+`i`. Taking the maximum over paths gives `S_i >= E_i`. Conversely, define `E_i` as that path maximum.
+Every edge inequality then holds, so with one compatible slot per ready task all tasks can start at `E_i`.
+The latest finish is exactly the maximum weighted path, `Lk`. Thus longest-path feasibility and the
+componentwise lower bound meet at one vector. This max-plus constraint proof and the event induction establish
+the same observable optimum by different routes. Neither proves a unique program or a finite-capacity optimum.
+
 **When immediate dispatch is the only universally exact online start policy.** Strengthen the preceding model:
 before each task starts, its duration is unobserved and may independently be any finite nonnegative value,
 with no upper bound, even when its realized value is zero. The deterministic dispatcher does not use future
@@ -3615,24 +3765,25 @@ It also does not force immediate dispatch of a task whose zero duration is known
 durations have known bounds that permit harmless delay.
 
 **A node-player execution game.** Fix one finite task DAG and a finite set of compatible execution nodes.
-The orchestrator and each choreographer are separate players. In compilation, the first chooses placements and
-each assigned node chooses when to start. In interpretation, nodes choose ready proposals and the first checks
-and persists them. In mixed, the first assigns nonpush tasks and interprets first-only effects.
+The orchestrator and each choreographer are separate players. In compilation, nodes choose ready proposals
+from first-node compiled descriptors without semantic replanning; the first checks and persists exact claims.
+In interpretation, nodes derive the plan and graph themselves before choosing proposals. In hybrid, nodes
+choose from compiled nonpush paths and the first interprets first-only effects.
 These are nonanticipating legal policies over the same fixed graph; the mode changes neither its edges nor the
 duration vector. An environment fixes arbitrary finite nonnegative
 task durations before play. Each duration coordinate may be chosen separately, without a probability law, and is
 learned only when that task completes.
 Admissible policies make legal decisions and eventually start every task for every finite duration vector.
-Assume there exists one nonanticipating compatible-placement policy that, on every duration history, can assign
-all newly ready tasks immediately while retaining slots for running tasks. There is no dispatch, communication,
+Assume there exists one nonanticipating compatible-pickup policy that, on every duration history, can start
+all newly ready tasks immediately while retaining slots for running tasks. There is no claim, communication,
 transfer or additional publication or record overhead, and no crashes, retries or other binding resources.
 Publication and record tasks represented in the DAG retain their chosen durations. Each play has finitely many
 tasks, with no configured bound on their number.
 
 For fixed durations `d`, give every execution player the same payoff `-(T(P,d) - Lk(d))`, where `P` is the joint
 policy and `T` its task makespan. The recurrence above proves `T(P,d) >= Lk(d)` for every feasible profile.
-The all-ASAP profile in which the mode's chooser proposes each newly ready task under the stated uniform
-placement policy, the first accepts it without delay, and its executor starts immediately attains `T = Lk(d)`.
+The all-ASAP profile in which eligible nodes propose each newly ready task under the stated pickup policy,
+the first accepts it without delay, and its executor starts immediately attains `T = Lk(d)`.
 It is therefore a pure Nash equilibrium for
 each fixed `d`: no unilateral deviation can raise any player's payoff above zero. It is also a global team
 optimum under these premises because even a joint deviation cannot finish before `Lk(d)`. This is a direct
@@ -3739,10 +3890,31 @@ lower bound is `Omega(n / w)` words, not `Omega(n)` words. Replaying durable evi
 changing the output timing or changing the graph representation changes this model. The result proves no
 universal auxiliary-word minimum for the full executor or planner.
 
-The readiness scan is the adjacency-list form of
-[Kahn's topological elimination](https://doi.org/10.1145/368996.369025).
-Clause 2 is the [Graham list-scheduling bound](https://doi.org/10.1002/j.1538-7305.1966.tb01709.x) with its
-idle-time proof stated above. Neither result asserts uniqueness of an executor or a universal auxiliary-space minimum.
+**Connections to earlier computer science.** The readiness scan is the adjacency-list form of
+[Kahn's topological elimination](https://doi.org/10.1145/368996.369025) (1962), and clause 2 is the
+[Graham list-scheduling bound](https://doi.org/10.1002/j.1538-7305.1966.tb01709.x) (1966) with its
+idle-time proof stated above. [Lamport's happened-before relation](https://doi.org/10.1145/359545.359563)
+(1978) explains why distributed acceptance and result events need a verifiable causal order rather than a
+wall-clock guess; §28 uses one signed authority chain for that purpose, not Lamport clocks as its protocol.
+[Garcia-Molina and Salem's sagas](https://doi.org/10.1145/38713.38742) (1987) allow interleaved long-lived
+transactions and compensating actions. CCME's irreversible publication uses forward recovery with verified
+records and may have no compensation, so "saga class" here is an analogy with explicit assumptions, not a claim
+of the original saga's all-or-compensated guarantee. The static-input/runtime-decision split in hybrid execution
+has the earlier [partial-evaluation lineage](https://studwww.itu.dk/people/sestoft/pebook/).
+[Lee and Messerschmitt's SDF work](https://ptolemy.berkeley.edu/publications/papers/87/staticscheduling/)
+uses known token production and consumption rates to construct static single- or multiprocessor schedules.
+dispat fixes a finite semantic DAG but lets eligible nodes claim ready tasks at runtime; it does not fix
+their node mapping or start order at compilation. The static-schedule result therefore supplies lineage,
+not a claim that dispat has a universally optimal planner.
+[Murthy, Bhattacharyya and Lee](https://ptolemy.berkeley.edu/publications/papers/97/jointCodeDataMinimize/)
+prove buffer-optimal single-appearance schedules for a specified well-ordered synchronous-dataflow class.
+That result illustrates why a memory optimum needs a graph class and memory objective; it gives no
+auxiliary-memory minimum for the CCME executor.
+[Blumofe and Leiserson's work stealing](https://doi.org/10.1145/324133.324234) (1999) gives a different
+work/span result for fully strict multithreaded computations; its expected bound is not a theorem for arbitrary
+CCME graphs with publication, owner lanes and durable return traffic. These connections identify prior
+mathematical tools and limits, not priority or novelty of a universal scheduling solution. None asserts
+uniqueness of an executor or a universal auxiliary-space minimum.
 
 For example, on a fixed explicit graph with distinct task names, one executor can select the least ready name
 with a binary heap and another with a balanced search tree. Both implement the same name priority, use `O(Tk)`
@@ -4032,12 +4204,18 @@ the failure-free makespan result. One implementation can use these six steps.
 2. **Compile the graph.** Compute §13's release plan, then create package stage tasks, the precedence edges of
    §19.2, §19.2a and §28.5, and one indegree counter per task. The table and ledger above account for planning.
    Once an explicit graph is built, its readiness scan costs `O(Tk + Dk)` and `O(Tk)` auxiliary words beyond the
-   graph. A configured-stage engine first checks that its graph is realisable.
-3. **Dispatch ready work.** Decrement successors' counters once as tasks finish and offer zero-indegree tasks
-   to admissible nodes and stage pools. A deterministic priority resolves a ready-set tie; completion timing can
-   still change the event order and log. The placement scan in the table costs `O(Tk · Wn)`; a comparison heap
-   for priority adds `O(Tk log Tk)` comparisons. Input transfer, leases and compatibility state add their stated
-   costs. Work conservation under all actual resource constraints is the dispatch policy. The factor in clause 2
+   graph. A configured-stage engine first checks that its graph is realisable. Before task effects, the first
+   node creates every required node-neutral task ref and the signed event root. Interpreting nodes instead
+   recompute the same plan and graph from pinned inputs; this repeats planning work, not semantic choices.
+3. **Pick up ready work.** Each node indexes accepted terminal events and decrements each outgoing edge once.
+   With free durable capacity, it selects a zero-indegree, policy-eligible task from the compiled descriptor
+   or independently recomputed graph and proposes one exact claim to the first node. The first checks
+   readiness, inputs, membership and budgets, then atomically persists that claim or a signed refusal without
+   substituting another task. An admitted late node joins the same frontier without adding a task vertex.
+   A deterministic priority resolves a ready-set tie; completion and join timing can still change event order.
+   A comparison heap for priority adds `O(Tk log Tk)` comparisons per node; compatibility and placement
+   search, input transfer, leases and membership changes add their stated costs. Work conservation under
+   actual resource constraints is a policy at accepted claim boundaries. The factor in clause 2
    applies only when its one-pool premises hold; clause 3 applies to disjoint stage pools under its premises.
 4. **Make effects durable.** Before admitting an irreversible external effect, check its stable identity, durable
    record path and outcome resolution mechanism as the crash-ready condition above defines. If that contract is
@@ -4092,7 +4270,8 @@ Under budgets of `m_b` build slots and `m_p` publication slots, write `Wb = sum(
 longest path. By the dispat theorem, applied per stage, no schedule beats `max(Lk, Wb / m_b, Wp / m_p)`. Where builds
 and publications are the only tasks that take time, the two budgets are the only capacities that bind, no owner lane
 binds and records take no time of their own, a placement that never idles a slot of a stage while a task of that stage
-is ready finishes within `Lk + Wb / m_b + Wp / m_p`. Trace the latest-finishing predecessor chain backward from
+is ready and that completes every ready zero-duration task or relay and its resulting zero-time closure immediately
+finishes within `Lk + Wb / m_b + Wp / m_p`. Trace the latest-finishing predecessor chain backward from
 the last task. Whenever no task of that chain runs, its next task is ready and its stage pool is full. Chain time
 is at most `Lk`, and the full-pool intervals are charged to their respective pool loads. This is clause 3's
 two-budget case, within three
@@ -4124,6 +4303,9 @@ matching upper factor; §28.7 measures actual time. On a fixed chain no extra no
 premise, `s = Wk / Lk` marks only the point where the aggregate work lower bound ceases to dominate. Packing can
 leave task makespan above `Lk`: four independent tasks of durations 10, 7, 7 and 6 on three slots can end at 13,
 although `Lk = 10`. More slots can shorten such a schedule even above that threshold.
+Clause 4 gives a separate sufficient saturation condition using poset width, and a placement-dependent transport
+span bound. Mandatory setup or transport can make an enlarged run slower after compute time stops falling;
+optional idle capacity alone cannot worsen the optimal run.
 
 **What none of this may change.** These are all internal representations. The plan, the diagnostics, and their order
 MUST be identical to the literal reading (§17.2), and an implementation that trades a different plan for speed does not
@@ -4945,8 +5127,11 @@ adds per-owner publication serialization, fencing and reconciliation while prese
 
 ### 19.1 Tagging
 
-* A release tag MUST be created at the exact commit the plan was computed from (`HEAD` of the run) for every released
-  package, **whatever its publish target** (§13.10a).
+* Let `H0` be the exact source `HEAD` on which the semantic plan was computed. In tag-only mode, a release tag
+  MUST target `H0` for every released package, **whatever its publish target** (§13.10a). In release-commit
+  mode it MAY instead target the exact authorized exported release commit `H1` derived from `H0`, with the
+  planned source and target bound separately by the publication receipt and atomic finalization of §19.4.
+  A concurrent, unrelated or merely current `HEAD` is never an inferred tag target.
 * Tags MUST be created **after** a successful publish of that package, never before. A tag for an unpublished version
   makes the version unrecoverable, since §13.3 will treat it as released.
 * Tags MUST be created **immediately** after that package publishes, not batched to the end of the run (§19.3), and
@@ -5136,7 +5321,7 @@ run(plan):
         try:
             if publishTarget(P) != none:           # §13.10a
                 publishTo(publishTarget(P), P, plan[P].version)   # or adopt, §19.4
-            tag(P, plan[P].version, HEAD)          # §19.1: always, immediately
+            tag(P, plan[P].version, plannedTagTarget(P))  # §19.1, or durable §19.4 receipt until tag
             published[P] = plan[P].version
         except PublishError as e:
             failed[P] = e
@@ -5178,10 +5363,17 @@ whose registry cannot support such a check.
 
 Step 1 is also how the engine learns that the version exists. A publish command is commonly an opaque tool that reports
 only that it failed, so the verification states whether the destination holds the version at all. A destination that
-does not hold it leaves the failure an ordinary publish failure (§19.3), and one whose answer cannot be obtained does
-the same: identity is a question about a version the destination holds, and an unanswered question is not an answer.
+does not hold it leaves the current run in ordinary publish failure (§19.3), and one whose answer cannot be obtained
+does the same: identity is a question about a version the destination holds, and an unanswered question is not an
+answer.
 After `E198` the run starts no further publication. Packages already published and recorded keep their records, as
 every run-scoped error requires (§16).
+
+An ordinary publish failure caused by an absent or unanswered destination response neither settles nor fences
+an earlier request that may still be in flight, and does not authorize a fresh non-idempotent publication attempt.
+Before retry, settle or fence every prior attempt and verify destination state,
+or use destination deduplication of the same stable request identity (§13.11, §28.6). A timeout, unanswered query or
+momentary absence alone is insufficient.
 
 **Publication receipts.** The reconciliation above answers a record that was lost. A record that is late is answered
 earlier. To provide durable recovery when a release tag is not yet in the authoritative store, an implementation MUST
@@ -8015,20 +8207,22 @@ A signature alone does not prove lock ownership. A sweep has its separate non-lo
 release refs. At most one orchestrator owns a given run; a second entry process must acquire its own complete
 lock set and may be refused by the first run's exclusion.
 
-`--distribution-mode` accepts exactly `compilation`, `interpretation` and `mixed`; its default is
+`--distribution-mode` accepts exactly `compilation`, `interpretation` and `hybrid`; its default is
 `compilation`. The modes share one semantic release plan, deterministic task identities, dependency and outcome
 edges, capacity rules, provenance checks, and recovery obligations. They differ in who chooses eligible work
 and when effect decisions are evaluated:
 
-* In `compilation`, the orchestrator compiles the graph and assigns ready command tasks. It publishes and records.
+* In `compilation`, the orchestrator compiles every node-neutral task descriptor and canonical task ref upfront.
+  Choreographers pick up eligible ready commands from that graph without recomputing the semantic plan.
+  The orchestrator validates their exact claims, publishes and records.
 * In `interpretation`, every node derives the graph and proposes locally ready work. The orchestrator validates,
   publishes and records.
-* In `mixed`, the orchestrator compiles and assigns nonpush command tasks. It interprets first-only effects after
-  exact prerequisites settle.
+* In `hybrid`, the orchestrator compiles known nonpush command paths for eligible node pickup and interprets
+  first-only effect decisions after exact prerequisites settle.
 
-Mixed is specified here for a later implementation. A binary MUST reject a mode it does not implement; it
-MUST NOT silently execute it as compilation. An implementation's dated conformance status belongs in
-DESIGN-HISTORY.md, not in the normative meaning of these values. No mode changes which packages or versions
+`--distribution-mode=hybrid` is specified here for a later implementation. A binary MUST reject a mode it does
+not implement; it MUST NOT silently execute it as compilation. An implementation's dated conformance status
+belongs in DESIGN-HISTORY.md, not in the normative meaning of these values. No mode changes which packages or versions
 `Plan(input)` selects. Execution links are independent of the history-selection modes in §27 and MUST NOT
 change source ownership, repository discovery or release scope.
 
@@ -8043,9 +8237,11 @@ positive cross-run command capacity, and `runOnly: choreographer` for a task eli
 policy cannot change node capacity or the first node's authority. Node names identify execution endpoints,
 not repository peers.
 
-With no remote choreographer, eligible work in every mode runs on the first node without a return listener.
-A task restricted to a choreographer then has no compatible node and must be refused before effects.
-With any remote choreographer, release and command-sweep entry points require an advertised
+With no remote choreographer and no authorized late join, eligible work in every mode runs on the first node
+without a return listener. A task restricted to a choreographer then has no compatible node and is refused
+before effects. A run permitting late join starts the authenticated return listener even if its initial
+admitted roster contains only the first node. With any remote choreographer or authorized late join, release
+and command-sweep entry points require an advertised
 `--return-endpoint=https://host:port`. `--return-listen=host:port` MAY set a different local bind address
 without changing the advertised one. These are runtime invocation settings, not a new static role.
 Endpoints contain no credentials. The signed bootstrap binds the exact advertised endpoint and per-run TLS
@@ -8059,10 +8255,11 @@ completion or safely acknowledged cancellation. First-only publication and nativ
 owner-lane and run-wide budget accounting without a peer claim. An unanswered timeout alone never frees a
 possibly active attempt.
 An unclaimed reservation consumes no task capacity. Shared workspace writes serialize or use isolated task
-materializations. Preflight MUST validate every linked node, protocol/toolchain version, platform, exact
-transport capability, capacity and return route before any package frame. It MUST refuse an incompatible node
-rather than silently drop it. Secret values are resolved from local references at the executing node and MUST
-NOT appear in signed Git objects, endpoint URLs, manifests, receipts or logs.
+materializations. Preflight MUST validate every initially admitted node, protocol/toolchain version, platform,
+exact transport capability, capacity and return route before any package frame. It MUST refuse an incompatible
+admitted node rather than silently drop it. An authorized absent node passes these checks at signed late join
+before it can claim or receive an assignment (§28.3). Secret values are resolved from local references at the
+executing node and MUST NOT appear in signed Git objects, endpoint URLs, manifests, receipts or logs.
 
 ### 28.3 Fixed input, shared graph and mode semantics
 
@@ -8101,18 +8298,89 @@ The deterministic semantic planner computes the release plan, then one shared gr
 vertices, predecessor and failure/outcome edges, placement, weights and budgets for every mode. The indexed
 readiness interpreter uses in-memory adjacency and indegree/outcome counters; it does
 not mean whole-DAG rescanning on every completion. There is no standalone persisted plan file.
+`GraphDigest` covers the deterministic logical task IDs, canonical ref names where executable, semantic
+descriptor fields, typed precedence and outcome edges, virtual gates, initial attempts and policy identities
+in a stable order. It excludes self-referential digest/bootstrap/carrier fields and task reservation object
+OIDs that themselves bind `GraphDigest`.
+The first node retains a separate signed graph-carrier initialization root bound to the bootstrap and
+`GraphDigest`. It enumerates those graph entries, their exact descriptor object OIDs and every initialized
+task reservation OID in the same order. A signed initialization-complete ledger event names the root OID;
+the first node publishes that event only after every bounded task-ref initialization batch settles at exact
+OIDs. No executable-task claim is accepted before then. A cold or late compiled node fetches and verifies
+that root and every listed carrier.
+For each task it verifies that the current ref tip has a legal signed ancestry from the manifest's exact
+initial reservation and reconciles its indexed ledger events; an advanced legitimate tip is expected.
+An absent, additional, divergent or duplicate descriptor/ref fails verification before indexed selection.
+The one-time enumeration costs its actual graph and carrier bytes; normal event polling does not relist all
+refs.
 Native preparation that writes shared manifests or lockfiles is an explicit first-node task with its required
-file/owner lane. Its admitted bytes are a new prepared input state. A later relevant native change invalidates
-an earlier result if that result's full effective input identity no longer matches. A build never implicitly
-regenerates a shared lockfile on each peer. Transport commits never become release intent, plan history,
+file/owner lane. Its admitted bytes are a new prepared input state. A later relevant native change can make
+an earlier result ineligible for a future effect if that effect requires the newer input state. It does not
+rewrite the accepted result or its signed input identity. A build never implicitly regenerates a shared
+lockfile on each peer. Transport commits never become release intent, plan history,
 release-tag ancestry or a native-head admission.
+Every known native writer precedes each task that reads its result in the compiled graph. A peer reads an
+immutable prepared snapshot identified by the signed preparation event, not a mutable shared path. Before
+accepting its Result, the first node checks that this is the task's authorized prepared input identity.
+Subsequent native writes produce a different state identity; they do not retroactively change an accepted
+Result or retract a signed terminal edge. Before any dependent publication or record using that Result, the
+first node also checks that no later relevant native state superseded its pinned input. If it did, it signs
+an input-invalidation and run-stopping decision, fences new claims and cancels affected live attempts where
+safe; it withholds the dependent native effect. A task not yet logically terminal may be retried on a new
+authorized input only if its signed retry policy permits it. A terminal task needs a new pinned run generation
+for rebuilding. The final state check and dependent native effect hold the same owner or file lane against
+relevant writers, so a write cannot race between the check and effect. The invalidation event binds the old
+and new prepared state OIDs and affected tasks; replay applies it before any later readiness or publication
+decision. Unrelated native writes do not invalidate a Result. A stale claim is refused with an exact
+signed reason and fence; repeatedly refusing the same unchanged claim is not a recovery strategy.
 
-In `compilation`, the orchestrator computes the graph, maintains readiness and chooses compatible task/node
-placements. It signs exact assignments containing run, plan and graph digests, task/attempt, node, ownership
-generation, source and predecessor object IDs, resolved command frame, permitted writes and outputs, and
-platform requirements. Peers authenticate and execute those assignments; they do not replan or substitute a
-locally chosen task. The first node may choose itself. Every probe, claim and result reply returns over §28.4;
-the first node alone persists Git state and supplies an exact signed acceptance receipt before execution.
+In `compilation`, the orchestrator computes the graph once and initializes a canonical, node-neutral task ref
+for every executable logical task before any task effect, including first-only publication and recording.
+Virtual gates have graph identities and ledger outcomes but execute no command and need no task branch.
+Each executable ref binds the run, plan and graph digests, task identity,
+stage kind, allowed attempt policy, placement and budget rules, executable command template, permitted writes,
+declared outputs, platform requirements and immutable source identities. Templates may contain typed holes for
+predecessor Result OIDs, their verified output identities and exact native prepared-input state OIDs, filled
+from signed terminal and first-node preparation events when ready. The claim and Result bind those filled
+identities. A later relevant native change cannot be silently substituted for the bound input identity;
+the invalidation rule above governs future effects. Filling typed holes does not replan, add a task or change
+the template identity. Each choreographer
+authenticates the compiled graph and event cursor, indexes local readiness, and picks an eligible ready task
+while its durable physical capacity permits. Before proposing, it records one exact weighted local lease
+intent under its admitted durable capacity authority. It proposes the exact task, attempt, unique pickup ID,
+input bindings,
+node, admitted membership epoch, capacity-authority ID and lease-intent ID and weight to
+the first node over §28.4. It does not recompute `Plan(input)` or the graph compiler. The first node validates
+current graph readiness, inputs, eligibility, weighted run budget, membership and task/ledger CAS state, then
+persists or refuses that exact proposal. It cannot substitute another task or node. An exact signed accepted
+claim receipt alone permits the command to start. Before effects, the worker creates a unique signed pending
+ref whose commit descends from that accepted canonical Claim. Its signed result is the next child commit on a
+separate unique output or failed ref; both refs bind the pickup ID, task, admitted authority, exact lease and
+compiled input identity. A lost push reply is reconciled against the same immutable ref and object, never by
+minting a new pickup ID. The first node may itself pick up compatible ordinary work
+through the same claim rules. All engine-managed Git writes remain there. An ambiguous reply leaves the
+identical proposal and its local lease pending until an exact receipt or signed fence settles it. A definitive
+signed refusal that binds the proposal and its expected task and ledger OIDs proves it unaccepted;
+the peer durably
+releases only that exact local lease before selecting other work. A run-budget capacity refusal parks the
+candidate until a relevant signed release while leaving its physical slot available for other ready tasks.
+A new proposal uses a new exact lease intent only after the old refusal or fence is verified.
+Ready selection uses indexed
+predecessor counters and a signed event feed: each task and edge is indexed once, and each logical terminal
+updates its outgoing edges once. Polling does not rescan all task refs or the graph after each completion.
+A failed attempt before retry decision discharges no logical precedence edge.
+Each outgoing edge has its compiled type: plain precedence waits for logical task finality, while a provider
+or same-package outcome gate waits for the signed package settlement required by §19.3. A raw failed Result
+or a terminal event with no settled package status cannot make a publish-dependent consumer ready. A causal
+failure may wait for in-flight siblings and first-node onFail or revert hooks before the package outcome is
+signed. Nodes apply the same indexed skip predicate to that accepted outcome; they do not infer it from a
+command exit code or a blank status. No-claim blocked outcomes use the same typed graph policy.
+Under a live return route, an admitted node with free physical capacity and at least one verified ready,
+compatible task keeps selecting eligible work; it does not wait for the first node to place each command.
+A lost claim race removes that task from the local frontier until a signed retry or terminal event, allowing
+other ready work to proceed. A capacity refusal waits for a relevant signed capacity release instead of
+reproposing on every poll. These are work-conservation and bounded-contention rules at accepted claim
+boundaries, not a zero-latency wall-clock guarantee when transport, validation or a run budget is binding.
 
 In `interpretation`, every node independently computes the same semantic plan and indexed task graph from
 the identical pinned envelope. It compares both digests before it proposes work. Each node applies accepted
@@ -8127,20 +8395,112 @@ The orchestrator cannot certify a peer's actual free local slots from a timestam
 attests its own cross-run limit. A failed attempt is not a logical terminal failure until its retry/exhaustion
 decision is durable. First-node local work uses the same broker rules.
 
-In `mixed`, the orchestrator compiles and centrally assigns tasks whose engine-managed effects do not push
-Git or perform a native release mutation. Delegable preparation, test, build and user stages are in that
+In `hybrid`, the orchestrator compiles known tasks whose engine-managed effects do not push Git or perform a
+native release mutation; eligible nodes pick up ready compiled command paths under the same exact claim rules.
+Delegable preparation, test, build and user stages are in that
 segment. Version, sign, syncLock and shared-file preparation may be compiled there only when their
 engine-managed effects are nonpush; they retain required first-node placement and file/owner lanes.
 Login and publish hooks, publication, native release commits/tags/ref pushes, peer settlement, receipt
 reconciliation, recording and postrecord hooks belong to the first-only interpreted effect segment.
-An engine-managed native mutation in an earlier preparing stage also belongs to that effect segment.
+An engine-managed native release, VCS ref or receipt mutation in an earlier preparing stage also belongs
+to that interpreted effect segment. A compiled first-only version, sign, syncLock or shared-file preparation
+may edit ordinary prepared files under its file lane; its descriptor fixes that write set and its admitted
+prepared-state OID gates consumers. It cannot perform a release, ref or receipt mutation by reclassifying it
+as a file edit.
 This is an authority classification, not a claim that arbitrary trusted shell commands are sandboxed.
 Virtual relay vertices are graph gates rather than separately executable tasks. Every executable task has
 exactly one policy owner. Signed exact outcome and effective-input gates cross the partition in both directions:
 a build can unlock publication, and a settled provider publication/record can unlock a later consumer build.
-These alternations may recur along one dependency chain; mixed is not a global two-phase barrier.
+These alternations may recur along one dependency chain; hybrid is not a global two-phase barrier.
 The same fixed graph and failure semantics apply throughout. The orchestrator interprets effect decisions only
 after those predecessors settle and alone performs every authorized push.
+
+**Elastic choreographer participation in every mode.** Compilation, interpretation and hybrid MUST admit an
+authorized choreographer while a run is active, non-stopping and unsealed. This includes a task-only sweep
+or a release with no configured publication or push effect. A distributed invocation in any mode pins a
+nonempty authorized join policy and
+return route; an ordinary local invocation with no distributed admission request may omit both. The signed
+bootstrap fixes that policy, route, pinned envelope and graph identity before execution. Its initially
+admitted roster MAY contain only the first node; absent
+preauthorized nodes need not delay unrelated work. A node not named before the run may join only when the
+bootstrap instead pins a trust root and a bounded enrollment policy that authorizes its identity. An arbitrary
+endpoint or self-asserted name grants no admission. The first node's authenticated listener and capacity
+authority are ready before the run starts, even when no peer is initially present. A task restricted to a
+choreographer waits for an eligible admitted node until the bootstrap's finite admission deadline; expiry
+produces a signed no-claim task failure and derives dependent blocking under the graph's ordinary policy,
+without a fabricated command result. Waiting does
+not block unrelated ready work. A run that cannot offer the return route or authorized admission fails before
+effects. This replaces fixed-roster preflight only for absent future participants; each admitted node still
+passes the same capability, platform, protocol and transport checks before its first offer or proposal.
+The deadline decision atomically advances an inert canonical task ref to a typed no-claim terminal and appends
+its event, naming the missing eligible placement and fixed policy. A task with a possibly accepted claim or
+durable offer cannot take this shortcut: its exact attempt is settled or fenced first. Expiry never converts
+absence of a peer reply into proof that its command stopped.
+
+Join changes future placement capacity, never the pinned history, semantic plan, finite task graph, task IDs,
+precreated node-neutral task roots, previous accepted outcomes or first-node Git authority. In compilation
+and hybrid, an admitted node reads the already compiled descriptors and signed event frontier before it picks
+an eligible ready command; in interpretation it independently recomputes the plan and graph first. Hybrid
+still interprets first-only effect decisions after exact prerequisites settle. A late node cannot change a
+compiled descriptor, publish, record or perform an engine-managed Git push. Dynamic resources are not
+runtime-added tasks. The membership view is a separate ordered state on the same signed first-node ledger;
+it does not change the graph digest or semantic plan.
+
+An authenticated join request binds the run, ownership generation, bootstrap object, plan and graph digests,
+protocol and algorithm versions, node identity, endpoint, platform and capabilities, positive capacity,
+nonsecret durable local capacity-authority identity, request ID and expected membership epoch. The node first
+fetches and verifies the pinned object closure. An interpreting node independently recomputes both digests;
+a compiling node verifies the signed graph and executable descriptors without semantic replanning. The first
+node authenticates the joining identity against the run-pinned per-node keys or enrollment trust root;
+possession of a shared return token or a claimed node name alone cannot add capacity. It verifies its lock
+or sweep generation, the pinned enrollment policy, unique node identity and physical capacity authority.
+It accepts no join after a signed run-stopping or sealed event, or until the signed
+initialization-complete graph root of §28.3 names all settled task refs;
+an earlier request receives a bounded refusal or noneligible pending status. It then atomically initializes
+bounded node participation slots where required and appends the admitted membership record to its ledger
+before returning an exact signed receipt. No node becomes eligible on an unsigned reply,
+half-created slots or a timed-out request. A lost reply is settled by the same request ID and exact body; a
+changed request requires proof that the previous one was refused or fenced. A different endpoint or capacity
+under an already admitted identity is a new signed membership transition, never a duplicate registration.
+Changing that identity's durable physical capacity-authority ID is refused while any old-authority lease
+remains unresolved. Such a replacement needs exact old-lease finality and a signed capacity transition before
+new claims; copying the same node credential into a fresh local slot ledger cannot multiply capacity.
+
+Every new claim checks that the run is neither stopping nor sealed and that its node is admitted and not
+draining at the authoritative membership state. The proposal binds that node's current admitted
+capacity-authority ID, membership epoch and exact durable local lease intent for the run, task, attempt and
+weight. The peer checks that the intent is still held before sending and before starting; the first node
+checks the signed ID, epoch, lease identity and weight against the admitted membership and task policy, as
+well as the task ref, expected ledger epoch, inputs and weighted budgets. A different fresh slot root under
+the same node key is not the admitted authority and cannot claim without the guarded replacement transition.
+An unrelated join may stale an
+unaccepted proposal; the proposer reconciles its exact receipt before retrying against the newer signed epoch.
+Accepted claims are not invalidated or displaced by a later join. The node's persistent physical slots count
+all active leases across runs, so registering the same logical node twice cannot multiply usable capacity.
+A capacity increase counts only after a signed admission and local authority confirmation. A decrease or
+drain cannot fall below occupied weight or release a running lease. On first-node restart, the signed
+membership ledger and task refs reconstruct eligibility before any new claim, and local durable leases remain
+charged until exact finality evidence.
+Join, run-stopping and claim transitions compare and advance the same signed ledger epoch atomically. Thus a
+join racing run-stopping either lands first and is then barred from claiming, or receives a signed refusal;
+no new claim is accepted after stopping. Result, cancellation acknowledgement and finality settlement remain
+admissible for already accepted attempts during stopping.
+
+A leaving node first enters a signed draining epoch: it receives no new offer or claim. Its accepted claims
+still consume capacity until terminal evidence or safely acknowledged cancellation. If a mode or first-only
+path persisted an explicit offer, that unclaimed offer is durably fenced before another node can claim it.
+A peer's private ready-task selection is neither a task-ref transition nor a capacity lease.
+Disconnection, timeout, missing heartbeat or `404` alone proves neither
+stop nor absence of a delayed claim. An unresolved effect retains the run's exclusion. Join and drain events
+are indexed once and do not rescan the graph on every poll; their own validation, carrier bytes, notice-slot
+initialization and stale-proposal reconciliation are separately charged. Fixed-capacity task-time bounds of
+§13.11 do not predict makespan under online joins, changing eligibility or outages. The signed membership
+epoch is a local ordered view and does not claim the full group-communication guarantees of
+[Birman and Joseph's virtual synchrony](https://doi.org/10.1145/41457.37515).
+
+Correctness uses signed run, task and attempt identities, membership epochs and causal ledger/event order, not
+synchronized wall-clock timestamps. A deadline, heartbeat loss or timeout is grounds to suspect or request
+cancellation; it is not evidence that an accepted command, child process or external request is quiescent.
 
 ### 28.4 Return channel, Git state and recovery
 
@@ -8152,35 +8512,94 @@ temporary storage, checked against its digest and exact task/input binding, then
 the first node. A lost response is settled by proposal ID and exact persisted object; repeating a request is
 not permission to repeat an external effect.
 
-All three modes use one canonical shared authoritative coordination Git repository per run. Every participant
-MUST be able to fetch it read-only; otherwise preflight refuses. An endpoint alias or mirror may carry the
-same objects but is never a second claim authority. After the fixed graph is known and before the first
-package frame, the first node creates one inert signed branch for each known logical delegable task, using
-bounded atomic batches. Other fixed-size dispatch/index refs may be precreated for bounded polling.
-Preflight probes, release locks, tags and native record refs are separate. The complete initialization must
-settle at exact OIDs before execution starts. A refused or ambiguous later batch requires exact read
+All three modes use one canonical shared authoritative coordination Git repository per run. Every initially
+admitted participant MUST be able to fetch it read-only or initial preflight refuses. A configured but absent
+authorized future node is not yet an admitted participant; it proves this exact read capability at signed
+join or that join is refused without aborting unrelated work already running. An endpoint alias or mirror may
+carry the same objects but is never a second claim authority. After the fixed graph is known and before the first
+package frame, the first node creates one inert signed branch for every executable logical task, including
+first-only publication and recording, using bounded atomic batches. Other fixed-size dispatch/index refs
+may be precreated for bounded polling. Preflight probes, release locks, tags and native record refs are
+separate. The complete initialization must settle at exact OIDs and publish its signed graph root before
+execution or late-join acceptance starts. A refused or ambiguous later batch requires exact read
 settlement and leased cleanup; there is no global atomic push across distinct repositories.
 An inert branch, empty slot or task name alone authorizes nothing.
 
-The task branch is the sole attempt authority for that logical task. Claim, result, retry-ready, cancel and
-terminal decision are successive exact-lease CAS commits on it, so two peers cannot claim separately
-precreated attempt branches. The durable claim contains its proposal ID and exact input digest. Claim and
-capacity-ledger refs are updated atomically in the same repository; preflight verifies atomic multi-ref push
-capability. Terminal, acknowledged cancellation and retry transitions fence capacity release in the same domain.
-A Git no-op ref update with a stale lease is not treated as a fencing proof; signed state and companion refs are
-checked. No timed-out or disconnected attempt is reassigned until it is safely stopped, fenced and, where
-necessary, its external effect reconciled under §19.4.
+For a first-only executable task, the first node advances that same canonical branch from reservation to a
+signed local claim or effect intent before the first possible native effect. After the effect is verified or
+its uncertainty settled under §19.4, it attaches exact typed effect evidence, then atomically advances the
+branch to terminal state with the matching ledger event. An admission refusal advances the inert branch to
+a signed no-claim blocked or failed terminal only after any local hook is verified stopped, with the matching
+event. A native publication's
+command result alone is not proof that its external destination accepted the planned artifact; a recording
+task binds the exact native tag, receipt or commit object that actually became durable. A crashed first node
+replays these task refs and events before retiring its lock or allowing dependents to proceed. First-only
+tasks do not invite a peer claim, but they use the same exact branch identity and finality fence.
 
-The first node writes a monotonic signed terminal-event chain or equivalent bounded read-only feed in that
-canonical repository. Every event has a sequence, task identity and exact accepted outcome/result OID.
-The authoritative task-terminal CAS and event-index advance MUST be one atomic remote transaction, or a
-restart reconciler MUST publish a missing event from the exact terminal task state before peers proceed.
-An event MUST NOT name an outcome whose task CAS did not land. Its sequence lives in signed durable state,
+The canonical task branch is the sole logical winner authority. A Claim atomically advances that branch and
+names one unique pickup ID. The worker creates its pending ref from the accepted Claim tip and an output or
+failed ref from that exact pending commit; each ref is create-only and unique to the run, task, node and
+pickup. A signed Result or Ack may be admitted as pickup evidence on the ledger without advancing the
+canonical task tip while a successor pickup is active. The first node selects at most one verified successful
+Result as the canonical terminal winner before installing its outputs. A failed Result can reopen the task
+for a bounded successor only when the signed run policy declares that every delegated command and hook is
+safe to repeat without conflicting external effects. This operator declaration defaults to false and is
+bound into the bootstrap and complete graph; it never authorizes a native first-node effect retry. Without
+it, an accepted failed Result or Ack reaches a terminal failure, and uncertain contact loss retains its
+charge and exclusion without starting a successor. Failure alone does not discharge logical successors.
+The durable Claim contains
+its proposal ID, pickup ID and exact input digest. Claim,
+capacity-ledger and claim-event index refs are updated atomically in the same repository; preflight verifies
+atomic multi-ref push capability. Terminal, acknowledged cancellation and retry transitions fence capacity
+release in the same domain.
+A Git no-op ref update with a stale lease is not treated as a fencing proof; signed state and companion refs are
+checked. There is no deliberate duplicate fanout. A task deadline first signs an exact Cancel with an
+immutable reply deadline; an Ack settles a responsive worker. Only after that signed post-Cancel deadline
+may the first node record contact loss and open a bounded successor pickup. The old pickup's physical lease
+and run-budget charge remain retained until exact signed finality or Ack evidence settles it, so a successor must fit
+remaining capacity. Cancel fences any later success admission from that old pickup, although its immutable
+worker-owned outcome branch remains evidence. A native publication or recording attempt remains exclusive
+to the first node and obeys the separate effect reconciliation rule of §19.4.
+
+An accepted cancellation request records durable cancel intent for the exact attempt; it is not a terminal
+cancellation acknowledgement. An earlier accepted claim or command can still start or continue, write local
+output, emit a late Result, or leave an upload queued after that intent; a queued publication can also commit.
+Process death alone does not fence a queued remote effect. The first node MUST preserve late output and effect
+evidence under exact attempt identities and reconcile that evidence. It MUST NOT discard it as impossible or
+treat cancellation as rollback. A terminal cancellation acknowledgement MUST bind verified stop of the command
+and child processes, fencing of delayed starts, and settlement or fencing of delayed output transport.
+Receipt of the request alone is insufficient. Physical and run-wide capacity remains charged while the command
+or its descendants can still execute. Conflicting side effects MUST NOT be retried and release exclusion MUST NOT
+end until relevant external effects are settled or fenced. Atomic destination deduplication of the same stable
+request identity permits only that exact request's safe retry while its outcome is pending (§19.4); it does not
+authorize a different request or new-plan publication. Operational cancellation differs from a `cancel` commit
+unit that changes release metadata (§10).
+
+The first node writes one monotonic signed event chain or equivalent bounded read-only feed in that
+canonical repository. It includes claim accepted, exact claim refusal or fence, retry ready, logical
+terminal, no-claim outcome, settled package outcome, input invalidation, run stopping and membership
+transitions. Every event has a sequence,
+task and proposal identities where applicable, and an exact accepted state OID. An accepted claim event names
+the winning node and ClaimOID. A refusal binds the rejected proposal, expected task OID and ledger epoch,
+reason and signed fence; an HTTP error or absent receipt alone does not settle it. A node removes a task from
+its ready frontier on a verified competing claim and reopens it only on the matching retry-ready event.
+Cold startup replays this feed from its signed root, including nonterminal claims, before selecting work.
+Every transition that changes readiness or capacity, including claim, retry-ready, cancel issuance,
+acknowledgement, queue fence, blocked and terminal, MUST atomically advance its exact task tip, companion
+capacity ledger and event index in one same-repository transaction. Where a transition is recoverably
+split, an exact signed-tip replay reconciler MUST prove and finish the missing companion state before any
+new claim or capacity release; ambiguity remains charged and stops admission. A ledger-only refusal is
+permitted only when it changes no task tip or capacity, and it binds the exact proposal and fence.
+Run-stopping, join and drain events atomically advance their signed admission state and event index on the
+same ledger CAS, even though they do not advance a task tip.
+A task-outcome event MUST NOT name an outcome whose task CAS did not land. Its sequence lives in signed durable state,
 not only process memory.
 Peers fetch from their last verified sequence, reject gaps/reordering, and replay from the signed root after
 restart. Cleanup cannot remove an unread required event. A terminal event becomes visible only after attempt
 retry/finality and result durability settle; a raw failed attempt cannot release a successor. Each node
-applies an event once to its indexed outgoing edges. The feed is coordination state, not a plan file or peer
+applies each event once. Only logical terminal or blocked finality discharges plain precedence edges; a
+signed package settlement discharges its outcome-gated edges under §19.3.
+The feed is coordination state, not a plan file or peer
 push authority. The first node can reconstruct broker task, budget and receipt state from exact signed refs
 and events after restart; orphaned proposals never become accepted by inference. The per-run TLS key and
 certificate pin are also part of that continuity. Resuming the same generation requires protected durable
@@ -8318,10 +8737,14 @@ admission receipt.
 Cleanup removes only owned temporary refs and bundles after their consumers have finished. Failed attempts and
 receipts retain diagnostic provenance. Cleanup failure is reported without rewriting successful package outcomes;
 borrowed nodes' unrelated data is never deleted. Repository locks are normally released in reverse acquisition
-order after the orchestrator's publication and recording path ends. A local publish-script error alone does not
-retain a release lock as evidence of an uncertain destination outcome. The lock serializes active orchestrators;
-it does not establish what happened at an external destination. A process stopped without lock cleanup leaves its
-lock for operator recovery under VCS-PROTOCOL.md §4. Revoking an unclaimed task fences its coordination ref,
+order after the orchestrator's publication and recording path ends. A verified local failure before any external
+request does not retain the lock merely because the script failed. A prior request that may still be in flight
+retains a durable release lock or equivalent fail-closed exclusion until its outcome is settled or fenced.
+Stable-key destination deduplication permits only that exact request's safe retry while the old outcome remains
+pending (§19.4).
+The lock serializes active orchestrators; it does not establish what happened at an external
+destination. A process stopped without lock cleanup leaves its lock for operator recovery under
+VCS-PROTOCOL.md §4. Revoking an unclaimed task fences its coordination ref,
 not an external publication. A changed generation rejects stale choreographer results but is not an
 external-effect fence.
 
@@ -8331,7 +8754,7 @@ In one large JS repository, let the task-precedence notation `assets => {ui, doc
 `assets`, and `app` consumes both. The package edges of §2 point in the opposite direction.
 Choreographer A builds `assets` once and exports its required outputs.
 Choreographers B and C receive verified outputs and build `ui` and `docs` concurrently.
-The assigned app node receives both output sets and builds `app`. Publication
+The node that claims `app` receives both output sets and builds it. Publication
 and source recording then obey the existing stage/owner constraints; an isolated
 registry-based image consumer still waits for image publication when required.
 Neither B nor C rebuilds `assets`, and the app node does not rebuild their
@@ -8351,11 +8774,15 @@ variability and artifact equivalence. Identify the fixture and environment with 
 skipped or failed trials MUST NOT be described as successful speedups. Require a demonstrated wall-time
 benefit on a declared representative parallel fixture; do not call source-only dispatch or
 duplicate prerequisite compilation a distributed-build success.
+Reported elapsed intervals use readings of the same monotonic clock. Subtracting wall-clock timestamps from
+different nodes is not exact latency without an explicit bounded-uncertainty model; signed event order alone
+does not measure duration.
 
 For an already supplied explicit graph of `n` vertices and `e` edges, one adjacency-list construction and
 one incremental readiness pass inspect `Theta(n + e)` required records and do `O(n + e)` graph/event work
-without retries. Interpretation repeats that in-memory state on each of `q` interpreting nodes, so the
-aggregate explicit graph state and event processing can be `O(q(n + e))`. Fixed-size claim and terminal
+without retries. Each of `q` participating nodes indexes a local frontier in every mode, so aggregate
+explicit graph state and event processing can be `O(q(n + e))`; interpretation additionally repeats semantic
+planning on those nodes. Fixed-size claim, membership and terminal
 events update indexed successors; polling all predecessors or all task refs after every event does not meet
 this bound. Semantic `Plan(input)`, sorting, Git history and record discovery, transport, publication,
 retries and recovery are separate costs. These bounds neither establish a fastest implementation nor a
@@ -8380,8 +8807,8 @@ is not applicable, while that mode's invocation must fail before effects. Every 
    unchanged. Concurrency limits hold locally and across the run.
 6. Two ready tasks share a repository: use isolated worktrees and branches;
    conflicting declared release-file writes are detected before admission.
-7. Branch tips move after dispatch or a stale receipt arrives: use only the
-   assigned full object ID and matching plan/attempt/ownership generation.
+7. Branch tips move after claim or a stale receipt arrives: use only the
+   exact accepted object ID and matching plan/attempt/ownership generation.
 8. Ignored JS outputs from `assets` reach `ui` and `docs` on separate choreographers:
    both builds use those bytes, overlap when ready and never rebuild `assets`.
    The app consumes both output sets without rebuilding either provider.
@@ -8397,8 +8824,8 @@ is not applicable, while that mode's invocation must fail before effects. Every 
 13. A configuration places `publish` on a choreographer, including scalar `runOnly: choreographer`:
     refuse it before dispatch. With `runOnly: [choreographer, orchestrator]`, delegate
     the eligible build-side frames and run `publish` on the orchestrator.
-14. A choreographer disconnects or the orchestrator loses its lock: no new claims, assignments
-    or publications start, and no missing peer reply is treated as evidence
+14. A choreographer disconnects or the orchestrator loses its lock: no new claims or first-only effects
+    start, and no missing peer reply is treated as evidence
     of an engine-managed publication.
 15. A source tag succeeds and later checkpoint/cleanup fails: preserve source
     success and report the specific failure; no source republication for cleanup.
@@ -8418,12 +8845,12 @@ is not applicable, while that mode's invocation must fail before effects. Every 
     run's receipt alone authorizes no task or effect.
 21. A choreographer joins two runs: its total active command tasks remain within local capacity,
     and each run's stage budgets remain global. An unacknowledged timed-out attempt still consumes capacity; an
-    assignment no node has claimed consumes none and is offered again.
+    node-neutral task ref no node has claimed consumes none and remains eligible for a later exact proposal.
 22. A build-only dependency outside propagation kinds supplies ignored output: transfer it before the consumer
     builds. Where the implementation admits execution-only edges that the release graph does not already
     reject, an execution-only cycle fails preflight without changing the semantic release plan.
-23. An authenticated assignment declares choreographer task authority but its hook invokes release or writes a native
-    release ref: refuse the operation. A role or endpoint in a linked repository cannot elevate the assignment.
+23. An authenticated task claim declares choreographer authority but its hook invokes release or writes a native
+    release ref: refuse the operation. A role or endpoint in a linked repository cannot elevate the claim.
 24. A native record changes an in-flight task's relevant effective input bytes: withhold its publication and
     rebuild or require a new plan as the input rules dictate. An unrelated admitted change alone does not
     invalidate an otherwise matching result.
@@ -8465,10 +8892,59 @@ is not applicable, while that mode's invocation must fail before effects. Every 
     canonical CAS endpoint. A lost receipt is settled by proposal ID; a timed-out attempt is not retried blindly.
 38. A failed attempt eligible for retry does not emit logical TaskFailed to successors. A signed terminal feed
     replays without gaps after peer or first-node restart and processes each graph edge once per terminal event.
-39. In mixed, each executable task has one policy owner. Exact accepted outcomes cross compiled and interpreted
-    gates in both directions; a provider publication can gate a later compiled consumer build. No peer pushes.
+39. In hybrid, each executable task has one policy owner. Nodes pick up eligible compiled nonpush paths, while
+    first-only effects are interpreted after exact prerequisites. Accepted outcomes cross those gates in both
+    directions; a provider publication can gate a later compiled consumer build. No peer pushes.
 40. In every advertised mode, the orchestrator executes eligible ordinary tasks and alone performs every
     engine-managed Git push. An unreachable first-node return route refuses remote participation before frames.
+41. In each advertised mode, start a run with only the first node admitted, then join an authorized second
+    node after independent tasks become ready. Compilation and hybrid let it pick up a ready command from
+    existing compiled descriptors; interpretation has it independently recompute the same graph first. Its signed
+    membership receipt precedes any offer or accepted claim. The plan, task IDs and existing claims remain
+    identical, and the second node sends no Git push. A task restricted to a choreographer can wait only until
+    the signed admission deadline; expiry does not fabricate a command result.
+42. Submit two joins with one node identity, a stale membership epoch, a changed input or graph digest, an
+    unauthenticated endpoint and incompatible capacity authorities. At most one exact identity is admitted;
+    none of the mismatches creates capacity or a claim. Repeating one identical accepted join returns its
+    exact receipt after reply loss. A failed bounded slot initialization admits no partial member.
+43. Drain or disconnect a node with an accepted running claim, then let another node select the same task.
+    The new claim is refused until exact stop and finality evidence fences the old attempt. Where an explicit
+    durable offer exists, it can move only after its fence; a peer's private selection needs no offer fence.
+    A missing heartbeat or `404` alone frees no slot. After first-node restart,
+    replay signed membership and task events before new claims, without double-counting the joined capacity.
+44. In compilation, initialize every executable logical task ref before the first command. Two eligible peers read the
+    same compiled graph and terminal feed, select a ready task without receiving a first-node placement, and
+    race exact claims. One accepted receipt authorizes one execution; the other peer consumes the winner's
+    signed event and selects other eligible work. Neither peer reruns the semantic planner or scans all task
+    refs after each completion. A predecessor Result fills the waiting descriptor's typed input slots without
+    changing its task identity or creating a new task branch.
+45. Race an authorized late join and a ready claim against signed run-stopping. The shared ledger CAS orders
+    them; a join accepted before stopping cannot claim afterward, and a later join is refused. An already
+    accepted attempt may still return its Result or cancellation acknowledgement for exact finality.
+46. Restart an admitted node under the same node key with a fresh local capacity-authority root while an old
+    lease is unresolved. Its claim carrying the new AuthorityID is refused despite the unchanged node name.
+    Reopen the original durable authority and lease intent: reconcile any existing exact claim receipt before
+    a command, and admit a new claim only within the current signed membership and capacity budget. Missing
+    local lease evidence cannot free the old slot.
+47. With one local physical slot, refuse one peer proposal for a run-wide budget and leave another task ready.
+    The exact signed refusal releases only the unaccepted local lease; the first candidate stays parked until
+    the relevant signed budget release, while the node can pick up the other task. If the reply is lost, the
+    lease stays charged until exact receipt reconciliation proves acceptance or refusal.
+48. A claim is accepted, then cancel intent is durably accepted before the peer's delayed command start.
+    A stale start can still occur after the intent; request acceptance alone emits no terminal cancellation
+    acknowledgement, frees no slot and authorizes no conflicting retry. Exact stop and fencing evidence settles it.
+49. A running command writes local output or returns a Result after cancel intent. Preserve and bind the late
+    evidence to its exact attempt, reconcile it, and withhold terminal cancellation and capacity release until
+    the command and child processes are verified stopped and delayed starts are fenced. Cancellation does not
+    roll back its effects.
+50. The command stops, but an earlier output upload arrives later. A process stop alone does not prove attempt
+    finality; settle or fence that transport before terminal cancellation and capacity release. Separately, a
+    queued publication may commit after local cancellation is acknowledged: preserve its evidence and retain
+    release exclusion until its outcome is settled or fenced. A stable-key retry permits only that same request,
+    never a different request or new-plan publication while the old outcome remains pending.
+51. Skew node clocks so one deadline expires and a heartbeat or reply is lost while the accepted attempt still
+    runs. Signed attempt and epoch order remains authoritative; timeout or clock skew alone neither frees
+    physical capacity nor proves cancellation finality or permits a conflicting publication.
 
 ### 28.9 Operational diagnostics
 
@@ -8516,10 +8992,11 @@ environment-based lock bypass refuses a sweep with execution links as it refuses
 A sweep task carries the package's commands for the swept script alone, with the sweep's computed environment and the
 unresolved static environment of §28.3, and runs them in the snapshot of the package's input closure; the hooks that
 bracket a release stage do not bracket it. It consumes no output of another task, because a sweep installs nothing,
-and it returns its exports as a build returns its manifest. Its signed assignment carries kind `run` on a
+and it returns its exports as a build returns its manifest. Its signed compiled descriptor carries kind `run` on a
 preinitialized logical-task branch (§28.4). Interpretation peers independently derive the same pinned sweep
-task graph and propose ready work; compilation centrally assigns it. Mixed has no publication segment in a
-sweep and follows the compiled nonpush command path. In every mode the first node alone persists Git state.
+task graph and propose ready work; compilation peers pick up ready tasks from compiled descriptors without
+semantic replanning. Hybrid has no publication segment in a sweep and follows the same compiled nonpush pickup.
+In every mode the first node alone persists Git state.
 
 A sweep MAY declare, per script and in the entry configuration only, repository-relative roots its tasks write. They
 are captured on the node after the task succeeds under the manifest and validation of §28.5 and installed on the

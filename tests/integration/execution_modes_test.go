@@ -131,6 +131,19 @@ func executionModeExecution(mailbox string, isDistributed bool, names ...string)
 	}
 }
 
+// The distributed twin pins its build tasks to the peers so the history
+// comparison covers actual remote output carriage in every mode.
+func executionModePinWorkerBuilds(cfg *models.File, distributed bool, packages ...string) {
+	if !distributed {
+		return
+	}
+	placements := make(map[string]*models.RunOnly, len(packages))
+	for _, packageName := range packages {
+		placements[packageName] = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
+	}
+	pinPackages(placements)(cfg)
+}
+
 // executionModeScripts is the build and publish scripts every mode shares.
 func executionModeScripts(provider string) map[string]models.Script {
 	return map[string]models.Script{
@@ -186,6 +199,7 @@ func newExecutionSingleFleet(t *testing.T, isDistributed bool) *executionModeFle
 	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Branch: harness.DefaultBranch}
 	cfg.Execution = executionModeExecution(mailbox, isDistributed)
+	executionModePinWorkerBuilds(&cfg, isDistributed, executionModePackages...)
 	repo.SeedPackage("packages/providers", executionModeProvider)
 	for _, name := range []string{executionModeConsumerA, executionModeConsumerB} {
 		repo.SeedPackage("packages/consumers", name)
@@ -250,6 +264,7 @@ func newExecutionControlFleet(t *testing.T, isDistributed bool) *executionModeFl
 	cfg.Changelog = &models.ChangelogConfig{Enabled: models.Bool(true)}
 	cfg.Commit = &models.CommitConfig{Enabled: models.Bool(true), Branch: harness.DefaultBranch}
 	cfg.Execution = executionModeExecution(mailbox, isDistributed)
+	executionModePinWorkerBuilds(&cfg, isDistributed, executionModePackages...)
 	control.WriteConfigModel(cfg)
 	control.WriteFile(".gitignore", "dist/\n")
 	control.Commit("chore: assemble the control repository")
@@ -282,6 +297,7 @@ func newExecutionLinkedFleet(t *testing.T, isDistributed bool) *executionModeFle
 	fleet.writeConfig("alpha", func(cfg *models.File) {
 		executionModeLinkedConfig(cfg, true)
 		cfg.Execution = executionModeExecution(mailbox, isDistributed)
+		executionModePinWorkerBuilds(cfg, isDistributed, executionModeProvider)
 	})
 	fleet.peer("alpha").WriteFile(".gitignore", "dist/\n")
 	fleet.peer("alpha").Commit("feat(" + executionModeProvider + "): hold the provider of this fleet")
@@ -289,6 +305,7 @@ func newExecutionLinkedFleet(t *testing.T, isDistributed bool) *executionModeFle
 	fleet.writeConfig("beta", func(cfg *models.File) {
 		executionModeLinkedConfig(cfg, false)
 		cfg.Dependencies = executionModeDependencies()
+		executionModePinWorkerBuilds(cfg, isDistributed, executionModeConsumerA, executionModeConsumerB)
 	})
 	fleet.peer("beta").WriteFile(".gitignore", "dist/\n")
 	fleet.peer("beta").Commit(fmt.Sprintf("feat(%s,%s): hold the consumers of this fleet",
@@ -906,7 +923,10 @@ func TestExecutionControlCheckpointFailureKeepsSourceSuccess(t *testing.T) {
 	require.NoError(t, os.WriteFile(fleet.entry.Path(".git", "hooks", "pre-commit"),
 		[]byte("#!/bin/sh\nexit 37\n"), 0o755))
 
-	res := fleet.release()
+	res := fleet.entry.StartCommandEnv(fleet.env(), "release", "--package", "*",
+		"--return-endpoint", fleet.returnURL).WaitForDiagnostic(90*time.Second, func() {
+		t.Logf("checkpoint failure signed ledger: %+v", executionLateJoinLedgerEvents(t, fleet.mailbox))
+	})
 	stopAll(t, workers)
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
@@ -917,8 +937,8 @@ func TestExecutionControlCheckpointFailureKeepsSourceSuccess(t *testing.T) {
 	assert.Equal(t, []string{executionModeProvider},
 		executionReleasedPackages(res), "and nothing else was published")
 	assert.Empty(t, fleet.tags()["beta"], "the consumers of an unrecorded source are left for the next run")
-	assert.Empty(t, executionMailboxBranches(t, fleet.mailbox),
-		"the run still closed the branches it created")
+	assert.NotEmpty(t, executionProtocolRefs(t, fleet.mailbox, "dispat-ledger-"),
+		"the run retains signed finality and truthful publication evidence")
 }
 
 // executionCheckpointCode is the diagnostic a control repository reports for

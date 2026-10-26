@@ -13,26 +13,29 @@ import (
 // must separately authenticate the retained run bootstrap and replay its
 // ledger before enabling any new effect.
 func (l *Lock) AdoptPrepared(ctx context.Context, prepared PreparedLockIdentity) error {
-	if l == nil || l.Git == nil || l.held || l.oid != "" ||
-		prepared.Run == "" || prepared.Run != l.Run ||
-		prepared.Remote == "" || prepared.Remote != l.Remote ||
+	if l == nil || l.Git == nil || l.held || l.oid != releaseRuntimeAbsentIdentityText ||
+		prepared.Run == releaseRuntimeAbsentIdentityText || prepared.Run != l.Run ||
+		prepared.Remote == releaseRuntimeAbsentIdentityText || prepared.Remote != l.Remote ||
 		!strings.HasPrefix(prepared.LocalTag, gitx.LockAttemptTagPrefix) ||
-		prepared.Object == "" {
-		return fmt.Errorf("release: incomplete prepared lock identity")
+		prepared.Object == releaseRuntimeAbsentIdentityText {
+		return fmt.Errorf(releasePreparedLockIncompleteErrorText)
 	}
 	local, err := l.Git.TagObject(ctx, prepared.LocalTag)
-	if err != nil || local != prepared.Object {
-		return fmt.Errorf("release: local prepared lock identity differs from journal: %w", err)
+	if err != nil {
+		return fmt.Errorf(releasePreparedLocalLockReadErrorFormat, err)
+	}
+	if local != prepared.Object {
+		return fmt.Errorf(releasePreparedLocalLockMismatchErrorText)
 	}
 	remote, err := l.readRemoteObjectOnce(ctx)
 	if err != nil {
-		return fmt.Errorf("release: prepared remote lock could not be verified: %w", err)
+		return fmt.Errorf(releasePreparedRemoteLockReadErrorFormat, err)
 	}
 	if remote != prepared.Object {
-		return fmt.Errorf("%w: prepared remote lock differs from journal", ErrLockLost)
+		return fmt.Errorf(releasePreparedRemoteLockMismatchErrorFormat, ErrLockLost)
 	}
 	l.localTag = prepared.LocalTag
 	l.oid = prepared.Object
-	l.held = true
+	l.held = releasePreparedLockHeldState
 	return nil
 }

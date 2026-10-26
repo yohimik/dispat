@@ -38,7 +38,9 @@ func (c *CompiledTaskGraph) BudgetCapacities(build, publish int) map[StageBudget
 	for name := range c.plans {
 		changed[name] = compiledGraphPackageChangedState
 	}
-	return executionBudgetCapacities(c.plan, changed, build, publish)
+	return executionBudgetCapacities(executionBudgetPolicy{
+		Plan: c.plan, Changed: changed, Build: build, Publish: publish,
+	})
 }
 
 // TaskShape is a vertex in the compiled graph. Virtual vertices are the

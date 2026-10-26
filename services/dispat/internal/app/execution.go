@@ -31,19 +31,19 @@ import (
 // branch is enabled when the peer protocol and interpreter are installed.
 func (a *App) checkDistributionMode(mode public.DistributionMode) error {
 	switch mode {
-	case "", public.DistributionModeCompilation:
+	case choreographyAbsentIdentityText, public.DistributionModeCompilation:
 		return nil
 	case public.DistributionModeInterpretation:
 		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
-			"distribution mode interpretation is not available in this build")
+			interpretationUnavailableErrorText)
 	default:
 		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
-			"unsupported distribution mode %q (this build supports compilation)", mode)
+			unsupportedDistributionModeErrorFormat, mode)
 	}
 }
 
 func effectiveDistributionMode(mode public.DistributionMode) string {
-	if mode == "" {
+	if mode == choreographyAbsentIdentityText {
 		return string(public.DistributionModeCompilation)
 	}
 	return string(mode)

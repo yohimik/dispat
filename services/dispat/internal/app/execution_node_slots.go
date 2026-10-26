@@ -17,12 +17,12 @@ import (
 func sharedNodeSlotRoot() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("execution: locating persistent node state: %w", err)
+		return retainedRunAbsentValueText, fmt.Errorf(sharedNodeSlotConfigurationPathErrorFormat, err)
 	}
 	if !filepath.IsAbs(configDir) {
-		return "", fmt.Errorf("execution: user config directory is not absolute")
+		return retainedRunAbsentValueText, fmt.Errorf(sharedNodeSlotRelativeConfigurationPathErrorText)
 	}
-	return filepath.Join(configDir, "dispat", "node-state"), nil
+	return filepath.Join(configDir, firstRunJournalApplicationDirectoryName, sharedNodeSlotDirectoryName), nil
 }
 
 func openSharedNodeSlots(node string, capacity int) (*execution.NodeSlotAuthority, error) {
@@ -42,10 +42,10 @@ func (a *App) prepareExplicitLocalSlots() error {
 		return nil
 	}
 	a.localNodeSlots = nil
-	a.localSlotRunID = ""
+	a.localSlotRunID = retainedRunAbsentValueText
 	authority, err := openSharedNodeSlots(a.sender.Node, settings.ResolveConcurrency())
 	if err != nil {
-		return fmt.Errorf("execution: explicit local node capacity cannot be established: %w", err)
+		return fmt.Errorf(sharedNodeSlotLocalCapacityErrorFormat, err)
 	}
 	a.localNodeSlots = authority
 	a.localSlotRunID = execution.FormatRunID()
@@ -57,12 +57,12 @@ func (a *App) prepareExplicitLocalSlots() error {
 // evidence that an unresolved task has stopped or released its lease.
 func waitLocalSweepSlot(ctx context.Context, authority *execution.NodeSlotAuthority,
 	intent execution.NodeSlotIntent, wait time.Duration) (execution.NodeSlotLease, error) {
-	if authority == nil || wait <= 0 {
-		return execution.NodeSlotLease{}, fmt.Errorf("execution: local node slot wait is not configured")
+	if authority == nil || wait <= sharedNodeSlotNoCapacityCount {
+		return execution.NodeSlotLease{}, fmt.Errorf(sharedNodeSlotUnconfiguredWaitErrorText)
 	}
 	bounded, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(sharedNodeSlotPollIntervalMilliseconds * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		lease, ok, err := authority.TryReserve(bounded, intent)
@@ -74,7 +74,7 @@ func waitLocalSweepSlot(ctx context.Context, authority *execution.NodeSlotAuthor
 		}
 		select {
 		case <-bounded.Done():
-			return execution.NodeSlotLease{}, fmt.Errorf("execution: local node capacity did not become available: %w", bounded.Err())
+			return execution.NodeSlotLease{}, fmt.Errorf(sharedNodeSlotUnavailableCapacityErrorFormat, bounded.Err())
 		case <-ticker.C:
 		}
 	}
@@ -89,8 +89,8 @@ func (a *App) installExplicitLocalReleaseSlots(executor *release.Executor,
 	if a.localNodeSlots == nil {
 		return nil
 	}
-	if executor == nil || compiled == nil || a.localSlotRunID == "" {
-		return fmt.Errorf("execution: local release capacity has no compiled task identity")
+	if executor == nil || compiled == nil || a.localSlotRunID == retainedRunAbsentValueText {
+		return fmt.Errorf(sharedNodeSlotMissingTaskIdentityErrorText)
 	}
 	weights := make(map[string]int)
 	capacity := a.cfg.Execution.ResolveConcurrency()
@@ -98,14 +98,14 @@ func (a *App) installExplicitLocalReleaseSlots(executor *release.Executor,
 		if shape.Virtual {
 			continue
 		}
-		if shape.Weight <= 0 || shape.Weight > capacity {
-			return fmt.Errorf("execution: local task %s requires weight %d outside node capacity %d",
+		if shape.Weight <= sharedNodeSlotNoCapacityCount || shape.Weight > capacity {
+			return fmt.Errorf(sharedNodeSlotInvalidTaskWeightErrorFormat,
 				shape.ID, shape.Weight, capacity)
 		}
 		weights[shape.ID] = shape.Weight
 	}
-	if len(weights) == 0 {
-		return fmt.Errorf("execution: local release has no executable task")
+	if len(weights) == sharedNodeSlotNoCapacityCount {
+		return fmt.Errorf(sharedNodeSlotNoExecutableTaskErrorText)
 	}
 	runID := a.localSlotRunID
 	slots := a.localNodeSlots
@@ -113,17 +113,17 @@ func (a *App) installExplicitLocalReleaseSlots(executor *release.Executor,
 	executor.LocalTaskLifecycle = func(ctx context.Context, taskID string) (func(context.Context, string) error, error) {
 		weight, found := weights[taskID]
 		if !found {
-			return nil, fmt.Errorf("execution: local release task %s is absent from the compiled graph", taskID)
+			return nil, fmt.Errorf(sharedNodeSlotTaskAbsentFromGraphErrorFormat, taskID)
 		}
 		lease, err := waitLocalSweepSlot(ctx, slots, execution.NodeSlotIntent{
-			Run: runID, Task: taskID, Attempt: 1, Weight: weight,
+			Run: runID, Task: taskID, Attempt: sharedNodeSlotInitialAttemptCount, Weight: weight,
 		}, wait)
 		if err != nil {
 			return nil, err
 		}
 		return func(settleCtx context.Context, status string) error {
 			return slots.ReleaseLocalSettled(settleCtx, lease.ID, execution.NodeSlotLocalCompletion{
-				Run: runID, Task: taskID, Attempt: 1, Status: status,
+				Run: runID, Task: taskID, Attempt: sharedNodeSlotInitialAttemptCount, Status: status,
 			})
 		}, nil
 	}

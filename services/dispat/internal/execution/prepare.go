@@ -34,6 +34,17 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
+const (
+	preparationMissingIdentity             = ""
+	preparationProviderNotRunErrorFormat   = "execution: prepared provider %s did not run before %s"
+	preparationProviderFailedErrorFormat   = "execution: prepared provider %s failed before %s: %w"
+	preparationProviderStillRunningError   = "execution: prepared provider %s is still running when %s became ready"
+	preparationProviderPanicErrorFormat    = "preparing provider %s panicked: %v"
+	preparationSignedFinalityErrorFormat   = "%w; signed prepared finality: %v"
+	preparationTaskMissingCoordinatorError = "execution: prepared task has no coordinator or package"
+	preparationSettlementErrorFormat       = "settling prepared provider %s: %w"
+)
+
 // PreparedProvider is one provider's build frame as this run would execute it
 // without releasing it.
 //
@@ -146,15 +157,15 @@ func (c *Coordinator) requirePreparedProviderOutputs(task string,
 		pending := c.preparations[provider.Package]
 		c.preparing.Unlock()
 		if pending == nil {
-			return fmt.Errorf("execution: prepared provider %s did not run before %s", provider.Package, task)
+			return fmt.Errorf(preparationProviderNotRunErrorFormat, provider.Package, task)
 		}
 		select {
 		case <-pending.done:
 			if pending.err != nil {
-				return fmt.Errorf("execution: prepared provider %s failed before %s: %w", provider.Package, task, pending.err)
+				return fmt.Errorf(preparationProviderFailedErrorFormat, provider.Package, task, pending.err)
 			}
 		default:
-			return fmt.Errorf("execution: prepared provider %s is still running when %s became ready", provider.Package, task)
+			return fmt.Errorf(preparationProviderStillRunningError, provider.Package, task)
 		}
 	}
 	return nil
@@ -169,12 +180,12 @@ func (c *Coordinator) ensurePrepared(ctx context.Context, packageName string) (e
 	}
 	defer func() {
 		if value := recover(); value != nil {
-			pending.err = fmt.Errorf("preparing provider %s panicked: %v", packageName, value)
+			pending.err = fmt.Errorf(preparationProviderPanicErrorFormat, packageName, value)
 		}
 		if pending.err != nil && c.choreographyBroker != nil {
 			settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), release.RecordTimeout)
 			if blockErr := c.BlockPreparedTask(settleCtx, packageName); blockErr != nil {
-				pending.err = fmt.Errorf("%w; signed prepared finality: %v", pending.err, blockErr)
+				pending.err = fmt.Errorf(preparationSignedFinalityErrorFormat, pending.err, blockErr)
 			}
 			cancel()
 		}
@@ -190,8 +201,8 @@ func (c *Coordinator) ensurePrepared(ctx context.Context, packageName string) (e
 // uses the same once-future as every consumer, so a prepared provider is
 // executed and settled exactly once before its consumer can reserve capacity.
 func (c *Coordinator) ExecutePreparedTask(ctx context.Context, packageName string) error {
-	if c == nil || packageName == "" {
-		return fmt.Errorf("execution: prepared task has no coordinator or package")
+	if c == nil || packageName == preparationMissingIdentity {
+		return fmt.Errorf(preparationTaskMissingCoordinatorError)
 	}
 	return c.ensurePrepared(ctx, packageName)
 }
@@ -286,7 +297,7 @@ func (c *Coordinator) prepareProvider(ctx context.Context, packageName string) (
 		prerequisiteErr = c.prepareProviderOutputs(ctx, task, prepared.Request)
 	}
 	if prerequisiteErr != nil {
-		return "", prerequisiteErr
+		return preparationMissingIdentity, prerequisiteErr
 	}
 	space := prepared.Request.Release.Pkg.Space
 	if c.choreographyBroker != nil {
@@ -295,9 +306,9 @@ func (c *Coordinator) prepareProvider(ctx context.Context, packageName string) (
 			// An unreleasing provider has task finality but no release-package
 			// outcome. Its failed terminal is a required-input blocker in the
 			// shared broker/frontier graph.
-			settleErr := c.SettleChoreographyTask(ctx, task, "")
+			settleErr := c.SettleChoreographyTask(ctx, task, preparationMissingIdentity)
 			if settleErr != nil {
-				return c.Local.Name, fmt.Errorf("settling prepared provider %s: %w", packageName, settleErr)
+				return c.Local.Name, fmt.Errorf(preparationSettlementErrorFormat, packageName, settleErr)
 			}
 		}
 		return c.Local.Name, runErr

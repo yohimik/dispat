@@ -94,7 +94,8 @@ func (c *CompiledTaskGraph) prepareTaskFrame(taskID string, state TaskFrameState
 		}
 	}
 	updates := liveProviderUpdates(t.pkg, c.framePlan, results)
-	request := renderStageRequest(visible, descriptor, descriptor.frame(visible.Pkg.Space), state.WorkspaceVars, updates)
+	request := renderStageRequest(stageRequestRenderOptions{Release: visible, Descriptor: descriptor,
+		Frame: descriptor.frame(visible.Pkg.Space), WorkspaceVars: state.WorkspaceVars, Updates: updates})
 	request.TaskID = taskID
 	return request, nil
 }

@@ -173,8 +173,8 @@ package the run covers. A bare word without the "--" is still a usage error:
 packages are selected with flags.
 
 With worker links, from execution.workers or from --worker name[=endpoint],
-each package's task is placed on a worker node, or on this machine when
-none has room, and the folders runOutputs declares for the script are
+eligible tasks can run on this machine or an admitted worker within their
+available capacity. The folders runOutputs declares for the script are
 carried back and merged into this checkout once every task has answered.
 A link with no endpoint reaches the repository being released.
 

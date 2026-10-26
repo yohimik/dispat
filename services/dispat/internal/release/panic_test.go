@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -67,6 +68,37 @@ func TestRunContainsAPanicInABuildFrame(t *testing.T) {
 	assert.Equal(t, StatusCancelled, results["b"].Status, "work behind the panic is cancelled, not failed")
 	assert.Contains(t, logs.String(), "run stopped after an internal error")
 	assert.Equal(t, -1, runner.indexOf("publish a"), "nothing of the panicked package publishes")
+}
+
+func TestPublishPanicRetainsUnsettledExclusionAndCapacity(t *testing.T) {
+	p := mkPlan(planSpec{Names: []string{"a"}})
+	p.Releases["a"].Pkg.Space.RevertOnFail = true
+	runner := &panickingRunner{panicOn: "publish a"}
+	tagger := &fakeTagger{}
+	reverter := &fakeReverter{}
+	e := newExecutor(execSpec{Runner: &runner.fakeRunner, Tagger: tagger, Build: 1, Publish: 1})
+	e.Runner, e.Reverter = runner, reverter
+	var publicationLeaseReleased atomic.Bool
+	e.LocalTaskLifecycle = func(_ context.Context, taskID string) (func(context.Context, string) error, error) {
+		return func(context.Context, string) error {
+			if taskID == taskGraphID(task{pkg: "a", kind: taskPublish}) {
+				publicationLeaseReleased.Store(true)
+			}
+			return nil
+		}, nil
+	}
+	var unsettled error
+	e.OnPublicationUnsettled = func(err error) { unsettled = err }
+
+	results := runWithin(t, e, p)
+
+	require.ErrorContains(t, unsettled, "E228")
+	require.ErrorContains(t, unsettled, "internal error: stage bug")
+	require.False(t, publicationLeaseReleased.Load(), "an uncertain external request still owns capacity")
+	require.Empty(t, reverter.dirs, "local files remain available for exact-effect reconciliation")
+	require.NotEqual(t, StatusPublished, results["a"].Status)
+	require.NotEqual(t, StatusFailed, results["a"].Status, "a panic cannot establish that publication failed")
+	require.Equal(t, -1, runner.indexOf("on-fail a"))
 }
 
 // TestRunKeepsAPackagePublishedWhenARecorderPanics: a panic after the publish

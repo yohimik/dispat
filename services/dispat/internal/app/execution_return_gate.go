@@ -17,7 +17,7 @@ func (g *runReturnGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	handler := g.handler
 	g.mu.RUnlock()
 	if handler == nil {
-		http.Error(w, "run return channel is not ready", http.StatusServiceUnavailable)
+		http.Error(w, runReturnNotReadyErrorText, http.StatusServiceUnavailable)
 		return
 	}
 	handler.ServeHTTP(w, r)

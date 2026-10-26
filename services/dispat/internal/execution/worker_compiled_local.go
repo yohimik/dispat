@@ -19,6 +19,7 @@ const (
 	compiledLocalFirstRosterIndex             = 0
 	compiledLocalMinimumSlots                 = 1
 	compiledLocalInitialPendingClaims         = 0
+	compiledLocalInitialWithdrawalBranches    = 0
 )
 
 // WaitCompiledLocalFinality keeps the signed feed alive until every accepted
@@ -160,9 +161,9 @@ func (w *Worker) RunCompiledLocal(ctx context.Context, broker *FirstNodeBroker,
 // has no slot-branch poll and must still deliver a signed Cancel to its task.
 func (w *Worker) pollCompiledLocalWithdrawals(ctx context.Context) error {
 	w.claims.Lock()
-	branches := make([]string, 0, len(w.claimed))
-	for branch := range w.claimed {
-		branches = append(branches, branch)
+	branches := make([]string, compiledLocalInitialWithdrawalBranches, len(w.claimed))
+	for identity := range w.claimed {
+		branches = append(branches, identity.Branch)
 	}
 	w.claims.Unlock()
 	for _, branch := range branches {

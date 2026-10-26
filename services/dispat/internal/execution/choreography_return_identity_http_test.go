@@ -48,6 +48,7 @@ func TestChoreographyHTTPSClaimAndResultRejectWrongSignatureAndOldRun(t *testing
 	defer forged.Close()
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
+		PickupID:    NewChoreographyPickupID(),
 		ExpectedOID: offered.AssignmentOID, InputsDigest: spec.InputsDigest,
 		ProposalID: choreographyReturnHTTPTestClaimID}
 	completeChoreographyFixtureClaim(t, persist, &claim)
@@ -76,22 +77,10 @@ func TestChoreographyHTTPSClaimAndResultRejectWrongSignatureAndOldRun(t *testing
 		PlanDigest: binding.PlanDigest, Task: spec.Task, Attempt: 1,
 		Node: claim.Node, Branch: spec.Branch}, Assignment: accepted.OID,
 		Status: StatusSucceeded}
-	document, err := json.Marshal(result)
-	require.NoError(t, err)
-	rawOID, err := fixture.mailbox.commitMessage(t.Context(), MessageResult, document, nil, nil)
-	require.NoError(t, err)
-	pack, err := os.CreateTemp(t.TempDir(), "return-result-*.pack")
-	require.NoError(t, err)
-	defer pack.Close()
-	require.NoError(t, fixture.git.ExportCommitPack(t.Context(), rawOID, pack))
+	proposal, pack := prepareChoreographyFixturePickupResult(t, fixture,
+		choreographyFixturePickupResult{Claim: claim, Accepted: accepted,
+			Result: result, ProposalID: choreographyReturnHTTPTestResultID})
 	packBytes, err := os.ReadFile(pack.Name())
-	require.NoError(t, err)
-	proposal := ChoreographyResultProposal{ChoreographyRunBinding: binding,
-		Task: spec.Task, Attempt: 1, Node: claim.Node, Branch: spec.Branch,
-		ClaimOID: accepted.OID, InputsDigest: claim.InputsDigest,
-		ProposalID: choreographyReturnHTTPTestResultID, ResultDigest: rawOID}
-	proposal, err = PrepareChoreographyResult(t.Context(), proposal, bytes.NewReader(packBytes),
-		choreographyReturnHTTPTestMaximumDocumentBytes)
 	require.NoError(t, err)
 	_, err = forged.SubmitResult(t.Context(), proposal, bytes.NewReader(packBytes))
 	require.Error(t, err)
@@ -102,7 +91,8 @@ func TestChoreographyHTTPSClaimAndResultRejectWrongSignatureAndOldRun(t *testing
 	resultReceipt, err := client.SubmitResult(t.Context(), proposal, bytes.NewReader(packBytes))
 	require.NoError(t, err)
 	require.True(t, resultReceipt.Accepted)
-	require.Equal(t, resultReceipt.OID, remoteChoreographyOID(t, fixture, spec.Branch))
+	require.Equal(t, accepted.OID, remoteChoreographyOID(t, fixture, spec.Branch),
+		"the signed Result receipt stays beside the canonical Claim until first-node decision")
 	ledgerAfterResult, err := persist.LedgerHead(t.Context())
 	require.NoError(t, err)
 	resultReplay, err := client.SubmitResult(t.Context(), proposal, bytes.NewReader(packBytes))
@@ -115,9 +105,18 @@ func TestChoreographyHTTPSClaimAndResultRejectWrongSignatureAndOldRun(t *testing
 	oldBinding.Run = choreographyReturnHTTPTestOldRun
 	oldResult := result
 	oldResult.Header.Run = oldBinding.Run
+	oldPickup := ChoreographyPickupIdentity{Run: oldBinding.Run, Task: spec.Task,
+		Node: claim.Node, PickupID: claim.PickupID}
+	oldPendingBranch, err := FormatChoreographyPendingBranch(oldPickup)
+	require.NoError(t, err)
+	oldOutcomeBranch, err := FormatChoreographyOutcomeBranch(oldPickup, StatusSucceeded)
+	require.NoError(t, err)
+	oldResult.PickupID, oldResult.PendingBranch, oldResult.PendingOID, oldResult.OutcomeBranch =
+		claim.PickupID, oldPendingBranch, proposal.PendingOID, oldOutcomeBranch
 	oldDocument, err := json.Marshal(oldResult)
 	require.NoError(t, err)
-	oldOID, err := fixture.mailbox.commitMessage(t.Context(), MessageResult, oldDocument, nil, nil)
+	oldOID, err := fixture.mailbox.commitMessage(t.Context(), MessageResult, oldDocument,
+		[]string{proposal.PendingOID}, nil)
 	require.NoError(t, err)
 	oldPack, err := os.CreateTemp(t.TempDir(), "return-old-result-*.pack")
 	require.NoError(t, err)
@@ -129,10 +128,13 @@ func TestChoreographyHTTPSClaimAndResultRejectWrongSignatureAndOldRun(t *testing
 	oldProposal.ChoreographyRunBinding = oldBinding
 	oldProposal.ProposalID = choreographyReturnHTTPTestOldResultID
 	oldProposal.ResultDigest = oldOID
+	oldProposal.PendingBranch = oldPendingBranch
+	oldProposal.OutcomeBranch = oldOutcomeBranch
 	oldProposal, err = PrepareChoreographyResult(t.Context(), oldProposal, bytes.NewReader(oldPackBytes),
 		choreographyReturnHTTPTestMaximumDocumentBytes)
 	require.NoError(t, err)
 	options.Binding = oldBinding
+	options.Signer = fixture.signer
 	oldClient, err := NewChoreographyReturnClient(options)
 	require.NoError(t, err)
 	defer oldClient.Close()
@@ -141,7 +143,7 @@ func TestChoreographyHTTPSClaimAndResultRejectWrongSignatureAndOldRun(t *testing
 	ledgerAfterOldRun, err := persist.LedgerHead(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, ledgerAfterResult, ledgerAfterOldRun)
-	require.Equal(t, resultReceipt.OID, remoteChoreographyOID(t, fixture, spec.Branch))
+	require.Equal(t, accepted.OID, remoteChoreographyOID(t, fixture, spec.Branch))
 }
 
 func TestChoreographyHTTPSAckRejectsForeignTaskNodeAndSignature(t *testing.T) {
@@ -163,6 +165,7 @@ func TestChoreographyHTTPSAckRejectsForeignTaskNodeAndSignature(t *testing.T) {
 	defer client.Close()
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
+		PickupID:    NewChoreographyPickupID(),
 		ExpectedOID: offered.AssignmentOID, InputsDigest: spec.InputsDigest,
 		ProposalID: choreographyReturnHTTPTestClaimID}
 	completeChoreographyFixtureClaim(t, persist, &claim)

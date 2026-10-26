@@ -11,6 +11,7 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -34,16 +35,27 @@ type localIsolatedFrame struct {
 	here    release.LocalFrame
 }
 
+const localIsolatedFrameRequiresStoppedGroup = true
+
 func (c *Coordinator) runIsolatedHere(ctx context.Context, frame localIsolatedFrame) (release.StageOutcome, error) {
 	lease, task, attempt, request, here := frame.lease, frame.task, frame.attempt, frame.request, frame.here
+	var unsettledEffects bool
 	if lease != nil {
-		defer lease.Release()
+		defer func() {
+			if !unsettledEffects {
+				lease.Release()
+			}
+		}()
 	}
 	root, err := os.MkdirTemp("", "dispat-local-frame-")
 	if err != nil {
 		return release.StageOutcome{FailedPart: release.PartInputs}, err
 	}
-	defer func() { _ = os.RemoveAll(root) }()
+	defer func() {
+		if !unsettledEffects {
+			_ = os.RemoveAll(root)
+		}
+	}()
 	sources := c.dispatch.Sources(request.Release.Pkg.Name)
 	commits, err := c.captureInputs(ctx, sources)
 	if err != nil {
@@ -52,6 +64,9 @@ func (c *Coordinator) runIsolatedHere(ctx context.Context, frame localIsolatedFr
 	checkoutRoot := filepath.Join(root, "checkout")
 	var added []localWorktree
 	defer func() {
+		if unsettledEffects {
+			return
+		}
 		for i := len(added) - 1; i >= 0; i-- {
 			plumbing := gitx.NewPlumbing(added[i].git)
 			plumbing.WorktreeRemove(context.WithoutCancel(ctx), added[i].dir)
@@ -108,11 +123,12 @@ func (c *Coordinator) runIsolatedHere(ctx context.Context, frame localIsolatedFr
 	if err != nil {
 		return release.StageOutcome{FailedPart: release.PartInputs}, err
 	}
-	runner := &script.ShellRunner{Shell: c.dispatch.Shell(request.Dir), Log: c.Log}
+	runner := &script.ShellRunner{Shell: c.dispatch.Shell(request.Dir), Log: c.Log, RequireStoppedGroup: localIsolatedFrameRequiresStoppedGroup}
 	what, err := here(release.WithLocalStageRuntime(ctx, release.LocalStageRuntime{
 		Dir: packageDir, Runner: runner, Env: formatInheritedBlanks(os.Environ()), OutputPaths: outputPaths}))
 	if err != nil {
-		return release.StageOutcome{LocalFailure: what}, err
+		unsettledEffects = errors.Is(err, script.ErrProcessGroupUnsettled)
+		return release.StageOutcome{LocalFailure: what, UnresolvedOffer: unsettledEffects}, err
 	}
 	if !request.Descriptor.IsProducingOutputs {
 		return release.StageOutcome{}, nil

@@ -1,6 +1,7 @@
 # Entry configuration for one distributed release. The first node is the
-# orchestrator. It also runs eligible work and is the only node that pushes
-# Git refs, publishes artifacts, and writes canonical release records.
+# orchestrator. It also runs eligible work and is the only node that advances
+# canonical task, ledger and release refs, publishes artifacts, and writes
+# canonical release records. Workers create their own pickup branches.
 #
 # Start with `dispat release --distribution-mode=compilation` (the default) to
 # plan and assign ready work here. Other modes are not available in this build.

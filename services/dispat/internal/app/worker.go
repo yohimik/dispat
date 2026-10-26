@@ -47,11 +47,11 @@ const workerIdentitySeedMissingErrorFormat = "execution.identityKeyEnv names %s 
 const workerIdentitySeedInvalidErrorFormat = "execution.identityKeyEnv names %s but its value is not a canonical base64url Ed25519 seed"
 
 func (a *App) workerJoinIdentityKey(settings *config.ExecutionConfig) (ed25519.PrivateKey, error) {
-	if settings.IdentityKeyEnv == "" {
+	if settings.IdentityKeyEnv == choreographyAbsentIdentityText {
 		return nil, nil
 	}
 	encoded := os.Getenv(settings.IdentityKeyEnv)
-	if encoded == "" {
+	if encoded == choreographyAbsentIdentityText {
 		return nil, a.refuseToServe(execution.NewDiagnostic(
 			execution.CodeConfiguration, execution.CategoryConfiguration,
 			workerIdentitySeedMissingErrorFormat, settings.IdentityKeyEnv))

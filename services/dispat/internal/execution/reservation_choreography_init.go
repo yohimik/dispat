@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+const (
+	choreographyReservationInitMissingIdentity  = ""
+	choreographyInitFirstAttempt                = 1
+	choreographyInitTaskSeen                    = true
+	choreographyInitStarted                     = true
+	choreographyInitSlotsReady                  = true
+	choreographyInitPreflightRequiredError      = "execution: choreography task initialization requires preflight"
+	choreographyInitDuplicateTaskError          = "execution: duplicate or empty choreography task"
+	choreographyInitNoncommandBranchErrorFormat = "execution: noncommand task %s has a branch"
+	choreographyInitInvalidTaskErrorFormat      = "execution: invalid choreography task %s"
+	choreographyInitDuplicateIndexError         = "execution: duplicate choreography participation index"
+)
+
 // ChoreographyInitialization names the retained bootstrap and the exact
 // independently compiled task shapes. Only branch-bearing tasks get refs;
 // virtual gates and first-only native effects use the signed ledger instead.
@@ -39,11 +52,11 @@ type InitializedChoreography struct {
 func (c *Coordinator) InitializeChoreographyTasks(ctx context.Context,
 	opts ChoreographyInitialization) (InitializedChoreography, error) {
 	if c == nil || c.Pool == nil || c.choreographyInitialized ||
-		c.reservations != nil || opts.BootstrapOID == "" ||
-		c.BootstrapOID != opts.BootstrapOID || c.Run == "" ||
-		c.Generation == "" || c.PlanDigest == "" || c.GraphDigest == "" ||
-		c.canonicalMailbox == nil || c.CanonicalEndpoint == "" {
-		return InitializedChoreography{}, fmt.Errorf("execution: choreography task initialization requires preflight")
+		c.reservations != nil || opts.BootstrapOID == choreographyReservationInitMissingIdentity ||
+		c.BootstrapOID != opts.BootstrapOID || c.Run == choreographyReservationInitMissingIdentity ||
+		c.Generation == choreographyReservationInitMissingIdentity || c.PlanDigest == choreographyReservationInitMissingIdentity || c.GraphDigest == choreographyReservationInitMissingIdentity ||
+		c.canonicalMailbox == nil || c.CanonicalEndpoint == choreographyReservationInitMissingIdentity {
+		return InitializedChoreography{}, fmt.Errorf(choreographyInitPreflightRequiredError)
 	}
 	mailbox := c.canonicalMailbox
 	result := InitializedChoreography{Tasks: append([]ChoreographyTaskSpec(nil), opts.Tasks...),
@@ -72,25 +85,25 @@ func (c *Coordinator) InitializeChoreographyTasks(ctx context.Context,
 	seen := map[string]bool{}
 	for index := range result.Tasks {
 		task := &result.Tasks[index]
-		if task.Task == "" || seen[task.Task] {
-			return InitializedChoreography{}, fmt.Errorf("execution: duplicate or empty choreography task")
+		if task.Task == choreographyReservationInitMissingIdentity || seen[task.Task] {
+			return InitializedChoreography{}, fmt.Errorf(choreographyInitDuplicateTaskError)
 		}
-		seen[task.Task] = true
+		seen[task.Task] = choreographyInitTaskSeen
 		if task.Virtual {
-			if task.LocalAuthority || task.Branch != "" || task.ReservationOID != "" {
-				return InitializedChoreography{}, fmt.Errorf("execution: noncommand task %s has a branch", task.Task)
+			if task.LocalAuthority || task.Branch != choreographyReservationInitMissingIdentity || task.ReservationOID != choreographyReservationInitMissingIdentity {
+				return InitializedChoreography{}, fmt.Errorf(choreographyInitNoncommandBranchErrorFormat, task.Task)
 			}
 			continue
 		}
 		branch := FormatChoreographyTaskBranch(c.Run, task.Task)
-		if task.Kind == "" || task.ReservationOID != "" ||
-			task.Branch != "" && task.Branch != branch || batch.refs[branch] != "" {
-			return InitializedChoreography{}, fmt.Errorf("execution: invalid choreography task %s", task.Task)
+		if task.Kind == choreographyReservationInitMissingIdentity || task.ReservationOID != choreographyReservationInitMissingIdentity ||
+			task.Branch != choreographyReservationInitMissingIdentity && task.Branch != branch || batch.refs[branch] != choreographyReservationInitMissingIdentity {
+			return InitializedChoreography{}, fmt.Errorf(choreographyInitInvalidTaskErrorFormat, task.Task)
 		}
 		task.Branch = branch
 		reservation := &Reservation{Header: Header{
 			Protocol: ChoreographyProtocolVersion, Kind: task.Kind, Run: c.Run,
-			PlanDigest: c.PlanDigest, Task: task.Task, Attempt: 1,
+			PlanDigest: c.PlanDigest, Task: task.Task, Attempt: choreographyInitFirstAttempt,
 			Generation: c.Generation, Branch: branch,
 			IssuedAt: time.Now().UTC().Format(time.RFC3339),
 		}, BootstrapOID: opts.BootstrapOID, MaxAttempts: maxPlacementAttempts}
@@ -110,15 +123,15 @@ func (c *Coordinator) InitializeChoreographyTasks(ctx context.Context,
 		if err != nil {
 			return InitializedChoreography{}, err
 		}
-		if batch.refs[slot.branch] != "" {
-			return InitializedChoreography{}, fmt.Errorf("execution: duplicate choreography participation index")
+		if batch.refs[slot.branch] != choreographyReservationInitMissingIdentity {
+			return InitializedChoreography{}, fmt.Errorf(choreographyInitDuplicateIndexError)
 		}
 		batch.refs[slot.branch] = slot.oid
 		slots.free[authorized.Name] = []*dispatchSlot{&slot}
 	}
 	// Mark this before the first network mutation so a failed or ambiguous
 	// batch cannot be started a second time under a new root identity.
-	c.choreographyInitialized = true
+	c.choreographyInitialized = choreographyInitStarted
 	c.choreographySlots = slots
 	if err := c.createInitialRefs(ctx, c.CanonicalEndpoint, batch); err != nil {
 		return InitializedChoreography{}, err
@@ -138,6 +151,6 @@ func (c *Coordinator) InitializeChoreographyTasks(ctx context.Context,
 	if err := c.ActivateChoreographyGraphNotices(ctx, root); err != nil {
 		return InitializedChoreography{}, err
 	}
-	slots.ready = true
+	slots.ready = choreographyInitSlotsReady
 	return result, nil
 }

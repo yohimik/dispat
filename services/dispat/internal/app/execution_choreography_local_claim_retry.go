@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
+	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
 const (
@@ -14,16 +15,23 @@ const (
 	localClaimRefusalFenceErrorFormat = "execution: first-node task %q has no exact signed refusal fence"
 )
 
+type choreographyLocalClaimRetryOptions struct {
+	Coordinator *execution.Coordinator
+	Broker      *execution.FirstNodeBroker
+	TaskID      string
+	Claim       func(execution.NodeSlotLease) error
+}
+
 // retryChoreographyLocalClaim releases an unaccepted physical lease only
 // after a definitive signed refusal. A lost/unknown reply retains it for
 // exact recovery. Budget waits are read-only and hold no physical slot.
-func (a *App) retryChoreographyLocalClaim(ctx context.Context,
-	c *execution.Coordinator, broker *execution.FirstNodeBroker, taskID string,
-	claim func(execution.NodeSlotLease) error) error {
+func (a *App) retryChoreographyLocalClaim(ctx context.Context, options choreographyLocalClaimRetryOptions) error {
+	c, broker, taskID, claim := options.Coordinator, options.Broker, options.TaskID, options.Claim
+
 	for {
 		value, ok := a.localTaskLeases.Load(taskID)
 		lease, valid := value.(execution.NodeSlotLease)
-		if !ok || !valid || lease.ID == "" {
+		if !ok || !valid || lease.ID == choreographyAbsentIdentityText {
 			return fmt.Errorf(localClaimLeaseMissingErrorFormat, taskID)
 		}
 		err := claim(lease)
@@ -37,13 +45,19 @@ func (a *App) retryChoreographyLocalClaim(ctx context.Context,
 		receipt := refused.Receipt
 		if !receipt.Refused || receipt.Accepted || receipt.Task != taskID ||
 			receipt.Node != c.Local.Name || receipt.GraphRootOID != c.GraphRootOID ||
-			receipt.FenceOID == "" || receipt.FenceSequence == 0 {
+			receipt.FenceOID == choreographyAbsentIdentityText || receipt.FenceSequence == choreographyAbsentFenceSequence {
 			return fmt.Errorf(localClaimRefusalFenceErrorFormat, taskID)
 		}
-		if err := a.localNodeSlots.ReleaseSettled(ctx, lease.ID, receipt.FenceOID); err != nil {
-			return err
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), release.RecordTimeout)
+		settleErr := a.localNodeSlots.ReleaseSettled(settleCtx, lease.ID, receipt.FenceOID)
+		cancel()
+		if settleErr != nil {
+			return settleErr
 		}
 		a.localTaskLeases.Delete(taskID)
+		if receipt.RefusalReason == execution.ChoreographyRefusalStopping {
+			return execution.ErrChoreographyRunStopping
+		}
 		if receipt.RefusalReason != execution.ChoreographyRefusalCapacity {
 			return err
 		}

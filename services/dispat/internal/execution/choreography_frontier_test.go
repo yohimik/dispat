@@ -61,12 +61,16 @@ func (p *testedOutcomePolicy) ShouldSkip(pkg string) (bool, string, error) {
 
 func TestInterpretedFrontierAppliesClaimRetryAndTerminalEdges(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	frontier, err := NewChoreographyFrontier(binding, "node-b", []ChoreographyTaskSpec{
-		{Task: "assets", EligibleNodes: []string{"node-a"}},
-		{Task: "ui", EligibleNodes: []string{"node-b"}, Predecessors: []string{"assets"}},
-		{Task: "docs", EligibleNodes: []string{"node-c"}, Predecessors: []string{"assets"}},
-		{Task: "app", EligibleNodes: []string{"node-b"}, Predecessors: []string{"ui", "docs"}},
-		{Task: "publish", LocalAuthority: true, Predecessors: []string{"app"}},
+	frontier, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding: binding,
+		Node:    "node-b",
+		Tasks: []ChoreographyTaskSpec{
+			{Task: "assets", EligibleNodes: []string{"node-a"}},
+			{Task: "ui", EligibleNodes: []string{"node-b"}, Predecessors: []string{"assets"}},
+			{Task: "docs", EligibleNodes: []string{"node-c"}, Predecessors: []string{"assets"}},
+			{Task: "app", EligibleNodes: []string{"node-b"}, Predecessors: []string{"ui", "docs"}},
+			{Task: "publish", LocalAuthority: true, Predecessors: []string{"app"}},
+		},
 	})
 	require.NoError(t, err)
 	_, ready, err := frontier.SelectReady()
@@ -118,12 +122,90 @@ func TestInterpretedFrontierAppliesClaimRetryAndTerminalEdges(t *testing.T) {
 	require.False(t, ready, "local publish is never a peer claim")
 }
 
+func TestCompiledFrontierRequeuesAfterSignedCancelGraceAndSettlesLateAck(t *testing.T) {
+	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
+	frontier, err := NewCompiledChoreographyFrontier(CompiledChoreographyFrontierOptions{
+		Binding: binding, GraphRootOID: "root",
+		Node: ChoreographyRuntimeNode{Name: "node-a", Capacity: 2},
+		Tasks: []ChoreographyTaskSpec{
+			{Task: "build", Kind: KindBuild, Placement: PlacementAnyNode,
+				Weight: 1, ReservationOID: "reservation"},
+			{Task: "consumer", Kind: KindBuild, Placement: PlacementAnyNode,
+				Weight: 1, ReservationOID: "consumer-reservation", Predecessors: []string{"build"}},
+		},
+	})
+	require.NoError(t, err)
+	apply := func(events ...ChoreographyEvent) {
+		t.Helper()
+		for i := range events {
+			events[i].Sequence = frontier.cursor.Sequence + uint64(i) + 1
+		}
+		require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
+			Events: events,
+			Cursor: ChoreographyEventCursor{OID: fmt.Sprintf("ledger-%d", frontier.cursor.Sequence+uint64(len(events))),
+				Sequence: frontier.cursor.Sequence + uint64(len(events))},
+		}))
+	}
+	apply(ChoreographyEvent{Kind: ChoreographyInitializationComplete, Task: choreographyRunTaskID,
+		TaskOID: "root", GraphRootOID: "root"},
+		ChoreographyEvent{Kind: ChoreographyExecutionStarted, Task: choreographyRunTaskID,
+			TaskOID: "root", GraphRootOID: "root", AdmissionDeadlineUTC: "deadline"})
+	chosen, ready, err := frontier.SelectReady()
+	require.NoError(t, err)
+	require.True(t, ready)
+	require.Equal(t, "build", chosen.Spec.Task)
+	apply(ChoreographyEvent{Kind: ChoreographyClaimAccepted, Task: "build", Attempt: 1,
+		Node: "node-a", TaskOID: "claim-one", PriorTaskOID: "reservation",
+		PickupID: "pickup-one", AssignmentOID: "assignment-one", GraphRootOID: "root"},
+		ChoreographyEvent{Kind: ChoreographyCancelIssued, Task: "build", Attempt: 1,
+			Node: "node-a", TaskOID: "cancel-one", PriorTaskOID: "claim-one",
+			PickupID: "pickup-one", ClaimOID: "claim-one",
+			CancelReplyDeadlineUTC: "deadline", GraphRootOID: "root"},
+		ChoreographyEvent{Kind: ChoreographyPickupContactLost, Task: "build", Attempt: 1,
+			Node: "node-a", TaskOID: "cancel-one", PriorTaskOID: "cancel-one",
+			PickupID: "pickup-one", ClaimOID: "claim-one", CancelReplyDeadlineUTC: "deadline", GraphRootOID: "root"})
+	chosen, ready, err = frontier.SelectReady()
+	require.NoError(t, err)
+	require.True(t, ready)
+	require.Equal(t, 2, chosen.Attempt)
+	apply(ChoreographyEvent{Kind: ChoreographyClaimAccepted, Task: "build", Attempt: 2,
+		Node: "node-a", TaskOID: "claim-two", PriorTaskOID: "cancel-one",
+		PickupID: "pickup-two", AssignmentOID: "assignment-two", GraphRootOID: "root"},
+		ChoreographyEvent{Kind: ChoreographyAckAccepted, Task: "build", Attempt: 1,
+			Node: "node-a", TaskOID: "claim-two", PriorTaskOID: "claim-two",
+			PickupID: "pickup-one", ClaimOID: "claim-one", ResultReceiptOID: "ack-one",
+			ProposalDigest: "digest-one", ProposalID: "proposal-one", GraphRootOID: "root"},
+		ChoreographyEvent{Kind: ChoreographyPickupSettled, Task: "build", Attempt: 1,
+			Node: "node-a", TaskOID: "claim-two", PriorTaskOID: "claim-two",
+			PickupID: "pickup-one", ClaimOID: "claim-one", ResultReceiptOID: "ack-one",
+			GraphRootOID: "root"},
+		ChoreographyEvent{Kind: ChoreographyResultAccepted, Task: "build", Attempt: 2,
+			Node: "node-a", TaskOID: "claim-two", PriorTaskOID: "claim-two",
+			PickupID: "pickup-two", ClaimOID: "claim-two", ResultReceiptOID: "receipt-two",
+			OutputOID: "result-two", ProposalDigest: "digest-two", ProposalID: "proposal-two", GraphRootOID: "root"},
+		ChoreographyEvent{Kind: ChoreographyTerminal, Task: "build", Attempt: 2,
+			Node: "node-a", TaskOID: "terminal-two", PriorTaskOID: "claim-two",
+			PickupID: "pickup-two", ClaimOID: "claim-two", ResultReceiptOID: "receipt-two",
+			OutputOID: "result-two", Succeeded: true, GraphRootOID: "root"})
+	outputOID, found := frontier.CompletedOutput("build")
+	require.True(t, found)
+	require.Equal(t, "result-two", outputOID)
+	chosen, ready, err = frontier.SelectReady()
+	require.NoError(t, err)
+	require.True(t, ready)
+	require.Equal(t, "consumer", chosen.Spec.Task)
+}
+
 func TestInterpretedFrontierPreservesParallelPrecedenceEdges(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	f, err := NewChoreographyFrontier(binding, "node-b", []ChoreographyTaskSpec{
-		{Task: "provider", EligibleNodes: []string{"node-a"}},
-		{Task: "consumer", EligibleNodes: []string{"node-b"},
-			Predecessors: []string{"provider", "provider"}},
+	f, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding: binding,
+		Node:    "node-b",
+		Tasks: []ChoreographyTaskSpec{
+			{Task: "provider", EligibleNodes: []string{"node-a"}},
+			{Task: "consumer", EligibleNodes: []string{"node-b"},
+				Predecessors: []string{"provider", "provider"}},
+		},
 	})
 	require.NoError(t, err, "two typed graph edges may share endpoint tasks")
 	require.Equal(t, 2, f.tasks["consumer"].remaining)
@@ -151,9 +233,13 @@ func TestInterpretedFrontierPreservesParallelPrecedenceEdges(t *testing.T) {
 func TestFrontierQueueRetryRequiresExactUnclaimedOffer(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
 	makeFrontier := func() *ChoreographyFrontier {
-		f, err := NewChoreographyFrontier(binding, "node-a", []ChoreographyTaskSpec{{
-			Task: "task", Kind: KindBuild, ReservationOID: "reservation",
-			EligibleNodes: []string{"node-a"}}})
+		f, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+			Binding: binding,
+			Node:    "node-a",
+			Tasks: []ChoreographyTaskSpec{{
+				Task: "task", Kind: KindBuild, ReservationOID: "reservation",
+				EligibleNodes: []string{"node-a"}}},
+		})
 		require.NoError(t, err)
 		return f
 	}
@@ -207,9 +293,13 @@ func TestFrontierQueueRetryRequiresExactUnclaimedOffer(t *testing.T) {
 
 func TestFrontierCancellationBindsTheAcceptedClaimBeforeAck(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	f, err := NewChoreographyFrontier(binding, "node-a", []ChoreographyTaskSpec{{
-		Task: "task", Kind: KindBuild, ReservationOID: "reservation",
-		EligibleNodes: []string{"node-a"}}})
+	f, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding: binding,
+		Node:    "node-a",
+		Tasks: []ChoreographyTaskSpec{{
+			Task: "task", Kind: KindBuild, ReservationOID: "reservation",
+			EligibleNodes: []string{"node-a"}}},
+	})
 	require.NoError(t, err)
 	require.NoError(t, f.ApplyEventPage(ChoreographyEventPage{
 		Cursor: ChoreographyEventCursor{OID: "ledger-2", Sequence: 2},
@@ -219,9 +309,13 @@ func TestFrontierCancellationBindsTheAcceptedClaimBeforeAck(t *testing.T) {
 			{Sequence: 2, Kind: ChoreographyCancelIssued, Task: "task", Attempt: 1,
 				Node: "node-a", TaskOID: "cancel", PriorTaskOID: "claim"},
 		}}))
-	wrong, err := NewChoreographyFrontier(binding, "node-a", []ChoreographyTaskSpec{{
-		Task: "task", Kind: KindBuild, ReservationOID: "reservation",
-		EligibleNodes: []string{"node-a"}}})
+	wrong, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding: binding,
+		Node:    "node-a",
+		Tasks: []ChoreographyTaskSpec{{
+			Task: "task", Kind: KindBuild, ReservationOID: "reservation",
+			EligibleNodes: []string{"node-a"}}},
+	})
 	require.NoError(t, err)
 	require.ErrorContains(t, wrong.ApplyEventPage(ChoreographyEventPage{
 		Cursor: ChoreographyEventCursor{OID: "ledger-2", Sequence: 2},
@@ -255,10 +349,14 @@ func TestClaimFencingRequiresAConflictingSignedTaskTransition(t *testing.T) {
 
 func TestInterpretedFrontierWaitsForSignedFailureAndBlockedFinality(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	frontier, err := NewChoreographyFrontier(binding, "node-b", []ChoreographyTaskSpec{
-		{Task: "core", Package: "core", EligibleNodes: []string{"node-a"}},
-		{Task: "app-build", Package: "app", EligibleNodes: []string{"node-b"}, Predecessors: []string{"core"}},
-		{Task: "app-test", Package: "app", EligibleNodes: []string{"node-b"}, Predecessors: []string{"app-build"}},
+	frontier, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding: binding,
+		Node:    "node-b",
+		Tasks: []ChoreographyTaskSpec{
+			{Task: "core", Package: "core", EligibleNodes: []string{"node-a"}},
+			{Task: "app-build", Package: "app", EligibleNodes: []string{"node-b"}, Predecessors: []string{"core"}},
+			{Task: "app-test", Package: "app", EligibleNodes: []string{"node-b"}, Predecessors: []string{"app-build"}},
+		},
 	})
 	require.NoError(t, err)
 	policy := &testedOutcomePolicy{status: map[string]string{}}
@@ -300,10 +398,14 @@ func TestInterpretedFrontierWaitsForSignedFailureAndBlockedFinality(t *testing.T
 
 func TestInterpretedFrontierBlocksRequiredPreparedInputWithoutPackageOutcome(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	frontier, err := NewChoreographyFrontier(binding, "node-b", []ChoreographyTaskSpec{
-		{Task: "ui:prepare", Package: "ui", Kind: KindPrepare, EligibleNodes: []string{"node-a"}},
-		{Task: "app-build", Package: "app", Kind: KindBuild, EligibleNodes: []string{"node-b"},
-			Predecessors: []string{"ui:prepare"}},
+	frontier, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding: binding,
+		Node:    "node-b",
+		Tasks: []ChoreographyTaskSpec{
+			{Task: "ui:prepare", Package: "ui", Kind: KindPrepare, EligibleNodes: []string{"node-a"}},
+			{Task: "app-build", Package: "app", Kind: KindBuild, EligibleNodes: []string{"node-b"},
+				Predecessors: []string{"ui:prepare"}, PreparedProviders: []string{"ui"}},
+		},
 	})
 	require.NoError(t, err)
 	require.NoError(t, frontier.AttachOutcomePolicy(&testedOutcomePolicy{status: map[string]string{}}))
@@ -326,12 +428,16 @@ func TestInterpretedFrontierBlocksRequiredPreparedInputWithoutPackageOutcome(t *
 
 func TestInterpretedFrontierOwnDeadPackagePrecedesInheritedPreparedBlocker(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	frontier, err := NewChoreographyFrontier(binding, "node-b", []ChoreographyTaskSpec{
-		{Task: "assets:prepare", Package: "assets", Kind: KindPrepare, EligibleNodes: []string{"node-a"}},
-		{Task: "docs-build", Package: "docs", Kind: KindBuild, EligibleNodes: []string{"node-b"},
-			Predecessors: []string{"assets:prepare"}},
-		{Task: "docs-test", Package: "docs", Kind: KindStage, EligibleNodes: []string{"node-b"},
-			Predecessors: []string{"docs-build"}},
+	frontier, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding: binding,
+		Node:    "node-b",
+		Tasks: []ChoreographyTaskSpec{
+			{Task: "assets:prepare", Package: "assets", Kind: KindPrepare, EligibleNodes: []string{"node-a"}},
+			{Task: "docs-build", Package: "docs", Kind: KindBuild, EligibleNodes: []string{"node-b"},
+				Predecessors: []string{"assets:prepare"}, PreparedProviders: []string{"assets"}},
+			{Task: "docs-test", Package: "docs", Kind: KindStage, EligibleNodes: []string{"node-b"},
+				Predecessors: []string{"docs-build"}},
+		},
 	})
 	require.NoError(t, err)
 	require.NoError(t, frontier.AttachOutcomePolicy(&testedOutcomePolicy{status: map[string]string{}}))
@@ -367,11 +473,16 @@ func TestInterpretedFrontierOwnDeadPackagePrecedesInheritedPreparedBlocker(t *te
 func TestInterpretedFrontierChoosesStableFailedPreparedBlocker(t *testing.T) {
 	for _, names := range [][]string{{"zeta", "alpha"}, {"alpha", "zeta"}} {
 		binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-		frontier, err := NewChoreographyFrontier(binding, "node-b", []ChoreographyTaskSpec{
-			{Task: "alpha:prepare", Package: "alpha", Kind: KindPrepare, EligibleNodes: []string{"node-a"}},
-			{Task: "zeta:prepare", Package: "zeta", Kind: KindPrepare, EligibleNodes: []string{"node-a"}},
-			{Task: "app-build", Package: "app", Kind: KindBuild, EligibleNodes: []string{"node-b"},
-				Predecessors: []string{"alpha:prepare", "zeta:prepare"}},
+		frontier, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+			Binding: binding,
+			Node:    "node-b",
+			Tasks: []ChoreographyTaskSpec{
+				{Task: "alpha:prepare", Package: "alpha", Kind: KindPrepare, EligibleNodes: []string{"node-a"}},
+				{Task: "zeta:prepare", Package: "zeta", Kind: KindPrepare, EligibleNodes: []string{"node-a"}},
+				{Task: "app-build", Package: "app", Kind: KindBuild, EligibleNodes: []string{"node-b"},
+					Predecessors:      []string{"alpha:prepare", "zeta:prepare"},
+					PreparedProviders: []string{"alpha", "zeta"}},
+			},
 		})
 		require.NoError(t, err)
 		require.NoError(t, frontier.AttachOutcomePolicy(&testedOutcomePolicy{status: map[string]string{}}))
@@ -398,9 +509,13 @@ func TestInterpretedFrontierChoosesStableFailedPreparedBlocker(t *testing.T) {
 
 func TestInterpretedFrontierDoesNotDispatchAfterRunStops(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	frontier, err := NewChoreographyFrontier(binding, "node-b", []ChoreographyTaskSpec{
-		{Task: "provider", EligibleNodes: []string{"node-a"}},
-		{Task: "consumer", EligibleNodes: []string{"node-b"}, Predecessors: []string{"provider"}},
+	frontier, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding: binding,
+		Node:    "node-b",
+		Tasks: []ChoreographyTaskSpec{
+			{Task: "provider", EligibleNodes: []string{"node-a"}},
+			{Task: "consumer", EligibleNodes: []string{"node-b"}, Predecessors: []string{"provider"}},
+		},
 	})
 	require.NoError(t, err)
 	require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
@@ -420,10 +535,13 @@ func TestInterpretedFrontierDoesNotDispatchAfterRunStops(t *testing.T) {
 
 func TestCompiledFrontierAcceptsCausalFailedInertCancellationAfterStop(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	frontier, err := NewCompiledChoreographyFrontier(binding, "complete-root",
-		ChoreographyRuntimeNode{Name: "peer", Platform: "linux/amd64", Capacity: 1},
-		[]ChoreographyTaskSpec{{Task: "core:build", Package: "core", Kind: KindBuild,
-			ReservationOID: "inert-task", Placement: PlacementWorker}})
+	frontier, err := NewCompiledChoreographyFrontier(CompiledChoreographyFrontierOptions{
+		Binding:      binding,
+		GraphRootOID: "complete-root",
+		Node:         ChoreographyRuntimeNode{Name: "peer", Platform: "linux/amd64", Capacity: 1},
+		Tasks: []ChoreographyTaskSpec{{Task: "core:build", Package: "core", Kind: KindBuild,
+			ReservationOID: "inert-task", Placement: PlacementWorker}},
+	})
 	require.NoError(t, err)
 	policy := &testedOutcomePolicy{status: map[string]string{}}
 	require.NoError(t, frontier.AttachOutcomePolicy(policy))
@@ -448,15 +566,18 @@ func TestCompiledFrontierAcceptsCausalFailedInertCancellationAfterStop(t *testin
 
 func TestCompiledFrontierHoldsAcceptedResultEdgesUntilPackageSettlement(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	frontier, err := NewCompiledChoreographyFrontier(binding, "complete-root",
-		ChoreographyRuntimeNode{Name: "peer", Platform: "linux/amd64", Capacity: 1},
-		[]ChoreographyTaskSpec{
+	frontier, err := NewCompiledChoreographyFrontier(CompiledChoreographyFrontierOptions{
+		Binding:      binding,
+		GraphRootOID: "complete-root",
+		Node:         ChoreographyRuntimeNode{Name: "peer", Platform: "linux/amd64", Capacity: 1},
+		Tasks: []ChoreographyTaskSpec{
 			{Task: "core:build", Package: "core", Kind: KindBuild,
 				ReservationOID: "inert-core", Placement: PlacementWorker},
 			{Task: "app:build", Package: "app", Kind: KindBuild,
 				ReservationOID: "inert-app", Placement: PlacementWorker,
 				Predecessors: []string{"core:build"}},
-		})
+		},
+	})
 	require.NoError(t, err)
 	require.NoError(t, frontier.AttachOutcomePolicy(&testedOutcomePolicy{status: map[string]string{}}))
 	require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
@@ -499,17 +620,66 @@ func TestCompiledFrontierHoldsAcceptedResultEdgesUntilPackageSettlement(t *testi
 		"package settlement must retain the earlier signed Result identity")
 }
 
+func TestCompiledFrontierReleasesFirstOnlyVersionAfterItsSettledTicket(t *testing.T) {
+	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
+	frontier, err := NewCompiledChoreographyFrontier(CompiledChoreographyFrontierOptions{
+		Binding:      binding,
+		GraphRootOID: "complete-root",
+		Node:         ChoreographyRuntimeNode{Name: "peer", Platform: "linux/amd64", Capacity: 1},
+		Tasks: []ChoreographyTaskSpec{
+			{Task: "core:version", Package: "core", Kind: "version", ExecutorOwned: true,
+				ReservationOID: "inert-version", Placement: PlacementOrchestrator},
+			{Task: "core:build", Package: "core", Kind: KindBuild,
+				ReservationOID: "inert-build", Placement: PlacementWorker,
+				Predecessors: []string{"core:version"}},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, frontier.AttachOutcomePolicy(&testedOutcomePolicy{status: map[string]string{}}))
+	require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
+		Cursor: ChoreographyEventCursor{OID: "ledger-five", Sequence: 5},
+		Events: []ChoreographyEvent{
+			{Sequence: 1, Kind: ChoreographyInitializationComplete, Task: choreographyRunTaskID,
+				TaskOID: "complete-root", GraphRootOID: "complete-root"},
+			{Sequence: 2, Kind: ChoreographyExecutionStarted, Task: choreographyRunTaskID,
+				TaskOID: "complete-root", GraphRootOID: "complete-root", AdmissionDeadlineUTC: "deadline"},
+			{Sequence: 3, Kind: ChoreographyClaimAccepted, Task: "core:version", Package: "core",
+				Attempt: 1, Node: "first", TaskOID: "claim-version", PriorTaskOID: "inert-version",
+				AssignmentOID: "assignment-version", GraphRootOID: "complete-root"},
+			{Sequence: 4, Kind: ChoreographyResultAccepted, Task: "core:version", Package: "core",
+				Attempt: 1, Node: "first", TaskOID: "receipt-version", OutputOID: "raw-result",
+				ProposalID: "result-proposal", ProposalDigest: "result-digest"},
+			{Sequence: 5, Kind: ChoreographyTerminal, Task: "core:version", Package: "core",
+				Attempt: 1, Node: "first", TaskOID: "terminal-version", ResultReceiptOID: "receipt-version",
+				OutputOID: "raw-result", Succeeded: true, GraphRootOID: "complete-root"},
+		},
+	}))
+	selected, ready, err := frontier.SelectReady()
+	require.NoError(t, err)
+	require.True(t, ready, "a first-only ticket finishes after the package hook barrier")
+	require.Equal(t, "core:build", selected.Spec.Task)
+	terminal, found := frontier.CompletedResultEvent("core:version")
+	require.True(t, found)
+	require.Equal(t, "raw-result", terminal.OutputOID)
+}
+
 func TestCompiledFrontierFailedPreparedProviderSettlesWithoutReleaseOutcome(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	frontier, err := NewCompiledChoreographyFrontier(binding, "complete-root",
-		ChoreographyRuntimeNode{Name: "peer", Platform: "linux/amd64", Capacity: 1},
-		[]ChoreographyTaskSpec{
+	frontier, err := NewCompiledChoreographyFrontier(CompiledChoreographyFrontierOptions{
+		Binding:      binding,
+		GraphRootOID: "complete-root",
+		Node:         ChoreographyRuntimeNode{Name: "peer", Platform: "linux/amd64", Capacity: 1},
+		Tasks: []ChoreographyTaskSpec{
 			{Task: "assets:prepare", Package: "assets", Kind: KindPrepare,
 				ReservationOID: "inert-assets", Placement: PlacementWorker},
 			{Task: "ui:build", Package: "ui", Kind: KindBuild,
 				ReservationOID: "inert-ui", Placement: PlacementWorker,
-				Predecessors: []string{"assets:prepare"}},
-		})
+				Predecessors: []string{"assets:prepare"}, PreparedProviders: []string{"assets"}},
+			{Task: "solo:publish", Package: "solo", Kind: KindPublish,
+				ReservationOID: "inert-solo", Placement: PlacementOrchestrator,
+				ExecutorOwned: true, Predecessors: []string{"ui:build"}},
+		},
+	})
 	require.NoError(t, err)
 	require.NoError(t, frontier.AttachOutcomePolicy(&testedOutcomePolicy{status: map[string]string{}}))
 	require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
@@ -527,28 +697,37 @@ func TestCompiledFrontierFailedPreparedProviderSettlesWithoutReleaseOutcome(t *t
 				ResultReceiptOID: "ack-assets", Succeeded: false, GraphRootOID: "complete-root"},
 		},
 	}))
-	require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
-		Cursor: ChoreographyEventCursor{OID: "ledger-five", Sequence: 5},
-		Events: []ChoreographyEvent{{Sequence: 5, Kind: ChoreographyTaskPackageSettled,
-			Task: "assets:prepare", Package: "assets", Attempt: 1,
-			TaskOID: "terminal-assets", PriorTaskOID: "terminal-assets",
-			GraphRootOID: "complete-root"}},
-	}))
+	require.Zero(t, frontier.tasks["ui:build"].remaining,
+		"a prepared provider settles its edge at its signed terminal without a release package event")
 	_, ready, err := frontier.SelectReady()
 	require.NoError(t, err)
 	require.False(t, ready)
 	blocked, found := frontier.PeekBlocked()
 	require.True(t, found)
 	require.Equal(t, "assets", blocked.BlockedBy)
+	require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
+		Cursor: ChoreographyEventCursor{OID: "ledger-five", Sequence: 5},
+		Events: []ChoreographyEvent{{Sequence: 5, Kind: ChoreographyBlocked,
+			Task: "ui:build", Package: "ui", Attempt: 1, TaskOID: "blocked-ui",
+			PriorTaskOID: "inert-ui", BlockedBy: "assets", PackageOutcome: "failed",
+			GraphRootOID: "complete-root"}},
+	}))
+	require.Zero(t, frontier.tasks["solo:publish"].remaining)
+	require.Empty(t, frontier.tasks["solo:publish"].failedPrepared,
+		"a publication-order edge does not turn an independent package into a prepared-input consumer")
 }
 
 func TestInterpretedVirtualSweepGatesApplySkipPolicyBeforeReleasingChildren(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	frontier, err := NewChoreographyFrontier(binding, "node", []ChoreographyTaskSpec{
-		{Task: "middle:run", Package: "middle", Virtual: true},
-		{Task: "leaf:run", Package: "leaf", Virtual: true, Predecessors: []string{"middle:run"}},
-		{Task: "consumer:run", Package: "consumer", EligibleNodes: []string{"node"},
-			Predecessors: []string{"leaf:run"}},
+	frontier, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding: binding,
+		Node:    "node",
+		Tasks: []ChoreographyTaskSpec{
+			{Task: "middle:run", Package: "middle", Virtual: true},
+			{Task: "leaf:run", Package: "leaf", Virtual: true, Predecessors: []string{"middle:run"}},
+			{Task: "consumer:run", Package: "consumer", EligibleNodes: []string{"node"},
+				Predecessors: []string{"leaf:run"}},
+		},
 	})
 	require.NoError(t, err)
 	policy := &testedSweepVirtualPolicy{
@@ -566,10 +745,14 @@ func TestInterpretedVirtualSweepGatesApplySkipPolicyBeforeReleasingChildren(t *t
 
 func TestInterpretedVirtualPackageCannotStartWithoutOutcomePolicy(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	frontier, err := NewChoreographyFrontier(binding, "node", []ChoreographyTaskSpec{
-		{Task: "virtual:run", Package: "virtual", Virtual: true},
-		{Task: "child:run", Package: "child", EligibleNodes: []string{"node"},
-			Predecessors: []string{"virtual:run"}},
+	frontier, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding: binding,
+		Node:    "node",
+		Tasks: []ChoreographyTaskSpec{
+			{Task: "virtual:run", Package: "virtual", Virtual: true},
+			{Task: "child:run", Package: "child", EligibleNodes: []string{"node"},
+				Predecessors: []string{"virtual:run"}},
+		},
 	})
 	require.NoError(t, err)
 	_, _, err = frontier.SelectReady()
@@ -578,10 +761,14 @@ func TestInterpretedVirtualPackageCannotStartWithoutOutcomePolicy(t *testing.T) 
 
 func TestInterpretedFailedFinalSweepResultRetainsPartialOutputs(t *testing.T) {
 	binding := ChoreographyRunBinding{Run: "run", Generation: "gen", PlanDigest: "plan", GraphDigest: "graph"}
-	frontier, err := NewChoreographyFrontier(binding, "node", []ChoreographyTaskSpec{
-		{Task: "provider:run", Package: "provider", EligibleNodes: []string{"node"}},
-		{Task: "consumer:run", Package: "consumer", EligibleNodes: []string{"node"},
-			Predecessors: []string{"provider:run"}},
+	frontier, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding: binding,
+		Node:    "node",
+		Tasks: []ChoreographyTaskSpec{
+			{Task: "provider:run", Package: "provider", EligibleNodes: []string{"node"}},
+			{Task: "consumer:run", Package: "consumer", EligibleNodes: []string{"node"},
+				Predecessors: []string{"provider:run"}},
+		},
 	})
 	require.NoError(t, err)
 	policy := &testedSweepVirtualPolicy{status: map[string]string{}, blocked: map[string]string{}}

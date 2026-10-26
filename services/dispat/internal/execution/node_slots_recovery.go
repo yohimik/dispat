@@ -26,6 +26,9 @@ type recoveredNodeSlot struct {
 func (s *recoveredNodeSlot) settlementEvidence(priorSequence uint64,
 	head ChoreographyEventCursor) string {
 	if s.terminalOID != nodeSlotAbsentIdentityText {
+		if s.terminal != nil && s.terminal.Kind == ChoreographyPickupSettled {
+			return head.OID
+		}
 		return s.terminalOID
 	}
 	if s.claimOID == nodeSlotAbsentIdentityText && head.Sequence > priorSequence {
@@ -88,7 +91,8 @@ func (s *recoveredNodeSlot) apply(event ChoreographyEvent) error {
 		if event.ProposalDigest != r.ProposalDigest {
 			return nil
 		}
-		if event.PriorTaskOID != r.expectedTaskOID() || event.TaskOID == nodeSlotAbsentIdentityText || s.refused ||
+		if event.PickupID != s.lease.Intent.PickupID ||
+			event.PriorTaskOID != r.expectedTaskOID() || event.TaskOID == nodeSlotAbsentIdentityText || s.refused ||
 			(r.GraphRootOID != nodeSlotAbsentIdentityText &&
 				(event.GraphRootOID != r.GraphRootOID || event.AssignmentOID == nodeSlotAbsentIdentityText)) ||
 			(s.claimOID != nodeSlotAbsentIdentityText && s.claimOID != event.TaskOID) {
@@ -106,17 +110,41 @@ func (s *recoveredNodeSlot) apply(event ChoreographyEvent) error {
 		}
 		s.refused = nodeSlotProposalRefusedState
 	case ChoreographyResultAccepted, ChoreographyAckAccepted:
+		if event.PickupID != s.lease.Intent.PickupID {
+			return nil
+		}
 		if s.claimOID == nodeSlotAbsentIdentityText || event.TaskOID == nodeSlotAbsentIdentityText {
 			return nil
 		}
-		if event.Kind == ChoreographyResultAccepted && event.PriorTaskOID != s.claimOID {
-			return fmt.Errorf(nodeSlotResultClaimMismatchErrorText)
+		effectOID := event.TaskOID
+		if event.Kind == ChoreographyResultAccepted {
+			if event.PickupID == nodeSlotAbsentIdentityText {
+				if event.PriorTaskOID != s.claimOID {
+					return fmt.Errorf(nodeSlotResultClaimMismatchErrorText)
+				}
+			} else {
+				if event.ClaimOID != s.claimOID || event.ResultReceiptOID == nodeSlotAbsentIdentityText {
+					return fmt.Errorf(nodeSlotResultClaimMismatchErrorText)
+				}
+				effectOID = event.ResultReceiptOID
+			}
 		}
-		if s.effectOID != nodeSlotAbsentIdentityText && s.effectOID != event.TaskOID {
+		if event.Kind == ChoreographyAckAccepted && event.PickupID != nodeSlotAbsentIdentityText {
+			if event.ClaimOID != s.claimOID {
+				return fmt.Errorf(nodeSlotResultClaimMismatchErrorText)
+			}
+			if event.ResultReceiptOID != nodeSlotAbsentIdentityText {
+				effectOID = event.ResultReceiptOID
+			}
+		}
+		if s.effectOID != nodeSlotAbsentIdentityText && s.effectOID != effectOID {
 			return fmt.Errorf(nodeSlotAcceptedEffectsConflictErrorText)
 		}
-		s.effectOID = event.TaskOID
-	case ChoreographyTerminal, ChoreographyRetryReady:
+		s.effectOID = effectOID
+	case ChoreographyTerminal, ChoreographyRetryReady, ChoreographyPickupSettled:
+		if event.PickupID != s.lease.Intent.PickupID {
+			return nil
+		}
 		if s.claimOID == nodeSlotAbsentIdentityText || s.effectOID == nodeSlotAbsentIdentityText || event.TaskOID == nodeSlotAbsentIdentityText {
 			return nil
 		}
@@ -216,15 +244,17 @@ func (w *Worker) recoverHeldNodeSlots(ctx context.Context, onlyRun string) error
 			return err
 		}
 		states := group.peer
-		byTask := make(map[recoveredNodeSlotKey]*recoveredNodeSlot, len(states))
+		byTask := make(map[recoveredNodeSlotKey][]*recoveredNodeSlot, len(states))
 		for _, state := range states {
 			r := state.lease.Intent.Recovery
 			identity := recoveredNodeSlotKey{task: state.lease.Intent.Task,
 				attempt: state.lease.Intent.Attempt, node: r.Node}
-			if byTask[identity] != nil {
-				return fmt.Errorf(nodeSlotDuplicateRetainedTaskErrorText)
+			for _, prior := range byTask[identity] {
+				if prior.lease.Intent.PickupID == state.lease.Intent.PickupID {
+					return fmt.Errorf(nodeSlotDuplicateRetainedTaskErrorText)
+				}
 			}
-			byTask[identity] = state
+			byTask[identity] = append(byTask[identity], state)
 			if _, err := runMailbox.ReadChoreographyTaskRoot(ctx, ChoreographyTaskRootQuery{
 				Binding: r.Binding, Task: state.lease.Intent.Task,
 				Kind: r.Kind, BootstrapOID: r.BootstrapOID,
@@ -302,8 +332,8 @@ func (w *Worker) recoverHeldNodeSlots(ctx context.Context, onlyRun string) error
 				return fmt.Errorf(nodeSlotLedgerCursorGapErrorText)
 			}
 			for _, event := range page.Events {
-				if state := byTask[recoveredNodeSlotKey{task: event.Task,
-					attempt: event.Attempt, node: event.Node}]; state != nil {
+				for _, state := range byTask[recoveredNodeSlotKey{task: event.Task,
+					attempt: event.Attempt, node: event.Node}] {
 					if err := state.apply(event); err != nil {
 						return err
 					}

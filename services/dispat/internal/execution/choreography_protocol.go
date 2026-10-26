@@ -95,6 +95,7 @@ type ChoreographyClaimProposal struct {
 	CapacityAuthorityID string                   `json:"capacityAuthorityId"`
 	LeaseIntentID       string                   `json:"leaseIntentId"`
 	LeaseWeight         int                      `json:"leaseWeight"`
+	PickupID            string                   `json:"pickupId,omitempty"`
 	IdentitySignature   string                   `json:"identitySignature,omitempty"`
 	InputsDigest        string                   `json:"inputsDigest"`
 	TemplateDigest      string                   `json:"templateDigest,omitempty"`
@@ -153,6 +154,12 @@ func (p ChoreographyClaimProposal) validate() error {
 		p.LeaseIntentID == choreographyProtocolMissingField || p.LeaseWeight < choreographyProtocolMinimumLeaseWeight {
 		return fmt.Errorf(choreographyProtocolClaimIncompleteError)
 	}
+	if p.PickupID != choreographyProtocolMissingField {
+		if err := (ChoreographyPickupIdentity{Run: p.Run, Task: p.Task,
+			Node: p.Node, PickupID: p.PickupID}).validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -167,6 +174,10 @@ type ChoreographyResultProposal struct {
 	Branch        string `json:"branch"`
 	ClaimOID      string `json:"claimOid"`
 	InputsDigest  string `json:"inputsDigest"`
+	PickupID      string `json:"pickupId,omitempty"`
+	PendingBranch string `json:"pendingBranch,omitempty"`
+	PendingOID    string `json:"pendingOid,omitempty"`
+	OutcomeBranch string `json:"outcomeBranch,omitempty"`
 	ProposalID    string `json:"proposalId"`
 	ResultDigest  string `json:"resultDigest"`
 	PayloadBytes  int64  `json:"payloadBytes"`
@@ -183,6 +194,18 @@ func (p ChoreographyResultProposal) validate(maxBytes int64) error {
 	if _, err := hex.DecodeString(p.PayloadSHA256); err != nil || len(p.PayloadSHA256) != choreographyProtocolPayloadDigestHexChars {
 		return fmt.Errorf(choreographyProtocolPayloadDigestError)
 	}
+	if p.PickupID != choreographyProtocolMissingField || p.PendingBranch != choreographyProtocolMissingField ||
+		p.PendingOID != choreographyProtocolMissingField || p.OutcomeBranch != choreographyProtocolMissingField {
+		pendingBranch, err := FormatChoreographyPendingBranch(ChoreographyPickupIdentity{
+			Run: p.Run, Task: p.Task, Node: p.Node, PickupID: p.PickupID})
+		if err != nil {
+			return err
+		}
+		if p.PendingBranch != pendingBranch || p.PendingOID == choreographyProtocolMissingField ||
+			p.OutcomeBranch == choreographyProtocolMissingField {
+			return fmt.Errorf(choreographyProtocolResultIncompleteError)
+		}
+	}
 	return nil
 }
 
@@ -191,17 +214,19 @@ func (p ChoreographyResultProposal) validate(maxBytes int64) error {
 // result does not by itself declare the logical task terminal.
 type ChoreographyReceipt struct {
 	ChoreographyRunBinding
-	Kind           MessageKind `json:"kind"`
-	Task           string      `json:"task"`
-	Attempt        int         `json:"attempt"`
-	Node           string      `json:"node"`
-	ProposalID     string      `json:"proposalId"`
-	ProposalDigest string      `json:"proposalDigest"`
-	Branch         string      `json:"branch"`
-	OID            string      `json:"oid"`
-	GraphRootOID   string      `json:"graphRootOid,omitempty"`
-	AssignmentOID  string      `json:"assignmentOid,omitempty"`
-	Accepted       bool        `json:"accepted"`
+	Kind              MessageKind `json:"kind"`
+	Task              string      `json:"task"`
+	Attempt           int         `json:"attempt"`
+	Node              string      `json:"node"`
+	ProposalID        string      `json:"proposalId"`
+	ProposalDigest    string      `json:"proposalDigest"`
+	Branch            string      `json:"branch"`
+	OID               string      `json:"oid"`
+	GraphRootOID      string      `json:"graphRootOid,omitempty"`
+	AssignmentOID     string      `json:"assignmentOid,omitempty"`
+	PickupID          string      `json:"pickupId,omitempty"`
+	PickupDeadlineUTC string      `json:"pickupDeadlineUtc,omitempty"`
+	Accepted          bool        `json:"accepted"`
 	// Cursor is the exact signed accepted-event position. A peer starts its
 	// finality wait here, never at the run's root or a later ledger head.
 	Cursor ChoreographyEventCursor `json:"cursor,omitempty"`

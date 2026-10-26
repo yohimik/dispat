@@ -12,21 +12,29 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
+type releaseChoreographyBindingOptions struct {
+	Coordinator   *execution.Coordinator
+	Plan          *plan.Plan
+	Compiled      *release.CompiledTaskGraph
+	ReturnChannel *runReturnChannel
+}
+
 // bindReleaseChoreography gives the first node the exact effective DAG used
 // for preflight and RunCompiled, including unreleasing prepared providers.
 // It binds the shared release skip policy to the canonical broker before any
 // executor task can request a claim or publish an effect.
-func (a *App) bindReleaseChoreography(ctx context.Context, coordinator *execution.Coordinator,
-	pl *plan.Plan, compiled *release.CompiledTaskGraph,
-	returnChannel *runReturnChannel) (*execution.FirstNodeBroker, error) {
+func (a *App) bindReleaseChoreography(ctx context.Context, options releaseChoreographyBindingOptions) (*execution.FirstNodeBroker, error) {
+	coordinator, pl, compiled, returnChannel := options.Coordinator, options.Plan, options.Compiled, options.ReturnChannel
+
 	if a == nil || a.cfg == nil || coordinator == nil || pl == nil || compiled == nil ||
 		returnChannel == nil {
-		return nil, fmt.Errorf("execution: release choreography differs from its signed graph")
+		return nil, fmt.Errorf(choreographyReleaseGraphMismatchErrorText)
 	}
 	specs, err := releaseChoreographySpecs(pl, compiled, coordinator.ChoreographyNodes())
 	if err != nil {
 		return nil, err
 	}
+	applyChoreographyRetrySafety(specs, coordinator.JoinPolicy.RetryAfterUncertainAttempt)
 	templates, err := compileReleaseChoreographyTemplates(coordinator, compiled, specs)
 	if err != nil {
 		return nil, err
@@ -42,7 +50,7 @@ func (a *App) bindReleaseChoreography(ctx context.Context, coordinator *executio
 		return nil, err
 	}
 	if digest != coordinator.GraphDigest {
-		return nil, fmt.Errorf("execution: release choreography differs from its signed complete logical graph")
+		return nil, fmt.Errorf(choreographyReleaseLogicalGraphMismatchErrorText)
 	}
 	budgets, err := releaseChoreographyBudgets(compiled,
 		a.cfg.BuildConcurrency, a.cfg.PublishConcurrency)

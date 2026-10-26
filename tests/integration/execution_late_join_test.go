@@ -142,12 +142,15 @@ type executionLateJoinLedgerEvent struct {
 	Kind                 string `json:"kind"`
 	Task                 string `json:"task"`
 	Node                 string `json:"node"`
+	PickupID             string `json:"pickupId"`
+	OutputOID            string `json:"outputOid"`
 	RefusalReason        string `json:"refusalReason"`
 	PreparedInputOID     string `json:"preparedInputOid"`
 	Package              string `json:"package"`
 	PackageOutcome       string `json:"packageOutcome"`
 	TaskOID              string `json:"taskOid"`
 	PriorTaskOID         string `json:"priorTaskOid"`
+	AssignmentOID        string `json:"assignmentOid"`
 	AdmissionDeadlineUTC string `json:"admissionDeadlineUtc"`
 }
 
@@ -329,8 +332,8 @@ func executionLateJoinBuild(gate, peerDone, firstStarted, firstDone string) stri
 
 // A late worker is authorized in the signed bootstrap but absent from the
 // initial roster. It becomes usable after an unrelated first-node build has
-// already started, without changing the fixed task graph or giving it Git
-// write authority.
+// already started, without changing the fixed task graph or giving it
+// authority to advance canonical task and ledger refs.
 func TestExecutionLateWorkerJoinsActiveCompiledRelease(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the distributed durable node-slot backend is not available on Windows")
@@ -376,7 +379,7 @@ func TestExecutionLateWorkerJoinsActiveCompiledRelease(t *testing.T) {
 	require.Len(t, executionProtocolRefs(t, rig.mailbox, "dispat-graph-"), 1,
 		"the signed complete graph is public before late admission")
 	executionAssertLateJoinSlotNotice(t, rig.mailbox, executionNode)
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	peer := rig.startWorker(executionWorkerConfig(rig.mailbox, func(cfg *models.ExecutionConfig) {
 		cfg.IdentityKeyEnv = executionLateJoinIdentitySeedEnv
 	}), 0, append(peerGit.Env(), executionLateJoinIdentitySeedEnv+"="+seed)...)
@@ -402,7 +405,7 @@ func TestExecutionLateWorkerJoinsActiveCompiledRelease(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	require.Equal(t, executionNode, rig.nodesByPackage()["beta"], "the late worker took the existing beta task")
 	require.FileExists(t, firstDone, "the first-node task released only after the peer completed")
-	require.Zero(t, peerGit.Matches(), "the late worker returns claims and results without Git pushes")
+	require.Zero(t, peerGit.Matches(), "the late worker returns claims and results without canonical task pushes")
 	require.ElementsMatch(t, before, executionProtocolRefs(t, rig.mailbox, "dispat-task-"),
 		"admission does not add task branches; sealed refs remain for recovery")
 }
@@ -523,7 +526,7 @@ func TestExecutionLateWorkerJoinsActiveCompiledSweep(t *testing.T) {
 	require.Len(t, executionProtocolRefs(t, rig.mailbox, "dispat-graph-"), 1,
 		"the sweep signed its complete graph before late admission")
 	executionAssertLateJoinSlotNotice(t, rig.mailbox, executionNode)
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	peer := rig.startWorker(executionWorkerConfig(rig.mailbox, func(cfg *models.ExecutionConfig) {
 		cfg.IdentityKeyEnv = executionLateJoinIdentitySeedEnv
 	}), 0, append(peerGit.Env(), executionLateJoinIdentitySeedEnv+"="+seed)...)
@@ -549,7 +552,7 @@ func TestExecutionLateWorkerJoinsActiveCompiledSweep(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	require.Equal(t, executionNode, rig.nodesByPackage()["beta"], "the late worker took the existing beta sweep task")
 	require.FileExists(t, firstDone, "the first-node sweep task released only after the peer completed")
-	require.Zero(t, peerGit.Matches(), "the late worker returned sweep claims and results without Git pushes")
+	require.Zero(t, peerGit.Matches(), "the late worker returned sweep claims and results without canonical task pushes")
 	require.ElementsMatch(t, before, executionProtocolRefs(t, rig.mailbox, "dispat-task-"),
 		"late admission does not add sweep task branches")
 	require.Empty(t, rig.repo.TagList(), "a sweep writes no release tags")

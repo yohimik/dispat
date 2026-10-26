@@ -19,14 +19,14 @@ import (
 func reopenActiveFirstRunIdentity(ctx context.Context,
 	git *gitx.LocalGitx) (*firstRunJournal, firstRunIdentity, error) {
 	if git == nil {
-		return nil, firstRunIdentity{}, fmt.Errorf("execution: first-node Git store is absent")
+		return nil, firstRunIdentity{}, fmt.Errorf(firstRunMissingGitStoreErrorText)
 	}
 	gitDir, err := git.GitDir(ctx)
 	if err != nil {
 		return nil, firstRunIdentity{}, err
 	}
-	run, err := readActiveRun(filepath.Join(gitDir, "dispat", "return-runs", "active-run"))
-	if err != nil || run == "" {
+	run, err := readActiveRun(filepath.Join(gitDir, firstRunJournalApplicationDirectoryName, firstRunJournalRunsDirectoryName, firstRunJournalActiveLocatorFileName))
+	if err != nil || run == retainedRunAbsentValueText {
 		return nil, firstRunIdentity{}, err
 	}
 	journal, err := openFirstRunJournal(gitDir, run)
@@ -47,25 +47,28 @@ func (a *App) prepareFirstRunIdentity(ctx context.Context, endpoint, listen stri
 	if !a.cfg.Execution.IsDistributed() {
 		return nil
 	}
-	if endpoint == "" || a.runID == "" || a.returnJournal != nil {
+	if endpoint == retainedRunAbsentValueText || a.runID == retainedRunAbsentValueText || a.returnJournal != nil {
 		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
-			"distributed first-node run has no return endpoint or a repeated identity")
+			firstRunInvalidReturnIdentityErrorText)
 	}
 	bind, err := ValidateReturnAddress(endpoint, listen)
-	if err != nil || bind == "" {
-		return fmt.Errorf("execution: first-node return listen address is invalid: %w", err)
+	if err != nil {
+		return fmt.Errorf(firstRunInvalidListenAddressErrorFormat, err)
+	}
+	if bind == retainedRunAbsentValueText {
+		return fmt.Errorf(firstRunEmptyListenAddressErrorText)
 	}
 	gitDir, err := a.git.GitDir(ctx)
 	if err != nil {
-		return fmt.Errorf("execution: resolving private Git directory for first-node identity: %w", err)
+		return fmt.Errorf(firstRunPrivateGitDirectoryErrorFormat, err)
 	}
 	journal, err := openFirstRunJournal(gitDir, a.runID)
 	if err != nil {
 		return err
 	}
-	if _, err := os.Lstat(filepath.Join(journal.dir, "identity.json")); err == nil {
+	if _, err := os.Lstat(filepath.Join(journal.dir, firstRunJournalIdentityFileName)); err == nil {
 		_ = journal.close()
-		return fmt.Errorf("execution: first-node run %s already has an identity; resume or reconcile it", a.runID)
+		return fmt.Errorf(firstRunIdentityAlreadyExistsErrorFormat, a.runID)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		_ = journal.close()
 		return err
@@ -74,7 +77,7 @@ func (a *App) prepareFirstRunIdentity(ctx context.Context, endpoint, listen stri
 	if err != nil {
 		_ = journal.abandonUnwritten()
 		_ = journal.close()
-		return fmt.Errorf("execution: creating first-node return identity: %w", err)
+		return fmt.Errorf(firstRunReturnIdentityCreationErrorFormat, err)
 	}
 	leaf, key, err := encodeFirstRunCertificate(certificate)
 	if err != nil {
@@ -83,7 +86,8 @@ func (a *App) prepareFirstRunIdentity(ctx context.Context, endpoint, listen stri
 		return err
 	}
 	if err := journal.write(firstRunIdentity{Run: a.runID, Endpoint: endpoint, Listen: bind,
-		CertPin: pin, CertificatePEM: leaf, PrivateKeyPEM: key}); err != nil {
+		CertPin: pin, CertificatePEM: leaf, PrivateKeyPEM: key,
+		AdmissionState: firstRunAdmissionInertState}); err != nil {
 		_ = journal.abandonUnwritten()
 		_ = journal.close()
 		return err
@@ -101,17 +105,17 @@ func (a *App) finishFirstRunIdentity(safe bool) error {
 	}
 	var err error
 	if safe && a.localNodeSlots != nil {
-		checkCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		checkCtx, cancel := context.WithTimeout(context.Background(), firstRunCapacityInspectionTimeoutSeconds*time.Second)
 		held, readErr := a.localNodeSlots.Held(checkCtx)
 		cancel()
 		if readErr != nil {
-			safe = false
-			err = fmt.Errorf("execution: first-node capacity cannot be inspected before retirement: %w", readErr)
+			safe = firstRunUnsafeRetirementState
+			err = fmt.Errorf(firstRunCapacityInspectionErrorFormat, readErr)
 		} else {
 			for _, lease := range held {
 				if lease.Intent.Run == journal.run {
-					safe = false
-					err = fmt.Errorf("execution: first-node run %s retains task %s capacity without settled evidence",
+					safe = firstRunUnsafeRetirementState
+					err = fmt.Errorf(firstRunUnsettledTaskCapacityErrorFormat,
 						journal.run, lease.Intent.Task)
 					break
 				}
@@ -121,7 +125,7 @@ func (a *App) finishFirstRunIdentity(safe bool) error {
 	if safe {
 		err = errors.Join(err, journal.markCompleted())
 	} else {
-		err = errors.Join(err, fmt.Errorf("execution: first-node run %s remains active for exact reconciliation", journal.run))
+		err = errors.Join(err, fmt.Errorf(firstRunActiveReconciliationErrorFormat, journal.run))
 	}
 	err = errors.Join(err, journal.close())
 	a.returnJournal = nil

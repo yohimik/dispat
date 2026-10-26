@@ -22,7 +22,13 @@ const (
 	choreographyCloseUnknownTaskError          = "execution: ledger names unknown task ref"
 	choreographyCloseUnknownTransitionError    = "execution: unknown task-ref transition"
 	choreographyCloseTipMismatchErrorFormat    = "execution: canonical task ref %s differs from signed ledger tip"
+	choreographyClosePendingPickupErrorFormat  = "execution: completed task %s still has an unsettled physical pickup: %w"
+	choreographyCloseSideAckErrorFormat        = "execution: settling old acknowledged pickup for task %s: %w"
 	choreographyCloseNoTaskIdentity            = ""
+	choreographyCloseNoPickupIdentity          = ""
+	choreographyCloseNoAckSettled              = false
+	choreographyCloseAckSettled                = true
+	choreographyCloseFirstPendingPickup        = 0
 	choreographyCloseStopPendingScan           = false
 	choreographyCloseNormalSeal                = false
 	choreographyCloseAbortedSeal               = true
@@ -51,6 +57,9 @@ func (c *Coordinator) closeChoreography(ctx context.Context) error {
 	if pendingTask != choreographyCloseNoTaskIdentity {
 		return fmt.Errorf(choreographyClosePendingTaskErrorFormat, pendingTask)
 	}
+	if err := c.awaitTerminalPickupSettlement(ctx); err != nil {
+		return err
+	}
 	if _, err := c.choreographyPersist.SealRun(ctx, choreographyCloseNormalSeal); err != nil {
 		if _, abortErr := c.choreographyPersist.SealRun(ctx, choreographyCloseAbortedSeal); abortErr != nil {
 			return fmt.Errorf(choreographyCloseUnresolvedErrorFormat, abortErr)
@@ -78,6 +87,79 @@ func (c *Coordinator) closeChoreography(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+type choreographyClosePendingPickup struct {
+	taskID   string
+	branch   string
+	pickupID string
+	attempt  int
+	node     string
+	receipt  string
+	ack      bool
+}
+
+// awaitTerminalPickupSettlement keeps the authenticated return listener
+// available after one pickup wins logical finality. A prior contact-lost
+// pickup still owns its exact physical charge until its signed side Ack is
+// settled. An unanswered pickup remains retained when Close's bound ends.
+func (c *Coordinator) awaitTerminalPickupSettlement(ctx context.Context) error {
+	b := c.choreographyBroker
+	for {
+		b.mu.Lock()
+		wake := b.budgetWake
+		var pending []choreographyClosePendingPickup
+		for taskID, task := range b.tasks {
+			if !task.terminal {
+				continue
+			}
+			for pickupID, pickup := range task.pickups {
+				if pickup.settled {
+					continue
+				}
+				pending = append(pending, choreographyClosePendingPickup{
+					taskID: taskID, branch: task.spec.Branch, pickupID: pickupID,
+					attempt: pickup.attempt, node: pickup.node,
+					receipt: pickup.resultReceiptOID,
+					ack: pickup.contactLost && pickup.cancelOID != choreographyCloseNoPickupIdentity &&
+						pickup.resultReceiptOID != choreographyCloseNoPickupIdentity &&
+						pickup.resultOutputOID == choreographyCloseNoPickupIdentity,
+				})
+			}
+		}
+		b.mu.Unlock()
+		if len(pending) == choreographyCloseNoCanonicalTasks {
+			return nil
+		}
+		sort.Slice(pending, func(i, j int) bool {
+			if pending[i].taskID == pending[j].taskID {
+				return pending[i].pickupID < pending[j].pickupID
+			}
+			return pending[i].taskID < pending[j].taskID
+		})
+		settledAck := choreographyCloseNoAckSettled
+		for _, pickup := range pending {
+			if !pickup.ack {
+				continue
+			}
+			decision := ChoreographyDecision{ChoreographyRunBinding: b.binding,
+				Task: pickup.taskID, Branch: pickup.branch, Attempt: pickup.attempt,
+				Node: pickup.node, ResultOID: pickup.receipt}
+			if err := b.DecideAttempt(ctx, decision); err != nil {
+				return fmt.Errorf(choreographyCloseSideAckErrorFormat, pickup.taskID, err)
+			}
+			settledAck = choreographyCloseAckSettled
+		}
+		if settledAck {
+			continue
+		}
+		select {
+		case <-wake:
+		case <-ctx.Done():
+			return fmt.Errorf(choreographyClosePendingPickupErrorFormat,
+				pending[choreographyCloseFirstPendingPickup].taskID, ctx.Err())
+		}
+	}
 }
 
 // CanonicalTaskLeases returns exact task-ref tips only after a signed final

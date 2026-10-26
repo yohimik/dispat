@@ -6,6 +6,7 @@ package execution
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sync"
 
@@ -38,6 +39,20 @@ const choreographyBindingMissingSweepPolicyError = "execution: signed sweep fram
 const choreographyBindingMissingCarriedResultError = "execution: inherited declared path lacks verified Result and manifest"
 const choreographyBindingForeignCarriedRepositoryError = "execution: inherited declared path names a repository outside its input closure"
 const choreographyOwnBuildStage = "build"
+const choreographyBindingMissingOID = ""
+const choreographyBindingMissingTask = ""
+const choreographyBindingMissingPackage = ""
+const choreographyBindingMissingNode = ""
+const choreographyBindingMissingDigest = ""
+const choreographyBindingMissingStage = ""
+const choreographyBindingMissingPath = ""
+const choreographyBindingMissingOutcome = ""
+const choreographyBindingNoEntries = 0
+const choreographyBindingFirstEventOffset = 1
+const choreographyBindingFirstExportIndex = 0
+const choreographyBindingIndexEntryPresent = true
+const choreographyBindingPackageLogField = "package"
+const choreographyBindingMissingPreparedProviderOutputErrorFormat = "execution: prepared provider %s has no signed admitted output for %s"
 
 type ChoreographyBindingEventReaderx interface {
 	ReadEvents(context.Context, ChoreographyEventCursor, int) (ChoreographyEventPage, error)
@@ -50,7 +65,7 @@ func (c *Coordinator) ChoreographyInputPackages(packageName string) []string {
 		return nil
 	}
 	inputs := c.dispatch.Inputs(packageName)
-	packages := make([]string, 0, len(inputs))
+	packages := make([]string, choreographyBindingNoEntries, len(inputs))
 	for _, input := range inputs {
 		packages = append(packages, input.Package)
 	}
@@ -62,22 +77,22 @@ func (c *Coordinator) ChoreographyInputPackages(packageName string) []string {
 // the signed Claim and its exact Assignment parent before publication.
 func (c *Coordinator) CacheAcceptedChoreographyBuildSnapshot(spec ChoreographyTaskSpec,
 	bindings ChoreographyTaskBindings, repository string) {
-	if c == nil || c.snapshots == nil || spec.Package == "" ||
+	if c == nil || c.snapshots == nil || spec.Package == choreographyBindingMissingPackage ||
 		(spec.Kind != string(KindBuild) && spec.Kind != string(KindPrepare)) {
 		return
 	}
 	for _, source := range bindings.Repositories {
-		if source.Name != repository || source.Snapshot == "" {
+		if source.Name != repository || source.Snapshot == choreographyBindingMissingOID {
 			continue
 		}
 		c.snapshots.mu.Lock()
 		prior := c.snapshots.consumed[spec.Package]
-		if prior == "" {
+		if prior == choreographyBindingMissingOID {
 			c.snapshots.consumed[spec.Package] = source.Snapshot
 		}
 		c.snapshots.mu.Unlock()
-		if prior != "" && prior != source.Snapshot {
-			c.Log.Error().Str("package", spec.Package).
+		if prior != choreographyBindingMissingOID && prior != source.Snapshot {
+			c.Log.Error().Str(choreographyBindingPackageLogField, spec.Package).
 				Msgf(choreographyAcceptedSnapshotMismatchErrorFormat, spec.Package)
 		}
 		return
@@ -152,48 +167,61 @@ func applyVerifiedChoreographyExports(ctx context.Context, bindings *Choreograph
 			continue
 		}
 		identity := carried.Output
-		if carried.Signed.DeclaredPath == nil || identity.ResultOID == "" ||
-			identity.Manifest == nil || identity.Manifest.Digest == "" ||
-			identity.Task == "" || identity.Package == "" {
+		if carried.Signed.DeclaredPath == nil || identity.ResultOID == choreographyBindingMissingOID ||
+			identity.Manifest == nil || identity.Manifest.Digest == choreographyBindingMissingDigest ||
+			identity.Task == choreographyBindingMissingTask || identity.Package == choreographyBindingMissingPackage {
 			return fmt.Errorf(choreographyBindingMissingCarriedResultError)
 		}
-		path := ""
+		path := choreographyBindingMissingPath
 		for _, source := range inputs.Sources {
 			if source.Name == carried.Signed.DeclaredPath.Repository {
 				path = source.Path
 				break
 			}
 		}
-		if path == "" {
+		if path == choreographyBindingMissingPath {
 			return fmt.Errorf(choreographyBindingForeignCarriedRepositoryError)
 		}
 		bindings.Exports[index] = carried.Signed
-		if err := appendVerifiedChoreographyInput(ctx, bindings, AssignmentInput{
-			Task: identity.Task, Package: identity.Package, Commit: identity.ResultOID,
-			Digest: identity.Manifest.Digest, Path: path}, inputs.SourceDir,
-			inputs.Imported, inputs.Seen, inputs.ImportCommit); err != nil {
+		if err := appendVerifiedChoreographyInput(ctx, choreographyVerifiedInputAppend{
+			Bindings: bindings, Input: AssignmentInput{
+				Task: identity.Task, Package: identity.Package, Commit: identity.ResultOID,
+				Digest: identity.Manifest.Digest, Path: path}, SourceDir: inputs.SourceDir,
+			Imported: inputs.Imported, Seen: inputs.Seen, ImportCommit: inputs.ImportCommit}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func appendVerifiedChoreographyInput(ctx context.Context, bindings *ChoreographyTaskBindings,
-	input AssignmentInput, sourceDir string, imported map[string]bool,
-	seen map[choreographyInputDestination]bool,
-	importCommit func(context.Context, string, string) error) error {
-	key := choreographyInputDestination{input.Commit, input.Path}
-	if seen[key] {
+type choreographyVerifiedInputAppend struct {
+	Bindings     *ChoreographyTaskBindings
+	Input        AssignmentInput
+	SourceDir    string
+	Imported     map[string]bool
+	Seen         map[choreographyInputDestination]bool
+	ImportCommit func(context.Context, string, string) error
+}
+
+func appendVerifiedChoreographyInput(ctx context.Context, options choreographyVerifiedInputAppend) error {
+	key := choreographyInputDestination{options.Input.Commit, options.Input.Path}
+	if options.Seen[key] {
 		return nil
 	}
-	if !imported[input.Commit] {
-		if err := importCommit(ctx, sourceDir, input.Commit); err != nil {
-			return fmt.Errorf(choreographyBindingCarryResultErrorFormat, input.Commit, err)
+	if !options.Imported[options.Input.Commit] {
+		// The first node may open its control repository as ".". Transport
+		// imports need its absolute location, independent of the target store.
+		sourceDir, err := filepath.Abs(options.SourceDir)
+		if err != nil {
+			return fmt.Errorf(choreographyBindingCarryResultErrorFormat, options.Input.Commit, err)
 		}
-		imported[input.Commit] = true
+		if err := options.ImportCommit(ctx, sourceDir, options.Input.Commit); err != nil {
+			return fmt.Errorf(choreographyBindingCarryResultErrorFormat, options.Input.Commit, err)
+		}
+		options.Imported[options.Input.Commit] = choreographyBindingIndexEntryPresent
 	}
-	bindings.Inputs = append(bindings.Inputs, input)
-	seen[key] = true
+	options.Bindings.Inputs = append(options.Bindings.Inputs, options.Input)
+	options.Seen[key] = choreographyBindingIndexEntryPresent
 	return nil
 }
 
@@ -223,24 +251,26 @@ type ChoreographyBindingCache struct {
 }
 
 func NewChoreographyBindingCache(opts ChoreographyBindingCacheOptions) (*ChoreographyBindingCache, error) {
-	if !opts.Binding.valid() || opts.LedgerRootOID == "" || opts.Reader == nil ||
-		opts.Mailbox == nil || opts.MaxDocumentBytes <= 0 || len(opts.Tasks) == 0 ||
+	if !opts.Binding.valid() || opts.LedgerRootOID == choreographyBindingMissingOID || opts.Reader == nil ||
+		opts.Mailbox == nil || opts.MaxDocumentBytes <= choreographyBindingNoEntries ||
+		len(opts.Tasks) == choreographyBindingNoEntries ||
 		opts.Accumulate == nil {
 		return nil, fmt.Errorf(choreographyBindingMissingPolicyError)
 	}
 	tasks := make(map[string]ChoreographyTaskSpec, len(opts.Tasks))
 	stagesByPackage := make(map[string][]string)
 	for _, task := range opts.Tasks {
-		if task.Task == "" || tasks[task.Task].Task != "" {
+		if task.Task == choreographyBindingMissingTask ||
+			tasks[task.Task].Task != choreographyBindingMissingTask {
 			return nil, fmt.Errorf(choreographyBindingDuplicateTaskError)
 		}
 		tasks[task.Task] = task
-		if task.Package != "" {
+		if task.Package != choreographyBindingMissingPackage {
 			stage := task.Stage
-			if stage == "" {
+			if stage == choreographyBindingMissingStage {
 				stage = task.Kind
 			}
-			if stage != "" && !slices.Contains(stagesByPackage[task.Package], stage) {
+			if stage != choreographyBindingMissingStage && !slices.Contains(stagesByPackage[task.Package], stage) {
 				stagesByPackage[task.Package] = append(stagesByPackage[task.Package], stage)
 			}
 		}
@@ -265,11 +295,12 @@ func (c *ChoreographyBindingCache) sync(ctx context.Context) error {
 		}
 		if page.Cursor.Sequence < c.cursor.Sequence || page.Head.Sequence < page.Cursor.Sequence ||
 			len(page.Events) > choreographyBindingEventPageSize ||
-			len(page.Events) == 0 && page.More {
+			len(page.Events) == choreographyBindingNoEntries && page.More {
 			return fmt.Errorf(choreographyBindingInvalidCursorError)
 		}
 		for _, event := range page.Events {
-			if event.LedgerOID == "" || event.Sequence != c.cursor.Sequence+1 {
+			if event.LedgerOID == choreographyBindingMissingOID ||
+				event.Sequence != c.cursor.Sequence+choreographyBindingFirstEventOffset {
 				return fmt.Errorf(choreographyBindingSkippedEpochError)
 			}
 			if err := c.apply(ctx, event); err != nil {
@@ -287,7 +318,8 @@ func (c *ChoreographyBindingCache) sync(ctx context.Context) error {
 }
 
 func (c *ChoreographyBindingCache) apply(ctx context.Context, event ChoreographyEvent) error {
-	if event.Package != "" && event.PackageOutcome != "" {
+	if event.Package != choreographyBindingMissingPackage &&
+		event.PackageOutcome != choreographyBindingMissingOutcome {
 		c.outcomes[event.Package] = release.PackageOutcome(event.PackageOutcome)
 	}
 	switch event.Kind {
@@ -297,22 +329,30 @@ func (c *ChoreographyBindingCache) apply(ctx context.Context, event Choreography
 		if err != nil {
 			return fmt.Errorf(choreographyBindingClaimHistoryErrorFormat, event.Task, err)
 		}
-		c.accepted[event.TaskOID] = choreographyAcceptedBindingResult{result: result, oid: event.OutputOID}
+		receiptOID := event.ResultReceiptOID
+		if receiptOID == choreographyBindingMissingOID {
+			receiptOID = event.TaskOID
+		}
+		c.accepted[receiptOID] = choreographyAcceptedBindingResult{result: result, oid: event.OutputOID}
 	case ChoreographyTerminal, ChoreographyBlocked, ChoreographyNoClaimExpired:
-		if c.tasks[event.Task].Task == "" {
+		if c.tasks[event.Task].Task == choreographyBindingMissingTask {
 			return fmt.Errorf(choreographyBindingUnknownTaskErrorFormat, event.Task)
 		}
-		if event.OutputOID != "" && (event.ResultReceiptOID == "" ||
-			c.accepted[event.ResultReceiptOID].oid != event.OutputOID) {
+		if event.OutputOID != choreographyBindingMissingOID &&
+			(event.ResultReceiptOID == choreographyBindingMissingOID ||
+				c.accepted[event.ResultReceiptOID].oid != event.OutputOID) {
 			return fmt.Errorf(choreographyBindingInvalidResultErrorFormat, event.Task, event.ResultReceiptOID)
 		}
 		c.terminal[event.Task] = event
-		if event.Kind == ChoreographyNoClaimExpired && event.Package != "" {
-			c.pendingNoClaim[event.Task] = true
+		if event.Kind == ChoreographyNoClaimExpired && event.Package != choreographyBindingMissingPackage {
+			c.pendingNoClaim[event.Task] = choreographyBindingIndexEntryPresent
 		}
-		if event.Kind == ChoreographyTerminal && event.Package != "" &&
-			event.PackageOutcome == "" && event.ResultReceiptOID != "" {
-			c.pendingTask[event.Task] = true
+		if event.Kind == ChoreographyTerminal && event.Package != choreographyBindingMissingPackage &&
+			!c.tasks[event.Task].ExecutorOwned &&
+			c.tasks[event.Task].Kind != string(KindPrepare) &&
+			event.PackageOutcome == choreographyBindingMissingOutcome &&
+			event.ResultReceiptOID != choreographyBindingMissingOID {
+			c.pendingTask[event.Task] = choreographyBindingIndexEntryPresent
 		} else {
 			c.installTerminalOutput(event)
 		}
@@ -342,7 +382,8 @@ func (c *ChoreographyBindingCache) apply(ctx context.Context, event Choreography
 }
 
 func (c *ChoreographyBindingCache) installTerminalOutput(event ChoreographyEvent) {
-	if event.Kind != ChoreographyTerminal || !event.Succeeded || event.OutputOID == "" {
+	if event.Kind != ChoreographyTerminal || !event.Succeeded ||
+		event.OutputOID == choreographyBindingMissingOID {
 		return
 	}
 	accepted := c.accepted[event.ResultReceiptOID]
@@ -353,7 +394,7 @@ func (c *ChoreographyBindingCache) installTerminalOutput(event ChoreographyEvent
 		Package: c.tasks[event.Task].Package, ResultOID: accepted.oid,
 		Manifest: accepted.result.Outputs}
 	stage := c.tasks[event.Task].Stage
-	if stage == "" {
+	if stage == choreographyBindingMissingStage {
 		stage = c.tasks[event.Task].Kind
 	}
 	c.stages[stageOutputKey(output.Package, stage)] = output
@@ -373,20 +414,20 @@ func (c *ChoreographyBindingCache) State(ctx context.Context, taskID string) (Ch
 		return ChoreographyVerifiedBindingState{}, err
 	}
 	task := c.tasks[taskID]
-	if task.Task == "" || task.Virtual {
+	if task.Task == choreographyBindingMissingTask || task.Virtual {
 		return ChoreographyVerifiedBindingState{}, fmt.Errorf(choreographyBindingAbsentTaskErrorFormat, taskID)
 	}
 	result := ChoreographyVerifiedBindingState{
 		ProviderOutcomes:        make(map[string]release.PackageOutcome, len(c.outcomes)),
 		PredecessorOutputs:      make(map[string][]plan.Output, len(task.Predecessors)),
-		PredecessorTaskOIDs:     make([]string, 0, len(task.Predecessors)),
+		PredecessorTaskOIDs:     make([]string, choreographyBindingNoEntries, len(task.Predecessors)),
 		PreparedInputOID:        c.prepared[taskID],
 		VerifiedOutputByPackage: make(map[string]ChoreographyVerifiedOutput, len(c.providers)),
 		VerifiedOutputByStage:   make(map[string]ChoreographyVerifiedOutput),
 		VerifiedCarriedExports:  make(map[plan.Output]ChoreographyVerifiedCarriedExport),
 	}
 	for _, pkg := range c.opts.OutcomePackagesByTask[taskID] {
-		if outcome := c.outcomes[pkg]; outcome != "" {
+		if outcome := c.outcomes[pkg]; outcome != choreographyBindingMissingOutcome {
 			result.ProviderOutcomes[pkg] = outcome
 		}
 	}
@@ -409,7 +450,7 @@ func (c *ChoreographyBindingCache) State(ctx context.Context, taskID string) (Ch
 		}
 		result.PredecessorOutputs[predecessor] = slices.Clone(outputs)
 		identity := c.terminal[predecessor].OutputOID
-		if identity == "" {
+		if identity == choreographyBindingMissingOID {
 			identity = c.terminal[predecessor].TaskOID
 		}
 		result.PredecessorTaskOIDs = append(result.PredecessorTaskOIDs, identity)
@@ -426,11 +467,12 @@ func (c *ChoreographyBindingCache) cumulative(taskID string, memo map[string][]p
 		return outputs, nil
 	}
 	task := c.tasks[taskID]
-	if task.Task == "" || visiting[taskID] || !task.Virtual &&
-		(c.terminal[taskID].TaskOID == "" || c.pendingNoClaim[taskID] || c.pendingTask[taskID]) {
+	if task.Task == choreographyBindingMissingTask || visiting[taskID] || !task.Virtual &&
+		(c.terminal[taskID].TaskOID == choreographyBindingMissingOID ||
+			c.pendingNoClaim[taskID] || c.pendingTask[taskID]) {
 		return nil, fmt.Errorf(choreographyBindingMissingFinalityErrorFormat, taskID)
 	}
-	visiting[taskID] = true
+	visiting[taskID] = choreographyBindingIndexEntryPresent
 	defer delete(visiting, taskID)
 	parents := make(map[string][]plan.Output, len(task.Predecessors))
 	for _, predecessor := range task.Predecessors {
@@ -446,12 +488,15 @@ func (c *ChoreographyBindingCache) cumulative(taskID string, memo map[string][]p
 	}
 	var own []plan.Output
 	terminal := c.terminal[taskID]
-	if (terminal.Succeeded || c.opts.IncludeFailedExports) && terminal.OutputOID != "" {
+	if (terminal.Succeeded || c.opts.IncludeFailedExports) &&
+		terminal.OutputOID != choreographyBindingMissingOID {
 		result := c.accepted[terminal.ResultReceiptOID].result
 		result.Exports = slices.Clone(result.Exports)
 		if outputContext, found := c.opts.OutputContexts[taskID]; found {
-			if err := rehomeChoreographyExports(&result, outputContext.Repository,
-				outputContext.Package, outputContext.SourceRoot, outputContext.Roots); err != nil {
+			if err := rehomeChoreographyExports(choreographyExportRehomeOptions{
+				Result: &result, Repository: outputContext.Repository,
+				Package: outputContext.Package, SourceRoot: outputContext.SourceRoot,
+				Roots: outputContext.Roots}); err != nil {
 				return nil, err
 			}
 		} else {
@@ -476,9 +521,9 @@ func (c *ChoreographyBindingCache) collectCarriedExports(taskID string,
 	if visited[taskID] {
 		return nil
 	}
-	visited[taskID] = true
+	visited[taskID] = choreographyBindingIndexEntryPresent
 	task := c.tasks[taskID]
-	if task.Task == "" {
+	if task.Task == choreographyBindingMissingTask {
 		return fmt.Errorf(choreographyBindingUnknownExportTaskErrorFormat, taskID)
 	}
 	parents := slices.Clone(task.Predecessors)
@@ -492,7 +537,8 @@ func (c *ChoreographyBindingCache) collectCarriedExports(taskID string,
 	if c.pendingTask[taskID] {
 		return fmt.Errorf(choreographyBindingMissingFinalityErrorFormat, taskID)
 	}
-	if terminal.OutputOID == "" || (!terminal.Succeeded && !c.opts.IncludeFailedExports) {
+	if terminal.OutputOID == choreographyBindingMissingOID ||
+		(!terminal.Succeeded && !c.opts.IncludeFailedExports) {
 		return nil
 	}
 	accepted := c.accepted[terminal.ResultReceiptOID]
@@ -508,11 +554,13 @@ func (c *ChoreographyBindingCache) collectCarriedExports(taskID string,
 		}
 		rehomed := accepted.result
 		rehomed.Exports = []ExportedValue{signed}
-		if err := rehomeChoreographyExports(&rehomed, context.Repository,
-			context.Package, context.SourceRoot, context.Roots); err != nil {
+		if err := rehomeChoreographyExports(choreographyExportRehomeOptions{
+			Result: &rehomed, Repository: context.Repository,
+			Package: context.Package, SourceRoot: context.SourceRoot,
+			Roots: context.Roots}); err != nil {
 			return err
 		}
-		key := formatOutputs(rehomed.Exports)[0]
+		key := formatOutputs(rehomed.Exports)[choreographyBindingFirstExportIndex]
 		carried[key] = ChoreographyVerifiedCarriedExport{Signed: signed, Output: verified}
 	}
 	return nil
@@ -522,16 +570,25 @@ func (c *ChoreographyBindingCache) collectCarriedExports(taskID string,
 // a frame rendered with verified predecessor state. Source snapshots are
 // captured under the coordinator's native snapshot guard; output carriers
 // come only from verified Result and manifest pairs in state.
-func (c *Coordinator) resolvePreparedChoreographyBindings(ctx context.Context, taskID string,
-	state ChoreographyVerifiedBindingState, templateDigest string,
-	prepare func() (ChoreographyTaskBindings, error)) (ChoreographyTaskBindings, error) {
-	if c == nil || c.canonicalMailbox == nil || taskID == "" ||
-		c.GraphRootOID == "" || templateDigest == "" || prepare == nil {
+type choreographyPreparedBindingResolution struct {
+	TaskID         string
+	State          ChoreographyVerifiedBindingState
+	TemplateDigest string
+	Prepare        func() (ChoreographyTaskBindings, error)
+}
+
+func (c *Coordinator) resolvePreparedChoreographyBindings(ctx context.Context,
+	options choreographyPreparedBindingResolution) (ChoreographyTaskBindings, error) {
+	taskID, state, templateDigest, prepare := options.TaskID, options.State,
+		options.TemplateDigest, options.Prepare
+	if c == nil || c.canonicalMailbox == nil || taskID == choreographyBindingMissingTask ||
+		c.GraphRootOID == choreographyBindingMissingOID ||
+		templateDigest == choreographyBindingMissingDigest || prepare == nil {
 		return ChoreographyTaskBindings{}, fmt.Errorf(missingChoreographyPreparedCarrierError)
 	}
 	binding := ChoreographyRunBinding{Run: c.Run, Generation: c.Generation,
 		PlanDigest: c.PlanDigest, GraphDigest: c.GraphDigest}
-	if state.PreparedInputOID != "" {
+	if state.PreparedInputOID != choreographyBindingMissingOID {
 		carrier, err := c.canonicalMailbox.ReadChoreographyPreparedCarrier(ctx,
 			state.PreparedInputOID, c.Limits.MaxManifestBytes)
 		if err != nil {
@@ -551,7 +608,7 @@ func (c *Coordinator) resolvePreparedChoreographyBindings(ctx context.Context, t
 		return ChoreographyTaskBindings{}, err
 	}
 	if !slices.Equal(bindings.PredecessorResultOIDs, state.PredecessorTaskOIDs) ||
-		bindings.PreparedInputOID != "" {
+		bindings.PreparedInputOID != choreographyBindingMissingOID {
 		return ChoreographyTaskBindings{}, fmt.Errorf(invalidChoreographyPreparedCarrierError)
 	}
 	carrier := ChoreographyPreparedCarrier{ChoreographyRunBinding: binding,
@@ -566,20 +623,29 @@ func (c *Coordinator) resolvePreparedChoreographyBindings(ctx context.Context, t
 	return bindings, nil
 }
 
-func (c *Coordinator) ResolveChoreographyBindings(ctx context.Context, node string,
-	request release.StageRequest, state ChoreographyVerifiedBindingState,
-	templateDigest string) (ChoreographyTaskBindings, error) {
-	return c.resolvePreparedChoreographyBindings(ctx, request.TaskID, state, templateDigest,
-		func() (ChoreographyTaskBindings, error) {
-			return c.resolveChoreographyBindingsFresh(ctx, node, request, state)
-		})
+type ChoreographyBindingResolution struct {
+	Node           string
+	Request        release.StageRequest
+	State          ChoreographyVerifiedBindingState
+	TemplateDigest string
+}
+
+func (c *Coordinator) ResolveChoreographyBindings(ctx context.Context,
+	options ChoreographyBindingResolution) (ChoreographyTaskBindings, error) {
+	return c.resolvePreparedChoreographyBindings(ctx, choreographyPreparedBindingResolution{
+		TaskID: options.Request.TaskID, State: options.State,
+		TemplateDigest: options.TemplateDigest,
+		Prepare: func() (ChoreographyTaskBindings, error) {
+			return c.resolveChoreographyBindingsFresh(ctx, options.Node, options.Request, options.State)
+		}})
 }
 
 func (c *Coordinator) resolveChoreographyBindingsFresh(ctx context.Context, node string,
 	request release.StageRequest, state ChoreographyVerifiedBindingState) (ChoreographyTaskBindings, error) {
 	if c == nil || c.dispatch.Sources == nil || c.dispatch.Inputs == nil ||
 		c.dispatch.Store == nil || c.canonicalMailbox == nil || request.Release == nil ||
-		request.Release.Pkg == nil || request.TaskID == "" || node == "" {
+		request.Release.Pkg == nil || request.TaskID == choreographyBindingMissingTask ||
+		node == choreographyBindingMissingNode {
 		return ChoreographyTaskBindings{}, fmt.Errorf(choreographyBindingMissingCompiledPolicyError)
 	}
 	packageName := request.Release.Pkg.Name
@@ -615,21 +681,25 @@ func (c *Coordinator) resolveChoreographyBindingsFresh(ctx context.Context, node
 		return ChoreographyTaskBindings{}, err
 	}
 	appendOutput := func(output ChoreographyVerifiedOutput, path string) error {
-		if output.ResultOID == "" || output.Manifest == nil || output.Manifest.Digest == "" ||
-			output.Task == "" || output.Package == "" {
+		if output.ResultOID == choreographyBindingMissingOID || output.Manifest == nil ||
+			output.Manifest.Digest == choreographyBindingMissingDigest ||
+			output.Task == choreographyBindingMissingTask ||
+			output.Package == choreographyBindingMissingPackage {
 			return fmt.Errorf(choreographyBindingMissingOutputIdentityError)
 		}
-		return appendVerifiedChoreographyInput(ctx, &bindings, AssignmentInput{
-			Task: output.Task, Package: output.Package,
-			Commit: output.ResultOID, Digest: output.Manifest.Digest, Path: path,
-		}, c.canonicalMailbox.plumbing.Dir, imported, seen, c.dispatch.Store.ImportCommitFrom)
+		return appendVerifiedChoreographyInput(ctx, choreographyVerifiedInputAppend{
+			Bindings: &bindings, Input: AssignmentInput{
+				Task: output.Task, Package: output.Package,
+				Commit: output.ResultOID, Digest: output.Manifest.Digest, Path: path,
+			}, SourceDir: c.canonicalMailbox.plumbing.Dir, Imported: imported,
+			Seen: seen, ImportCommit: c.dispatch.Store.ImportCommitFrom})
 	}
 	for _, provider := range c.dispatch.Inputs(packageName) {
 		output, found := state.VerifiedOutputByPackage[provider.Package]
 		if !found {
 			if provider.IsPrepared {
 				return ChoreographyTaskBindings{}, fmt.Errorf(
-					"execution: prepared provider %s has no signed admitted output for %s",
+					choreographyBindingMissingPreparedProviderOutputErrorFormat,
 					provider.Package, request.TaskID)
 			}
 			continue
@@ -640,7 +710,7 @@ func (c *Coordinator) resolveChoreographyBindingsFresh(ctx context.Context, node
 	}
 	if request.Descriptor.Inputs == release.InputsOwnOutputs {
 		stages := request.Descriptor.OwnOutputStages
-		if len(stages) == 0 {
+		if len(stages) == choreographyBindingNoEntries {
 			stages = []string{choreographyOwnBuildStage}
 		}
 		for _, stage := range stages {
@@ -659,20 +729,22 @@ func (c *Coordinator) resolveChoreographyBindingsFresh(ctx context.Context, node
 
 // ResolveChoreographySweepBindings reconstructs the sweep's inherited exports
 // from signed final Results, including accepted partial exports under continue.
-func (c *Coordinator) ResolveChoreographySweepBindings(ctx context.Context, node string,
-	request release.StageRequest, state ChoreographyVerifiedBindingState,
-	templateDigest string) (ChoreographyTaskBindings, error) {
-	return c.resolvePreparedChoreographyBindings(ctx, request.TaskID, state, templateDigest,
-		func() (ChoreographyTaskBindings, error) {
-			return c.resolveChoreographySweepBindingsFresh(ctx, node, request, state)
-		})
+func (c *Coordinator) ResolveChoreographySweepBindings(ctx context.Context,
+	options ChoreographyBindingResolution) (ChoreographyTaskBindings, error) {
+	return c.resolvePreparedChoreographyBindings(ctx, choreographyPreparedBindingResolution{
+		TaskID: options.Request.TaskID, State: options.State,
+		TemplateDigest: options.TemplateDigest,
+		Prepare: func() (ChoreographyTaskBindings, error) {
+			return c.resolveChoreographySweepBindingsFresh(ctx, options.Node, options.Request, options.State)
+		}})
 }
 
 func (c *Coordinator) resolveChoreographySweepBindingsFresh(ctx context.Context, node string,
 	request release.StageRequest, state ChoreographyVerifiedBindingState) (ChoreographyTaskBindings, error) {
 	if c == nil || c.dispatch.Sources == nil || c.dispatch.Store == nil ||
 		c.canonicalMailbox == nil || request.Release == nil || request.Release.Pkg == nil ||
-		request.TaskID == "" || node == "" {
+		request.TaskID == choreographyBindingMissingTask ||
+		node == choreographyBindingMissingNode {
 		return ChoreographyTaskBindings{}, fmt.Errorf(choreographyBindingMissingSweepPolicyError)
 	}
 	sources := c.dispatch.Sources(request.Release.Pkg.Name)

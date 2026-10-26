@@ -139,8 +139,9 @@ func (w *Worker) prepareCompiledUnavailableDrain(ctx context.Context,
 		BootstrapOID: notice.BootstrapOID, GraphRootOID: notice.GraphRootOID,
 		Node: w.Node, CapacityAuthorityID: w.Report.AuthorityID,
 		MembershipEpochOID: epoch, ExpectedLedgerOID: page.Head.OID,
-		RequestID: returnProposalID(choreographyDrainKind, bootstrap.Run,
-			w.Node, minimumCompiledAttempt, epoch+page.Head.OID)}
+		RequestID: returnProposalID(returnProposalIdentity{Kind: choreographyDrainKind,
+			Run: bootstrap.Run, Task: w.Node, Attempt: minimumCompiledAttempt,
+			OID: epoch + page.Head.OID})}
 	if len(w.JoinIdentityKey) != compiledNoJoinKeyBytes {
 		if err := SignChoreographyDrainProposal(&proposal, w.JoinIdentityKey); err != nil {
 			return err

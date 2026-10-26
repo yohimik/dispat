@@ -24,17 +24,17 @@ type sweepOutputAccumulator struct {
 
 func newSweepOutputAccumulator(pl *plan.Plan, covered []string) (*sweepOutputAccumulator, error) {
 	if pl == nil {
-		return nil, fmt.Errorf("execution: sweep output plan is absent")
+		return nil, fmt.Errorf(choreographyMissingSweepOutputPlanErrorText)
 	}
 	a := &sweepOutputAccumulator{plan: pl,
 		covered:  make(map[string]bool, len(covered)),
 		prepared: make(map[string]bool, len(covered)),
 		settled:  make(map[string]bool, len(covered))}
 	for _, name := range covered {
-		if name == "" || a.covered[name] || pl.Releases[name] == nil {
-			return nil, fmt.Errorf("execution: sweep output names an invalid covered package")
+		if name == choreographyAbsentIdentityText || a.covered[name] || pl.Releases[name] == nil {
+			return nil, fmt.Errorf(choreographyInvalidSweepOutputPackageErrorText)
 		}
-		a.covered[name] = true
+		a.covered[name] = choreographyKnownMemberState
 	}
 	return a, nil
 }
@@ -44,7 +44,7 @@ func newSweepOutputAccumulator(pl *plan.Plan, covered []string) (*sweepOutputAcc
 // A no-script or later skipped package still inherits these outputs.
 func (a *sweepOutputAccumulator) Prepare(pkg string) ([]plan.Output, error) {
 	if a == nil || !a.covered[pkg] {
-		return nil, fmt.Errorf("execution: sweep output preparation names an uncovered package")
+		return nil, fmt.Errorf(choreographyUncoveredSweepOutputPreparationErrorText)
 	}
 	rel := a.plan.Releases[pkg]
 	if !a.prepared[pkg] {
@@ -52,7 +52,7 @@ func (a *sweepOutputAccumulator) Prepare(pkg string) ([]plan.Output, error) {
 		slices.Sort(providers)
 		for _, provider := range providers {
 			if a.covered[provider] && !a.settled[provider] {
-				return nil, fmt.Errorf("execution: sweep provider %q has no accepted final outcome", provider)
+				return nil, fmt.Errorf(choreographyMissingSweepProviderOutcomeErrorFormat, provider)
 			}
 		}
 		for _, provider := range providers {
@@ -61,7 +61,7 @@ func (a *sweepOutputAccumulator) Prepare(pkg string) ([]plan.Output, error) {
 			}
 			release.MergeOutputs(rel, a.plan.Releases[provider].Outputs)
 		}
-		a.prepared[pkg] = true
+		a.prepared[pkg] = choreographyOutputPreparedState
 	}
 	return slices.Clone(rel.Outputs), nil
 }
@@ -71,9 +71,9 @@ func (a *sweepOutputAccumulator) Prepare(pkg string) ([]plan.Output, error) {
 // A virtual no-script gate passes nil exports after Prepare.
 func (a *sweepOutputAccumulator) Finalize(pkg string, own []plan.Output) error {
 	if a == nil || !a.covered[pkg] || !a.prepared[pkg] || a.settled[pkg] {
-		return fmt.Errorf("execution: sweep output finality is out of order")
+		return fmt.Errorf(choreographySweepOutputFinalityOrderErrorText)
 	}
 	release.MergeOutputs(a.plan.Releases[pkg], own)
-	a.settled[pkg] = true
+	a.settled[pkg] = choreographyOutputSettledState
 	return nil
 }

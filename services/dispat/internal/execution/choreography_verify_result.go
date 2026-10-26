@@ -10,16 +10,36 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 )
 
+const (
+	choreographyResultVerifyMissingIdentity       = ""
+	choreographyResultVerifyNoOutputRoots         = 0
+	choreographyResultVerifyNoCoordinatorError    = "execution: compiled result expectations have no coordinator"
+	choreographyResultVerifyNoTaskError           = "execution: compiled result expectation has no task"
+	choreographyResultVerifyWrongRunError         = "execution: result belongs to another pinned run"
+	choreographyResultVerifyUnregisteredTaskError = "execution: result has no registered command frame"
+	choreographyResultVerifyInvalidStatusError    = "execution: result has an invalid status"
+	choreographyResultVerifyMissingOutputsError   = "execution: successful producer has no declared output set"
+	choreographyResultVerifyUndeclaredOutputError = "execution: result carries undeclared outputs"
+)
+
 type choreographyResultExpectation struct {
 	roots     []string
 	platforms []string
 	produces  bool
 }
 
-func (c *Coordinator) registerChoreographyResult(task string, roots, platforms []string, produces bool) {
-	c.choreographyRequests.Store(task, choreographyResultExpectation{
-		roots: append([]string(nil), roots...), platforms: append([]string(nil), platforms...),
-		produces: produces})
+type choreographyResultRegistration struct {
+	Task      string
+	Roots     []string
+	Platforms []string
+	Produces  bool
+}
+
+func (c *Coordinator) registerChoreographyResult(registration choreographyResultRegistration) {
+	c.choreographyRequests.Store(registration.Task, choreographyResultExpectation{
+		roots:     append([]string(nil), registration.Roots...),
+		platforms: append([]string(nil), registration.Platforms...),
+		produces:  registration.Produces})
 }
 
 // RegisterCompiledChoreographyResults installs result expectations for every
@@ -28,14 +48,15 @@ func (c *Coordinator) registerChoreographyResult(task string, roots, platforms [
 func (c *Coordinator) RegisterCompiledChoreographyResults(
 	templates []ChoreographyCompiledTemplate) error {
 	if c == nil {
-		return fmt.Errorf("execution: compiled result expectations have no coordinator")
+		return fmt.Errorf(choreographyResultVerifyNoCoordinatorError)
 	}
 	for _, template := range templates {
-		if template.Task == "" {
-			return fmt.Errorf("execution: compiled result expectation has no task")
+		if template.Task == choreographyResultVerifyMissingIdentity {
+			return fmt.Errorf(choreographyResultVerifyNoTaskError)
 		}
-		c.registerChoreographyResult(template.Task, template.Outputs,
-			template.Platforms, len(template.Outputs) != 0)
+		c.registerChoreographyResult(choreographyResultRegistration{Task: template.Task,
+			Roots: template.Outputs, Platforms: template.Platforms,
+			Produces: len(template.Outputs) != choreographyResultVerifyNoOutputRoots})
 	}
 	return nil
 }
@@ -48,24 +69,24 @@ func (c *Coordinator) VerifyChoreographyResult(ctx context.Context,
 	proposal ChoreographyResultProposal, result Result, store *gitx.LocalGitx) error {
 	if c == nil || store == nil || proposal.Run != c.Run ||
 		proposal.Generation != c.Generation || proposal.PlanDigest != c.PlanDigest {
-		return fmt.Errorf("execution: result belongs to another pinned run")
+		return fmt.Errorf(choreographyResultVerifyWrongRunError)
 	}
 	value, ok := c.choreographyRequests.Load(proposal.Task)
 	if !ok {
-		return fmt.Errorf("execution: result has no registered command frame")
+		return fmt.Errorf(choreographyResultVerifyUnregisteredTaskError)
 	}
 	expect := value.(choreographyResultExpectation)
 	if result.Status != StatusSucceeded && result.Status != StatusFailed && result.Status != StatusCancelled {
-		return fmt.Errorf("execution: result has an invalid status")
+		return fmt.Errorf(choreographyResultVerifyInvalidStatusError)
 	}
 	if result.Outputs == nil {
-		if expect.produces && result.Status == StatusSucceeded && len(expect.roots) > 0 {
-			return fmt.Errorf("execution: successful producer has no declared output set")
+		if expect.produces && result.Status == StatusSucceeded && len(expect.roots) > choreographyResultVerifyNoOutputRoots {
+			return fmt.Errorf(choreographyResultVerifyMissingOutputsError)
 		}
 		return nil
 	}
-	if !expect.produces || len(expect.roots) == 0 {
-		return fmt.Errorf("execution: result carries undeclared outputs")
+	if !expect.produces || len(expect.roots) == choreographyResultVerifyNoOutputRoots {
+		return fmt.Errorf(choreographyResultVerifyUndeclaredOutputError)
 	}
 	_, err := ValidateOutputs(ctx, store, result.Outputs, OutputExpectation{
 		Run: c.Run, PlanDigest: c.PlanDigest, Generation: c.Generation,

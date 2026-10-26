@@ -9,6 +9,19 @@ import (
 	"reflect"
 )
 
+const (
+	choreographyFinalityMissingIdentity   = ""
+	choreographyFinalityNoSequence        = 0
+	choreographyFinalityFirstAttempt      = 1
+	choreographyFinalitySequenceOffset    = 1
+	choreographyFinalityFirstParentIndex  = 0
+	choreographyFinalityResultParentIndex = 1
+	choreographyFinalitySingleParentCount = 1
+	choreographyFinalityResultParentCount = 2
+	choreographyFinalityIncompleteError   = "execution: incomplete retained attempt finality"
+	choreographyFinalityNotInLedgerError  = "execution: attempt finality is not in the signed ledger"
+)
+
 // VerifyAttemptFinality proves that a retained signed terminal/retry event
 // names the exact signed Decision commit whose first parent is the accepted
 // Result or Ack receipt. A ledger-only field match is insufficient evidence
@@ -24,19 +37,20 @@ func (f *RetainedChoreographyFeed) VerifyAttemptFinality(ctx context.Context,
 	proof ChoreographyAttemptFinalityProof) error {
 	event, expectedReceiptOID := proof.Event, proof.ReceiptOID
 	expectedClaimOID, expectedAssignmentOID := proof.ClaimOID, proof.AssignmentOID
-	if f == nil || f.reader == nil || f.maxDocumentBytes <= 0 ||
-		(event.Kind != ChoreographyTerminal && event.Kind != ChoreographyRetryReady) ||
-		event.Sequence == 0 || event.Task == "" || event.TaskOID == "" ||
-		event.ResultReceiptOID == "" || event.ResultReceiptOID != expectedReceiptOID ||
-		expectedClaimOID == "" || expectedAssignmentOID == "" ||
-		event.Attempt < 1 || event.Node == "" {
-		return fmt.Errorf("execution: incomplete retained attempt finality")
+	if f == nil || f.reader == nil || f.maxDocumentBytes <= choreographyFinalityNoSequence ||
+		(event.Kind != ChoreographyTerminal && event.Kind != ChoreographyRetryReady &&
+			event.Kind != ChoreographyPickupSettled) ||
+		event.Sequence == choreographyFinalityNoSequence || event.Task == choreographyFinalityMissingIdentity || event.TaskOID == choreographyFinalityMissingIdentity ||
+		event.ResultReceiptOID == choreographyFinalityMissingIdentity || event.ResultReceiptOID != expectedReceiptOID ||
+		expectedClaimOID == choreographyFinalityMissingIdentity || expectedAssignmentOID == choreographyFinalityMissingIdentity ||
+		event.Attempt < choreographyFinalityFirstAttempt || event.Node == choreographyFinalityMissingIdentity {
+		return fmt.Errorf(choreographyFinalityIncompleteError)
 	}
 	g := f.reader
 	g.mu.Lock()
 	err := g.syncLedgerLocked(ctx)
-	if err == nil && (event.Sequence > uint64(len(g.events)) || !reflect.DeepEqual(g.events[event.Sequence-1], event)) {
-		err = fmt.Errorf("execution: attempt finality is not in the signed ledger")
+	if err == nil && (event.Sequence > uint64(len(g.events)) || !reflect.DeepEqual(g.events[event.Sequence-choreographyFinalitySequenceOffset], event)) {
+		err = fmt.Errorf(choreographyFinalityNotInLedgerError)
 	}
 	g.mu.Unlock()
 	if err != nil {
@@ -44,7 +58,7 @@ func (f *RetainedChoreographyFeed) VerifyAttemptFinality(ctx context.Context,
 	}
 	m := g.opts.Mailbox
 	claimParents, err := m.plumbing.CommitParents(ctx, expectedClaimOID)
-	if err != nil || len(claimParents) != 1 || claimParents[0] != expectedAssignmentOID {
+	if err != nil || len(claimParents) != choreographyFinalitySingleParentCount || claimParents[choreographyFinalityFirstParentIndex] != expectedAssignmentOID {
 		return &Rejection{Reason: ReasonChain}
 	}
 	claimBytes, err := readChoreographyFinalityDocument(ctx, choreographyFinalityDocumentQuery{
@@ -56,13 +70,14 @@ func (f *RetainedChoreographyFeed) VerifyAttemptFinality(ctx context.Context,
 	var claim ChoreographyClaimProposal
 	if strictJSON(claimBytes, &claim) != nil || claim.ChoreographyRunBinding != g.opts.Binding ||
 		claim.Task != event.Task || claim.Attempt != event.Attempt || claim.Node != event.Node ||
+		claim.PickupID != event.PickupID ||
 		claim.Branch != FormatChoreographyTaskBranch(g.opts.Binding.Run, event.Task) ||
-		claim.GraphRootOID != g.opts.GraphRootOID || claim.ExpectedOID == "" {
+		claim.GraphRootOID != g.opts.GraphRootOID || claim.ExpectedOID == choreographyFinalityMissingIdentity {
 		return &Rejection{Reason: ReasonChain}
 	}
 	assignmentParents, err := m.plumbing.CommitParents(ctx, expectedAssignmentOID)
-	if err != nil || len(assignmentParents) == 0 ||
-		assignmentParents[0] != claim.ExpectedOID {
+	if err != nil || len(assignmentParents) == choreographyFinalityNoSequence ||
+		assignmentParents[choreographyFinalityFirstParentIndex] != claim.ExpectedOID {
 		return &Rejection{Reason: ReasonChain}
 	}
 	view, err := m.OpenCarriedAssignment(ctx, expectedAssignmentOID, f.maxDocumentBytes)
@@ -74,24 +89,49 @@ func (f *RetainedChoreographyFeed) VerifyAttemptFinality(ctx context.Context,
 		view.Assignment.Attempt != claim.Attempt || view.Assignment.Branch != claim.Branch {
 		return &Rejection{Reason: ReasonChain}
 	}
-	decisionParents, err := m.plumbing.CommitParents(ctx, event.TaskOID)
-	if err != nil || len(decisionParents) != 1 || decisionParents[0] != expectedReceiptOID {
-		return &Rejection{Reason: ReasonChain}
-	}
-	decisionBytes, err := readChoreographyFinalityDocument(ctx, choreographyFinalityDocumentQuery{
-		Mailbox: m, OID: event.TaskOID, Kind: choreographyDecisionKind,
-		MaxBytes: f.maxDocumentBytes})
-	if err != nil {
-		return err
-	}
-	var decision ChoreographyDecision
-	if strictJSON(decisionBytes, &decision) != nil ||
-		decision.ChoreographyRunBinding != g.opts.Binding || decision.Task != event.Task ||
-		decision.Branch != FormatChoreographyTaskBranch(g.opts.Binding.Run, event.Task) ||
-		decision.Attempt != event.Attempt || decision.Node != event.Node ||
-		decision.ResultOID != expectedReceiptOID || decision.Retry != (event.Kind == ChoreographyRetryReady) ||
-		decision.Succeeded != event.Succeeded || decision.PackageOutcome != event.PackageOutcome {
-		return &Rejection{Reason: ReasonChain}
+	decision := ChoreographyDecision{Branch: FormatChoreographyTaskBranch(g.opts.Binding.Run, event.Task)}
+	if event.Kind == ChoreographyPickupSettled {
+		if event.PickupID == choreographyFinalityMissingIdentity ||
+			event.ClaimOID != expectedClaimOID || event.TaskOID != event.PriorTaskOID ||
+			event.GraphRootOID != g.opts.GraphRootOID {
+			return &Rejection{Reason: ReasonChain}
+		}
+	} else {
+		decisionParents, err := m.plumbing.CommitParents(ctx, event.TaskOID)
+		if err != nil {
+			return &Rejection{Reason: ReasonChain}
+		}
+		if event.PickupID == choreographyFinalityMissingIdentity {
+			if len(decisionParents) != choreographyFinalitySingleParentCount ||
+				decisionParents[choreographyFinalityFirstParentIndex] != expectedReceiptOID {
+				return &Rejection{Reason: ReasonChain}
+			}
+		} else {
+			resultDecision := len(decisionParents) == choreographyFinalityResultParentCount &&
+				decisionParents[choreographyFinalityFirstParentIndex] == event.PriorTaskOID &&
+				decisionParents[choreographyFinalityResultParentIndex] == expectedReceiptOID &&
+				event.OutputOID != choreographyFinalityMissingIdentity
+			ackDecision := len(decisionParents) == choreographyFinalitySingleParentCount &&
+				decisionParents[choreographyFinalityFirstParentIndex] == expectedReceiptOID &&
+				event.OutputOID == choreographyFinalityMissingIdentity
+			if event.ClaimOID != expectedClaimOID || !(resultDecision || ackDecision) {
+				return &Rejection{Reason: ReasonChain}
+			}
+		}
+		decisionBytes, err := readChoreographyFinalityDocument(ctx, choreographyFinalityDocumentQuery{
+			Mailbox: m, OID: event.TaskOID, Kind: choreographyDecisionKind,
+			MaxBytes: f.maxDocumentBytes})
+		if err != nil {
+			return err
+		}
+		if strictJSON(decisionBytes, &decision) != nil ||
+			decision.ChoreographyRunBinding != g.opts.Binding || decision.Task != event.Task ||
+			decision.Branch != FormatChoreographyTaskBranch(g.opts.Binding.Run, event.Task) ||
+			decision.Attempt != event.Attempt || decision.Node != event.Node ||
+			decision.ResultOID != expectedReceiptOID || decision.Retry != (event.Kind == ChoreographyRetryReady) ||
+			decision.Succeeded != event.Succeeded || decision.PackageOutcome != event.PackageOutcome {
+			return &Rejection{Reason: ReasonChain}
+		}
 	}
 	receiptTree, err := m.readTree(ctx, expectedReceiptOID)
 	if err != nil {
@@ -103,8 +143,8 @@ func (f *RetainedChoreographyFeed) VerifyAttemptFinality(ctx context.Context,
 	}
 	switch receiptTree.kind {
 	case choreographyResultKind:
-		if len(receiptParents) != 2 || receiptParents[0] != expectedClaimOID ||
-			receiptParents[1] != event.OutputOID {
+		if len(receiptParents) != choreographyFinalityResultParentCount || receiptParents[choreographyFinalityFirstParentIndex] != expectedClaimOID ||
+			receiptParents[choreographyFinalityResultParentIndex] != event.OutputOID {
 			return &Rejection{Reason: ReasonChain}
 		}
 		data, err := readChoreographyFinalityDocument(ctx, choreographyFinalityDocumentQuery{
@@ -116,12 +156,13 @@ func (f *RetainedChoreographyFeed) VerifyAttemptFinality(ctx context.Context,
 		var result ChoreographyResultProposal
 		if strictJSON(data, &result) != nil || result.ChoreographyRunBinding != g.opts.Binding ||
 			result.Task != event.Task || result.Attempt != event.Attempt || result.Node != event.Node ||
-			result.Branch != decision.Branch || result.ClaimOID != receiptParents[0] ||
+			result.PickupID != event.PickupID ||
+			result.Branch != decision.Branch || result.ClaimOID != receiptParents[choreographyFinalityFirstParentIndex] ||
 			result.ResultDigest != event.OutputOID {
 			return &Rejection{Reason: ReasonChain}
 		}
 	case MessageAck:
-		if len(receiptParents) != 1 || event.OutputOID != "" {
+		if len(receiptParents) != choreographyFinalitySingleParentCount || event.OutputOID != choreographyFinalityMissingIdentity {
 			return &Rejection{Reason: ReasonChain}
 		}
 		data, err := readChoreographyFinalityDocument(ctx, choreographyFinalityDocumentQuery{
@@ -135,11 +176,11 @@ func (f *RetainedChoreographyFeed) VerifyAttemptFinality(ctx context.Context,
 			ack.Run != g.opts.Binding.Run || ack.Generation != g.opts.Binding.Generation ||
 			ack.PlanDigest != g.opts.Binding.PlanDigest || ack.Task != event.Task ||
 			ack.Attempt != event.Attempt || ack.Node != event.Node ||
-			ack.Branch != decision.Branch || ack.Cancel != receiptParents[0] {
+			ack.Branch != decision.Branch || ack.Cancel != receiptParents[choreographyFinalityFirstParentIndex] {
 			return &Rejection{Reason: ReasonChain}
 		}
 		cancelParents, err := m.plumbing.CommitParents(ctx, ack.Cancel)
-		if err != nil || len(cancelParents) != 1 {
+		if err != nil || len(cancelParents) != choreographyFinalitySingleParentCount {
 			return &Rejection{Reason: ReasonChain}
 		}
 		cancelBytes, err := readChoreographyFinalityDocument(ctx, choreographyFinalityDocumentQuery{
@@ -149,7 +190,7 @@ func (f *RetainedChoreographyFeed) VerifyAttemptFinality(ctx context.Context,
 			return err
 		}
 		var cancel Withdrawal
-		if strictJSON(cancelBytes, &cancel) != nil || cancel.Tip != cancelParents[0] ||
+		if strictJSON(cancelBytes, &cancel) != nil || cancel.Tip != cancelParents[choreographyFinalityFirstParentIndex] ||
 			cancel.Tip != expectedClaimOID || cancel.Assignment != expectedAssignmentOID ||
 			cancel.Assignment != ack.Assignment || cancel.Run != ack.Run ||
 			cancel.Generation != ack.Generation || cancel.PlanDigest != ack.PlanDigest ||

@@ -63,14 +63,20 @@ func (a *App) reconcilePriorFirstRun(ctx context.Context) error {
 		return err
 	}
 	defer journal.close()
-	if identity.BootstrapOID == "" && identity.LedgerRootOID == "" &&
-		len(identity.PreparedLocks) == 0 {
+	if identity.AdmissionState == firstRunAdmissionInertState {
+		if err := a.reconcileUnstartedReleaseLocks(ctx, identity); err != nil {
+			return err
+		}
+		return journal.markCompleted()
+	}
+	if identity.BootstrapOID == retainedRunAbsentValueText && identity.LedgerRootOID == retainedRunAbsentValueText &&
+		len(identity.PreparedLocks) == retainedRunNoEntriesCount {
 		// No lock attempt and no protocol ref was prepared. The journal and
 		// certificate are the only durable effects of the interrupted run.
 		return journal.markCompleted()
 	}
-	if identity.BootstrapOID == "" && identity.LedgerRootOID == "" &&
-		len(identity.PreparedLocks) != 0 {
+	if identity.BootstrapOID == retainedRunAbsentValueText && identity.LedgerRootOID == retainedRunAbsentValueText &&
+		len(identity.PreparedLocks) != retainedRunNoEntriesCount {
 		// A lock attempt was written ahead of its remote push, but no
 		// choreography frame or native command can have started yet. Settle
 		// only this exact lock identity; a moved lock is never ours to delete.
@@ -79,10 +85,10 @@ func (a *App) reconcilePriorFirstRun(ctx context.Context) error {
 		}
 		return journal.markCompleted()
 	}
-	if identity.BootstrapOID == "" || identity.LedgerRootOID == "" {
+	if identity.BootstrapOID == retainedRunAbsentValueText || identity.LedgerRootOID == retainedRunAbsentValueText {
 		return fmt.Errorf(priorFirstRunIncompleteRemoteStateErrorFormat, identity.Run)
 	}
-	if len(identity.PreparedLocks) != 0 {
+	if len(identity.PreparedLocks) != retainedRunNoEntriesCount {
 		return a.reconcileCompletedRelease(ctx, journal, identity)
 	}
 	return a.reconcilePriorSweep(ctx, journal, identity)
@@ -101,13 +107,13 @@ type preparedLockRemote interface {
 func reconcileUnstartedReleaseLocksWithGit(ctx context.Context,
 	identity firstRunIdentity, remote preparedLockRemote) error {
 	for repository, prepared := range identity.PreparedLocks {
-		if prepared.Run != identity.Run || prepared.Remote == "" || prepared.Object == "" ||
-			prepared.LocalTag == "" {
+		if prepared.Run != identity.Run || prepared.Remote == retainedRunAbsentValueText || prepared.Object == retainedRunAbsentValueText ||
+			prepared.LocalTag == retainedRunAbsentValueText {
 			return fmt.Errorf(priorReleaseInvalidPreparedLockErrorFormat,
 				identity.Run, repository)
 		}
 		read := func() (string, error) {
-			readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			readCtx, cancel := context.WithTimeout(ctx, retainedRunLockReadTimeoutSeconds*time.Second)
 			defer cancel()
 			return remote.RemoteTagObject(readCtx, prepared.Remote, release.LockTagName)
 		}
@@ -115,14 +121,14 @@ func reconcileUnstartedReleaseLocksWithGit(ctx context.Context,
 		if err != nil {
 			return fmt.Errorf(priorReleaseLockReadErrorFormat, repository, err)
 		}
-		if current == "" {
+		if current == retainedRunAbsentValueText {
 			continue
 		}
 		if current != prepared.Object {
 			return fmt.Errorf(priorReleaseLockReplacedErrorFormat,
 				repository)
 		}
-		deleteCtx, cancel := context.WithTimeout(ctx, 18*time.Second)
+		deleteCtx, cancel := context.WithTimeout(ctx, retainedRunLockDeleteTimeoutSeconds*time.Second)
 		err = remote.DeleteRemoteTagLease(deleteCtx, prepared.Remote,
 			release.LockTagName, prepared.Object)
 		cancel()
@@ -130,7 +136,7 @@ func reconcileUnstartedReleaseLocksWithGit(ctx context.Context,
 			continue
 		}
 		current, readErr := read()
-		if readErr != nil || current != "" {
+		if readErr != nil || current != retainedRunAbsentValueText {
 			return fmt.Errorf(priorReleaseLockSettleErrorFormat,
 				repository, err)
 		}
@@ -141,7 +147,7 @@ func reconcileUnstartedReleaseLocksWithGit(ctx context.Context,
 func (a *App) reconcilePriorSweep(ctx context.Context,
 	journal *firstRunJournal, identity firstRunIdentity) error {
 	settings := a.cfg.Execution
-	if settings == nil || settings.SecretEnv == "" {
+	if settings == nil || settings.SecretEnv == retainedRunAbsentValueText {
 		return fmt.Errorf(priorSweepMissingSecretReferenceErrorFormat, identity.Run)
 	}
 	signer, err := execution.NewSigner(os.Getenv(settings.SecretEnv))
@@ -149,14 +155,14 @@ func (a *App) reconcilePriorSweep(ctx context.Context,
 		return fmt.Errorf(priorSweepSigningKeyUnavailableErrorFormat, err)
 	}
 	limits := formatTransferLimits(settings)
-	local := execution.NewGitMailbox("", a.git, signer, a.log)
+	local := execution.NewGitMailbox(retainedRunAbsentValueText, a.git, signer, a.log)
 	bootstrap, err := local.ReadChoreographyBootstrap(ctx, identity.BootstrapOID,
 		int64(limits.MaxManifestBytes), limits.MaxPackBytes)
 	if err != nil {
 		return fmt.Errorf(retainedSweepBootstrapUnauthenticErrorFormat, err)
 	}
 	binding := bootstrap.ChoreographyRunBinding
-	if bootstrap.Mode != "compilation" || binding.Run != identity.Run ||
+	if bootstrap.Mode != retainedRunCompilationModeName || binding.Run != identity.Run ||
 		binding.Generation != identity.Generation ||
 		bootstrap.ReturnEndpoint != identity.Endpoint ||
 		bootstrap.ReturnCertSHA256 != identity.CertPin {
@@ -191,18 +197,27 @@ func (a *App) reconcilePriorSweep(ctx context.Context,
 		return fmt.Errorf(retainedSweepReplanFailureErrorFormat, err)
 	}
 	defer private.close()
-	recomputedSpecs, budgets, err := sweepChoreographySpecs(private.plan, private.covered,
-		private.tasks, roster.Nodes, private.app.cfg.BuildConcurrency)
+	recomputedSpecs, budgets, err := sweepChoreographySpecs(sweepChoreographySpecOptions{
+		Plan:          private.plan,
+		Covered:       private.covered,
+		Tasks:         private.tasks,
+		Roster:        roster.Nodes,
+		BuildCapacity: private.app.cfg.BuildConcurrency,
+	})
 	if err != nil {
 		return fmt.Errorf(retainedSweepRosterPolicyReadErrorFormat, err)
 	}
+	applyChoreographyRetrySafety(recomputedSpecs, bootstrap.JoinPolicy.RetryAfterUncertainAttempt)
 	if !slices.Equal(budgets, roster.Budgets) {
 		return fmt.Errorf(retainedSweepRosterPolicyMismatchError)
 	}
 	specs := retained.Carrier.Tasks
-	if err := verifyRetainedChoreographyPolicy(recomputedSpecs, specs,
-		sweepChoreographyPackagePolicies(private.plan, private.covered, selection.OnError),
-		retained.Carrier.PackagePolicies); err != nil {
+	if err := verifyRetainedChoreographyPolicy(retainedChoreographyPolicyOptions{
+		RecomputedTasks:    recomputedSpecs,
+		SignedTasks:        specs,
+		RecomputedPackages: sweepChoreographyPackagePolicies(private.plan, private.covered, selection.OnError),
+		SignedPackages:     retained.Carrier.PackagePolicies,
+	}); err != nil {
 		return err
 	}
 	verifyFirst := func(context.Context) error {
@@ -237,7 +252,7 @@ func (a *App) reconcilePriorSweep(ctx context.Context,
 		return err
 	}
 	nodes := make(map[string]int, len(roster.Nodes))
-	first := ""
+	first := retainedRunAbsentValueText
 	for _, node := range roster.Nodes {
 		nodes[node.Name] = node.Capacity
 		if node.First {
@@ -258,6 +273,7 @@ func (a *App) reconcilePriorSweep(ctx context.Context,
 		JoinPolicy:                bootstrap.JoinPolicy, FirstNode: first,
 		Tasks: specs, Templates: retained.Carrier.Templates, Members: roster.Nodes,
 		NodeCapacity: nodes, Budgets: capacities, OutcomePolicy: policy, Persist: persist,
+		CancelResponseDuration: time.Duration(a.cfg.Execution.ResolveTimeouts().Cancel) * time.Second,
 	})
 	if err != nil {
 		return fmt.Errorf(retainedSweepBrokerReplayErrorFormat, err)
@@ -270,27 +286,47 @@ func (a *App) reconcilePriorSweep(ctx context.Context,
 		if _, err := broker.StopClaims(ctx); err != nil {
 			return fmt.Errorf(retainedSweepClaimFenceErrorFormat, err)
 		}
-		if err := a.settleRetainedSweepAttempts(ctx, identity, signer, limits,
-			binding, mailbox, broker, persist); err != nil {
+		if err := a.settleRetainedSweepAttempts(ctx, retainedSweepSettlementOptions{
+			Identity: identity,
+			Signer:   signer,
+			Limits:   limits,
+			Binding:  binding,
+			Mailbox:  mailbox,
+			Broker:   broker,
+			Persist:  persist,
+		}); err != nil {
 			return err
 		}
-		if _, err := persist.SealRun(ctx, true); err != nil {
+		if _, err := persist.SealRun(ctx, retainedSweepAbortedSealState); err != nil {
 			return fmt.Errorf(retainedSweepUnsettledAcceptedWorkErrorFormat, err)
 		}
 	}
-	if err := a.recoverPriorRunNodeSlots(ctx, identity, roster, mailbox, signer, limits); err != nil {
+	if err := a.recoverPriorRunNodeSlots(ctx, priorRunNodeSlotRecoveryOptions{
+		Identity: identity,
+		Roster:   roster,
+		Mailbox:  mailbox,
+		Signer:   signer,
+		Limits:   limits,
+	}); err != nil {
 		return err
 	}
 	return journal.markCompleted()
+}
+
+type priorRunNodeSlotRecoveryOptions struct {
+	Identity firstRunIdentity
+	Roster   execution.ChoreographyRuntimeRoster
+	Mailbox  *execution.GitMailbox
+	Signer   *execution.Signer
+	Limits   execution.TransferLimits
 }
 
 // recoverPriorRunNodeSlots reconciles the physical capacity held by this
 // first-node run against its retained signed feed before its active locator
 // retires. A sealed run alone cannot prove that a preclaim native hook or
 // outcome command stopped; those leases remain held without exact finality.
-func (a *App) recoverPriorRunNodeSlots(ctx context.Context, identity firstRunIdentity,
-	roster execution.ChoreographyRuntimeRoster, mailbox *execution.GitMailbox, signer *execution.Signer,
-	limits execution.TransferLimits) error {
+func (a *App) recoverPriorRunNodeSlots(ctx context.Context, options priorRunNodeSlotRecoveryOptions) error {
+	identity, roster, mailbox, signer, limits := options.Identity, options.Roster, options.Mailbox, options.Signer, options.Limits
 	var first *execution.ChoreographyRuntimeNode
 	for index := range roster.Nodes {
 		if roster.Nodes[index].First {
@@ -298,7 +334,7 @@ func (a *App) recoverPriorRunNodeSlots(ctx context.Context, identity firstRunIde
 			break
 		}
 	}
-	if first == nil || first.Name == "" || first.Capacity <= 0 || first.AuthorityID == "" {
+	if first == nil || first.Name == retainedRunAbsentValueText || first.Capacity <= retainedRunNoEntriesCount || first.AuthorityID == retainedRunAbsentValueText {
 		return fmt.Errorf(retainedFirstRosterMissingAuthorityError)
 	}
 	slots, err := openSharedNodeSlots(first.Name, first.Capacity)

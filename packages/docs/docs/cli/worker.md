@@ -2,7 +2,8 @@
 
 Run `dispat worker` on a peer node that can execute build, test and other eligible prepublication stages.
 It reads the signed compiled graph, discovers ready tasks, and executes only after its authenticated claim is
-accepted. The orchestrator also executes ordinary work and alone pushes Git refs, publishes artifacts and writes
+accepted and its pending Git branch is created. It writes its own output or failed branch. The orchestrator also
+executes ordinary work and alone advances canonical task, ledger and release refs, publishes artifacts and writes
 release records.
 
 ```
@@ -54,8 +55,9 @@ A worker configuration does not need a separate release policy. The signed graph
 and exact inputs; the worker verifies its root and each eligible task before claiming. When `execution.endpoint` is set,
 the worker can start outside a Git checkout. The orchestrator advertises its HTTPS return URL and exact
 TLS leaf SHA-256 in signed per-run bootstrap data; the peer needs no independent return URL setting.
-The worker sends signed claim and result requests through that authenticated non-Git channel. It may read
-Git objects, but only the orchestrator can push coordination, lock or release refs.
+The worker sends signed claim and result requests through that authenticated non-Git channel. It reads Git objects
+and creates only its own `dispat-pending-*`, `dispat-output-*` and `dispat-failed-*` refs. Configure Git host rules
+to deny its credential writes to canonical task and ledger refs, release branches, tags and the lock tag.
 
 Set the signing secret and any credentials or variables the assigned commands need. Environment values are expanded
 on the worker, using its own environment:

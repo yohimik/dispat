@@ -30,16 +30,16 @@ type sweepOutcomeEvaluator struct {
 
 func newSweepOutcomeEvaluator(pl *plan.Plan, covered []string, onError string) (*sweepOutcomeEvaluator, error) {
 	if pl == nil || onError != OnErrorSkip && onError != OnErrorContinue {
-		return nil, fmt.Errorf("execution: sweep outcome policy is incomplete")
+		return nil, fmt.Errorf(choreographyIncompleteSweepOutcomePolicyErrorText)
 	}
 	e := &sweepOutcomeEvaluator{onError: onError,
 		covered: make(map[string]bool, len(covered)), status: make(map[string]string, len(covered)),
 		from: make(map[string][]sweepPolicyEdge), blocked: make(map[string]sweepPolicyBlocker)}
 	for _, name := range covered {
-		if name == "" || e.covered[name] || pl.Releases[name] == nil {
-			return nil, fmt.Errorf("execution: sweep outcome policy has an invalid covered package")
+		if name == choreographyAbsentIdentityText || e.covered[name] || pl.Releases[name] == nil {
+			return nil, fmt.Errorf(choreographyInvalidSweepOutcomePackageErrorText)
 		}
-		e.covered[name] = true
+		e.covered[name] = choreographyKnownMemberState
 	}
 	for _, consumer := range covered {
 		for rank, provider := range pl.Providers[consumer] {
@@ -53,15 +53,15 @@ func newSweepOutcomeEvaluator(pl *plan.Plan, covered []string, onError string) (
 
 func (e *sweepOutcomeEvaluator) ValidateOutcome(pkg, status string) error {
 	if e == nil || !e.covered[pkg] {
-		return fmt.Errorf("execution: sweep outcome names an uncovered package %q", pkg)
+		return fmt.Errorf(choreographyUncoveredSweepOutcomeErrorFormat, pkg)
 	}
 	switch status {
-	case "failed", "skipped", "cancelled":
+	case choreographyFailedOutcomeName, choreographySkippedOutcomeName, choreographyCancelledOutcomeName:
 	default:
-		return fmt.Errorf("execution: sweep outcome %q is invalid", status)
+		return fmt.Errorf(choreographyInvalidSweepOutcomeErrorFormat, status)
 	}
-	if prior := e.status[pkg]; prior != "" && prior != status {
-		return fmt.Errorf("execution: sweep package %q changed settled outcome", pkg)
+	if prior := e.status[pkg]; prior != choreographyAbsentIdentityText && prior != status {
+		return fmt.Errorf(choreographyChangedSweepOutcomeErrorFormat, pkg)
 	}
 	return nil
 }
@@ -74,7 +74,7 @@ func (e *sweepOutcomeEvaluator) ApplyOutcome(pkg, status string) error {
 		return nil
 	}
 	e.status[pkg] = status
-	if e.onError == OnErrorSkip && (status == "failed" || status == "skipped") {
+	if e.onError == OnErrorSkip && (status == choreographyFailedOutcomeName || status == choreographySkippedOutcomeName) {
 		for _, edge := range e.from[pkg] {
 			previous, exists := e.blocked[edge.consumer]
 			if !exists || edge.rank < previous.rank {
@@ -87,10 +87,10 @@ func (e *sweepOutcomeEvaluator) ApplyOutcome(pkg, status string) error {
 
 func (e *sweepOutcomeEvaluator) ShouldSkip(pkg string) (bool, string, error) {
 	if e == nil || !e.covered[pkg] {
-		return false, "", fmt.Errorf("execution: sweep skip query names an uncovered package %q", pkg)
+		return choreographySkipDeclinedState, choreographyAbsentIdentityText, fmt.Errorf(choreographyUncoveredSweepSkipQueryErrorFormat, pkg)
 	}
 	if e.onError == OnErrorContinue {
-		return false, "", nil
+		return choreographySkipDeclinedState, choreographyAbsentIdentityText, nil
 	}
 	blocker, exists := e.blocked[pkg]
 	return exists, blocker.provider, nil

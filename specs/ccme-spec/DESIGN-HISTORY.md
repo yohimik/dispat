@@ -636,12 +636,12 @@ recovery remain outside this ideal game and keep their separate bounds.
 
 ## 2026-10-26: Three specified distribution modes before their implementation
 
-The revised §28 specifies `compilation`, `interpretation` and `mixed` over one pinned semantic plan and task graph.
+The revised §28 specifies `compilation`, `interpretation` and `hybrid` over one pinned semantic plan and task graph.
 The first node is the orchestrator for one run and can execute eligible ordinary work. Other nodes are
 choreographers. Only the orchestrator may perform engine-managed Git pushes, publication and native recording.
 Compilation lets it select and assign ready work. Interpretation has every participating node derive the plan and
 indexed graph from the same pinned inputs and propose eligible ready work; the first node verifies and persists
-claims without selecting a different peer task. Mixed compiles nonpush command placement and interprets
+claims without selecting a different peer task. Hybrid compiles nonpush command placement and interprets
 first-node effect decisions, including publication and records. The partitions exchange exact accepted outcomes
 in both directions.
 The three policies change selection and placement, not the semantic plan or release authority.
@@ -649,8 +649,103 @@ The three policies change selection and placement, not the semantic plan or rele
 This is a specification milestone, not an implementation or performance claim. The RC.9 candidate retains
 the earlier compiled worker Git-mailbox protocol described above; it does not conform to revised §28.
 The isolated RC.10 implementation is unfinished; `compilation` and `interpretation` are its targets.
-`mixed` is a later RC.11 target. The public name
+`hybrid` is a later RC.11 target. The public name
 changes (`dispat choreographer`, `execution.choreographers`, `runOnly: choreographer`) and first-only coordination
 pushes take effect only in an implementation that passes the revised §28 conformance vectors. Earlier entries keep
 the names and behavior of the designs they record. Neither repeated planning on interpretation nodes nor the
 mode label changes §13.11's phase-specific lower bounds into a global time, memory or communication minimum.
+
+## 2026-10-26: Scope and lineage of dispat theory
+
+Section 13.11 now names dispat theory as the CCME combination of deterministic semantic planning, one pinned
+finite task graph, conditional parallel task-time bounds, and durable recovery of external effects. It covers
+single-package repositories, monorepos, control-and-source repositories and linked families without treating
+their different discovery, history and transport costs as one constant. The graph remains finite in compilation,
+interpretation and hybrid mode. Hybrid specializes known nonpush command paths and evaluates first-only external
+outcomes under pinned rules at runtime; it is not discovery of an unbounded new graph or a novel claim to
+hybrid compilation. The revised text cites the primary Kahn, Graham, Lamport, Garcia-Molina and Salem,
+partial-evaluation, and Blumofe and Leiserson sources for the relevant prior methods and limits.
+It also contrasts Lee and Messerschmitt's statically scheduled synchronous dataflow with runtime ready-task
+claims, and Murthy, Bhattacharyya and Lee's graph-specific buffer optimum with this executor's distinct
+auxiliary-state question.
+
+The clarification separates four kinds of uniqueness. Fixed valid inputs and policy have one semantic plan;
+a deterministic total decision rule plus fixed task outputs and external observations has one canonical trace;
+unlimited compatible capacity has one
+componentwise earliest-start vector; and neither fact yields a unique program or a unique makespan-optimal
+finite-capacity schedule. The exact span result now has both an event induction and a path-constraint proof.
+Finite one-pool list scheduling retains only its conditional factor and asymptotic order. Recovery has two
+necessity arguments, post-crash indistinguishability and delayed in-flight requests, with separate conditional
+progress premises. Classic compensating sagas and CCME forward recovery are related but have different
+guarantees. No rare-case exception can make the constructed counterexamples disappear.
+
+## 2026-10-26: Elastic choreographer admission in all three modes
+
+Section 28 now requires a signed, replayable late-join path in compilation, interpretation and hybrid mode.
+An initially absent but authorized node can add capacity after a run starts. Its membership receipt changes
+only future eligibility and available capacity; it cannot revise the pinned history, semantic plan or finite
+graph, and no joining node gains engine-managed Git-push authority. Under the revised specification,
+compilation and hybrid nodes pick
+eligible ready work from complete node-neutral descriptors initialized before execution; interpretation
+first recomputes the pinned semantic plan and graph. In every mode the first node validates and persists exact
+claims without substituting a different task or node. The initial roster may contain only the first node if
+the authenticated return listener and admission policy are ready.
+Every executable task, including first-only native publication and recording, has its canonical task ref
+initialized before effects; virtual gates retain graph identities without commands. A signed complete-graph
+carrier closes the initialization batches before joins and claims. Claim, refusal, package settlement and
+terminal events let a cold node rebuild its indexed frontier without per-poll ref scans.
+An absent configured node is validated when it joins; a previously unnamed node additionally needs a
+run-pinned enrollment trust policy. A signed epoch, exact request identity, bounded slot initialization,
+physical capacity authority and terminal proof protect against duplicate joins and displaced claims.
+The specification adds conformance vectors for each mode, lost replies, invalid admission, drain and restart.
+
+The earlier central-assignment account in the 2026-10-26 modes entry records its draft milestone; this later
+clarification supersedes that selection rule for the current §28 compilation and hybrid contracts. The
+fixed-capacity makespan theorem does not cover online membership changes. This is an ordered-view
+design related to dynamic process membership, not an assertion that dispat implements virtual synchrony or
+has an optimal online scheduler. At this date the implementation has not demonstrated the new late-join
+vectors; no RC.9 or RC.10 conformance claim follows from publishing this text.
+The dated branchless local-outcome and central-offer implementation paths need migration before they satisfy
+this revised contract.
+
+## 2026-10-26: Hybrid distribution-mode name
+
+The `hybrid` distribution mode replaces the earlier `mixed` name. Its task placement, authority and
+outcome-gate rules are unchanged. The CLI value is `--distribution-mode=hybrid`.
+
+## 2026-10-26: Horizontal scaling with transport costs
+
+Section 13.11 distinguishes the work/span lower-bound crossover `Wk / Lk` from an exact saturation point.
+Under ideal one-pool assumptions, poset width is a sufficient slot count for earliest-start execution at
+`Lk / v`. For a fixed placement, precedence edges with communication delay give a transport-augmented path
+lower bound; mandatory bytes on one shared bottleneck give a separate rate bound. The bounds are combined by
+maximum because their delays can overlap. An exact finite-task example includes serialized, mandatory control
+transfer to every added machine before task execution. Once all independent tasks fit in one batch, each added
+machine strictly raises end-to-end makespan by its transfer cost. Optional idle machines with no cost retain the old
+placement and cannot worsen the optimum. The example supplies no universal machine-count threshold for the
+distributed executor or for its compilation, interpretation and hybrid modes.
+The same clause notes that vertical scaling has finite per-machine capacity and workload-dependent task gains;
+unaccelerated serial work, memory waits and I/O waits still contribute to a critical path.
+
+## 2026-10-26: Zero-time readiness and uncertain publication
+
+Section 13.11's one-pool and disjoint-pool list bounds require immediate completion of ready zero-duration
+tasks and their zero-time closure. Delaying a slot-free relay could violate those bounds despite work
+conservation on positive-duration slots. The canonical trace condition also fixes the complete initial
+execution state and full ordered external input and event stream, including crash, restart and recovery
+observations; deterministic scripts alone do not fix those events. Section 19.4 treats
+an absent or unanswered destination query as a run failure, without treating it as a fence for an in-flight
+publication. Retry requires settled or fenced prior attempts or stable-key destination deduplication.
+
+## 2026-10-26: Operational cancellation is asynchronous
+
+Section 13.11's zero-time scheduling premises remain an ideal abstraction. Section 28 now distinguishes
+durable cancel intent from verified terminal cancellation: an accepted command can still start, write local
+output or leave transport and external effects in flight after the request. Signed identities, epochs and
+event order establish causality without synchronized wall clocks; timeouts do not prove quiescence. Late
+evidence is reconciled, capacity stays charged while execution remains possible, and relevant effects retain
+release exclusion until settled or fenced; stable-key deduplication permits only an exact-request retry while
+the old outcome remains pending. Operational cancellation neither rolls back
+effects nor means the `cancel` commit unit of §10. Section 28.7 measures elapsed intervals on one monotonic
+clock, with explicit uncertainty needed for cross-node timestamp comparisons. Conformance vectors cover the
+late start, late result, delayed upload and clock-skew races.

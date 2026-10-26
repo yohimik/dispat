@@ -14,9 +14,12 @@ import (
 
 func TestFirstNodeNativeTicketClaimsBeforeEffectAndSettlesAfter(t *testing.T) {
 	fixture, persist, binding, spec := newChoreographyLedgerFixture(t,
-		ChoreographyTaskSpec{Task: "build", ExecutorOwned: true,
-			EligibleNodes: []string{"node-a"}})
-	broker, err := RecoverFirstNodeBroker(t.Context(), choreographyFixtureBrokerOptions(persist))
+		ChoreographyTaskSpec{Task: "build", Package: "core", ExecutorOwned: true,
+			EligibleNodes: []string{"node-a"}},
+		ChoreographyTaskSpec{Task: "consumer", Package: "consumer", Predecessors: []string{"build"}})
+	brokerOptions := choreographyFixtureBrokerOptions(persist)
+	brokerOptions.OutcomePolicy = preparedBrokerPolicy{}
+	broker, err := RecoverFirstNodeBroker(t.Context(), brokerOptions)
 	require.NoError(t, err)
 	c := &Coordinator{Run: binding.Run, Generation: binding.Generation,
 		PlanDigest: binding.PlanDigest, GraphDigest: binding.GraphDigest,
@@ -50,6 +53,9 @@ func TestFirstNodeNativeTicketClaimsBeforeEffectAndSettlesAfter(t *testing.T) {
 	ordinary.Release()
 	require.Equal(t, 0, broker.nodeUsed["node-a"])
 	require.True(t, broker.tasks[spec.Task].terminal)
+	require.False(t, broker.tasks[spec.Task].pendingPackageSettlement)
+	require.Zero(t, broker.tasks["consumer"].remaining,
+		"an executor-owned terminal follows its completed package barrier")
 	page, err := persist.ReadEvents(t.Context(), choreographyFixtureStartCursor(t, persist), 8)
 	require.NoError(t, err)
 	require.Len(t, page.Events, 3)
@@ -59,6 +65,14 @@ func TestFirstNodeNativeTicketClaimsBeforeEffectAndSettlesAfter(t *testing.T) {
 	feed := &RetainedChoreographyFeed{reader: persist, maxDocumentBytes: 1 << 20}
 	require.NoError(t, feed.VerifyNativeTaskFinality(t.Context(), spec.Task,
 		locator, page.Events[2]), "cold release must verify the exact native Claim/Result/Decision chain")
+	coldPersist, err := NewGitChoreographyPersist(persist.opts)
+	require.NoError(t, err)
+	brokerOptions.Persist = coldPersist
+	cold, err := RecoverFirstNodeBroker(t.Context(), brokerOptions)
+	require.NoError(t, err)
+	require.False(t, cold.tasks[spec.Task].pendingPackageSettlement)
+	require.Zero(t, cold.tasks["consumer"].remaining,
+		"cold replay must discharge the executor-owned package gate")
 }
 
 func TestLegacyFirstLocalPoolReservesPhysicalWeight(t *testing.T) {

@@ -87,16 +87,20 @@ func TestFailedSweepTypedExportRequiresCapturedFile(t *testing.T) {
 	valid := []ExportedValue{{Name: "CORE_ASSET", DeclaredPath: &ExportedDeclaredPath{
 		Repository: "source", Package: "core", Root: "coverage", Relative: "core.asset",
 	}}}
-	require.NoError(t, validateSweepCarriedExports(result, valid, "source", "core"))
-	require.NoError(t, validateSweepCarriedExports(result,
-		[]ExportedValue{{Name: "SCALAR", Value: "partial"}}, "source", "core"))
+	require.NoError(t, validateSweepCarriedExports(sweepCarriedExportValidation{
+		Result: result, Signed: valid, Repository: "source", Package: "core"}))
+	require.NoError(t, validateSweepCarriedExports(sweepCarriedExportValidation{
+		Result: result, Signed: []ExportedValue{{Name: "SCALAR", Value: "partial"}},
+		Repository: "source", Package: "core"}))
 	missing := []ExportedValue{{Name: "CORE_ASSET", DeclaredPath: &ExportedDeclaredPath{
 		Repository: "source", Package: "core", Root: "coverage", Relative: "missing.asset",
 	}}}
-	require.ErrorContains(t, validateSweepCarriedExports(result, missing, "source", "core"),
+	require.ErrorContains(t, validateSweepCarriedExports(sweepCarriedExportValidation{
+		Result: result, Signed: missing, Repository: "source", Package: "core"}),
 		"no matching admitted file")
 	result.Outputs = nil
-	require.ErrorContains(t, validateSweepCarriedExports(result, valid, "source", "core"),
+	require.ErrorContains(t, validateSweepCarriedExports(sweepCarriedExportValidation{
+		Result: result, Signed: valid, Repository: "source", Package: "core"}),
 		"no matching admitted file")
 }
 

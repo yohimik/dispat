@@ -399,8 +399,7 @@ func NewChoreographyReturnClient(opts ReturnClientOptions) (*ChoreographyReturnC
 	if err != nil || len(pin) != sha256.Size || opts.PinnedCertSHA256 != strings.ToLower(opts.PinnedCertSHA256) {
 		return nil, fmt.Errorf(returnTLSIdentityInvalidError)
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{
+	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		// The signed exact leaf pin is the trust root for this per-run,
 		// possibly self-signed certificate.
@@ -417,7 +416,7 @@ func NewChoreographyReturnClient(opts ReturnClientOptions) (*ChoreographyReturnC
 		},
 	}
 	return &ChoreographyReturnClient{base: strings.TrimSuffix(opts.BaseURL, returnURLRootPath),
-		client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
+		client: &http.Client{Transport: newPinnedReturnTransport(u.Host, tlsConfig), CheckRedirect: func(*http.Request, []*http.Request) error {
 			return fmt.Errorf(returnRedirectRefusedError)
 		}}, signer: opts.Signer, binding: opts.Binding, maxResultBytes: opts.MaxResultBytes}, nil
 }

@@ -36,6 +36,13 @@ const (
 	workerReturnReceiptVerified                = true
 	workerReturnPendingNotHandled              = false
 	workerReturnPendingHandled                 = true
+	workerReturnClaimNotAnswered               = false
+	workerReturnClaimAnswered                  = true
+	workerReturnClaimStateUnknown              = false
+	workerReturnClaimStateHandled              = true
+	workerReturnProposalDigestFormat           = "%s\x00%s\x00%s\x00%d\x00%s"
+	workerReturnProposalPartSeparator          = "\x00"
+	workerReturnResultPackFilePattern          = "dispat-result-pack-*"
 
 	workerReturnLogRunField                = "run"
 	workerReturnLogBranchField             = "branch"

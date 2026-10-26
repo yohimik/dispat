@@ -18,6 +18,8 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
+const executionCancelRaceReleaseWait = 60 * time.Second
+
 func TestExecutionWorkerAcknowledgesWithdrawalThatBeatsItsResult(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the durable distributed backend and Git fault wrapper are unavailable on Windows")
@@ -30,10 +32,10 @@ func TestExecutionWorkerAcknowledgesWithdrawalThatBeatsItsResult(t *testing.T) {
 			Preflight: 10, Task: 30, Cancel: 5,
 		}
 	})
-	pushReject, resultGate := harness.NewGitFaultChain(t,
-		harness.GitFault{Pattern: "*push*", Code: 128},
+	canonicalPushReject, resultGate := harness.NewGitFaultChain(t,
+		harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128},
 		harness.GitFault{Pattern: "*commit-tree*dispat transport result*", Nth: 1, Hold: true})
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60, pushReject.Env()...)
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60, canonicalPushReject.Env()...)
 	defer func() {
 		resultGate.Resume()
 		served := worker.stop(t)
@@ -49,7 +51,7 @@ func TestExecutionWorkerAcknowledgesWithdrawalThatBeatsItsResult(t *testing.T) {
 		select {
 		case <-until:
 			resultGate.Resume()
-			result := release.Wait()
+			result := release.WaitFor(executionCancelRaceReleaseWait)
 			t.Fatalf("the Result preparation was not held; matches=%d stdout:\n%s\nstderr:\n%s",
 				resultGate.Matches(), result.Stdout, result.Stderr)
 		case <-time.After(25 * time.Millisecond):
@@ -62,12 +64,17 @@ func TestExecutionWorkerAcknowledgesWithdrawalThatBeatsItsResult(t *testing.T) {
 	release.Signal(syscall.SIGINT)
 	executionAwaitMessage(t, rig.mailbox, branch, "cancel")
 	resultGate.Resume()
-	result := release.Wait()
+	result := release.WaitFor(executionCancelRaceReleaseWait)
+	t.Logf("signed Result/Cancel race ledger: %+v", executionLateJoinLedgerEvents(t, rig.mailbox))
+	t.Logf("canonical task chain: %s", executionChain(t, rig.mailbox, branch))
 	require.NotEqual(t, 0, result.Code, "the interrupted release cannot publish: %s", result.Stdout)
 	requireChoreographyTaskChain(t, rig.mailbox, rig.branches(),
 		"choreography-claim", "cancel", "ack", "choreography-decision")
 	require.Equal(t, 1, len(rig.runs()), "the build ran once and was not reoffered")
 	require.Empty(t, executionReleaseTags(rig))
-	require.False(t, remoteHoldsLock(t, rig.origin))
-	require.Zero(t, pushReject.Matches(), "a peer attempted an engine Git push")
+	require.NotEmpty(t, executionSagaWorkerOutcomeTips(t, rig.mailbox, executionSagaSuccessfulStatus),
+		"the immutable computed Result branch survives the later signed Cancel")
+	require.False(t, remoteHoldsLock(t, rig.origin),
+		"settled cancellation must release its lock\nstdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
+	require.Zero(t, canonicalPushReject.Matches(), "a worker attempted a canonical task push")
 }

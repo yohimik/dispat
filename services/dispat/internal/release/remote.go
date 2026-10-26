@@ -357,13 +357,23 @@ func (tc *taskCtx) revalidatePublication(ctx context.Context) error {
 // it is, and the configuration's own pairs travel unresolved so that a value
 // naming a secret expands on the node that runs the command.
 func (tc *taskCtx) stageRequest(s stage) StageRequest {
-	request := renderStageRequest(tc.rel, tc.stage, s, tc.wsVars, tc.updates)
+	request := renderStageRequest(stageRequestRenderOptions{Release: tc.rel, Descriptor: tc.stage,
+		Frame: s, WorkspaceVars: tc.wsVars, Updates: tc.updates})
 	request.TaskID = taskGraphID(tc.t)
 	return request
 }
 
-func renderStageRequest(rel *plan.Release, descriptor Stage, s stage,
-	wsVars []string, updates []providerUpdate) StageRequest {
+type stageRequestRenderOptions struct {
+	Release       *plan.Release
+	Descriptor    Stage
+	Frame         stage
+	WorkspaceVars []string
+	Updates       []providerUpdate
+}
+
+func renderStageRequest(options stageRequestRenderOptions) StageRequest {
+	rel, descriptor, s := options.Release, options.Descriptor, options.Frame
+	wsVars, updates := options.WorkspaceVars, options.Updates
 	return StageRequest{
 		Release:    rel,
 		Stage:      descriptor.Name,
@@ -387,17 +397,17 @@ func (tc *taskCtx) localFrame(s stage) LocalFrame {
 // failure is reported with.
 func (tc *taskCtx) foldPlacement(outcome StageOutcome, err error) (string, error) {
 	if outcome.UnresolvedOffer {
-		tc.unresolvedEffect = true
+		tc.unresolvedEffect = releaseUnresolvedEffectState
 	}
 	if err != nil {
 		tc.placementFailedPart = outcome.FailedPart
 	}
 	if outcome.NoClaim != nil {
 		if err == nil {
-			return "", errors.New(noClaimWithoutFailedFrameErrorFormat)
+			return releaseRuntimeAbsentIdentityText, errors.New(noClaimWithoutFailedFrameErrorFormat)
 		}
-		if outcome.NoClaim.Blocker == "" {
-			return "", errors.New(noClaimWithoutBlockerErrorFormat)
+		if outcome.NoClaim.Blocker == releaseRuntimeAbsentIdentityText {
+			return releaseRuntimeAbsentIdentityText, errors.New(noClaimWithoutBlockerErrorFormat)
 		}
 		copy := *outcome.NoClaim
 		tc.noClaim = &copy

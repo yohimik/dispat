@@ -98,6 +98,15 @@ func (m *GitMailbox) readChoreographyTaskLedgerTips(ctx context.Context,
 				parents[choreographyTaskLedgerPreparedParentIndex] != event.PreparedInputOID) {
 			return nil, fmt.Errorf(choreographyTaskLedgerEventError)
 		}
+		if ((event.Kind == ChoreographyResultAccepted || event.Kind == ChoreographyAckAccepted) &&
+			event.PickupID != choreographyTaskLedgerNoOID &&
+			event.ResultReceiptOID != choreographyTaskLedgerNoOID ||
+			event.Kind == ChoreographyPickupSettled) &&
+			(len(parents) != choreographyTaskLedgerMaximumEventParents ||
+				event.ResultReceiptOID == choreographyTaskLedgerNoOID ||
+				parents[choreographyTaskLedgerPreparedParentIndex] != event.ResultReceiptOID) {
+			return nil, fmt.Errorf(choreographyTaskLedgerEventError)
+		}
 		if index == choreographyTaskLedgerInitializationEventIndex {
 			if event.Kind != ChoreographyInitializationComplete || event.TaskOID != graphRootOID ||
 				event.GraphRootOID != graphRootOID {
@@ -111,16 +120,40 @@ func (m *GitMailbox) readChoreographyTaskLedgerTips(ctx context.Context,
 		}
 		switch event.Kind {
 		case ChoreographyAssignmentOffered, ChoreographyClaimAccepted,
-			ChoreographyResultAccepted, ChoreographyCancelIssued, ChoreographyQueueFenced,
-			ChoreographyAckAccepted, ChoreographyRetryReady, ChoreographyTerminal,
+			ChoreographyCancelIssued, ChoreographyQueueFenced,
+			ChoreographyRetryReady, ChoreographyTerminal,
 			ChoreographyBlocked, ChoreographyNoClaimExpired, ChoreographyInertCancelled:
+			if event.PriorTaskOID != prior || event.TaskOID == prior {
+				return nil, fmt.Errorf(choreographyTaskLedgerEventError)
+			}
+			tips[event.Task] = event.TaskOID
+		case ChoreographyAckAccepted:
+			if event.PickupID != choreographyTaskLedgerNoOID &&
+				event.ResultReceiptOID != choreographyTaskLedgerNoOID {
+				if event.PriorTaskOID != prior || event.TaskOID != prior {
+					return nil, fmt.Errorf(choreographyTaskLedgerEventError)
+				}
+				continue
+			}
+			if event.PriorTaskOID != prior || event.TaskOID == prior {
+				return nil, fmt.Errorf(choreographyTaskLedgerEventError)
+			}
+			tips[event.Task] = event.TaskOID
+		case ChoreographyResultAccepted:
+			if event.PickupID != choreographyTaskLedgerNoOID {
+				if event.PriorTaskOID != prior || event.TaskOID != prior {
+					return nil, fmt.Errorf(choreographyTaskLedgerEventError)
+				}
+				continue
+			}
 			if event.PriorTaskOID != prior || event.TaskOID == prior {
 				return nil, fmt.Errorf(choreographyTaskLedgerEventError)
 			}
 			tips[event.Task] = event.TaskOID
 		case ChoreographyClaimRefused, ChoreographyFrameReady, ChoreographyNoClaimPackageSettled,
 			ChoreographyTaskPackageSettled,
-			ChoreographyInertCancelSettled:
+			ChoreographyInertCancelSettled, ChoreographyPickupContactLost,
+			ChoreographyPickupSettled:
 			if event.TaskOID != prior {
 				return nil, fmt.Errorf(choreographyTaskLedgerEventError)
 			}

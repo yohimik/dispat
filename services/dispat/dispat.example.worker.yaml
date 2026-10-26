@@ -2,18 +2,20 @@
 #   dispat worker --config dispat.example.worker.yaml
 #
 # The first node is the orchestrator. It also executes ordinary tasks and is
-# the only node that pushes Git refs, publishes artifacts and writes release
-# records. This node reads exact pinned inputs and sends authenticated claim
-# and result requests through the non-Git return channel. Give it no Git-push
-# or publication credentials. Supply the shared signing secret through the
-# named environment variable, never in this file.
+# the only node that advances canonical task, ledger and release refs,
+# publishes artifacts and writes release records. This worker reads exact
+# pinned inputs, creates its own pending/output/failed Git branches, and sends
+# authenticated claim and result requests through the non-Git return channel.
+# Protect canonical and release refs from its Git credential at the host. Keep
+# publication credentials off this node. Supply the shared signing secret
+# through the named environment variable, never in this file.
 
 execution:
   # Match this identity to one entry of the orchestrator's
   # execution.workers list.
   name: build-a
-  # Read-only Git access to the repository holding pinned inputs and task
-  # state. With no endpoint, start this node in the repository checkout so
+  # Git access to read pinned inputs and create this worker's pickup branches.
+  # With no endpoint, start this node in the repository checkout so
   # dispat can resolve its release remote.
   endpoint: git@github.com:acme/project.git
   secretEnv: DISPAT_EXECUTION_SECRET

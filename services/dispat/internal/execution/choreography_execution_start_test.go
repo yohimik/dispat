@@ -168,9 +168,13 @@ func TestChoreographyStopCancelsNonreadyInertTaskBeforePredecessor(t *testing.T)
 	require.NoError(t, err)
 	require.True(t, recovered.tasks["downstream"].terminal)
 	require.Equal(t, 1, recovered.tasks["downstream"].remaining)
-	frontier, err := NewCompiledChoreographyFrontier(binding, persist.opts.GraphRootOID,
-		ChoreographyRuntimeNode{Name: "node-a", First: true, Platform: "linux/amd64",
-			Capacity: 1, AuthorityID: "0123456789abcdef0123456789abcdef"}, children)
+	frontier, err := NewCompiledChoreographyFrontier(CompiledChoreographyFrontierOptions{
+		Binding:      binding,
+		GraphRootOID: persist.opts.GraphRootOID,
+		Node: ChoreographyRuntimeNode{Name: "node-a", First: true, Platform: "linux/amd64",
+			Capacity: 1, AuthorityID: "0123456789abcdef0123456789abcdef"},
+		Tasks: children,
+	})
 	require.NoError(t, err)
 	page, err := restarted.ReadEvents(t.Context(), ChoreographyEventCursor{}, 8)
 	require.NoError(t, err)

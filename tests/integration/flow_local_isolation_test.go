@@ -61,7 +61,8 @@ test "$DISPAT_OUTPUT_DIST_DIR" = "$PWD/dist"`}
 	assert.NotEqual(t, strings.Fields(lines[0])[1], strings.Fields(lines[1])[1],
 		"unordered stages must have distinct checkouts")
 	for _, line := range lines {
-		assert.Contains(t, line, "dispat-local-frame-", "the stage ran in a private source checkout")
+		assert.Contains(t, line, "/first-local-compiled/tasks/", "the stage ran in a private source checkout")
+		assert.Contains(t, line, "/checkout/packages/core", "the stage used its package folder")
 	}
 	assert.True(t, rig.repo.IsTagged("core@0.1.0"), "the merged output view reached the local publisher")
 	stopAll(t, worker)

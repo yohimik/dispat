@@ -176,11 +176,16 @@ func TestCompleteGraphCarrierRetriesCoherentTaskAndLedgerReadDuringClaimCAS(t *t
 	sourceOID := plumbing.CommitTree(t.Context(), sourceTree, nil, "signed-claim-source")
 	require.NoError(t, plumbing.Err())
 	bindings := ChoreographyTaskBindings{Repositories: []AssignmentRepository{{Snapshot: sourceOID}}}
-	assignment, err := BindChoreographyCompiledTemplate(f.carrier.Templates[0], bindings,
-		Header{Protocol: ChoreographyProtocolVersion, Kind: KindBuild, Run: f.binding.Run,
+	assignment, err := BindChoreographyCompiledTemplate(ChoreographyTemplateBindingOptions{
+		Template: f.carrier.Templates[0],
+		Bindings: bindings,
+		Header: Header{Protocol: ChoreographyProtocolVersion, Kind: KindBuild, Run: f.binding.Run,
 			Generation: f.binding.Generation, PlanDigest: f.binding.PlanDigest,
 			Task: f.spec.Task, Attempt: 1, Node: "peer", Branch: f.spec.Branch,
-			IssuedAt: time.Now().UTC().Format(time.RFC3339)}, f.bootstrap, f.binding.GraphDigest)
+			IssuedAt: time.Now().UTC().Format(time.RFC3339)},
+		BootstrapOID: f.bootstrap,
+		GraphDigest:  f.binding.GraphDigest,
+	})
 	require.NoError(t, err)
 	assignment.GraphRootOID, assignment.InputsDigest = f.root, "signed-inputs"
 	assignmentOID, err := f.endpoint.mailbox.PrepareAssignmentOnReservation(t.Context(),

@@ -31,7 +31,7 @@ const (
 func (a *App) startCompiledLocalPicker(ctx context.Context, c *execution.Coordinator,
 	broker *execution.FirstNodeBroker) (context.Context, func() error, error) {
 	if a == nil || a.returnJournal == nil || a.localNodeSlots == nil ||
-		c == nil || broker == nil || c.Signer == nil || c.CanonicalEndpoint == "" {
+		c == nil || broker == nil || c.Signer == nil || c.CanonicalEndpoint == choreographyAbsentIdentityText {
 		return nil, nil, fmt.Errorf(compiledLocalPickerStateError)
 	}
 	stateDir := filepath.Join(a.returnJournal.dir, compiledLocalPickerStateFolder)

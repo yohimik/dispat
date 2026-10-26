@@ -9,6 +9,21 @@ import (
 	"sort"
 )
 
+const (
+	choreographyTaskWaitMissingIdentity          = ""
+	choreographyTaskWaitPreviousEventOffset      = 1
+	choreographyTaskWaitNextSequenceOffset       = 1
+	choreographyTaskWaitNoEvents                 = 0
+	choreographyTaskWaitIncompleteError          = "execution: incomplete task event wait"
+	choreographyTaskWaitCursorOutsideError       = "execution: task wait cursor is outside the signed ledger"
+	choreographyTaskWaitUnknownTaskError         = "execution: task event wait names no run task"
+	choreographyTaskWaitNoIndexError             = "execution: first-node persistence lacks an indexed task event wait"
+	choreographyTaskWaitIncompleteIntervalError  = "execution: incomplete task event interval"
+	choreographyTaskWaitIntervalOutsideError     = "execution: task event interval is outside the signed ledger"
+	choreographyTaskWaitUnknownIntervalTaskError = "execution: task event interval names no run task"
+	choreographyTaskWaitNoIntervalIndexError     = "execution: first-node persistence lacks an indexed task event interval"
+)
+
 // indexTaskEventLocked extends the in-memory per-task view at the same point
 // the signed ledger event becomes durable. The complete ordered feed remains
 // available to remote peers; local task waiters inspect only their own events.
@@ -19,7 +34,7 @@ func (g *GitChoreographyPersist) indexTaskEventLocked(event ChoreographyEvent) {
 			g.taskEvents[prior.Task] = append(g.taskEvents[prior.Task], position)
 		}
 	} else {
-		g.taskEvents[event.Task] = append(g.taskEvents[event.Task], len(g.events)-1)
+		g.taskEvents[event.Task] = append(g.taskEvents[event.Task], len(g.events)-choreographyTaskWaitPreviousEventOffset)
 	}
 	if g.taskNotify == nil {
 		g.taskNotify = make(map[string]chan struct{})
@@ -36,8 +51,8 @@ func (g *GitChoreographyPersist) indexTaskEventLocked(event ChoreographyEvent) {
 // local task pages or filters the global history independently.
 func (g *GitChoreographyPersist) WaitTaskEvent(ctx context.Context, task string,
 	after ChoreographyEventCursor) (ChoreographyEvent, ChoreographyEventCursor, error) {
-	if g == nil || task == "" || after.OID == "" {
-		return ChoreographyEvent{}, ChoreographyEventCursor{}, fmt.Errorf("execution: incomplete task event wait")
+	if g == nil || task == choreographyTaskWaitMissingIdentity || after.OID == choreographyTaskWaitMissingIdentity {
+		return ChoreographyEvent{}, ChoreographyEventCursor{}, fmt.Errorf(choreographyTaskWaitIncompleteError)
 	}
 	for {
 		g.mu.Lock()
@@ -48,7 +63,7 @@ func (g *GitChoreographyPersist) WaitTaskEvent(ctx context.Context, task string,
 		sequence, found := g.eventIndex[after.OID]
 		if !found || sequence != after.Sequence {
 			g.mu.Unlock()
-			return ChoreographyEvent{}, ChoreographyEventCursor{}, fmt.Errorf("execution: task wait cursor is outside the signed ledger")
+			return ChoreographyEvent{}, ChoreographyEventCursor{}, fmt.Errorf(choreographyTaskWaitCursorOutsideError)
 		}
 		if g.taskEvents == nil {
 			g.taskEvents = make(map[string][]int)
@@ -63,7 +78,7 @@ func (g *GitChoreographyPersist) WaitTaskEvent(ctx context.Context, task string,
 		if index < len(positions) {
 			position := positions[index]
 			event := g.events[position]
-			cursor := ChoreographyEventCursor{OID: g.eventOIDs[position], Sequence: uint64(position + 1)}
+			cursor := ChoreographyEventCursor{OID: g.eventOIDs[position], Sequence: uint64(position + choreographyTaskWaitNextSequenceOffset)}
 			g.mu.Unlock()
 			return event, cursor, nil
 		}
@@ -87,13 +102,13 @@ func (g *GitChoreographyPersist) WaitTaskEvent(ctx context.Context, task string,
 func (b *FirstNodeBroker) WaitTaskEvent(ctx context.Context, task string,
 	after ChoreographyEventCursor) (ChoreographyEvent, ChoreographyEventCursor, error) {
 	if b == nil || b.tasks[task] == nil {
-		return ChoreographyEvent{}, ChoreographyEventCursor{}, fmt.Errorf("execution: task event wait names no run task")
+		return ChoreographyEvent{}, ChoreographyEventCursor{}, fmt.Errorf(choreographyTaskWaitUnknownTaskError)
 	}
 	indexed, ok := b.persist.(interface {
 		WaitTaskEvent(context.Context, string, ChoreographyEventCursor) (ChoreographyEvent, ChoreographyEventCursor, error)
 	})
 	if !ok {
-		return ChoreographyEvent{}, ChoreographyEventCursor{}, fmt.Errorf("execution: first-node persistence lacks an indexed task event wait")
+		return ChoreographyEvent{}, ChoreographyEventCursor{}, fmt.Errorf(choreographyTaskWaitNoIndexError)
 	}
 	return indexed.WaitTaskEvent(ctx, task, after)
 }
@@ -103,9 +118,9 @@ func (b *FirstNodeBroker) WaitTaskEvent(ctx context.Context, task string,
 // let the first node release an offer that was durably claimed.
 func (g *GitChoreographyPersist) TaskEventsThrough(ctx context.Context, task string,
 	after, through ChoreographyEventCursor) ([]ChoreographyEvent, error) {
-	if g == nil || task == "" || after.OID == "" || through.OID == "" ||
+	if g == nil || task == choreographyTaskWaitMissingIdentity || after.OID == choreographyTaskWaitMissingIdentity || through.OID == choreographyTaskWaitMissingIdentity ||
 		through.Sequence < after.Sequence {
-		return nil, fmt.Errorf("execution: incomplete task event interval")
+		return nil, fmt.Errorf(choreographyTaskWaitIncompleteIntervalError)
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -117,7 +132,7 @@ func (g *GitChoreographyPersist) TaskEventsThrough(ctx context.Context, task str
 	if !afterFound || !throughFound ||
 		afterSequence != after.Sequence || throughSequence != through.Sequence ||
 		through.Sequence > g.sequence {
-		return nil, fmt.Errorf("execution: task event interval is outside the signed ledger")
+		return nil, fmt.Errorf(choreographyTaskWaitIntervalOutsideError)
 	}
 	if g.taskEvents == nil {
 		g.taskEvents = make(map[string][]int)
@@ -129,9 +144,9 @@ func (g *GitChoreographyPersist) TaskEventsThrough(ctx context.Context, task str
 	start := sort.Search(len(positions), func(i int) bool {
 		return uint64(positions[i]) >= after.Sequence
 	})
-	events := make([]ChoreographyEvent, 0)
+	events := make([]ChoreographyEvent, choreographyTaskWaitNoEvents)
 	for _, position := range positions[start:] {
-		if uint64(position+1) > through.Sequence {
+		if uint64(position+choreographyTaskWaitNextSequenceOffset) > through.Sequence {
 			break
 		}
 		events = append(events, g.events[position])
@@ -142,14 +157,14 @@ func (g *GitChoreographyPersist) TaskEventsThrough(ctx context.Context, task str
 func (b *FirstNodeBroker) TaskEventsThrough(ctx context.Context, task string,
 	after, through ChoreographyEventCursor) ([]ChoreographyEvent, error) {
 	if b == nil || b.tasks[task] == nil {
-		return nil, fmt.Errorf("execution: task event interval names no run task")
+		return nil, fmt.Errorf(choreographyTaskWaitUnknownIntervalTaskError)
 	}
 	indexed, ok := b.persist.(interface {
 		TaskEventsThrough(context.Context, string, ChoreographyEventCursor,
 			ChoreographyEventCursor) ([]ChoreographyEvent, error)
 	})
 	if !ok {
-		return nil, fmt.Errorf("execution: first-node persistence lacks an indexed task event interval")
+		return nil, fmt.Errorf(choreographyTaskWaitNoIntervalIndexError)
 	}
 	return indexed.TaskEventsThrough(ctx, task, after, through)
 }

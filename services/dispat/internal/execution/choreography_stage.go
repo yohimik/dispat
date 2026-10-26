@@ -26,12 +26,25 @@ func (c *Coordinator) runChoreographyStage(ctx context.Context, task string,
 	}
 	return c.placeTask(ctx, task, placement, space.BuildPlatforms, preferred,
 		func(ctx context.Context, lease *Lease, attempt int) (release.StageOutcome, error) {
-			return c.runChoreographyStageOnLease(ctx, task, request, lease, attempt)
+			return c.runChoreographyStageOnLease(ctx, choreographyStageLeaseOptions{
+				Task:    task,
+				Request: request,
+				Lease:   lease,
+				Attempt: attempt,
+			})
 		})
 }
 
-func (c *Coordinator) runChoreographyStageOnLease(ctx context.Context, task string,
-	request release.StageRequest, lease *Lease, attempt int) (release.StageOutcome, error) {
+type choreographyStageLeaseOptions struct {
+	Task    string
+	Request release.StageRequest
+	Lease   *Lease
+	Attempt int
+}
+
+func (c *Coordinator) runChoreographyStageOnLease(ctx context.Context, options choreographyStageLeaseOptions) (release.StageOutcome, error) {
+	task, request, lease, attempt := options.Task, options.Request, options.Lease, options.Attempt
+
 	space := request.Release.Pkg.Space
 	c.choreographySummary.Store(task, choreographyTaskSummary{Package: request.Release.Pkg.Name,
 		Stage: request.Stage})
@@ -70,8 +83,8 @@ func (c *Coordinator) runChoreographyStageOnLease(ctx context.Context, task stri
 	assignment := c.formatAssignment(lease.Node, kind, task, attempt,
 		frame.dir, frame.repositories, frame.inputs, request)
 	roots := resolveDeclaredOutputs(request)
-	c.registerChoreographyResult(task, roots, space.BuildPlatforms,
-		request.Descriptor.IsProducingOutputs)
+	c.registerChoreographyResult(choreographyResultRegistration{Task: task, Roots: roots,
+		Platforms: space.BuildPlatforms, Produces: request.Descriptor.IsProducingOutputs})
 	return c.runChoreographyAssigned(ctx, lease, assignment,
 		func(ctx context.Context, result Result, oid string) (release.StageOutcome, error) {
 			return c.readTaskOutcome(ctx, task, attempt,
@@ -98,7 +111,8 @@ func (c *Coordinator) runChoreographyPrepared(ctx context.Context, task string,
 			}
 			assignment := c.formatAssignment(lease.Node, KindPrepare, task, attempt,
 				frame.dir, frame.repositories, frame.inputs, request)
-			c.registerChoreographyResult(task, space.BuildOutputs, space.BuildPlatforms, choreographyStageOutputProducing)
+			c.registerChoreographyResult(choreographyResultRegistration{Task: task,
+				Roots: space.BuildOutputs, Platforms: space.BuildPlatforms, Produces: choreographyStageOutputProducing})
 			return c.runChoreographyAssigned(ctx, lease, assignment,
 				func(ctx context.Context, result Result, oid string) (release.StageOutcome, error) {
 					return c.readTaskOutcome(ctx, task, attempt,
@@ -141,7 +155,8 @@ func (c *Coordinator) runChoreographySweep(ctx context.Context, task string,
 			}
 			assignment := c.formatSweepAssignment(lease.Node, task, attempt, dir, repositories, sweep)
 			assignment.Exports, assignment.Inputs = exports, inputs
-			c.registerChoreographyResult(task, cleanSweepRoots(sweep.Roots), nil, choreographyStageOutputProducing)
+			c.registerChoreographyResult(choreographyResultRegistration{Task: task,
+				Roots: cleanSweepRoots(sweep.Roots), Produces: choreographyStageOutputProducing})
 			return c.runChoreographyAssigned(ctx, lease, assignment,
 				func(ctx context.Context, result Result, oid string) (release.StageOutcome, error) {
 					return c.readSweepOutcome(ctx, task, attempt, release.StageOutcome{Node: lease.Node},

@@ -277,13 +277,15 @@ a release-safety regression:
    `DISPAT_UNSAFE_DISABLE_LOCK` each refuse a run that configures workers. The bypass exists for a repository with no
    remote to coordinate through, which is not a run that reaches other machines.
 3. **The orchestrator publishes and records.** Workers execute eligible build, test and custom stages under signed
-   assignments bound to the fixed plan and exact inputs; they do not replan. They write Git mailbox coordination state
-   but do not run the engine-managed publish stage or create release tags and records. The worker publication Ready/Go
+   assignments bound to the fixed plan and exact inputs; they do not replan. They return signed results over the pinned
+   HTTPS channel; the first node alone writes coordination state, runs publication and creates release tags and records. The worker publication Ready/Go
    exchange is legacy protocol vocabulary, not an active authorization path.
 4. **An uncertain publication needs destination evidence.** A local publish-command error or missing tag does not prove
    that the destination lacks the artifact. Before retrying a potentially completed effect, verify the exact package,
    version and artifact identity or use a publisher whose retry is demonstrably safe for that identity. The error alone
-   does not retain the release lock; the lock serializes active orchestrators, not external destination outcomes.
+   does not prove the request stopped. Retain the release lock or equivalent durable exclusion while a request may
+   still complete. An absent destination read does not fence an earlier request. A verified failure before any request
+   needs no such retention; stable-key deduplication permits only that exact request's safe retry while it remains pending.
 
 Publication happens in CI. The release workflow is the only place that pushes tags, publishes packages or creates
 releases. Use `dispat status` to inspect the plan locally. Bare `dispat` and `dispat release` execute release stages;

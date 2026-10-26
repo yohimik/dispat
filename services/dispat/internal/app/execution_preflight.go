@@ -52,7 +52,7 @@ func (a *App) preflightWorkers(ctx context.Context, request releasePreflightRequ
 		return nil, nil
 	}
 	pl, fleet, compiled, returnChannel := request.plan, request.fleet, request.compiled, request.returnChannel
-	if compiled != nil && len(compiled.TaskShapes()) == 0 {
+	if compiled != nil && len(compiled.TaskShapes()) == choreographyNoEntriesCount {
 		return nil, nil
 	}
 	// The links reach the release remote at the destination this run's own
@@ -69,7 +69,7 @@ func (a *App) preflightWorkers(ctx context.Context, request releasePreflightRequ
 	if compiled == nil {
 		return coordinator, a.reportPreflightFailure(execution.NewDiagnostic(
 			execution.CodeConfiguration, execution.CategoryConfiguration,
-			"distributed preflight has no compiled task graph"))
+			preflightMissingGraphErrorText))
 	}
 	_, _, _, graphDigest, err := a.releaseChoreographyInventory(coordinator, pl, compiled)
 	if err != nil {
@@ -80,7 +80,7 @@ func (a *App) preflightWorkers(ctx context.Context, request releasePreflightRequ
 	if returnChannel == nil {
 		return coordinator, a.reportPreflightFailure(execution.NewDiagnostic(
 			execution.CodeConfiguration, execution.CategoryConfiguration,
-			"distributed preflight has no return channel"))
+			preflightMissingReturnChannelErrorText))
 	}
 	coordinator.ReturnEndpoint = returnChannel.endpoint
 	coordinator.ReturnCertSHA256 = returnChannel.certPin
@@ -139,7 +139,7 @@ func (a *App) newCoordinator(generation string, ownership *execution.OwnershipGa
 	localSlots, err := openSharedNodeSlots(a.sender.Node, settings.ResolveConcurrency())
 	if err != nil {
 		return nil, execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
-			"first-node shared task capacity cannot be established: %w", err)
+			firstNodeCapacityUnavailableErrorFormat, err)
 	}
 	a.localNodeSlots = localSlots
 	// This machine joins its own pool: it is a node under the same rules
@@ -155,9 +155,9 @@ func (a *App) newCoordinator(generation string, ownership *execution.OwnershipGa
 		}, formatTransferLimits(settings), a.log)
 	var canonicalEndpoint string
 	var canonicalMailbox *execution.GitMailbox
-	authorized := make([]execution.ChoreographyAuthorizedNode, 0, len(links))
+	authorized := make([]execution.ChoreographyAuthorizedNode, choreographyNoEntriesCount, len(links))
 	for _, link := range links {
-		if canonicalEndpoint == "" {
+		if canonicalEndpoint == choreographyAbsentIdentityText {
 			canonicalEndpoint = link.Endpoint
 			canonicalMailbox = mailboxes[link.Name]
 		}
@@ -168,8 +168,9 @@ func (a *App) newCoordinator(generation string, ownership *execution.OwnershipGa
 	}
 	coordinator.AlgorithmVersion = execution.ChoreographyGraphAlgorithmVersion
 	coordinator.JoinPolicy = execution.ChoreographyJoinPolicy{
-		AdmissionDurationSeconds: timeouts.Admission,
-		Authorized:               authorized,
+		AdmissionDurationSeconds:   timeouts.Admission,
+		RetryAfterUncertainAttempt: settings.RetryAfterUncertainAttempt,
+		Authorized:                 authorized,
 	}
 	if err := coordinator.JoinPolicy.Validate(canonicalEndpoint); err != nil {
 		return nil, execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,

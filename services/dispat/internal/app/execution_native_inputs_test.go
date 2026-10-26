@@ -26,3 +26,18 @@ func TestCompiledRelevantPathsIncludeSharedLockfile(t *testing.T) {
 	require.Contains(t, pathspecs, "shared.lock")
 	require.NotContains(t, pathspecs, "unrelated.txt")
 }
+
+func TestCompiledOutputExceptionKeepsOverlappingSharedIncludesRelevant(t *testing.T) {
+	a := &App{cfg: &config.File{Commit: &config.CommitConfig{
+		Include: []string{"packages/docs/dist/shared.lock"}}}}
+	inputs := &relevantInputs{app: a}
+	require.True(t, inputs.sharedIncludeOverlapsOutputRoot("packages/docs/dist"))
+	require.False(t, inputs.sharedIncludeOverlapsOutputRoot("packages/ui/dist"))
+	a.cfg.Commit.Include = []string{"shared.lock"}
+	require.False(t, inputs.sharedIncludeOverlapsOutputRoot("packages/docs/dist"))
+	a.cfg.Commit.Include = []string{"."}
+	require.True(t, inputs.sharedIncludeOverlapsOutputRoot("packages/docs/dist"),
+		"a repository-wide include must keep generated paths under the native source fence")
+	a.cfg.Commit.Include = []string{"./"}
+	require.True(t, inputs.sharedIncludeOverlapsOutputRoot("packages/docs/dist"))
+}

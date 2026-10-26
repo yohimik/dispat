@@ -700,11 +700,13 @@ After `publish` succeeds, failure to write a tag, changelog, GitHub record, rele
 ## Run a distributed release
 
 A root `execution` object with a non-empty `workers` list makes eligible build, test and custom stages
-available to other nodes. The first node is the orchestrator. It also runs ordinary tasks, and it alone pushes Git
-refs, publishes artifacts and writes release records. Other workers execute eligible tasks and return signed
-claim and result requests over the authenticated non-Git channel. Keep registry, release-write and Git-push
-credentials on the orchestrator; peers need read access to pinned inputs and whatever credentials their own build
-commands require. Read [distributed execution](../../packages/docs/docs/distributed-execution.md) before setup.
+available to other nodes. The first node is the orchestrator. It also runs ordinary tasks, and it alone advances
+canonical task, ledger and release refs, publishes artifacts and writes release records. Other workers execute
+eligible tasks, create their own pending/output/failed Git branches and return signed claim and result requests
+over the authenticated non-Git channel. Keep registry and release-write credentials on the orchestrator; peers
+need read access to pinned inputs, Git write access for their own pickup refs, and whatever credentials their own
+build commands require. Protect canonical and release refs from worker credentials at the Git host. Read
+[distributed execution](../../packages/docs/docs/distributed-execution.md) before setup.
 
 Distributed first-node and worker processes currently require Linux or macOS for the persistent weighted
 node-slot journal. Windows distributed execution is refused before task effects. Windows local execution without
@@ -725,7 +727,8 @@ room for a gain. See [stage placement](../../packages/docs/docs/distributed-exec
 
 For a custom coordination repository, a supported self-hosted Git server in the same data center as the nodes can
 reduce latency. Configure each applicable `endpoint` and measure transfer time; the repository holds coordination
-state, not a release record. The orchestrator is the only node that pushes to it.
+state, not a release record. The orchestrator alone advances canonical refs; workers create only their own
+pending and outcome refs there.
 
 Before a release:
 
@@ -735,6 +738,10 @@ Before a release:
    authorized tasks with the local machine's credentials.
    A node named in `execution.workers` with `lateJoin: true` may start after tasks are running; other named
    workers must pass preflight before effects. Set a finite `execution.timeouts.admission` for worker-only work.
+   `execution.retryAfterUncertainAttempt` defaults to `false`. Set it to `true` only when every delegated
+   command and its hooks can be repeated safely after a failed or contact-lost attempt without conflicting
+   external effects. The declaration is signed into the run; native first-node publication is never retried
+   through this policy. A contact-lost pickup retains its physical lease and capacity charge.
 3. Supply the signing secret from a secret store without reading, printing or copying its value. Keep Git-push and
    publication credentials on the orchestrator.
 4. Run `dispat status --distribution-mode=compilation` to inspect the plan before release. Each worker must verify

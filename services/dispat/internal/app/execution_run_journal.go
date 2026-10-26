@@ -38,6 +38,7 @@ type firstRunIdentity struct {
 	Generation     string                                  `json:"generation,omitempty"`
 	BootstrapOID   string                                  `json:"bootstrapOid,omitempty"`
 	LedgerRootOID  string                                  `json:"ledgerRootOid,omitempty"`
+	AdmissionState string                                  `json:"admissionState,omitempty"`
 }
 
 // firstRunDeferredTag is written in two steps: the task records its expected

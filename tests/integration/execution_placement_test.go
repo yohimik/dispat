@@ -11,8 +11,7 @@ package integration
 // no other machine has. So the claims here are about placement being obeyed.
 // A stage pinned to this machine runs here and nowhere else; a stage pinned
 // to a worker runs there and is refused outright when there is no worker; and
-// the default leaves the run free to use either, preferring a worker and
-// falling back here rather than queueing behind one.
+// the default leaves the run free to use either admitted node.
 //
 // The second half of the key is that a pinned build is not a lesser build. A
 // build the run keeps produces the same verified, transferable output set a
@@ -20,6 +19,8 @@ package integration
 // bytes and cannot tell where they came from.
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -69,16 +70,21 @@ func TestExecutionOrchestratorOnlyBuildFeedsWorkers(t *testing.T) {
 		cfg.LogLevel = "debug"
 	}, pinPackages(map[string]*models.RunOnly{
 		"assets": placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator),
+		"ui":     placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+		"docs":   placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+		"app":    placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
 	}))
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
-	carriers := newExecutionCarrierWatch(t, rig.mailbox)
 
 	res := rig.release()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	placed := rig.nodesByPackage()
-	assert.Equal(t, executionOrchestratorLabel, placed["assets"],
-		"the pinned build ran here, with no node variable in its environment: %v", rig.runs())
+	fixed, hasFixedPlan := executionLine(res, "plan fixed")
+	require.True(t, hasFixedPlan)
+	firstNode := fixed.Str("node")
+	assert.Equal(t, firstNode, placed["assets"],
+		"the pinned build ran on the first node: %v", rig.runs())
 	assert.Equal(t, 1, executionBuildCount(rig, "assets"), "and exactly once: %v", rig.runs())
 	for _, name := range []string{"ui", "docs", "app"} {
 		assert.Contains(t, []string{executionNode, executionSecondNode}, placed[name],
@@ -88,18 +94,31 @@ func TestExecutionOrchestratorOnlyBuildFeedsWorkers(t *testing.T) {
 	produced := executionProbeValues(rig, "inputs")
 	bundle := produced["assets"]
 	require.NotEmpty(t, bundle)
-	assert.Contains(t, bundle, executionOrchestratorLabel, "the bytes say where they were built")
+	assert.Contains(t, bundle, firstNode, "the bytes say where they were built")
 	assert.Equal(t, bundle, produced["ui"], "ui read exactly the bytes the pinned build produced")
 	assert.Equal(t, bundle, produced["docs"], "and so did docs")
 	assert.Equal(t, bundle+bundle, produced["app"])
 
-	carried := carriers.seen()
-	assert.Contains(t, carried["ui:build"], "assets:build", "ui assignment directly parents the local producer result")
-	assert.Contains(t, carried["docs:build"], "assets:build", "docs assignment directly parents it")
+	producerResult := -1
+	consumerClaims := map[string]int{}
+	for index, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+		if event.Kind == "result-accepted" && event.Task == "assets:1:" {
+			producerResult = index
+		}
+		if event.Kind == "claim-accepted" && (event.Task == "ui:1:" || event.Task == "docs:1:") {
+			consumerClaims[event.Task] = index
+		}
+	}
+	require.GreaterOrEqual(t, producerResult, 0, "the local producer has an accepted signed Result")
+	for _, task := range []string{"ui:1:", "docs:1:"} {
+		claim, found := consumerClaims[task]
+		require.True(t, found, "%s has a signed Claim", task)
+		assert.Greater(t, claim, producerResult, "%s claims after the local producer Result", task)
+	}
 
 	assert.ElementsMatch(t,
 		[]string{"assets@0.1.0", "ui@0.1.0", "docs@0.1.0", "app@0.1.0"}, rig.repo.TagList())
-	assert.Empty(t, rig.branches(), "the run closed every coordination branch it created")
+	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 	stopAll(t, workers)
 }
 
@@ -109,7 +128,10 @@ func TestExecutionOrchestratorOnlyBuildFeedsWorkers(t *testing.T) {
 // it in this checkout before anything that reads the working tree runs.
 func TestExecutionOrchestratorOnlyBuildConsumesWorkerOutputs(t *testing.T) {
 	rig := newExecutionOutputWorkspace(t, pinPackages(map[string]*models.RunOnly{
-		"app": placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator),
+		"assets": placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+		"ui":     placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+		"docs":   placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+		"app":    placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator),
 	}))
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
 
@@ -117,7 +139,9 @@ func TestExecutionOrchestratorOnlyBuildConsumesWorkerOutputs(t *testing.T) {
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	placed := rig.nodesByPackage()
-	assert.Equal(t, executionOrchestratorLabel, placed["app"], "the pinned consumer built here")
+	fixed, hasFixedPlan := executionLine(res, "plan fixed")
+	require.True(t, hasFixedPlan)
+	assert.Equal(t, fixed.Str("node"), placed["app"], "the pinned consumer built on the first node")
 	for _, name := range []string{"assets", "ui", "docs"} {
 		assert.Contains(t, []string{executionNode, executionSecondNode}, placed[name],
 			"%s built on a worker: %v", name, rig.runs())
@@ -130,7 +154,7 @@ func TestExecutionOrchestratorOnlyBuildConsumesWorkerOutputs(t *testing.T) {
 		"the providers' outputs were in this checkout before the pinned build ran")
 	assert.ElementsMatch(t,
 		[]string{"assets@0.1.0", "ui@0.1.0", "docs@0.1.0", "app@0.1.0"}, rig.repo.TagList())
-	assert.Empty(t, rig.branches())
+	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
 	stopAll(t, workers)
 }
 
@@ -147,9 +171,10 @@ func newExecutionPlacementRig(t *testing.T, names []string, script func(*harness
 	mailbox := executionMailbox(t)
 	cfg := libsConfig(script(repo), 4, 4)
 	cfg.Execution = &models.ExecutionConfig{
-		SecretEnv: executionSecretEnv,
-		Workers:   []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
-		Timeouts:  &models.ExecutionTimeoutsConfig{Preflight: 30},
+		RetryAfterUncertainAttempt: true,
+		SecretEnv:                  executionSecretEnv,
+		Workers:                    []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
+		Timeouts:                   &models.ExecutionTimeoutsConfig{Preflight: 30},
 	}
 	for _, change := range adjust {
 		change(&cfg)
@@ -199,19 +224,40 @@ func TestExecutionWorkerOnlyBuildNeverRunsOnTheOrchestrator(t *testing.T) {
 	stopAll(t, workers)
 }
 
-// TestExecutionBothUsesTheOrchestratorWhenWorkersAreFull: under the default
-// the orchestrator is one more node, and it is the node of last resort. With
-// the only worker busy it takes the next frame rather than letting it queue,
-// and the run's own build budget still bounds the two of them together.
+// TestExecutionBothUsesTheOrchestratorWhenWorkersAreFull: a worker-pinned task
+// occupies the only peer slot while another ready task remains eligible on the
+// first node. Both execute inside the run's shared build budget.
 func TestExecutionBothUsesTheOrchestratorWhenWorkersAreFull(t *testing.T) {
+	markers := t.TempDir()
+	workerStarted := filepath.Join(markers, "worker-started")
+	firstStarted := filepath.Join(markers, "first-started")
+	gate := filepath.Join(markers, "continue")
+	t.Cleanup(func() { _ = os.WriteFile(gate, nil, 0o600) })
 	rig := newExecutionPlacementRig(t, executionPlacementPackages,
-		executionTimedBuild(executionStageWindow), func(cfg *models.File) {
+		func(repo *harness.Repo) string {
+			return executionRecordingScript + " && " + fmt.Sprintf(`case "$DISPAT_PACKAGE" in
+alpha) printf started > %q ;;
+*) if [ "${DISPAT_EXECUTION_NODE:-orchestrator}" != %q ]; then printf started > %q; fi ;;
+esac
+for i in $(seq 1 600); do test -f %q && break; sleep .1; done; test -f %q && `,
+				workerStarted, executionNode, firstStarted, gate, gate) +
+				repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE", executionStageWindow)
+		}, func(cfg *models.File) {
 			cfg.Concurrency = []int{2, 1}
-			cfg.Execution.Concurrency = models.Int(2)
-		})
+			cfg.Execution.Concurrency = models.Int(1)
+		}, pinPackages(map[string]*models.RunOnly{
+			"alpha": placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+		}))
 	workers := rig.startWorkers([]string{executionNode}, 1)
-
-	res := rig.release()
+	releaseProcess := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
+	require.Eventually(t, func() bool {
+		_, workerErr := os.Stat(workerStarted)
+		_, firstErr := os.Stat(firstStarted)
+		return workerErr == nil && firstErr == nil
+	}, 45*time.Second, 50*time.Millisecond,
+		"the worker-pinned task and an independent first-node task run before either releases")
+	require.NoError(t, os.WriteFile(gate, nil, 0o600))
+	res := releaseProcess.Wait()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	started, isStarted := executionLine(res, "release started")
@@ -227,29 +273,13 @@ func TestExecutionBothUsesTheOrchestratorWhenWorkersAreFull(t *testing.T) {
 		}
 		away++
 	}
-	assert.Positive(t, here, "a frame was taken here while the only worker was busy: %v", rig.runs())
-	assert.Positive(t, away, "and the worker was still preferred for the others: %v", rig.runs())
+	assert.Positive(t, here, "an eligible frame ran on the first node while its peer was busy: %v", rig.runs())
+	assert.Positive(t, away, "the pinned task ran on the peer: %v", rig.runs())
 	timeline := rig.repo.Timeline("timeline.log")
 	require.Len(t, timeline, len(executionPlacementPackages))
 	// The run's own build budget bounds every node of the pool together.
 	harness.AssertConcurrencyBudget(t, timeline, 2)
 	assert.Len(t, rig.repo.TagList(), len(executionPlacementPackages))
-	stopAll(t, workers)
-}
-
-// TestExecutionBothPrefersAFreeWorker: the other half of the default. With
-// the worker free there is nothing for this machine to take, so it takes
-// nothing: the orchestrator is a fallback and never a first choice.
-func TestExecutionBothPrefersAFreeWorker(t *testing.T) {
-	rig := newExecutionPlacementRig(t, []string{"alpha"}, executionTimedBuild(time.Second),
-		func(cfg *models.File) { cfg.Execution.Concurrency = models.Int(4) })
-	workers := rig.startWorkers([]string{executionNode}, 1)
-
-	res := rig.release()
-
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Equal(t, executionNode, rig.nodesByPackage()["alpha"],
-		"the free worker took the frame although this machine had four slots: %v", rig.runs())
 	stopAll(t, workers)
 }
 
@@ -541,9 +571,11 @@ func TestExecutionOrchestratorOnlyBuildOwesItsOutputsToo(t *testing.T) {
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.True(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, "assets"),
 		"the pinned package whose outputs are missing fails with the integrity code\nstdout:\n%s", res.Stdout)
-	assert.Equal(t, executionOrchestratorLabel, rig.nodesByPackage()["assets"],
+	fixed, hasFixedPlan := executionLine(res, "plan fixed")
+	require.True(t, hasFixedPlan)
+	assert.Equal(t, fixed.Str("node"), rig.nodesByPackage()["assets"],
 		"it ran here: %v", rig.runs())
-	rejected, isRejected := executionLine(res, "outputs rejected")
+	rejected, isRejected := executionLine(res, "the task's declared outputs could not be captured")
 	require.True(t, isRejected, "stdout:\n%s", res.Stdout)
 	assert.Equal(t, "root-absent", rejected.Str("reason"))
 	assert.Empty(t, rejected.Str("worker"), "a set this machine produced names no worker")

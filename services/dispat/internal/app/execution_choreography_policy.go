@@ -16,7 +16,7 @@ func releaseChoreographyPackagePolicies(compiled *release.CompiledTaskGraph) []e
 		return nil
 	}
 	source := compiled.PackagePolicies()
-	policies := make([]execution.ChoreographyPackagePolicy, 0, len(source))
+	policies := make([]execution.ChoreographyPackagePolicy, choreographyNoEntriesCount, len(source))
 	for _, p := range source {
 		policies = append(policies, execution.ChoreographyPackagePolicy{
 			Package: p.Package, Providers: p.Providers, Reached: p.Reached,
@@ -32,9 +32,9 @@ func sweepChoreographyPackagePolicies(pl *plan.Plan, covered []string,
 	onError string) []execution.ChoreographyPackagePolicy {
 	coveredSet := make(map[string]bool, len(covered))
 	for _, name := range covered {
-		coveredSet[name] = true
+		coveredSet[name] = choreographyKnownMemberState
 	}
-	policies := make([]execution.ChoreographyPackagePolicy, 0, len(covered))
+	policies := make([]execution.ChoreographyPackagePolicy, choreographyNoEntriesCount, len(covered))
 	for _, name := range covered {
 		policy := execution.ChoreographyPackagePolicy{Package: name,
 			Mode: execution.KindRun, OnError: onError}
@@ -47,12 +47,12 @@ func sweepChoreographyPackagePolicies(pl *plan.Plan, covered []string,
 	}
 	slices.SortFunc(policies, func(a, b execution.ChoreographyPackagePolicy) int {
 		if a.Package < b.Package {
-			return -1
+			return choreographySortBeforeValue
 		}
 		if a.Package > b.Package {
-			return 1
+			return choreographySortAfterValue
 		}
-		return 0
+		return choreographySortEqualValue
 	})
 	return policies
 }

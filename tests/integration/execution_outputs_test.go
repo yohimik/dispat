@@ -194,10 +194,40 @@ printf '%s %s %s\n' probe-tested "$DISPAT_PACKAGE" "$DISPAT_OUTPUT_TESTED_ON" >>
 		cfg.Spaces["libs"] = space
 	})
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 1)
+	defer stopAll(t, workers)
 
-	res := rig.release()
+	started := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
+	res := started.WaitForDiagnostic(executionOutputFlowDiagnosticTimeout, func() {
+		t.Logf("build markers at timeout: %v", rig.runs())
+		for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+			t.Logf("signed ledger at timeout: kind=%s task=%s node=%s outcome=%s taskOID=%s",
+				event.Kind, event.Task, event.Node, event.PackageOutcome, event.TaskOID)
+		}
+		for _, branch := range rig.branches() {
+			if !strings.HasPrefix(branch, executionTaskBranchRefPrefix) {
+				continue
+			}
+			t.Logf("task branch at timeout: %s %v", branch,
+				executionReadChain(rig.mailbox, strings.TrimPrefix(branch, "refs/heads/")))
+		}
+	})
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	events := executionLateJoinLedgerEvents(t, rig.mailbox)
+	for _, name := range []string{"ui", "docs", "app"} {
+		versionTerminal, buildClaim := -1, -1
+		for index, event := range events {
+			if event.Task == name+":0:" && event.Kind == "terminal" {
+				versionTerminal = index
+			}
+			if event.Task == name+":1:" && event.Kind == "claim-accepted" {
+				buildClaim = index
+			}
+		}
+		require.Greater(t, versionTerminal, -1, "%s version has signed first-only finality", name)
+		require.Greater(t, buildClaim, versionTerminal,
+			"%s build claims after its signed first-only version terminal", name)
+	}
 	produced := executionProbeValues(rig, "inputs")
 	tested := executionProbeValues(rig, "tests")
 	nodes := executionProbeValues(rig, "tests-node")
@@ -222,8 +252,9 @@ printf '%s %s %s\n' probe-tested "$DISPAT_PACKAGE" "$DISPAT_OUTPUT_TESTED_ON" >>
 	assert.ElementsMatch(t,
 		[]string{"assets@0.1.0", "ui@0.1.0", "docs@0.1.0", "app@0.1.0"}, rig.repo.TagList())
 	assert.NotEmpty(t, rig.branches(), "signed task and ledger refs remain for recovery")
-	stopAll(t, workers)
 }
+
+const executionOutputFlowDiagnosticTimeout = 120 * time.Second
 
 // executionThirdNode is the third machine the §28.7 example needs: `assets`
 // on one, `ui` and `docs` on two others.
@@ -550,7 +581,8 @@ func TestExecutionOutputInstallPermissionFailureCanRetry(t *testing.T) {
 					}
 					removeNewRoot := ""
 					if !tc.isExistingRootMoveBlocked {
-						removeNewRoot = fmt.Sprintf("rm -rf %q; ", filepath.Join(assetDir, "z-assets", "nested"))
+						removeNewRoot = fmt.Sprintf("rm -rf %q; mkdir -p %q; ",
+							filepath.Join(assetDir, "z-assets", "nested"), filepath.Join(assetDir, "z-assets"))
 					}
 					return "set -eu; mkdir -p a-dist z-assets/nested; " +
 						"printf new > a-dist/new.txt; printf new > z-assets/nested/new.txt; " +
@@ -1620,18 +1652,18 @@ func (a *executionAnswerThief) taken() int {
 // out a task deadline for a document nobody could read.
 //
 // The ceiling bounds every document a mailbox carries, so it is set above what
-// an assignment and a result weigh and below what a manifest of two hundred
+// an assignment and a result weigh and below what a manifest of a thousand
 // files does: the scenario is about the manifest rather than about the
 // protocol being unusable.
 func TestExecutionOversizedManifestIsRefusedWhereItIsWritten(t *testing.T) {
 	rig := newExecutionOutputWorkspaceWith(t, func(*harness.Repo) string {
 		return executionRecordingScript + ` && mkdir -p dist && ` +
 			`{ [ "$DISPAT_PACKAGE" != assets ] || ` +
-			`for i in $(seq 1 200); do printf 'x' > "dist/file$i.txt"; done; }`
+			`for i in $(seq 1 1000); do printf 'x' > "dist/file$i.txt"; done; }`
 	}, func(cfg *models.File) {
 		executionOneWorker(cfg)
 		cfg.Scripts["publish"] = models.Script{"echo publishing"}
-		cfg.Execution.Transfer = &models.ExecutionTransferConfig{MaxManifestBytes: 4096}
+		cfg.Execution.Transfer = &models.ExecutionTransferConfig{MaxManifestBytes: 65536}
 	})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
 		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(4) }), 0)

@@ -10,3 +10,9 @@ import "os/exec"
 func setSysProcAttr(cmd *exec.Cmd) {}
 
 func setSysProcAttrForce(cmd *exec.Cmd) { setSysProcAttr(cmd) }
+
+func settleOwnedProcessGroup(_ *exec.Cmd, _ error) error {
+	// Windows has no owned process-group proof in this runner. A strict task
+	// must keep its lease rather than claim its descendants have stopped.
+	return ErrProcessGroupUnsettled
+}

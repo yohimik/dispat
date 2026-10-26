@@ -191,8 +191,9 @@ What a cluster adds to that:
 - Give the workers a namespace of their own, no service account token, a non-root user, and a NetworkPolicy that
   allows egress to the Git host and the registries the builds read, and nothing else.
 - Keep the signing secret and the worker Git key in Secrets that only this namespace mounts, and do not mount the
-  release job's credentials anywhere in it. The Git key can create and delete `dispat-worker-*` branches and read the
-  sources; the host's ref rules keep it away from everything else.
+  release job's credentials anywhere in it. The Git key reads the sources and creates the worker's
+  `dispat-pending-*`, `dispat-output-*` and `dispat-failed-*` branches; the host's ref rules keep it away from
+  canonical coordination and release refs.
 - A pool sharing one secret is one trust zone. Two namespaces that should not be able to run each other's commands
   need two secrets.
 - Keep publishing credentials off the workers. The publish stage always runs on the orchestrator, with or without a

@@ -36,8 +36,9 @@ func TestWorkerSignsOnlyVerifiedDeclaredRootExportsAsTypedPaths(t *testing.T) {
 	require.Equal(t, values[2].Value, exports[2].Value)
 
 	result := Result{Header: Header{Protocol: ChoreographyProtocolVersion}, Exports: exports}
-	require.NoError(t, rehomeChoreographyExports(&result, "source", "ui",
-		filepath.Join(t.TempDir(), "authoritative", "ui"), assignment.Outputs))
+	require.NoError(t, rehomeChoreographyExports(choreographyExportRehomeOptions{
+		Result: &result, Repository: "source", Package: "ui",
+		SourceRoot: filepath.Join(t.TempDir(), "authoritative", "ui"), Roots: assignment.Outputs}))
 	require.NotContains(t, result.Exports[0].Value, privateRoot)
 	require.Nil(t, result.Exports[0].DeclaredPath)
 }
@@ -57,7 +58,9 @@ func TestFailedSweepCarriesOnlyManifestProvenPrivatePaths(t *testing.T) {
 	}
 	manifest := &OutputManifest{Roots: []string{"coverage"},
 		Entries: []ManifestEntry{{Path: "coverage/core.txt", Type: "file"}}}
-	carried := formatFailedSweepExports(values, assignment, source, checkout, manifest, zerolog.Nop())
+	carried := formatFailedSweepExports(failedSweepExportOptions{Outputs: values,
+		Assignment: assignment, SourceRoot: source, CheckoutRoot: checkout,
+		Manifest: manifest, Log: zerolog.Nop()})
 	require.Len(t, carried, 3)
 	require.Equal(t, "before-failure", carried[0].Value)
 	require.Equal(t, &ExportedDeclaredPath{Package: "core", Root: "coverage", Relative: "core.txt"},
@@ -66,7 +69,9 @@ func TestFailedSweepCarriesOnlyManifestProvenPrivatePaths(t *testing.T) {
 	require.Equal(t, values[2].Value, carried[2].Value,
 		"an ordinary token-shaped string must remain literal")
 
-	uncaptured := formatFailedSweepExports(values, assignment, source, checkout, nil, zerolog.Nop())
+	uncaptured := formatFailedSweepExports(failedSweepExportOptions{Outputs: values,
+		Assignment: assignment, SourceRoot: source, CheckoutRoot: checkout,
+		Log: zerolog.Nop()})
 	require.Len(t, uncaptured, 2)
 	require.Equal(t, "SCALAR", uncaptured[0].Name)
 	require.Equal(t, "LITERAL", uncaptured[1].Name)

@@ -11,6 +11,7 @@ import (
 )
 
 const missingCompiledStageTemplateErrorFormat = "execution: task %q has no immutable stage request: %s"
+const missingCompiledTemplateIdentity = ""
 
 func (c *Coordinator) DispatchSources() func(string) []Source { return c.dispatch.Sources }
 func (c *Coordinator) DispatchShell() func(string) []string   { return c.dispatch.Shell }
@@ -23,20 +24,35 @@ func (c *Coordinator) CompileStageTemplate(spec ChoreographyTaskSpec,
 		return ChoreographyCompiledTemplate{}, fmt.Errorf(missingCompiledStageTemplateErrorFormat,
 			spec.Task, missingCompiledStageInputsReason)
 	}
-	return CompileStageTemplateWithInputs(spec, request, c.dispatch.Sources, c.dispatch.Shell,
-		resolveTaskDeadlineSeconds(c.Timeouts.Task), c.Limits)
+	return CompileStageTemplateWithInputs(ChoreographyStageTemplateOptions{
+		Spec:            spec,
+		Request:         request,
+		SourcesFor:      c.dispatch.Sources,
+		ShellFor:        c.dispatch.Shell,
+		DeadlineSeconds: resolveTaskDeadlineSeconds(c.Timeouts.Task),
+		Limits:          c.Limits,
+	})
 }
 
 const missingCompiledStageInputsReason = "stage request or dispatch sources are absent"
 const missingCompiledSweepInputsReason = "sweep kind or script is absent"
 
+type ChoreographyStageTemplateOptions struct {
+	Spec            ChoreographyTaskSpec
+	Request         release.StageRequest
+	SourcesFor      func(string) []Source
+	ShellFor        func(string) []string
+	DeadlineSeconds int
+	Limits          TransferLimits
+}
+
 // CompileStageTemplateWithInputs works before network preflight from the
 // pinned workspace callbacks. The same template is reused after preflight.
-func CompileStageTemplateWithInputs(spec ChoreographyTaskSpec, request release.StageRequest,
-	sourcesFor func(string) []Source, shellFor func(string) []string,
-	deadlineSeconds int, limits TransferLimits) (ChoreographyCompiledTemplate, error) {
+func CompileStageTemplateWithInputs(options ChoreographyStageTemplateOptions) (ChoreographyCompiledTemplate, error) {
+	spec, request, sourcesFor, shellFor, deadlineSeconds, limits := options.Spec, options.Request, options.SourcesFor, options.ShellFor, options.DeadlineSeconds, options.Limits
+
 	if sourcesFor == nil || shellFor == nil ||
-		spec.Task == "" || request.TaskID != spec.Task || request.Release == nil ||
+		spec.Task == missingCompiledTemplateIdentity || request.TaskID != spec.Task || request.Release == nil ||
 		request.Release.Pkg == nil || request.Release.Pkg.Space == nil {
 		return ChoreographyCompiledTemplate{}, fmt.Errorf(missingCompiledStageTemplateErrorFormat,
 			spec.Task, missingCompiledStageInputsReason)
@@ -67,32 +83,64 @@ func CompileStageTemplateWithInputs(spec ChoreographyTaskSpec, request release.S
 	return template, nil
 }
 
-func (c *Coordinator) CompileSweepTemplate(spec ChoreographyTaskSpec,
-	request release.StageRequest, script string, roots []string) (ChoreographyCompiledTemplate, error) {
+type ChoreographySweepFrameOptions struct {
+	Spec    ChoreographyTaskSpec
+	Request release.StageRequest
+	Script  string
+	Roots   []string
+}
+
+func (c *Coordinator) CompileSweepTemplate(options ChoreographySweepFrameOptions) (ChoreographyCompiledTemplate, error) {
+	spec, request, script, roots := options.Spec, options.Request, options.Script, options.Roots
+
 	if c == nil {
 		return ChoreographyCompiledTemplate{}, fmt.Errorf(missingCompiledStageTemplateErrorFormat,
 			spec.Task, missingCompiledStageInputsReason)
 	}
-	return CompileSweepTemplateWithInputs(spec, request, script, roots,
-		c.dispatch.Sources, c.dispatch.Shell, resolveTaskDeadlineSeconds(c.Timeouts.Task), c.Limits)
+	return CompileSweepTemplateWithInputs(ChoreographySweepTemplateOptions{
+		Spec:            spec,
+		Request:         request,
+		Script:          script,
+		Roots:           roots,
+		Sources:         c.dispatch.Sources,
+		Shell:           c.dispatch.Shell,
+		DeadlineSeconds: resolveTaskDeadlineSeconds(c.Timeouts.Task),
+		Limits:          c.Limits,
+	})
 }
 
-func CompileSweepTemplateWithInputs(spec ChoreographyTaskSpec,
-	request release.StageRequest, script string, roots []string,
-	sources func(string) []Source, shell func(string) []string,
-	deadlineSeconds int, limits TransferLimits) (ChoreographyCompiledTemplate, error) {
-	if spec.Kind != KindRun || script == "" {
+type ChoreographySweepTemplateOptions struct {
+	Spec            ChoreographyTaskSpec
+	Request         release.StageRequest
+	Script          string
+	Roots           []string
+	Sources         func(string) []Source
+	Shell           func(string) []string
+	DeadlineSeconds int
+	Limits          TransferLimits
+}
+
+func CompileSweepTemplateWithInputs(options ChoreographySweepTemplateOptions) (ChoreographyCompiledTemplate, error) {
+	spec, request, script, roots, sources, shell, deadlineSeconds, limits := options.Spec, options.Request, options.Script, options.Roots, options.Sources, options.Shell, options.DeadlineSeconds, options.Limits
+
+	if spec.Kind != KindRun || script == missingCompiledTemplateIdentity {
 		return ChoreographyCompiledTemplate{}, fmt.Errorf(missingCompiledStageTemplateErrorFormat,
 			spec.Task, missingCompiledSweepInputsReason)
 	}
-	template, err := CompileStageTemplateWithInputs(spec, request, sources, shell,
-		deadlineSeconds, limits)
+	template, err := CompileStageTemplateWithInputs(ChoreographyStageTemplateOptions{
+		Spec:            spec,
+		Request:         request,
+		SourcesFor:      sources,
+		ShellFor:        shell,
+		DeadlineSeconds: deadlineSeconds,
+		Limits:          limits,
+	})
 	if err != nil {
 		return ChoreographyCompiledTemplate{}, err
 	}
 	template.Script = script
 	template.Outputs = cleanSweepRoots(roots)
-	template.Package.SourceDir = ""
+	template.Package.SourceDir = missingCompiledTemplateIdentity
 	template.Package.OutputRoots = nil
 	template.Frame.Before = nil
 	template.Frame.After = nil

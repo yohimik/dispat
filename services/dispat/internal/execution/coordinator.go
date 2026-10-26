@@ -32,6 +32,20 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 )
 
+const (
+	coordinatorMissingIdentity                  = ""
+	coordinatorNoActiveLinks                    = 0
+	coordinatorAuthorityIDHexChars              = 32
+	coordinatorNoLateWorker                     = false
+	coordinatorCanonicalMailboxUnavailableError = "execution: canonical choreography mailbox is unavailable or was set after bootstrap"
+	coordinatorEndpointMismatchErrorFormat      = "execution: worker %q names a different coordination endpoint"
+	coordinatorMailboxCollisionError            = "execution: first-node mailbox identity collides with a peer link"
+	coordinatorMissingSlotAuthorityError        = "the worker has no persistent shared slot authority identity"
+	coordinatorMaxPackBytesKey                  = "transfer.maxPackBytes"
+	coordinatorLateJoinPlatformError            = "execution: joining node has no toolchain or platform identity"
+	coordinatorInitializedBrokerMissingError    = "execution: initialized choreography has no attached broker; canonical refs are retained"
+)
+
 // Link is one configured worker node: what it is called, and the mailbox it
 // reads its work from.
 type Link struct {
@@ -195,13 +209,13 @@ func NewCoordinator(run, planDigest, generation string, local LocalNode, links [
 // of the initially admitted peers. A run with only late joiners still needs
 // this store before it creates its signed bootstrap and task roots.
 func (c *Coordinator) SetCanonicalChoreographyMailbox(endpoint string, mailbox *GitMailbox) error {
-	if c == nil || mailbox == nil || c.BootstrapOID != "" || c.choreographyInitialized ||
-		endpoint == "" || mailbox.endpoint != endpoint {
-		return fmt.Errorf("execution: canonical choreography mailbox is unavailable or was set after bootstrap")
+	if c == nil || mailbox == nil || c.BootstrapOID != coordinatorMissingIdentity || c.choreographyInitialized ||
+		endpoint == coordinatorMissingIdentity || mailbox.endpoint != endpoint {
+		return fmt.Errorf(coordinatorCanonicalMailboxUnavailableError)
 	}
 	for _, link := range c.Links {
 		if link.Endpoint != endpoint {
-			return fmt.Errorf("execution: worker %q names a different coordination endpoint", link.Name)
+			return fmt.Errorf(coordinatorEndpointMismatchErrorFormat, link.Name)
 		}
 	}
 	c.CanonicalEndpoint, c.canonicalMailbox = endpoint, mailbox
@@ -209,7 +223,7 @@ func (c *Coordinator) SetCanonicalChoreographyMailbox(endpoint string, mailbox *
 		c.mailboxes = make(map[string]*GitMailbox)
 	}
 	if existing := c.mailboxes[c.Local.Name]; existing != nil && existing != mailbox {
-		return fmt.Errorf("execution: first-node mailbox identity collides with a peer link")
+		return fmt.Errorf(coordinatorMailboxCollisionError)
 	}
 	c.mailboxes[c.Local.Name] = mailbox
 	return nil
@@ -233,7 +247,7 @@ func (c *Coordinator) Preflight(ctx context.Context, packages []PackagePlatforms
 	if err := c.checkOwnership(ctx); err != nil {
 		return err
 	}
-	activeLinks := make([]Link, 0, len(c.Links))
+	activeLinks := make([]Link, coordinatorNoActiveLinks, len(c.Links))
 	for _, link := range c.Links {
 		if !link.LateJoin {
 			activeLinks = append(activeLinks, link)
@@ -306,7 +320,7 @@ func (c *Coordinator) probe(ctx context.Context, link Link) (*NodeReport, error)
 	if c.PinnedSources != nil {
 		assignment.Repositories = append([]AssignmentRepository(nil), c.PinnedSources.Repositories...)
 		parents := c.PinnedSources.CommitOIDs()
-		if c.BootstrapOID != "" {
+		if c.BootstrapOID != coordinatorMissingIdentity {
 			parents = append(parents, c.BootstrapOID)
 		}
 		offered, err = mailbox.PreparePinnedProbe(ctx, assignment, parents)
@@ -373,7 +387,7 @@ func (c *Coordinator) readReport(ctx context.Context, link Link, branch, offered
 	}
 	heads := []gitx.RemoteHead{head}
 	for _, head := range heads {
-		if head.OID == "" {
+		if head.OID == coordinatorMissingIdentity {
 			continue
 		}
 		tip, err := mailbox.Inspect(ctx, head)
@@ -447,7 +461,7 @@ func (c *Coordinator) readResult(ctx context.Context, link Link, tip ChainTip, o
 // all.
 func (c *Coordinator) checkResult(result Result, link Link, tip ChainTip, offered string) RejectReason {
 	if reason := CheckHeaderVersion(HeaderVersionCheck{Header: result.Header,
-		Binding: Binding{Node: link.Name, Branch: tip.Branch}, Now: time.Now(), Version: c.probeProtocol()}); reason != "" {
+		Binding: Binding{Node: link.Name, Branch: tip.Branch}, Now: time.Now(), Version: c.probeProtocol()}); reason != coordinatorMissingIdentity {
 		return reason
 	}
 	if tip.Previous != MessageClaim {
@@ -462,7 +476,7 @@ func (c *Coordinator) checkResult(result Result, link Link, tip ChainTip, offere
 	if result.Report == nil {
 		return ReasonUnreadable
 	}
-	return ""
+	return coordinatorMissingIdentity
 }
 
 // checkReport is what a node has to be for this run to place work on it.
@@ -474,8 +488,8 @@ func (c *Coordinator) checkReport(report *NodeReport) error {
 	if report.Capacity < 1 {
 		return fmt.Errorf("the node reports a capacity of %d: a node that accepts no task cannot be sent work", report.Capacity)
 	}
-	if c.Mode != "" && !validSlotHex(report.AuthorityID, 32) {
-		return fmt.Errorf("the worker has no persistent shared slot authority identity")
+	if c.Mode != coordinatorMissingIdentity && !validSlotHex(report.AuthorityID, coordinatorAuthorityIDHexChars) {
+		return fmt.Errorf(coordinatorMissingSlotAuthorityError)
 	}
 	for _, ceiling := range []struct {
 		key     string
@@ -485,7 +499,7 @@ func (c *Coordinator) checkReport(report *NodeReport) error {
 		{"transfer.maxFiles", int64(report.Limits.MaxFiles), int64(c.Limits.MaxFiles)},
 		{"transfer.maxBytes", report.Limits.MaxBytes, c.Limits.MaxBytes},
 		{"transfer.maxManifestBytes", report.Limits.MaxManifestBytes, c.Limits.MaxManifestBytes},
-		{"transfer.maxPackBytes", report.Limits.MaxPackBytes, c.Limits.MaxPackBytes},
+		{coordinatorMaxPackBytesKey, report.Limits.MaxPackBytes, c.Limits.MaxPackBytes},
 	} {
 		if ceiling.node < ceiling.orderer {
 			return fmt.Errorf("the node's %s is %d and this run's is %d: a node that would refuse what this run transfers cannot be sent work",
@@ -498,8 +512,8 @@ func (c *Coordinator) checkReport(report *NodeReport) error {
 // CheckChoreographyJoinReport applies the same capability floor as eager
 // preflight before a late node may enter the signed membership ledger.
 func (c *Coordinator) CheckChoreographyJoinReport(report *NodeReport) error {
-	if c == nil || report == nil || report.OS == "" || report.Arch == "" {
-		return fmt.Errorf("execution: joining node has no toolchain or platform identity")
+	if c == nil || report == nil || report.OS == coordinatorMissingIdentity || report.Arch == coordinatorMissingIdentity {
+		return fmt.Errorf(coordinatorLateJoinPlatformError)
 	}
 	if err := c.checkReport(report); err != nil {
 		return err
@@ -529,7 +543,7 @@ func (c *Coordinator) checkPlatforms(packages []PackagePlatforms, reports []*Nod
 		// A choreographer-only task may remain inert until an authorized
 		// future node proves its platform at signed admission.
 		if wanted.Placement == PlacementWorker {
-			lateAllowed := false
+			lateAllowed := coordinatorNoLateWorker
 			for _, link := range c.Links {
 				lateAllowed = lateAllowed || link.LateJoin
 			}
@@ -701,7 +715,7 @@ func (c *Coordinator) Close(ctx context.Context) error {
 		// The v3 roots may already be visible remotely. Without an attached
 		// broker there is no signed stop/seal decision, so v2 cleanup cannot
 		// certify that deleting those refs is safe.
-		return fmt.Errorf("execution: initialized choreography has no attached broker; canonical refs are retained")
+		return fmt.Errorf(coordinatorInitializedBrokerMissingError)
 	}
 	if c.stopWatching != nil {
 		// The pollers go first: a poll that ran while the refs were being

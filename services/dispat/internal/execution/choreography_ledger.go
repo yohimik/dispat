@@ -45,6 +45,8 @@ const choreographyLedgerKnownEventKind = true
 const choreographyLedgerUnknownEventKind = false
 const choreographyLedgerActiveClaim = true
 const choreographyLedgerInactiveClaim = false
+const choreographyLedgerTaskClaimKeyPrefix = "task:"
+const choreographyLedgerPickupClaimKeyPrefix = "pickup:"
 const choreographyLedgerFinishedTask = true
 const choreographyLedgerSealed = true
 const choreographyLedgerStopping = true
@@ -209,6 +211,8 @@ const (
 	ChoreographyInitializationComplete ChoreographyEventKind = "initialization-complete"
 	ChoreographyExecutionStarted       ChoreographyEventKind = "execution-started"
 	ChoreographyInputInvalidation      ChoreographyEventKind = "input-invalidation"
+	ChoreographyPickupContactLost      ChoreographyEventKind = "pickup-contact-lost"
+	ChoreographyPickupSettled          ChoreographyEventKind = "pickup-settled"
 )
 
 // IsChoreographyEventKind keeps retained-feed decoding aligned with every
@@ -227,7 +231,8 @@ func IsChoreographyEventKind(kind ChoreographyEventKind) bool {
 		ChoreographyInertCancelled, ChoreographyInertCancelSettled,
 		ChoreographyTaskPackageSettled,
 		ChoreographyFrameReady, ChoreographyInitializationComplete,
-		ChoreographyExecutionStarted, ChoreographyInputInvalidation:
+		ChoreographyExecutionStarted, ChoreographyInputInvalidation,
+		ChoreographyPickupContactLost, ChoreographyPickupSettled:
 		return choreographyLedgerKnownEventKind
 	default:
 		return choreographyLedgerUnknownEventKind
@@ -237,35 +242,39 @@ func IsChoreographyEventKind(kind ChoreographyEventKind) bool {
 // ChoreographyEvent names the exact task ref object that caused one accepted
 // change. A result commit alone is never a terminal event.
 type ChoreographyEvent struct {
-	Sequence              uint64                   `json:"sequence"`
-	LedgerOID             string                   `json:"ledgerOid,omitempty"`
-	Kind                  ChoreographyEventKind    `json:"kind"`
-	Task                  string                   `json:"task"`
-	Package               string                   `json:"package,omitempty"`
-	PackageOutcome        string                   `json:"packageOutcome,omitempty"`
-	BlockedBy             string                   `json:"blockedBy,omitempty"`
-	Attempt               int                      `json:"attempt"`
-	Node                  string                   `json:"node,omitempty"`
-	Member                *ChoreographyRuntimeNode `json:"member,omitempty"`
-	TaskOID               string                   `json:"taskOid"`
-	GraphRootOID          string                   `json:"graphRootOid,omitempty"`
-	OldPreparedOID        string                   `json:"oldPreparedOid,omitempty"`
-	NewPreparedOID        string                   `json:"newPreparedOid,omitempty"`
-	PreparedInputOID      string                   `json:"preparedInputOid,omitempty"`
-	AffectedTasks         []string                 `json:"affectedTasks,omitempty"`
-	AdmissionDeadlineUTC  string                   `json:"admissionDeadlineUtc,omitempty"`
-	ExecutionStartedUTC   string                   `json:"executionStartedUtc,omitempty"`
-	AdmissionPolicyDigest string                   `json:"admissionPolicyDigest,omitempty"`
-	MissingPlacement      string                   `json:"missingPlacement,omitempty"`
-	AssignmentOID         string                   `json:"assignmentOid,omitempty"`
-	MembershipEpochOID    string                   `json:"membershipEpochOid,omitempty"`
-	CapacityAuthorityID   string                   `json:"capacityAuthorityId,omitempty"`
-	LeaseIntentID         string                   `json:"leaseIntentId,omitempty"`
-	LeaseWeight           int                      `json:"leaseWeight,omitempty"`
-	PriorTaskOID          string                   `json:"priorTaskOid,omitempty"`
-	SlotBranch            string                   `json:"slotBranch,omitempty"`
-	SlotOID               string                   `json:"slotOid,omitempty"`
-	PriorSlotOID          string                   `json:"priorSlotOid,omitempty"`
+	Sequence               uint64                   `json:"sequence"`
+	LedgerOID              string                   `json:"ledgerOid,omitempty"`
+	Kind                   ChoreographyEventKind    `json:"kind"`
+	Task                   string                   `json:"task"`
+	Package                string                   `json:"package,omitempty"`
+	PackageOutcome         string                   `json:"packageOutcome,omitempty"`
+	BlockedBy              string                   `json:"blockedBy,omitempty"`
+	Attempt                int                      `json:"attempt"`
+	Node                   string                   `json:"node,omitempty"`
+	Member                 *ChoreographyRuntimeNode `json:"member,omitempty"`
+	TaskOID                string                   `json:"taskOid"`
+	GraphRootOID           string                   `json:"graphRootOid,omitempty"`
+	OldPreparedOID         string                   `json:"oldPreparedOid,omitempty"`
+	NewPreparedOID         string                   `json:"newPreparedOid,omitempty"`
+	PreparedInputOID       string                   `json:"preparedInputOid,omitempty"`
+	AffectedTasks          []string                 `json:"affectedTasks,omitempty"`
+	AdmissionDeadlineUTC   string                   `json:"admissionDeadlineUtc,omitempty"`
+	ExecutionStartedUTC    string                   `json:"executionStartedUtc,omitempty"`
+	AdmissionPolicyDigest  string                   `json:"admissionPolicyDigest,omitempty"`
+	MissingPlacement       string                   `json:"missingPlacement,omitempty"`
+	AssignmentOID          string                   `json:"assignmentOid,omitempty"`
+	MembershipEpochOID     string                   `json:"membershipEpochOid,omitempty"`
+	CapacityAuthorityID    string                   `json:"capacityAuthorityId,omitempty"`
+	LeaseIntentID          string                   `json:"leaseIntentId,omitempty"`
+	LeaseWeight            int                      `json:"leaseWeight,omitempty"`
+	PickupID               string                   `json:"pickupId,omitempty"`
+	ClaimOID               string                   `json:"claimOid,omitempty"`
+	PickupDeadlineUTC      string                   `json:"pickupDeadlineUtc,omitempty"`
+	CancelReplyDeadlineUTC string                   `json:"cancelReplyDeadlineUtc,omitempty"`
+	PriorTaskOID           string                   `json:"priorTaskOid,omitempty"`
+	SlotBranch             string                   `json:"slotBranch,omitempty"`
+	SlotOID                string                   `json:"slotOid,omitempty"`
+	PriorSlotOID           string                   `json:"priorSlotOid,omitempty"`
 	// ProposalDigest identifies the exact accepted or refused claim body.
 	// OutputOID is the signed Result commit admitted by a successful final
 	// decision; the decision's TaskOID alone is not an output manifest.
@@ -329,6 +338,17 @@ func (g *GitChoreographyPersist) pendingTaskOID(identity string) string {
 	defer g.mu.Unlock()
 	if g.pending != nil && g.pending.mutation.Identity == identity {
 		return g.pending.mutation.NewTaskOID
+	}
+	return choreographyLedgerMissingIdentity
+}
+
+func (g *GitChoreographyPersist) pendingResultReceiptOID(identity string) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pending != nil && g.pending.mutation.Identity == identity &&
+		(g.pending.mutation.Event.Kind == ChoreographyResultAccepted ||
+			g.pending.mutation.Event.Kind == ChoreographyAckAccepted) {
+		return g.pending.mutation.Event.ResultReceiptOID
 	}
 	return choreographyLedgerMissingIdentity
 }
@@ -397,6 +417,12 @@ func (g *GitChoreographyPersist) persistAtomic(ctx context.Context, mutation cho
 			parents = append(parents, mutation.NewSlotOID)
 		} else if mutation.Event.Kind == ChoreographyFrameReady && mutation.Event.PreparedInputOID != choreographyLedgerMissingIdentity {
 			parents = append(parents, mutation.Event.PreparedInputOID)
+		} else if (mutation.Event.Kind == ChoreographyResultAccepted ||
+			mutation.Event.Kind == ChoreographyAckAccepted ||
+			mutation.Event.Kind == ChoreographyPickupSettled) &&
+			mutation.Event.ResultReceiptOID != choreographyLedgerMissingIdentity &&
+			mutation.Event.ResultReceiptOID != mutation.Event.TaskOID {
+			parents = append(parents, mutation.Event.ResultReceiptOID)
 		}
 		newLedger, err := g.opts.Mailbox.commitMessage(ctx, choreographyLedgerKind, document,
 			parents, nil)
@@ -705,13 +731,17 @@ func (g *GitChoreographyPersist) SealRun(ctx context.Context, abort bool) (Chore
 	done := make(map[string]bool, len(g.tasks)+len(g.localTasks))
 	pendingTaskPackages := make(map[string]bool, len(g.tasks))
 	for _, event := range g.events {
+		key := choreographyLedgerTaskClaimKeyPrefix + event.Task
+		if event.PickupID != choreographyLedgerMissingIdentity {
+			key = choreographyLedgerPickupClaimKeyPrefix + event.PickupID
+		}
 		switch event.Kind {
 		case ChoreographyClaimAccepted:
-			active[event.Task] = choreographyLedgerActiveClaim
-		case ChoreographyRetryReady:
-			active[event.Task] = choreographyLedgerInactiveClaim
+			active[key] = choreographyLedgerActiveClaim
+		case ChoreographyRetryReady, ChoreographyPickupSettled:
+			active[key] = choreographyLedgerInactiveClaim
 		case ChoreographyTerminal, ChoreographyBlocked:
-			active[event.Task] = choreographyLedgerInactiveClaim
+			active[key] = choreographyLedgerInactiveClaim
 			done[event.Task] = choreographyLedgerFinishedTask
 			if event.Kind == ChoreographyTerminal && event.ResultReceiptOID != choreographyLedgerMissingIdentity &&
 				event.Package != choreographyLedgerMissingIdentity && event.PackageOutcome == choreographyLedgerMissingIdentity {
@@ -813,6 +843,12 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 			wantParents = choreographyLedgerThreeParentCount
 		} else if record.Event.Kind == ChoreographyFrameReady && record.Event.PreparedInputOID != choreographyLedgerMissingIdentity {
 			wantParents = choreographyLedgerThreeParentCount
+		} else if (record.Event.Kind == ChoreographyResultAccepted ||
+			record.Event.Kind == ChoreographyAckAccepted ||
+			record.Event.Kind == ChoreographyPickupSettled) &&
+			record.Event.ResultReceiptOID != choreographyLedgerMissingIdentity &&
+			record.Event.ResultReceiptOID != record.Event.TaskOID {
+			wantParents = choreographyLedgerThreeParentCount
 		}
 		if err != nil || len(parents) != wantParents ||
 			parents[choreographyLedgerFirstItemIndex] != previous ||
@@ -822,7 +858,12 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 				parents[choreographyLedgerThirdItemIndex] != record.Event.SlotOID ||
 			wantParents == choreographyLedgerThreeParentCount &&
 				record.Event.Kind == ChoreographyFrameReady &&
-				parents[choreographyLedgerThirdItemIndex] != record.Event.PreparedInputOID {
+				parents[choreographyLedgerThirdItemIndex] != record.Event.PreparedInputOID ||
+			wantParents == choreographyLedgerThreeParentCount &&
+				(record.Event.Kind == ChoreographyResultAccepted ||
+					record.Event.Kind == ChoreographyAckAccepted ||
+					record.Event.Kind == ChoreographyPickupSettled) &&
+				parents[choreographyLedgerThirdItemIndex] != record.Event.ResultReceiptOID {
 			return fmt.Errorf(choreographyLedgerEventParentErr)
 		}
 		if record.Event.Kind == ChoreographyBlocked {
@@ -1004,7 +1045,9 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 					cancellation.PlanDigest != g.opts.Binding.PlanDigest ||
 					cancellation.Task != record.Event.Task || cancellation.Attempt != record.Event.Attempt ||
 					cancellation.Node != record.Event.Node || cancellation.Tip != record.Event.PriorTaskOID ||
-					cancellation.Assignment == choreographyLedgerMissingIdentity {
+					cancellation.Assignment == choreographyLedgerMissingIdentity ||
+					record.Event.Kind == ChoreographyCancelIssued &&
+						cancellation.CancelReplyDeadlineUTC != record.Event.CancelReplyDeadlineUTC {
 					return fmt.Errorf(choreographyLedgerCancelEventErr)
 				}
 				claimParents, err := mailbox.plumbing.CommitParents(ctx, record.Event.PriorTaskOID)

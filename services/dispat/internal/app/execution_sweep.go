@@ -102,13 +102,13 @@ func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchReques
 	for _, rel := range work.resolveReachedReleases(covered) {
 		space := rel.Pkg.Space
 		tasks = append(tasks, execution.ReservationTask{
-			Task: rel.Pkg.Name + ":" + execution.KindRun, Kind: execution.KindRun,
+			Task: rel.Pkg.Name + choreographyTaskPartSeparatorText + execution.KindRun, Kind: execution.KindRun,
 			Platforms: space.BuildPlatforms,
 			Placement: execution.ResolveStagePlacement(execution.StageBuild,
-				space.RunOnly.ResolveBuild(), len(space.LoginScript) > 0),
+				space.RunOnly.ResolveBuild(), len(space.LoginScript) > choreographyNoEntriesCount),
 		})
 	}
-	if len(tasks) == 0 {
+	if len(tasks) == choreographyNoEntriesCount {
 		return nil, nil
 	}
 	graphDigest, err := execution.DigestSweepTasks(a.planDigest, work.name, tasks)
@@ -121,8 +121,14 @@ func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchReques
 	if err != nil {
 		return nil, a.reportSweepRefusal(err)
 	}
-	_, _, _, completeGraphDigest, err := a.sweepChoreographyInventory(coordinator,
-		work, covered, tasks, request.onError, graphDigest)
+	_, _, _, completeGraphDigest, err := a.sweepChoreographyInventory(sweepChoreographyInventoryOptions{
+		Coordinator:         coordinator,
+		Work:                work,
+		Covered:             covered,
+		Tasks:               tasks,
+		OnError:             request.onError,
+		SemanticGraphDigest: graphDigest,
+	})
 	if err != nil {
 		return coordinator, a.reportSweepRefusal(err)
 	}
@@ -131,7 +137,7 @@ func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchReques
 	if returnChannel == nil {
 		return coordinator, a.reportSweepRefusal(execution.NewDiagnostic(
 			execution.CodeConfiguration, execution.CategoryConfiguration,
-			"distributed sweep has no return channel"))
+			sweepMissingReturnChannelErrorText))
 	}
 	coordinator.ReturnEndpoint = returnChannel.endpoint
 	coordinator.ReturnCertSHA256 = returnChannel.certPin
@@ -149,18 +155,24 @@ func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchReques
 	if err := a.openDispatch(ctx, coordinator, work.pl, work.runner); err != nil {
 		return coordinator, a.reportSweepRefusal(err)
 	}
-	if len(covered) > 0 {
-		specs, budgets, err := sweepChoreographySpecs(work.pl, covered, tasks,
-			coordinator.ChoreographyNodes(), a.cfg.BuildConcurrency)
+	if len(covered) > choreographyNoEntriesCount {
+		specs, budgets, err := sweepChoreographySpecs(sweepChoreographySpecOptions{
+			Plan:          work.pl,
+			Covered:       covered,
+			Tasks:         tasks,
+			Roster:        coordinator.ChoreographyNodes(),
+			BuildCapacity: a.cfg.BuildConcurrency,
+		})
 		if err != nil {
 			return coordinator, a.reportSweepRefusal(err)
 		}
+		applyChoreographyRetrySafety(specs, coordinator.JoinPolicy.RetryAfterUncertainAttempt)
 		templates, err := compileSweepChoreographyTemplates(coordinator, work, specs)
 		if err != nil {
 			return coordinator, a.reportSweepRefusal(err)
 		}
 		onError := request.onError
-		if onError == "" {
+		if onError == choreographyAbsentIdentityText {
 			onError = OnErrorSkip
 		}
 		policies := sweepChoreographyPackagePolicies(work.pl, covered, onError)
@@ -176,7 +188,7 @@ func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchReques
 		if digest != coordinator.GraphDigest {
 			return coordinator, a.reportSweepRefusal(execution.NewDiagnostic(
 				execution.CodeIntegrity, execution.CategoryIntegrity,
-				"sweep descriptors differ from signed complete logical graph"))
+				sweepDescriptorMismatchErrorText))
 		}
 		policy, err := newSweepOutcomeEvaluator(work.pl, covered, onError)
 		if err != nil {

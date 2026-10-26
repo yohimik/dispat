@@ -8,6 +8,17 @@ import (
 	"fmt"
 )
 
+const (
+	choreographyBlockedVerifyMissingOutcome        = ""
+	choreographyBlockedVerifyFailedOutcome         = "failed"
+	choreographyBlockedVerifyWrongKindError        = "execution: blocked event names another task kind"
+	choreographyBlockedVerifyEventMismatchError    = "execution: blocked task differs from signed ledger event"
+	choreographyBlockedVerifyMissingEvidenceError  = "execution: failed local block has no signed evidence"
+	choreographyBlockedVerifyInvalidEvidenceError  = "execution: invalid signed local failure evidence"
+	choreographyBlockedVerifyNonInertError         = "execution: local failure did not fence an inert reservation"
+	choreographyBlockedVerifyWrongReservationError = "execution: local failure names another reservation"
+)
+
 // verifyBlockedEvent binds the ledger event to the signed task terminal. A
 // first-node pre-claim failure is valid only over the original inert root;
 // an offered or claimed task cannot be relabeled as a local failure.
@@ -18,7 +29,7 @@ func (g *GitChoreographyPersist) verifyBlockedEvent(ctx context.Context, event C
 		return err
 	}
 	if tree.kind != choreographyBlockedKind {
-		return fmt.Errorf("execution: blocked event names another task kind")
+		return fmt.Errorf(choreographyBlockedVerifyWrongKindError)
 	}
 	data, err := m.Read(ctx, ChainTip{OID: event.TaskOID, Kind: tree.kind,
 		document: tree.document, signature: tree.signature}, returnReplyLimit)
@@ -30,26 +41,26 @@ func (g *GitChoreographyPersist) verifyBlockedEvent(ctx context.Context, event C
 		blocked.Task != event.Task || blocked.Attempt != event.Attempt ||
 		blocked.ExpectedOID != event.PriorTaskOID || blocked.Package != event.Package ||
 		blocked.BlockedBy != event.BlockedBy || blocked.PackageOutcome != event.PackageOutcome {
-		return fmt.Errorf("execution: blocked task differs from signed ledger event")
+		return fmt.Errorf(choreographyBlockedVerifyEventMismatchError)
 	}
 	if blocked.LocalFailure == nil {
-		if blocked.PackageOutcome == "failed" && blocked.BlockedBy == blocked.Package {
-			return fmt.Errorf("execution: failed local block has no signed evidence")
+		if blocked.PackageOutcome == choreographyBlockedVerifyFailedOutcome && blocked.BlockedBy == blocked.Package {
+			return fmt.Errorf(choreographyBlockedVerifyMissingEvidenceError)
 		}
 		return nil
 	}
-	if blocked.PackageOutcome != "failed" &&
-		(blocked.PackageOutcome != "" || g.packageState[blocked.Package] != "failed") ||
+	if blocked.PackageOutcome != choreographyBlockedVerifyFailedOutcome &&
+		(blocked.PackageOutcome != choreographyBlockedVerifyMissingOutcome || g.packageState[blocked.Package] != choreographyBlockedVerifyFailedOutcome) ||
 		blocked.BlockedBy != blocked.Package ||
 		!validChoreographyLocalFailure(blocked.LocalFailure, event.PriorTaskOID) {
-		return fmt.Errorf("execution: invalid signed local failure evidence")
+		return fmt.Errorf(choreographyBlockedVerifyInvalidEvidenceError)
 	}
 	root, err := m.readTree(ctx, event.PriorTaskOID)
 	if err != nil {
 		return err
 	}
 	if root.kind != MessageReservation {
-		return fmt.Errorf("execution: local failure did not fence an inert reservation")
+		return fmt.Errorf(choreographyBlockedVerifyNonInertError)
 	}
 	rootData, err := m.Read(ctx, ChainTip{OID: event.PriorTaskOID, Kind: root.kind,
 		document: root.document, signature: root.signature}, returnReplyLimit)
@@ -63,7 +74,7 @@ func (g *GitChoreographyPersist) verifyBlockedEvent(ctx context.Context, event C
 		reservation.Generation != g.opts.Binding.Generation ||
 		reservation.PlanDigest != g.opts.Binding.PlanDigest ||
 		reservation.Task != event.Task || reservation.Attempt != event.Attempt {
-		return fmt.Errorf("execution: local failure names another reservation")
+		return fmt.Errorf(choreographyBlockedVerifyWrongReservationError)
 	}
 	return nil
 }

@@ -5,6 +5,7 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -14,6 +15,8 @@ import (
 const (
 	compiledNoticeIdentityError    = "execution: compiled participation notice differs from this node's pinned run"
 	compiledNoticeMailboxError     = "execution: compiled participation requires a signed canonical Git mailbox"
+	compiledDrainFeedErrorFormat   = "execution: worker drain cannot read its signed run state: %w"
+	compiledDrainReplyErrorFormat  = "execution: worker drain has no exact signed receipt: %w"
 	compiledJoinKeyError           = "execution: late choreography participation has no pinned node identity key"
 	compiledJoinRefusedErrorFormat = "execution: choreography join for node %q was refused: %s"
 	compiledEventPageSize          = 32
@@ -90,15 +93,23 @@ func (w *Worker) drainCompiledRuns(ctx context.Context) error {
 		for {
 			page, err := run.channel.client.PollEvents(ctx, ChoreographyEventRequest{
 				ChoreographyRunBinding: run.binding, Node: w.Node, MaxEvents: compiledSingleHeadEvent})
-			if err != nil || page.Head.OID == compiledMissingIdentity {
+			if err != nil {
+				retired, retireErr := w.retireSealedCompiledRun(ctx, run)
+				if retired || retireErr == nil && (run.frontier.stopped || run.frontier.sealed) {
+					break
+				}
+				return fmt.Errorf(compiledDrainFeedErrorFormat, errors.Join(err, retireErr))
+			}
+			if page.Head.OID == compiledMissingIdentity {
 				return fmt.Errorf(compiledNoticeIdentityError)
 			}
 			proposal := ChoreographyDrainProposal{ChoreographyRunBinding: run.binding,
 				BootstrapOID: run.bootstrapOID, GraphRootOID: run.rootOID, Node: w.Node,
 				CapacityAuthorityID: w.Report.AuthorityID,
 				MembershipEpochOID:  run.membershipEpoch, ExpectedLedgerOID: page.Head.OID,
-				RequestID: returnProposalID(choreographyDrainKind, run.binding.Run,
-					w.Node, minimumCompiledAttempt, run.membershipEpoch+page.Head.OID)}
+				RequestID: returnProposalID(returnProposalIdentity{Kind: choreographyDrainKind,
+					Run: run.binding.Run, Task: w.Node, Attempt: minimumCompiledAttempt,
+					OID: run.membershipEpoch + page.Head.OID})}
 			if len(w.JoinIdentityKey) != compiledNoJoinKeyBytes {
 				if err := SignChoreographyDrainProposal(&proposal, w.JoinIdentityKey); err != nil {
 					return err
@@ -112,7 +123,11 @@ func (w *Worker) drainCompiledRuns(ctx context.Context) error {
 			if err != nil {
 				settled, found, lookupErr := client.LookupDrain(ctx, query)
 				if lookupErr != nil || !found {
-					return fmt.Errorf(compiledNoticeIdentityError)
+					retired, retireErr := w.retireSealedCompiledRun(ctx, run)
+					if retired || retireErr == nil && (run.frontier.stopped || run.frontier.sealed) {
+						break
+					}
+					return fmt.Errorf(compiledDrainReplyErrorFormat, errors.Join(err, lookupErr, retireErr))
 				}
 				receipt = settled
 			}
@@ -127,6 +142,10 @@ func (w *Worker) drainCompiledRuns(ctx context.Context) error {
 				continue
 			}
 			if !receipt.Accepted {
+				if receipt.Refused && receipt.Reason == choreographyDrainRefusalStopping {
+					run.frontier.draining = compiledDrainAccepted
+					break
+				}
 				return fmt.Errorf(compiledNoticeIdentityError)
 			}
 			run.frontier.draining = compiledDrainAccepted
@@ -195,6 +214,9 @@ func (w *Worker) handleCompiledNotice(ctx context.Context,
 		carrier.LogicalDescriptorDigest != binding.GraphDigest {
 		return compiledNoSelectionProgress, fmt.Errorf(compiledNoticeIdentityError)
 	}
+	if err := validateChoreographyRetryPolicy(bootstrap.JoinPolicy, carrier.Tasks); err != nil {
+		return compiledNoSelectionProgress, err
+	}
 	_, roster, err := ReadChoreographyLedgerRoot(ctx, mailbox, binding, notice.BootstrapOID)
 	if err != nil {
 		return compiledNoSelectionProgress, err
@@ -246,8 +268,12 @@ func (w *Worker) handleCompiledNotice(ctx context.Context,
 }
 
 func (r *workerCompiledRun) openFrontier(node string) error {
-	frontier, err := NewCompiledChoreographyFrontier(r.binding, r.rootOID,
-		r.member, r.carrier.Tasks)
+	frontier, err := NewCompiledChoreographyFrontier(CompiledChoreographyFrontierOptions{
+		Binding:      r.binding,
+		GraphRootOID: r.rootOID,
+		Node:         r.member,
+		Tasks:        r.carrier.Tasks,
+	})
 	if err != nil {
 		return err
 	}
@@ -326,8 +352,9 @@ func (w *Worker) joinCompiledRun(ctx context.Context, run *workerCompiledRun) (b
 			BootstrapOID: run.bootstrapOID, GraphRootOID: run.rootOID,
 			AlgorithmVersion: run.bootstrap.AlgorithmVersion, Node: w.Node,
 			Endpoint: w.Endpoint, Report: report, ExpectedLedgerOID: page.Head.OID,
-			RequestID: returnProposalID(choreographyJoinKind, run.binding.Run,
-				w.Node, minimumCompiledAttempt, run.rootOID+page.Head.OID)}
+			RequestID: returnProposalID(returnProposalIdentity{Kind: choreographyJoinKind,
+				Run: run.binding.Run, Task: w.Node, Attempt: minimumCompiledAttempt,
+				OID: run.rootOID + page.Head.OID})}
 		if err := SignChoreographyJoinProposal(&proposal, w.JoinIdentityKey); err != nil {
 			return compiledNoSelectionProgress, err
 		}
@@ -407,7 +434,8 @@ func (w *Worker) applyCompiledEventPage(run *workerCompiledRun, page Choreograph
 			(event.Kind == ChoreographyMemberJoined || event.Kind == ChoreographyMemberCapacityChanged) {
 			run.membershipEpoch = event.LedgerOID
 		}
-		if event.Kind == ChoreographyTerminal && event.Weight > compiledNoLeaseWeight && event.Budget != compiledMissingIdentity {
+		if (event.Kind == ChoreographyTerminal || event.Kind == ChoreographyRetryReady ||
+			event.Kind == ChoreographyPickupSettled) && event.Weight > compiledNoLeaseWeight && event.Budget != compiledMissingIdentity {
 			for taskID, parked := range run.parked {
 				if parked.scope == compiledCapacityScopeBudget && parked.resource == event.Budget ||
 					parked.scope == compiledCapacityScopeNode && parked.resource == event.Node {
@@ -460,19 +488,22 @@ func (w *Worker) pickCompiledTasks(ctx context.Context, run *workerCompiledRun) 
 			return progress, err
 		}
 		intent := NodeSlotIntent{Run: run.binding.Run, Task: selected.Spec.Task,
-			Attempt: selected.Attempt, Weight: selected.Spec.Weight}
+			Attempt: selected.Attempt, Weight: selected.Spec.Weight,
+			PickupID: NewChoreographyPickupID()}
 		leaseID := nodeSlotLeaseID(intent)
 		proposal := ChoreographyClaimProposal{ChoreographyRunBinding: run.binding,
 			Task: selected.Spec.Task, Attempt: selected.Attempt, Node: w.Node,
-			Branch: selected.Spec.Branch, ExpectedOID: tipOID,
+			PickupID: intent.PickupID,
+			Branch:   selected.Spec.Branch, ExpectedOID: tipOID,
 			ExpectedLedgerOID: run.frontier.Cursor().OID,
 			GraphRootOID:      run.rootOID, MembershipEpochOID: run.membershipEpoch,
 			CapacityAuthorityID: w.Report.AuthorityID,
 			LeaseIntentID:       leaseID, LeaseWeight: selected.Spec.Weight,
 			InputsDigest: inputsDigest, TemplateDigest: selected.Spec.TemplateDigest,
 			Bindings: identity, BindingsDigest: bindingsDigest,
-			ProposalID: returnProposalID(choreographyClaimKind, run.binding.Run,
-				selected.Spec.Task, selected.Attempt, tipOID+run.frontier.Cursor().OID+leaseID)}
+			ProposalID: returnProposalID(returnProposalIdentity{Kind: choreographyClaimKind,
+				Run: run.binding.Run, Task: selected.Spec.Task, Attempt: selected.Attempt,
+				OID: tipOID + run.frontier.Cursor().OID + leaseID})}
 		if len(w.JoinIdentityKey) != compiledNoJoinKeyBytes {
 			if err := SignChoreographyClaimProposal(&proposal, w.JoinIdentityKey); err != nil {
 				return progress, err
@@ -588,8 +619,10 @@ func (w *Worker) settleCompiledClaim(ctx context.Context, run *workerCompiledRun
 	}
 	assignmentTip := ChainTip{OID: receipt.AssignmentOID, Branch: proposal.Branch,
 		Kind: MessageAssignment}
-	started, done, err := w.startReturnedClaim(ctx, ctx, assignmentTip,
-		*assignment, receipt.OID, pending.lease)
+	started, done, err := w.startReturnedClaim(returnedClaimStart{
+		LookupContext: ctx, TaskContext: ctx, Tip: assignmentTip,
+		Assignment: *assignment, ClaimOID: receipt.OID, Held: []NodeSlotLease{pending.lease},
+	})
 	if done {
 		delete(run.pending, proposal.Task)
 	}

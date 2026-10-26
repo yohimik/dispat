@@ -196,7 +196,8 @@ const (
 	// the assignment's own statement of what the node may do beyond running
 	// commands (§28.4), so a task that would have to exceed them is refused
 	// before it is claimed rather than halfway through.
-	ReasonPermit RejectReason = "permit"
+	ReasonPermit   RejectReason = "permit"
+	ReasonAccepted RejectReason = ""
 )
 
 // Rejection is one message a node will not act on.
@@ -260,6 +261,10 @@ type HeaderVersionCheck struct {
 	Binding Binding
 	Now     time.Time
 	Version int
+	// CausallyBound is only for an already verified signed descendant of this
+	// exact run/claim. Its durable ancestry, rather than local wall time,
+	// prevents replay into another attempt.
+	CausallyBound bool
 }
 
 // CheckHeaderVersion keeps the legacy reader pinned to v2 while a worker
@@ -278,6 +283,9 @@ func CheckHeaderVersion(check HeaderVersionCheck) RejectReason {
 	issued, err := time.Parse(time.RFC3339, header.IssuedAt)
 	if err != nil {
 		return ReasonIssuedAt
+	}
+	if check.CausallyBound {
+		return ReasonAccepted
 	}
 	if issued.Before(now.Add(-replayWindow)) || issued.After(now.Add(replayWindow)) {
 		return ReasonIssuedAt

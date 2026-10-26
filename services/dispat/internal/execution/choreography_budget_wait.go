@@ -5,10 +5,18 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
-const choreographyBudgetWaitStateErrorFormat = "execution: task %q cannot wait for an eligible signed claim budget"
+const (
+	choreographyBudgetWaitStateErrorFormat = "execution: task %q cannot wait for an eligible signed claim budget"
+	choreographyBudgetWaitNoPredecessors   = 0
+	choreographyBudgetWaitMissingClaim     = ""
+	choreographyBudgetWaitSignedStopping   = "execution: signed run stopping bars a new claim budget"
+)
+
+var ErrChoreographyRunStopping = errors.New(choreographyBudgetWaitSignedStopping)
 
 // WaitClaimBudget waits for this caller's own task to fit the current signed
 // run budget and admitted node capacity. It neither reserves capacity nor
@@ -20,8 +28,12 @@ func (b *FirstNodeBroker) WaitClaimBudget(ctx context.Context, taskID, node stri
 	for {
 		b.mu.Lock()
 		task := b.tasks[taskID]
-		if b.stopping || b.sealed || b.fault != nil || task == nil ||
-			task.spec.Virtual || task.remaining != 0 || task.terminal || task.claim != "" ||
+		if b.stopping {
+			b.mu.Unlock()
+			return ErrChoreographyRunStopping
+		}
+		if b.sealed || b.fault != nil || task == nil ||
+			task.spec.Virtual || task.remaining != choreographyBudgetWaitNoPredecessors || task.terminal || task.claim != choreographyBudgetWaitMissingClaim ||
 			!b.nodeEligible(task.spec, node) {
 			b.mu.Unlock()
 			return fmt.Errorf(choreographyBudgetWaitStateErrorFormat, taskID)

@@ -15,7 +15,7 @@ import (
 // from pinned inputs by an interpreting peer.
 func (a *App) includePreparedReleaseGraph(pl *plan.Plan, compiled *release.CompiledTaskGraph) error {
 	if a == nil || pl == nil || compiled == nil {
-		return fmt.Errorf("execution: prepared release graph has no plan or compiler")
+		return fmt.Errorf(choreographyMissingPreparedCompilerErrorText)
 	}
 	prepared, err := execution.DiscoverChoreographyPreparedTasks(compiled.ReservationStages(),
 		execution.ChoreographyPreparedDiscovery{
@@ -37,12 +37,12 @@ func includeDiscoveredPreparedReleaseGraph(compiled *release.CompiledTaskGraph,
 	for _, edge := range edges {
 		consumers[edge.From] = append(consumers[edge.From], edge.To)
 	}
-	specs := make([]release.PreparedTaskSpec, 0, len(prepared))
+	specs := make([]release.PreparedTaskSpec, choreographyNoEntriesCount, len(prepared))
 	for _, item := range prepared {
-		if item.Task == "" || item.Kind != execution.KindPrepare || item.Release == nil ||
+		if item.Task == choreographyAbsentIdentityText || item.Kind != execution.KindPrepare || item.Release == nil ||
 			item.Release.Pkg == nil || item.Release.Pkg.Name != item.Package ||
 			item.Weight != item.Release.Pkg.BuildWeight {
-			return fmt.Errorf("execution: invalid prepared provider %q", item.Task)
+			return fmt.Errorf(choreographyInvalidPreparedProviderErrorFormat, item.Task)
 		}
 		specs = append(specs, release.PreparedTaskSpec{
 			TaskID: item.Task, Package: item.Package, Release: item.Release,
@@ -60,39 +60,39 @@ type preparedGraphEdge struct{ From, To string }
 func resolvePreparedGraphEdges(compiled *release.CompiledTaskGraph,
 	prepared []execution.ChoreographyPreparedTask) ([]preparedGraphEdge, error) {
 	if compiled == nil {
-		return nil, fmt.Errorf("execution: prepared graph has no compiled release tasks")
+		return nil, fmt.Errorf(choreographyMissingPreparedReleaseTasksErrorText)
 	}
 	byStage := make(map[string]string)
 	known := make(map[string]bool)
 	for _, shape := range compiled.TaskShapes() {
-		known[shape.ID] = true
+		known[shape.ID] = choreographyKnownMemberState
 		// beforeAll reports under the first stage it gates but is not that
 		// stage. A prepared provider belongs to the actual consumer frame,
 		// whose reservation names Stage, so exclude this hook-only vertex.
-		if shape.Stage == "" || shape.Virtual || shape.Kind == "beforeAll" {
+		if shape.Stage == choreographyAbsentIdentityText || shape.Virtual || shape.Kind == choreographyBeforeAllStageName {
 			continue
 		}
-		key := shape.Package + "\x00" + shape.Stage
-		if prior := byStage[key]; prior != "" && prior != shape.ID {
-			return nil, fmt.Errorf("execution: ambiguous compiled stage %s", shape.Stage)
+		key := shape.Package + choreographyStageKeySeparatorText + shape.Stage
+		if prior := byStage[key]; prior != choreographyAbsentIdentityText && prior != shape.ID {
+			return nil, fmt.Errorf(choreographyAmbiguousStageErrorFormat, shape.Stage)
 		}
 		byStage[key] = shape.ID
 	}
 	for _, item := range prepared {
-		if item.Task == "" || known[item.Task] {
-			return nil, fmt.Errorf("execution: repeated prepared task identity %q", item.Task)
+		if item.Task == choreographyAbsentIdentityText || known[item.Task] {
+			return nil, fmt.Errorf(choreographyRepeatedPreparedTaskErrorFormat, item.Task)
 		}
-		known[item.Task] = true
+		known[item.Task] = choreographyKnownMemberState
 	}
-	edges := make([]preparedGraphEdge, 0)
+	edges := make([]preparedGraphEdge, choreographyNoEntriesCount)
 	for _, item := range prepared {
 		for _, consumer := range item.Consumers {
 			taskID := consumer.Task
-			if taskID == "" {
-				taskID = byStage[consumer.Package+"\x00"+consumer.Stage]
+			if taskID == choreographyAbsentIdentityText {
+				taskID = byStage[consumer.Package+choreographyStageKeySeparatorText+consumer.Stage]
 			}
-			if taskID == "" || !known[taskID] || taskID == item.Task {
-				return nil, fmt.Errorf("execution: prepared provider %s has no exact consumer task", item.Task)
+			if taskID == choreographyAbsentIdentityText || !known[taskID] || taskID == item.Task {
+				return nil, fmt.Errorf(choreographyMissingPreparedConsumerErrorFormat, item.Task)
 			}
 			edges = append(edges, preparedGraphEdge{From: item.Task, To: taskID})
 		}
@@ -108,10 +108,10 @@ func resolvePreparedGraphEdges(compiled *release.CompiledTaskGraph,
 
 func compareGraphString(a, b string) int {
 	if a < b {
-		return -1
+		return choreographySortBeforeValue
 	}
 	if a > b {
-		return 1
+		return choreographySortAfterValue
 	}
-	return 0
+	return choreographySortEqualValue
 }

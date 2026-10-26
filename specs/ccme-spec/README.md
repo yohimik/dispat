@@ -11,7 +11,7 @@ The current source contains the following additional contracts:
 - [Polyrepository Git profile](./SPEC.md#27-polyrepository-git-profile): optional planning across explicitly linked source histories, with repository-qualified revisions, gitlink checkpoints, explicit ambiguous-boundary recovery, and one combined dependency graph.
 - [Linked peer topology](./SPEC.md#2711-linked-peer-topology): the same profile without a control repository. Identity and roster activate the fleet; peers carry their own configuration and records, two-sided links join them, a release may start in any of them, and a cross-repository boundary is proven from the links a release recorded rather than from a checkpoint.
 - [Distributed task and release execution](./SPEC.md#28-distributed-task-and-release-execution): optional
-  compilation, interpretation and mixed modes across all three history modes. One first node owns engine-managed
+  compilation, interpretation and hybrid modes across all three history modes. One first node owns engine-managed
   Git pushes and release effects; choreographers execute eligible tasks. Pinned planning inputs, a verified
   return channel and exact task outcomes preserve release authority in ordinary repository records.
 - [Build readiness](./SPEC.md#192a-build-readiness): what a consumer's build waits for in its provider, `none`, `build` or `publish`; the provider publishes first under all three.

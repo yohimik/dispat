@@ -47,8 +47,26 @@ esac`}
 			require.Zero(t, result.Code, "stdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
 			reports := executionPreparedReports(result)
 			require.Len(t, reports, 1)
-			assert.Equal(t, placement.worker, reports[0].Str("worker"))
-			assert.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(result))
+			actualWorker := ""
+			for _, event := range executionEvents(result) {
+				if event.Str("message") == "task outcome" && event.Str("task") == "assets:"+executionPrepareKind &&
+					event.Str("stage") == "build" {
+					actualWorker = event.Str("worker")
+				}
+			}
+			assert.Equal(t, placement.worker, actualWorker,
+				"the prepared task's signed build outcome records its placement\nstdout:\n%s", result.Stdout)
+			if placement.worker != "" {
+				claimedNode := ""
+				for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+					if event.Kind == "claim-accepted" && event.Task == "assets:"+executionPrepareKind {
+						claimedNode = event.Node
+					}
+				}
+				assert.Equal(t, placement.worker, claimedNode,
+					"the prepared provider's exact signed Claim determines its node")
+			}
+			assert.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(t, rig.mailbox))
 			assert.True(t, rig.repo.IsTagged("assets@"+executionPrepareBaseline))
 			assert.False(t, rig.repo.IsTagged("assets@1.1.0"))
 			stopAll(t, workers)

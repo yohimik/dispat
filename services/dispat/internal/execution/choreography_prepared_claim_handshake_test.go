@@ -66,10 +66,12 @@ func TestChoreographyFirstPreparedClaimSignsFrameBeforeExactRetry(t *testing.T) 
 	identity := ChoreographyTaskBindings{}
 	identityDigest, err := DigestChoreographyTaskBindings(identity)
 	require.NoError(t, err)
+	pickupID := NewChoreographyPickupID()
 	proposal := ChoreographyClaimProposal{ChoreographyRunBinding: f.binding, Task: f.spec.Task, Attempt: 1,
 		Node: "peer", Branch: f.spec.Branch, ExpectedOID: f.taskRoot, ExpectedLedgerOID: start.OID,
 		GraphRootOID: f.root, MembershipEpochOID: f.complete, CapacityAuthorityID: "11111111111111111111111111111111",
-		LeaseIntentID: nodeSlotLeaseID(NodeSlotIntent{Run: f.binding.Run, Task: f.spec.Task, Attempt: 1}), LeaseWeight: 1,
+		PickupID:      pickupID,
+		LeaseIntentID: nodeSlotLeaseID(NodeSlotIntent{Run: f.binding.Run, Task: f.spec.Task, Attempt: 1, PickupID: pickupID}), LeaseWeight: 1,
 		InputsDigest: inputsDigest, TemplateDigest: f.spec.TemplateDigest, Bindings: identity,
 		BindingsDigest: identityDigest, ProposalID: "first-prepared-attempt"}
 	wrongTemplate := proposal
@@ -96,9 +98,13 @@ func TestChoreographyFirstPreparedClaimSignsFrameBeforeExactRetry(t *testing.T) 
 	require.Equal(t, ChoreographyFrameReady, page.Events[2].Kind)
 	require.Equal(t, proposal.Attempt, page.Events[2].Attempt)
 	require.Equal(t, carrierOID, page.Events[2].PreparedInputOID)
-	frontier, err := NewCompiledChoreographyFrontier(f.binding, f.root,
-		ChoreographyRuntimeNode{Name: "peer", Platform: "linux/amd64", Capacity: 1,
-			AuthorityID: "11111111111111111111111111111111"}, f.carrier.Tasks)
+	frontier, err := NewCompiledChoreographyFrontier(CompiledChoreographyFrontierOptions{
+		Binding:      f.binding,
+		GraphRootOID: f.root,
+		Node: ChoreographyRuntimeNode{Name: "peer", Platform: "linux/amd64", Capacity: 1,
+			AuthorityID: "11111111111111111111111111111111"},
+		Tasks: f.carrier.Tasks,
+	})
 	require.NoError(t, err)
 	require.NoError(t, frontier.ApplyEventPage(ChoreographyEventPage{
 		Events: page.Events[:2], Cursor: ChoreographyEventCursor{
@@ -155,11 +161,13 @@ func TestChoreographyFatalBindingStopsRunAndSettlesExactRefusal(t *testing.T) {
 	identity := ChoreographyTaskBindings{}
 	identityDigest, err := DigestChoreographyTaskBindings(identity)
 	require.NoError(t, err)
+	pickupID := NewChoreographyPickupID()
 	proposal := ChoreographyClaimProposal{ChoreographyRunBinding: f.binding,
 		Task: f.spec.Task, Attempt: 1, Node: "peer", Branch: f.spec.Branch,
 		ExpectedOID: f.taskRoot, ExpectedLedgerOID: start.OID, GraphRootOID: f.root,
 		MembershipEpochOID: f.complete, CapacityAuthorityID: "11111111111111111111111111111111",
-		LeaseIntentID: nodeSlotLeaseID(NodeSlotIntent{Run: f.binding.Run, Task: f.spec.Task, Attempt: 1}),
+		PickupID:      pickupID,
+		LeaseIntentID: nodeSlotLeaseID(NodeSlotIntent{Run: f.binding.Run, Task: f.spec.Task, Attempt: 1, PickupID: pickupID}),
 		LeaseWeight:   1, InputsDigest: inputsDigest, TemplateDigest: f.spec.TemplateDigest,
 		Bindings: identity, BindingsDigest: identityDigest, ProposalID: "fatal-binding"}
 	refused, err := broker.AcceptClaim(t.Context(), proposal)

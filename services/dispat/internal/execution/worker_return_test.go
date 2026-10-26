@@ -137,7 +137,8 @@ func TestWorkerDefinitivelyRefusedClaimReleasesSlotWithoutStarting(t *testing.T)
 				return refusedReturnClaim(t, binding, p), nil
 			}
 			fake.lookup = func(query ChoreographyReceiptQuery) (ChoreographyReceipt, bool, error) {
-				proposal := (&Worker{Node: "node-a"}).formatReturnClaim(binding, "ledger-oid", tip, assignment)
+				proposal := (&Worker{Node: "node-a"}).formatReturnClaim(returnClaimRequest{
+					Binding: binding, LedgerOID: "ledger-oid", Tip: tip, Assignment: assignment})
 				require.Equal(t, proposal.ProposalID, query.ProposalID)
 				return refusedReturnClaim(t, binding, proposal), true, nil
 			}
@@ -450,6 +451,47 @@ func TestWorkerNodeSlotRejectsMismatchedSignedFinality(t *testing.T) {
 	require.Equal(t, []NodeSlotLease{lease}, held)
 }
 
+func TestWorkerLosingPickupRetainsSlotUntilItsOwnSignedSettlement(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.Chmod(root, 0o700))
+	authority, err := OpenNodeSlotAuthority(root, "node-a", 1)
+	require.NoError(t, err)
+	pickupID := strings.Repeat("a", 32)
+	intent := NodeSlotIntent{Run: "run", Task: "pkg:build", Attempt: 1, Weight: 1, PickupID: pickupID}
+	lease, available, err := authority.TryReserve(t.Context(), intent)
+	require.NoError(t, err)
+	require.True(t, available)
+	receipt := ChoreographyReceipt{OID: strings.Repeat("b", 40), Accepted: true,
+		Cursor: ChoreographyEventCursor{OID: "ledger-2", Sequence: 2}}
+	polls := 0
+	fake := &fakeWorkerReturn{poll: func(request ChoreographyEventRequest) (ChoreographyEventPage, error) {
+		polls++
+		held, err := authority.Held(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, []NodeSlotLease{lease}, held, "the winning pickup cannot release the losing worker")
+		if polls == 1 {
+			return ChoreographyEventPage{Cursor: ChoreographyEventCursor{OID: "ledger-3", Sequence: 3},
+				Events: []ChoreographyEvent{{Sequence: 3, Kind: ChoreographyTerminal,
+					Task: intent.Task, Attempt: intent.Attempt, Node: "node-a", PickupID: strings.Repeat("c", 32),
+					TaskOID: strings.Repeat("d", 40), ResultReceiptOID: strings.Repeat("e", 40)}}}, nil
+		}
+		require.Equal(t, uint64(3), request.Cursor.Sequence)
+		return ChoreographyEventPage{Cursor: ChoreographyEventCursor{OID: strings.Repeat("f", 40), Sequence: 4},
+			Events: []ChoreographyEvent{{Sequence: 4, Kind: ChoreographyPickupSettled,
+				Task: intent.Task, Attempt: intent.Attempt, Node: "node-a", PickupID: pickupID,
+				TaskOID: strings.Repeat("d", 40), ResultReceiptOID: receipt.OID}}}, nil
+	}}
+	w := &Worker{Node: "node-a", NodeSlots: authority, Log: zerolog.Nop()}
+	task := &claimedTask{assignment: Assignment{Header: Header{Run: intent.Run,
+		Task: intent.Task, Attempt: intent.Attempt}}, slotLease: lease}
+	require.NoError(t, w.awaitNodeSlotDecision(t.Context(), task,
+		&workerReturnChannel{binding: testReturnBinding(), client: fake}, receipt))
+	require.Equal(t, 2, polls)
+	held, err := authority.Held(t.Context())
+	require.NoError(t, err)
+	require.Empty(t, held)
+}
+
 func TestCapacityRefusalParksAcrossIdlePollsAndUnrelatedFinality(t *testing.T) {
 	for _, scope := range []string{"node", "budget"} {
 		t.Run(scope, func(t *testing.T) {
@@ -470,9 +512,10 @@ func TestCapacityRefusalParksAcrossIdlePollsAndUnrelatedFinality(t *testing.T) {
 			worker := &Worker{Node: "node-a", Mailbox: mailbox, Log: zerolog.Nop(),
 				slotForTask: map[string]string{branch: slot}}
 			channel := &workerReturnChannel{binding: binding, client: fake}
-			worker.parkRefusedClaim(channel, branch, assignment, ChoreographyReceipt{
-				Refused: true, RefusalReason: ChoreographyRefusalCapacity,
-				CapacityScope: scope, Budget: "build", FenceOID: "ledger-1", FenceSequence: 1})
+			worker.parkRefusedClaim(parkedClaimRequest{Channel: channel, Branch: branch,
+				Assignment: assignment, Receipt: ChoreographyReceipt{
+					Refused: true, RefusalReason: ChoreographyRefusalCapacity,
+					CapacityScope: scope, Budget: "build", FenceOID: "ledger-1", FenceSequence: 1}})
 			worker.IdleTimeout = time.Second
 			worker.lastActive = time.Now().Add(-2 * time.Second)
 			require.Equal(t, time.Second, worker.resolveIdleRemainder(),
@@ -574,7 +617,8 @@ func TestWorkerRetriesOnePendingClaimWithoutSlotNoticeMovement(t *testing.T) {
 	assignment := Assignment{Header: Header{Run: binding.Run, Generation: binding.Generation,
 		PlanDigest: binding.PlanDigest, Node: "node-a", Task: "pkg:build", Attempt: 1}}
 	tip := ChainTip{Branch: "dispat-task-run-1-pkg-1", OID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
-	proposal := (&Worker{Node: "node-a"}).formatReturnClaim(binding, "ledger-oid", tip, assignment)
+	proposal := (&Worker{Node: "node-a"}).formatReturnClaim(returnClaimRequest{
+		Binding: binding, LedgerOID: "ledger-oid", Tip: tip, Assignment: assignment})
 	fake := &fakeWorkerReturn{}
 	fake.claim = func(got ChoreographyClaimProposal) (ChoreographyReceipt, error) {
 		require.Equal(t, proposal, got)
@@ -624,7 +668,10 @@ func TestWorkerAcceptedClaimSeesCancelBeforeStartingCommand(t *testing.T) {
 		Previous: MessageClaim, PreviousOID: "claim-oid"}
 	mailbox.documents[branch] = mustMarshal(t, Withdrawal{Header: assignment.Header,
 		Assignment: tip.OID, Tip: "claim-oid"})
-	progress, done, err := worker.startReturnedClaim(t.Context(), t.Context(), tip, assignment, "claim-oid")
+	progress, done, err := worker.startReturnedClaim(returnedClaimStart{
+		LookupContext: t.Context(), TaskContext: t.Context(), Tip: tip,
+		Assignment: assignment, ClaimOID: "claim-oid",
+	})
 	require.NoError(t, err)
 	require.True(t, done)
 	require.True(t, progress)
@@ -873,7 +920,9 @@ func TestWorkerCancellationAckReturnsExactCancelWithoutGitPush(t *testing.T) {
 		returnChannels: map[string]*workerReturnChannel{binding.Run: {binding: binding, client: fake}}}
 	task := &claimedTask{assignment: assignment,
 		tip: ChainTip{Branch: "dispat-task-run-1-pkg-1", OID: "assignment-oid"}, claimed: "claim-oid"}
-	ack, err := w.returnTaskAck(t.Context(), task, "cancel-oid", "build", true)
+	ack, err := w.returnTaskAck(t.Context(), taskAckReturnRequest{
+		Task: task, CancelOID: "cancel-oid", Phase: "build", CommandStarted: true,
+	})
 	require.NoError(t, err)
 	require.Equal(t, "first-ack-oid", ack)
 	require.Empty(t, fixture.remoteBranches(t))

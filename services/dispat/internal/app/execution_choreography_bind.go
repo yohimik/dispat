@@ -32,13 +32,13 @@ func (a *App) initializeAndBindChoreography(ctx context.Context,
 	opts choreographyBindOptions) (*execution.FirstNodeBroker, error) {
 	c := opts.Coordinator
 	if c == nil || opts.ReturnChannel == nil || a.returnJournal == nil ||
-		len(opts.Tasks) == 0 || len(opts.Budgets) == 0 {
-		return nil, fmt.Errorf("execution: choreography runtime is incomplete after preflight")
+		len(opts.Tasks) == choreographyNoEntriesCount || len(opts.Budgets) == choreographyNoEntriesCount {
+		return nil, fmt.Errorf(choreographyIncompleteRuntimeErrorText)
 	}
 	// Before broker attachment, a failed initial batch can have an ambiguous
 	// remote effect. The active run locator stays until exact reconciliation or
 	// a bound broker has durably stopped and sealed all accepted attempts.
-	a.choreographyRetained = true
+	a.choreographyRetained = choreographyRetainedRunState
 	initialized, err := c.InitializeChoreographyTasks(ctx, execution.ChoreographyInitialization{
 		BootstrapOID: c.BootstrapOID, Tasks: opts.Tasks, Templates: opts.Templates,
 		PackagePolicies: opts.PackagePolicies, SemanticGraphDigest: opts.SemanticGraphDigest,
@@ -77,7 +77,7 @@ func (a *App) initializeAndBindChoreography(ctx context.Context,
 		return nil, err
 	}
 	if opts.ResolveBindingsFactory == nil {
-		return nil, fmt.Errorf("execution: complete compiled graph has no signed effective-input resolver")
+		return nil, fmt.Errorf(choreographyMissingInputResolverErrorText)
 	}
 	resolveBindings, err := opts.ResolveBindingsFactory(persist, initialized.Ledger.OID)
 	if err != nil {
@@ -85,15 +85,15 @@ func (a *App) initializeAndBindChoreography(ctx context.Context,
 	}
 	nodeCapacity := make(map[string]int)
 	for _, node := range c.ChoreographyNodes() {
-		if node.Name == "" || node.Capacity <= 0 || node.AuthorityID == "" {
-			return nil, fmt.Errorf("execution: preflighted node has no persistent slot authority")
+		if node.Name == choreographyAbsentIdentityText || node.Capacity <= choreographyNoCapacityCount || node.AuthorityID == choreographyAbsentIdentityText {
+			return nil, fmt.Errorf(choreographyMissingNodeSlotAuthorityErrorText)
 		}
 		nodeCapacity[node.Name] = node.Capacity
 	}
 	budgets := make(map[string]int, len(opts.Budgets))
 	for _, budget := range opts.Budgets {
-		if budget.Name == "" || budget.Capacity <= 0 {
-			return nil, fmt.Errorf("execution: invalid retained choreography budget")
+		if budget.Name == choreographyAbsentIdentityText || budget.Capacity <= choreographyNoCapacityCount {
+			return nil, fmt.Errorf(choreographyInvalidRetainedBudgetErrorText)
 		}
 		budgets[budget.Name] = budget.Capacity
 	}
@@ -121,14 +121,18 @@ func (a *App) initializeAndBindChoreography(ctx context.Context,
 		},
 		ValidateJoinReport: c.CheckChoreographyJoinReport,
 		OutcomePolicy:      opts.OutcomePolicy, Persist: persist,
+		CancelResponseDuration: c.Timeouts.Cancel,
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := a.returnJournal.armChoreographyAdmission(); err != nil {
 		return nil, err
 	}
 	if err := c.AttachChoreography(persist, broker); err != nil {
 		return nil, err
 	}
-	a.choreographyBound = true
+	a.choreographyBound = choreographyBoundRuntimeState
 	if err := a.bindFirstLocalWorker(c, broker, verifyFirst); err != nil {
 		return nil, err
 	}

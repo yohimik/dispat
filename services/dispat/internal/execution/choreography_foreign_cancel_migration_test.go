@@ -41,7 +41,8 @@ func TestChoreographyWorkerRefusesForeignCancelOnClaimedRef(t *testing.T) {
 				ChoreographyRunBinding: binding, Task: spec.Task, Attempt: 1,
 				Node: "node-a", Branch: spec.Branch, ExpectedOID: offered.AssignmentOID,
 				ExpectedLedgerOID: offered.Cursor.OID,
-				InputsDigest:      spec.InputsDigest, ProposalID: "foreign-cancel"}
+				InputsDigest:      spec.InputsDigest, PickupID: NewChoreographyPickupID(),
+				ProposalID: "foreign-cancel"}
 			completeChoreographyFixtureClaim(t, persist, &proposal)
 			claim, err := broker.AcceptClaim(t.Context(), proposal)
 			require.NoError(t, err)

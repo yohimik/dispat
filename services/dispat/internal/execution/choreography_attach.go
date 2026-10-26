@@ -8,16 +8,23 @@ import (
 	"fmt"
 )
 
+const (
+	choreographyAttachMissingIdentity         = ""
+	choreographyAttachRefsUninitializedError  = "execution: choreography refs are not initialized"
+	choreographyAttachMailboxUnavailableError = "execution: canonical choreography mailbox is unavailable"
+	choreographyAttachBrokerRunMismatchError  = "execution: choreography broker does not match initialized run"
+)
+
 // ChoreographyMailbox is the single authoritative coordination object store.
 // The first node constructs the broker only after the initial refs have been
 // read back at their exact prepared OIDs.
 func (c *Coordinator) ChoreographyMailbox() (*GitMailbox, error) {
-	if c == nil || c.canonicalMailbox == nil || !c.choreographyInitialized || c.GraphRootOID == "" {
-		return nil, fmt.Errorf("execution: choreography refs are not initialized")
+	if c == nil || c.canonicalMailbox == nil || !c.choreographyInitialized || c.GraphRootOID == choreographyAttachMissingIdentity {
+		return nil, fmt.Errorf(choreographyAttachRefsUninitializedError)
 	}
 	mailbox := c.canonicalMailbox
 	if mailbox == nil {
-		return nil, fmt.Errorf("execution: canonical choreography mailbox is unavailable")
+		return nil, fmt.Errorf(choreographyAttachMailboxUnavailableError)
 	}
 	return mailbox, nil
 }
@@ -25,7 +32,7 @@ func (c *Coordinator) ChoreographyMailbox() (*GitMailbox, error) {
 // ChoreographyRefAdvanced updates the exact cleanup lease after the first
 // node has read back an atomic task/slot/ledger transaction.
 func (c *Coordinator) ChoreographyRefAdvanced(ctx context.Context, ref ChoreographyRefAdvance) {
-	if c == nil || c.canonicalMailbox == nil || ref.Branch == "" || ref.NewOID == "" {
+	if c == nil || c.canonicalMailbox == nil || ref.Branch == choreographyAttachMissingIdentity || ref.NewOID == choreographyAttachMissingIdentity {
 		return
 	}
 	c.recordOwnedRef(ctx, ownedRefStep{node: c.Local.Name,
@@ -41,7 +48,7 @@ func (c *Coordinator) AttachChoreography(persist *GitChoreographyPersist, broker
 	if persist == nil || broker == nil || c.choreographyPersist != nil || c.choreographyBroker != nil ||
 		persist.opts.Binding.Run != c.Run || broker.binding != persist.opts.Binding ||
 		persist.opts.Mailbox != c.canonicalMailbox {
-		return fmt.Errorf("execution: choreography broker does not match initialized run")
+		return fmt.Errorf(choreographyAttachBrokerRunMismatchError)
 	}
 	c.choreographyPersist, c.choreographyBroker = persist, broker
 	// V3 workers return through the broker. The older task-ref watcher has no

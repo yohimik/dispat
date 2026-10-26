@@ -42,11 +42,15 @@ func (m *GitMailbox) ReadVerifiedChoreographyAcceptedResultFromAssignment(ctx co
 	if err != nil {
 		return Result{}, err
 	}
-	tree, err := m.readTree(ctx, event.TaskOID)
+	receiptOID := event.TaskOID
+	if event.ResultReceiptOID != choreographyResultProofMissingIdentity {
+		receiptOID = event.ResultReceiptOID
+	}
+	tree, err := m.readTree(ctx, receiptOID)
 	if err != nil || tree.kind != choreographyResultKind {
 		return Result{}, fmt.Errorf(choreographyResultProofSignedReceiptError)
 	}
-	document, err := m.Read(ctx, ChainTip{OID: event.TaskOID, Kind: tree.kind,
+	document, err := m.Read(ctx, ChainTip{OID: receiptOID, Kind: tree.kind,
 		document: tree.document, signature: tree.signature}, maxDocumentBytes)
 	if err != nil {
 		return Result{}, err
@@ -105,7 +109,7 @@ func (m *GitMailbox) VerifyChoreographyResultFromClaim(ctx context.Context,
 		claim.ChoreographyRunBinding != p.ChoreographyRunBinding ||
 		claim.Task != p.Task || claim.Attempt != p.Attempt || claim.Node != p.Node ||
 		claim.Branch != p.Branch || claim.GraphRootOID == choreographyResultProofMissingIdentity ||
-		claim.InputsDigest != p.InputsDigest {
+		claim.InputsDigest != p.InputsDigest || claim.PickupID != p.PickupID {
 		return fmt.Errorf(choreographyResultProofClaimMismatchError)
 	}
 	view, err := m.OpenCarriedAssignment(ctx, parents[choreographyResultProofFirstParent], maxDocumentBytes)

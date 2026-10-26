@@ -18,17 +18,25 @@ const (
 	retainedPackagePolicyErrorText = "execution: retained complete graph package policy differs from independently compiled plan"
 )
 
+type retainedChoreographyPolicyOptions struct {
+	RecomputedTasks    []execution.ChoreographyTaskSpec
+	SignedTasks        []execution.ChoreographyTaskSpec
+	RecomputedPackages []execution.ChoreographyPackagePolicy
+	SignedPackages     []execution.ChoreographyPackagePolicy
+}
+
 // verifyRetainedChoreographyPolicy compares the semantic parts independently
 // reconstructed from pinned planning inputs with the authenticated carrier.
 // Ref OIDs, templates, and live eligible-node sets have separate exact checks.
-func verifyRetainedChoreographyPolicy(recomputed, signed []execution.ChoreographyTaskSpec,
-	packagePolicies, signedPackagePolicies []execution.ChoreographyPackagePolicy) error {
+func verifyRetainedChoreographyPolicy(options retainedChoreographyPolicyOptions) error {
+	recomputed, signed := options.RecomputedTasks, options.SignedTasks
+	packagePolicies, signedPackagePolicies := options.RecomputedPackages, options.SignedPackages
 	if len(recomputed) != len(signed) {
 		return fmt.Errorf(retainedTaskPolicyCountError)
 	}
 	byTask := make(map[string]execution.ChoreographyTaskSpec, len(recomputed))
 	for _, task := range recomputed {
-		if task.Task == "" || byTask[task.Task].Task != "" {
+		if task.Task == retainedRunAbsentValueText || byTask[task.Task].Task != retainedRunAbsentValueText {
 			return fmt.Errorf(retainedTaskPolicyErrorFormat, task.Task)
 		}
 		byTask[task.Task] = task
@@ -39,6 +47,7 @@ func verifyRetainedChoreographyPolicy(recomputed, signed []execution.Choreograph
 			task.Stage != want.Stage || task.Recording != want.Recording ||
 			task.Virtual != want.Virtual || task.LocalAuthority != want.LocalAuthority ||
 			task.ExecutorOwned != want.ExecutorOwned ||
+			task.RetryAfterUncertainAttempt != want.RetryAfterUncertainAttempt ||
 			task.NeedsPreparedInput != want.NeedsPreparedInput ||
 			task.Budget != want.Budget || task.Weight != want.Weight ||
 			task.Placement != want.Placement ||

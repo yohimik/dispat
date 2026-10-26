@@ -215,8 +215,8 @@ func (a *App) commitAndTag(ctx context.Context, fin finalizer, rc releaseCommit)
 		return false
 	}
 	if err := a.prepareDeferredTagIntents(ctx, rc.rels); err != nil {
-		fin.crit.record(a.log, plan.CodeTagFailed, err, "deferred release tag targets could not be durably prepared", nil)
-		return false
+		fin.crit.record(a.log, plan.CodeTagFailed, err, deferredTagTargetsUnpreparedLogText, nil)
+		return deferredReleaseTagUnsettledState
 	}
 	isTagged := true
 	for _, rel := range rc.rels {
@@ -230,8 +230,8 @@ func (a *App) commitAndTag(ctx context.Context, fin finalizer, rc releaseCommit)
 					return e.Str("package", rel.Pkg.Name).Str("tag", rel.TagName())
 				})
 		} else if err := a.recordDeferredTagObject(ctx, rel); err != nil {
-			isTagged = false
-			fin.crit.record(a.log, plan.CodeTagFailed, err, "deferred release tag object could not be durably recorded", nil)
+			isTagged = deferredReleaseTagUnsettledState
+			fin.crit.record(a.log, plan.CodeTagFailed, err, deferredTagObjectUnrecordedLogText, nil)
 		}
 	}
 	if isTagged {

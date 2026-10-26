@@ -45,3 +45,47 @@ func TestRetainedNodeSlotRejectsConflictingClaimAndRefusal(t *testing.T) {
 		Task: "pkg:build", Attempt: 1, Node: "node", ProposalDigest: "exact",
 		PriorTaskOID: "assignment", TaskOID: "claim"}), "differs")
 }
+
+func TestRetainedPickupSlotRequiresItsOwnReceiptAndSettlement(t *testing.T) {
+	state := &recoveredNodeSlot{lease: NodeSlotLease{Intent: NodeSlotIntent{
+		Task: "pkg:build", Attempt: 1, PickupID: "pickup-a", Recovery: &NodeSlotRecoveryLocator{
+			Node: "node", AssignmentOID: "assignment", ProposalDigest: "exact"}}}}
+	require.NoError(t, state.apply(ChoreographyEvent{Kind: ChoreographyClaimAccepted,
+		Task: "pkg:build", Attempt: 1, Node: "node", PickupID: "pickup-a",
+		ProposalDigest: "exact", PriorTaskOID: "assignment", TaskOID: "claim-a"}))
+	head := ChoreographyEventCursor{OID: "ledger-after-settlement", Sequence: 9}
+	require.NoError(t, state.apply(ChoreographyEvent{Kind: ChoreographyTerminal,
+		Task: "pkg:build", Attempt: 1, Node: "node", PickupID: "pickup-b",
+		TaskOID: "winner", ResultReceiptOID: "receipt-b"}))
+	require.Empty(t, state.settlementEvidence(1, head), "another pickup's success cannot free this lease")
+	require.NoError(t, state.apply(ChoreographyEvent{Kind: ChoreographyResultAccepted,
+		Task: "pkg:build", Attempt: 1, Node: "node", PickupID: "pickup-a",
+		TaskOID: "winner", PriorTaskOID: "winner", ClaimOID: "claim-a", ResultReceiptOID: "receipt-a"}))
+	require.Equal(t, "receipt-a", state.effectOID, "the canonical winner is not the losing Result receipt")
+	require.Empty(t, state.settlementEvidence(1, head))
+	require.NoError(t, state.apply(ChoreographyEvent{Kind: ChoreographyPickupSettled,
+		Task: "pkg:build", Attempt: 1, Node: "node", PickupID: "pickup-a",
+		TaskOID: "winner", PriorTaskOID: "winner", ClaimOID: "claim-a", ResultReceiptOID: "receipt-a"}))
+	require.Equal(t, head.OID, state.settlementEvidence(1, head),
+		"the retained ledger carries the losing pickup settlement without moving the canonical winner")
+}
+
+func TestRetainedCancelledPickupUsesSideAckAfterSuccessorClaim(t *testing.T) {
+	state := &recoveredNodeSlot{lease: NodeSlotLease{Intent: NodeSlotIntent{
+		Task: "pkg:build", Attempt: 1, PickupID: "pickup-a", Recovery: &NodeSlotRecoveryLocator{
+			Node: "node", AssignmentOID: "assignment", ProposalDigest: "exact"}}}}
+	require.NoError(t, state.apply(ChoreographyEvent{Kind: ChoreographyClaimAccepted,
+		Task: "pkg:build", Attempt: 1, Node: "node", PickupID: "pickup-a",
+		ProposalDigest: "exact", PriorTaskOID: "assignment", TaskOID: "claim-a"}))
+	require.NoError(t, state.apply(ChoreographyEvent{Kind: ChoreographyAckAccepted,
+		Task: "pkg:build", Attempt: 1, Node: "node", PickupID: "pickup-a",
+		ClaimOID: "claim-a", TaskOID: "successor-claim", PriorTaskOID: "successor-claim",
+		ResultReceiptOID: "ack-a"}))
+	head := ChoreographyEventCursor{OID: "ledger-after-settlement", Sequence: 9}
+	require.Equal(t, "ack-a", state.effectOID)
+	require.Empty(t, state.settlementEvidence(1, head), "Ack receipt alone retains the lease")
+	require.NoError(t, state.apply(ChoreographyEvent{Kind: ChoreographyPickupSettled,
+		Task: "pkg:build", Attempt: 1, Node: "node", PickupID: "pickup-a",
+		TaskOID: "successor-claim", PriorTaskOID: "successor-claim", ClaimOID: "claim-a", ResultReceiptOID: "ack-a"}))
+	require.Equal(t, head.OID, state.settlementEvidence(1, head))
+}

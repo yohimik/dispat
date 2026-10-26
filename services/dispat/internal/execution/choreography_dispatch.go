@@ -9,6 +9,20 @@ import (
 	"fmt"
 )
 
+const (
+	choreographyDispatchMissingIdentity      = ""
+	choreographyDispatchNoPredecessors       = 0
+	choreographyDispatchNoFreeSlots          = 0
+	choreographyDispatchLastSlotOffset       = 1
+	choreographyDispatchNextSequenceOffset   = 1
+	choreographyDispatchSlotOccupied         = true
+	choreographyDispatchSlotFree             = false
+	choreographyDispatchIncompleteOfferError = "execution: incomplete compiled assignment offer"
+	choreographyDispatchNotReadyError        = "execution: command task is not ready to offer"
+	choreographyDispatchNoIndexError         = "execution: peer dispatch index is unavailable"
+	choreographyDispatchNoFreeIndexError     = "execution: peer has no free dispatch index"
+)
+
 // OfferChoreographyAssignment places one compiled command on its already
 // created canonical task ref. The selected peer's fixed index is advanced
 // in the same Git transaction; a first-local assignment needs no index.
@@ -17,15 +31,15 @@ import (
 func (c *Coordinator) OfferChoreographyAssignment(ctx context.Context,
 	lease *Lease, assignment *Assignment) (ChoreographyAssignmentReceipt, error) {
 	if c == nil || c.choreographyBroker == nil || c.choreographyPersist == nil ||
-		lease == nil || assignment == nil || assignment.Task == "" || lease.Node != assignment.Node {
-		return ChoreographyAssignmentReceipt{}, fmt.Errorf("execution: incomplete compiled assignment offer")
+		lease == nil || assignment == nil || assignment.Task == choreographyDispatchMissingIdentity || lease.Node != assignment.Node {
+		return ChoreographyAssignmentReceipt{}, fmt.Errorf(choreographyDispatchIncompleteOfferError)
 	}
 	broker := c.choreographyBroker
 	broker.mu.Lock()
 	task := broker.tasks[assignment.Task]
-	if task == nil || task.terminal || task.remaining != 0 || task.offeredNode != "" {
+	if task == nil || task.terminal || task.remaining != choreographyDispatchNoPredecessors || task.offeredNode != choreographyDispatchMissingIdentity {
 		broker.mu.Unlock()
-		return ChoreographyAssignmentReceipt{}, fmt.Errorf("execution: command task is not ready to offer")
+		return ChoreographyAssignmentReceipt{}, fmt.Errorf(choreographyDispatchNotReadyError)
 	}
 	assignment.Protocol = ChoreographyProtocolVersion
 	assignment.Branch = task.spec.Branch
@@ -40,25 +54,25 @@ func (c *Coordinator) OfferChoreographyAssignment(ctx context.Context,
 	if !lease.IsLocal {
 		state := c.choreographySlots
 		if state == nil {
-			return ChoreographyAssignmentReceipt{}, fmt.Errorf("execution: peer dispatch index is unavailable")
+			return ChoreographyAssignmentReceipt{}, fmt.Errorf(choreographyDispatchNoIndexError)
 		}
 		state.mu.Lock()
 		free := state.free[lease.Node]
-		if len(free) == 0 {
+		if len(free) == choreographyDispatchNoFreeSlots {
 			state.mu.Unlock()
-			return ChoreographyAssignmentReceipt{}, fmt.Errorf("execution: peer has no free dispatch index")
+			return ChoreographyAssignmentReceipt{}, fmt.Errorf(choreographyDispatchNoFreeIndexError)
 		}
-		slot = free[len(free)-1]
-		state.free[lease.Node] = free[:len(free)-1]
-		slot.inUse = true
-		offer.SlotBranch, offer.OldSlotOID, offer.SlotSequence = slot.branch, slot.oid, slot.sequence+1
+		slot = free[len(free)-choreographyDispatchLastSlotOffset]
+		state.free[lease.Node] = free[:len(free)-choreographyDispatchLastSlotOffset]
+		slot.inUse = choreographyDispatchSlotOccupied
+		offer.SlotBranch, offer.OldSlotOID, offer.SlotSequence = slot.branch, slot.oid, slot.sequence+choreographyDispatchNextSequenceOffset
 		lease.onSettle = func(reason string) {
-			if reason != "" {
+			if reason != choreographyDispatchMissingIdentity {
 				return
 			}
 			state.mu.Lock()
 			if slot.inUse {
-				slot.inUse = false
+				slot.inUse = choreographyDispatchSlotFree
 				state.free[lease.Node] = append(state.free[lease.Node], slot)
 			}
 			state.mu.Unlock()

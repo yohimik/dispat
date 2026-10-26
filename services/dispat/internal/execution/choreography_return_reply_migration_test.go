@@ -33,7 +33,9 @@ func TestWorkerLostAcknowledgementReplyUsesExactReceipt(t *testing.T) {
 	}
 	worker := &Worker{Node: "node-a", ReturnSigner: fixture.signer,
 		returnChannels: map[string]*workerReturnChannel{binding.Run: {binding: binding, client: fake}}}
-	ack, err := worker.returnTaskAck(t.Context(), task, "cancel-oid", "commands", true)
+	ack, err := worker.returnTaskAck(t.Context(), taskAckReturnRequest{
+		Task: task, CancelOID: "cancel-oid", Phase: "commands", CommandStarted: true,
+	})
 	require.NoError(t, err)
 	require.Equal(t, "first-ack-oid", ack)
 	require.Equal(t, "cancel-oid", submitted.CancelOID)

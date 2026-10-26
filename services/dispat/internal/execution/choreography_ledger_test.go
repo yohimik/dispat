@@ -82,7 +82,7 @@ func TestChoreographyLocalPreclaimFailureLeavesUnrelatedTaskClaimable(t *testing
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding, Task: other.Task,
 		Attempt: 1, Node: "node-a", Branch: other.Branch,
 		ExpectedOID: other.ReservationOID, ExpectedLedgerOID: ledger.OID,
-		InputsDigest: broker.tasks[other.Task].inputsDigest, ProposalID: "independent-claim"}
+		InputsDigest: broker.tasks[other.Task].inputsDigest, PickupID: NewChoreographyPickupID(), ProposalID: "independent-claim"}
 	completeChoreographyFixtureClaim(t, persist, &claim)
 	accepted, err := broker.AcceptClaim(t.Context(), claim)
 	require.NoError(t, err)
@@ -132,10 +132,13 @@ func newChoreographyLedgerFixtureWithAuthority(t *testing.T, authorityID string,
 }
 
 type choreographyLedgerFixtureSettings struct {
-	AuthorityID      string
-	AdmissionSeconds int
-	Tasks            []ChoreographyTaskSpec
-	OutputRoots      []string
+	AuthorityID                string
+	AdmissionSeconds           int
+	RetryAfterUncertainAttempt bool
+	Tasks                      []ChoreographyTaskSpec
+	OutputRoots                []string
+	DeadlineSeconds            int
+	Capacity                   int
 }
 
 func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreographyLedgerFixtureSettings) (*mailboxFixture, *GitChoreographyPersist,
@@ -152,6 +155,7 @@ func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreograph
 	templates := make([]ChoreographyCompiledTemplate, 0, len(requested))
 	for index, requestedSpec := range requested {
 		spec := requestedSpec
+		spec.RetryAfterUncertainAttempt = settings.RetryAfterUncertainAttempt && !spec.Virtual && !spec.ExecutorOwned
 		if spec.Virtual {
 			specs[index] = spec
 			continue
@@ -165,7 +169,7 @@ func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreograph
 		if spec.Weight == 0 {
 			spec.Weight = 1
 		}
-		if spec.InputsDigest == "" && !spec.ExecutorOwned {
+		if spec.InputsDigest == "" && !spec.ExecutorOwned && !spec.NeedsPreparedInput {
 			spec.InputsDigest = "inputs"
 		}
 		if spec.Placement == "" {
@@ -173,7 +177,8 @@ func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreograph
 		}
 		spec.Branch = FormatChoreographyTaskBranch(binding.Run, spec.Task)
 		template := ChoreographyCompiledTemplate{Task: spec.Task, Kind: spec.Kind,
-			Stage: spec.Stage, Weight: spec.Weight, Outputs: settings.OutputRoots}
+			Stage: spec.Stage, Weight: spec.Weight, Outputs: settings.OutputRoots,
+			DeadlineSeconds: settings.DeadlineSeconds}
 		var err error
 		spec.TemplateDigest, err = DigestChoreographyCompiledTemplate(template)
 		require.NoError(t, err)
@@ -191,7 +196,8 @@ func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreograph
 	sourceOID := fixturePlumbing.CommitTree(t.Context(), sourceTree, []string{plannedOID}, "fixture-source")
 	require.NoError(t, fixturePlumbing.Err())
 	policy := ChoreographyJoinPolicy{AdmissionDurationSeconds: settings.AdmissionSeconds,
-		Authorized: []ChoreographyAuthorizedNode{{Name: "node-a", CoordinationEndpoint: fixture.endpoint}}}
+		RetryAfterUncertainAttempt: settings.RetryAfterUncertainAttempt,
+		Authorized:                 []ChoreographyAuthorizedNode{{Name: "node-a", CoordinationEndpoint: fixture.endpoint}}}
 	bootstrapOID, err := fixture.mailbox.PrepareChoreographyBootstrap(t.Context(), ChoreographyBootstrapOptions{
 		Bootstrap: &RunBootstrap{Protocol: ChoreographyProtocolVersion, ChoreographyRunBinding: binding,
 			Mode: "compilation", AlgorithmVersion: ChoreographyGraphAlgorithmVersion,
@@ -201,11 +207,15 @@ func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreograph
 				Selection: []byte(`{"command":"release"}`), Options: []byte(`{"strict":false}`)}},
 		MaxDocumentBytes: 1 << 20, MaxTagBytes: 1 << 20})
 	require.NoError(t, err)
+	capacity := settings.Capacity
+	if capacity == 0 {
+		capacity = 1
+	}
 	root, err := PrepareChoreographyLedgerRoot(t.Context(), ChoreographyLedgerRootOptions{
 		Mailbox: fixture.mailbox, Binding: binding, BootstrapOID: bootstrapOID,
 		Roster: ChoreographyRuntimeRoster{
-			Nodes:   []ChoreographyRuntimeNode{{Name: "node-a", Platform: "linux/amd64", Capacity: 1, First: true, AuthorityID: settings.AuthorityID}},
-			Budgets: []ChoreographyRuntimeBudget{{Name: "build", Capacity: 1}},
+			Nodes:   []ChoreographyRuntimeNode{{Name: "node-a", Platform: "linux/amd64", Capacity: capacity, First: true, AuthorityID: settings.AuthorityID}},
+			Budgets: []ChoreographyRuntimeBudget{{Name: "build", Capacity: capacity}},
 		}})
 	require.NoError(t, err)
 	refs := []gitx.CreateRef{{Branch: root.Branch, OID: root.OID}}
@@ -283,7 +293,7 @@ func completeChoreographyFixtureClaim(t *testing.T, persist *GitChoreographyPers
 	require.Len(t, roster.Nodes, 1)
 	proposal.CapacityAuthorityID = roster.Nodes[0].AuthorityID
 	proposal.LeaseIntentID = nodeSlotLeaseID(NodeSlotIntent{Run: proposal.Run,
-		Task: proposal.Task, Attempt: proposal.Attempt})
+		Task: proposal.Task, Attempt: proposal.Attempt, PickupID: proposal.PickupID})
 	proposal.LeaseWeight = persist.tasks[proposal.Task].Weight
 	proposal.TemplateDigest = persist.tasks[proposal.Task].TemplateDigest
 	proposal.Bindings = ChoreographyTaskBindings{}
@@ -429,6 +439,7 @@ func TestChoreographyCompiledClaimAtomicallyMovesTaskAndLedgerWithoutOffer(t *te
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding, Task: spec.Task,
 		Attempt: 1, Node: "node-a", Branch: spec.Branch, ExpectedOID: spec.ReservationOID,
 		InputsDigest: spec.InputsDigest,
+		PickupID:     NewChoreographyPickupID(),
 		ProposalID:   "compiled-claim"}
 	completeChoreographyFixtureClaim(t, persist, &claim)
 	receipt, err := broker.AcceptClaim(t.Context(), claim)
@@ -490,10 +501,11 @@ func TestChoreographyFirstLocalClaimReproposesAfterAnotherLedgerEvent(t *testing
 	require.NoError(t, err)
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding, Task: spec.Task,
 		Attempt: 1, Node: "node-a", Branch: spec.Branch, ExpectedOID: spec.ReservationOID,
-		InputsDigest: spec.InputsDigest}
+		InputsDigest: spec.InputsDigest, PickupID: NewChoreographyPickupID()}
 	completeChoreographyFixtureClaim(t, persist, &claim)
-	claim.ProposalID = returnProposalID(choreographyClaimKind, binding.Run, spec.Task,
-		claim.Attempt, claim.ExpectedOID+"\x00"+claim.ExpectedLedgerOID)
+	claim.ProposalID = returnProposalID(returnProposalIdentity{Kind: choreographyClaimKind,
+		Run: binding.Run, Task: spec.Task, Attempt: claim.Attempt,
+		OID: claim.ExpectedOID + "\x00" + claim.ExpectedLedgerOID})
 	advance := claim
 	advance.ProposalID = "another-ledger-event"
 	_, err = persist.PersistRefusal(t.Context(), advance, ChoreographyRefusalNotReady)

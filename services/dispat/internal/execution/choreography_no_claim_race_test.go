@@ -40,6 +40,7 @@ func TestChoreographyNoClaimProofLosesToExactClaim(t *testing.T) {
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 		ExpectedOID: spec.ReservationOID, InputsDigest: spec.InputsDigest,
+		PickupID:   NewChoreographyPickupID(),
 		ProposalID: "claim-after-stale-local-proof"}
 	completeChoreographyFixtureClaim(t, claimingPersist, &claim)
 	accepted, err := claimingBroker.AcceptClaim(t.Context(), claim)

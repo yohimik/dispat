@@ -11,14 +11,24 @@ import (
 	"slices"
 )
 
+const (
+	choreographyPinnedProbeMissingIdentity      = ""
+	choreographyPinnedProbeMinimumDocumentBytes = 0
+	choreographyPinnedProbeNoParents            = 0
+	choreographyPinnedProbeBootstrapParentCount = 1
+	choreographyPinnedProbeIncompleteReadError  = "execution: incomplete pinned probe read"
+	choreographyPinnedProbeSnapshotSeen         = true
+)
+
 // ReadVerifiedPinnedProbe authenticates the signed v3 probe, its ordered
 // direct-parent source/bootstrap carriers, and the retained bootstrap. A
 // choreographer must establish this binding before using a return endpoint
 // or independently interpreting pinned inputs.
 func (m *GitMailbox) ReadVerifiedPinnedProbe(ctx context.Context, oid string,
 	maxDocumentBytes, maxTagBytes int64) (*Assignment, RunBootstrap, error) {
-	if m == nil || oid == "" || maxDocumentBytes <= 0 || maxTagBytes <= 0 {
-		return nil, RunBootstrap{}, fmt.Errorf("execution: incomplete pinned probe read")
+	if m == nil || oid == choreographyPinnedProbeMissingIdentity ||
+		maxDocumentBytes <= choreographyPinnedProbeMinimumDocumentBytes || maxTagBytes <= choreographyPinnedProbeMinimumDocumentBytes {
+		return nil, RunBootstrap{}, fmt.Errorf(choreographyPinnedProbeIncompleteReadError)
 	}
 	tree, err := m.readTree(ctx, oid)
 	if err != nil {
@@ -35,18 +45,18 @@ func (m *GitMailbox) ReadVerifiedPinnedProbe(ctx context.Context, oid string,
 	var probe Assignment
 	if err := json.Unmarshal(document, &probe); err != nil ||
 		probe.Protocol != ChoreographyProtocolVersion || probe.Kind != KindProbe ||
-		probe.BootstrapOID == "" || probe.PinnedInputs == nil ||
-		probe.GraphDigest == "" || probe.Run == "" || probe.Generation == "" ||
-		probe.PlanDigest == "" || probe.Node == "" || probe.Branch == "" {
+		probe.BootstrapOID == choreographyPinnedProbeMissingIdentity || probe.PinnedInputs == nil ||
+		probe.GraphDigest == choreographyPinnedProbeMissingIdentity || probe.Run == choreographyPinnedProbeMissingIdentity || probe.Generation == choreographyPinnedProbeMissingIdentity ||
+		probe.PlanDigest == choreographyPinnedProbeMissingIdentity || probe.Node == choreographyPinnedProbeMissingIdentity || probe.Branch == choreographyPinnedProbeMissingIdentity {
 		return nil, RunBootstrap{}, &Rejection{Reason: ReasonUnreadable}
 	}
-	parents := make([]string, 0, len(probe.PinnedInputs.Repositories)+1)
+	parents := make([]string, choreographyPinnedProbeNoParents, len(probe.PinnedInputs.Repositories)+choreographyPinnedProbeBootstrapParentCount)
 	seen := map[string]bool{}
 	for _, source := range probe.PinnedInputs.Repositories {
-		if source.Snapshot == "" || seen[source.Snapshot] || source.Snapshot == probe.BootstrapOID {
+		if source.Snapshot == choreographyPinnedProbeMissingIdentity || seen[source.Snapshot] || source.Snapshot == probe.BootstrapOID {
 			return nil, RunBootstrap{}, &Rejection{Reason: ReasonChain}
 		}
-		seen[source.Snapshot] = true
+		seen[source.Snapshot] = choreographyPinnedProbeSnapshotSeen
 		parents = append(parents, source.Snapshot)
 	}
 	parents = append(parents, probe.BootstrapOID)

@@ -16,6 +16,7 @@ func TestChoreographyOldRunReceiptGrantsNothing(t *testing.T) {
 	_, persist, broker, binding, spec, offered := newCompiledCancellationFixture(t)
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
+		PickupID:    NewChoreographyPickupID(),
 		ExpectedOID: offered.AssignmentOID, ExpectedLedgerOID: offered.Cursor.OID,
 		InputsDigest: spec.InputsDigest, ProposalID: "current-run-claim"}
 	completeChoreographyFixtureClaim(t, persist, &claim)
@@ -62,19 +63,22 @@ func TestChoreographyResultRefusesForeignClaimIdentity(t *testing.T) {
 			fixture, persist, broker, binding, spec, offered := newCompiledCancellationFixture(t)
 			claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 				Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
+				PickupID:    NewChoreographyPickupID(),
 				ExpectedOID: offered.AssignmentOID, ExpectedLedgerOID: offered.Cursor.OID,
 				InputsDigest: spec.InputsDigest, ProposalID: "signed-claim"}
 			completeChoreographyFixtureClaim(t, persist, &claim)
 			receipt, err := broker.AcceptClaim(t.Context(), claim)
 			require.NoError(t, err)
-			proposal := ChoreographyResultProposal{ChoreographyRunBinding: binding,
-				Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
-				ClaimOID: receipt.OID, InputsDigest: claim.InputsDigest}
 			result := Result{Header: Header{Protocol: ChoreographyProtocolVersion,
 				Kind: KindBuild, Run: binding.Run, Generation: binding.Generation,
 				PlanDigest: binding.PlanDigest, Task: spec.Task, Attempt: 1,
 				Node: "node-a", Branch: spec.Branch}, Assignment: receipt.OID,
 				Status: StatusSucceeded}
+			proposal, _ := prepareChoreographyFixturePickupResult(t, fixture,
+				choreographyFixturePickupResult{Claim: claim, Accepted: receipt,
+					Result: result, ProposalID: "foreign-result"})
+			result.PickupID, result.PendingBranch, result.PendingOID, result.OutcomeBranch =
+				claim.PickupID, proposal.PendingBranch, proposal.PendingOID, proposal.OutcomeBranch
 			require.NoError(t, fixture.mailbox.VerifyChoreographyResultFromClaim(t.Context(),
 				ChoreographyResultClaimProof{Proposal: proposal, Result: result,
 					Store: fixture.git, MaxDocumentBytes: 1 << 20}))
@@ -107,6 +111,7 @@ func TestChoreographyClaimRefusesForeignDirectIdentity(t *testing.T) {
 			fixture, persist, broker, binding, spec, offered := newCompiledCancellationFixture(t)
 			claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 				Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
+				PickupID:    NewChoreographyPickupID(),
 				ExpectedOID: offered.AssignmentOID, ExpectedLedgerOID: offered.Cursor.OID,
 				InputsDigest: spec.InputsDigest, ProposalID: "foreign-claim"}
 			completeChoreographyFixtureClaim(t, persist, &claim)

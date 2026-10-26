@@ -24,17 +24,17 @@ type runReturnServer struct {
 // still owe a peer signed Cancel/Result/Ack settlement through this listener.
 // The caller closes it after the coordinator has settled or retained refs.
 func startRunReturnServer(listen string, cert tls.Certificate, handler http.Handler) (*runReturnServer, error) {
-	listener, err := net.Listen("tcp", listen)
+	listener, err := net.Listen(runReturnNetworkName, listen)
 	if err != nil {
 		return nil, err
 	}
 	server := &http.Server{
 		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		MaxHeaderBytes:    64 << 10,
+		ReadHeaderTimeout: runReturnReadHeaderTimeoutSeconds * time.Second,
+		MaxHeaderBytes:    runReturnMaximumHeaderBytes,
 	}
 	server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13}
-	state := &runReturnServer{server: server, done: make(chan error, 1), address: listener.Addr().String()}
+	state := &runReturnServer{server: server, done: make(chan error, runReturnCompletionBufferCount), address: listener.Addr().String()}
 	go func() { state.done <- server.Serve(tls.NewListener(listener, server.TLSConfig)) }()
 	return state, nil
 }

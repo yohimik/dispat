@@ -296,9 +296,11 @@ jobs:
         run: sh scripts/ci-worker.sh tunnel-start
 
       # Minted once the machine exists, so that the token's hour covers the
-      # suite rather than the wait for a machine. The peer only reads Git;
-      # this runner alone holds the repository write credential. The action
-      # revokes the peer token when the job ends.
+      # suite rather than the wait for a machine. The peer creates its own
+      # pending/output/failed branches with this contents-write token. Git
+      # host rules must keep its App identity off canonical task/ledger refs,
+      # release branches, tags and the lock tag. The action revokes the token
+      # when the job ends.
       - name: Mint the worker's token
         id: worker-token
         if: env.CI_WORKER != ''
@@ -306,7 +308,7 @@ jobs:
         with:
           client-id: ${{ vars.CI_WORKER_APP_CLIENT_ID }}
           private-key: ${{ secrets.CI_WORKER_APP_PRIVATE_KEY }}
-          permission-contents: read
+          permission-contents: write
 
       # The token reaches this step's environment and the machine, over ssh,
       # and nothing else: it is never written to GITHUB_ENV.

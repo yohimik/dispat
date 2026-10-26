@@ -45,6 +45,10 @@ var executionWorkspacePackages = []string{"assets", "ui", "docs", "app"}
 // executionIntegrityCode is the diagnostic a task that could not be executed
 // carries.
 const executionIntegrityCode = "E227"
+const executionTaskTimeoutSettlementWait = 60 * time.Second
+const executionTaskTimeoutWorkerDiagnosticWait = 5 * time.Second
+const executionTaskTimeoutScript = executionRecordingScript +
+	` && if [ "$DISPAT_PACKAGE" = assets ]; then sleep 60; fi`
 
 // newExecutionWorkspace seeds the fixture every delegated scenario is driven
 // through and returns its rig.
@@ -154,7 +158,12 @@ func TestExecutionBuildsRunOnWorkersFromThePreparedSnapshot(t *testing.T) {
 				WriteVersion: models.Bool(true),
 			}
 			cfg.Spaces["libs"] = space
-		})
+		}, pinPackages(map[string]*models.RunOnly{
+			"assets": placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+			"ui":     placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+			"docs":   placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+			"app":    placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+		}))
 	for _, name := range executionWorkspacePackages {
 		rig.repo.WriteFile(filepath.Join("packages", name, "package.json"),
 			executionManifest(name, "", ""))
@@ -339,14 +348,18 @@ func TestExecutionWorkerCapacityHoldsAcrossRuns(t *testing.T) {
 		t.Fatalf("first release never started its command; stdout:\n%s\nstderr:\n%s\nworker stdout:\n%s\nworker stderr:\n%s",
 			firstResult.Stdout, firstResult.Stderr, workerResult.Stdout, workerResult.Stderr)
 	}
+	priorSlots := make(map[string]bool)
+	for _, branch := range executionProtocolRefs(t, mailbox, "dispat-slot-") {
+		priorSlots[branch] = true
+	}
 	otherStarted := second.repo.StartReleaseEnv(second.env(), "release", "--return-endpoint", second.returnURL)
 	var waitingSlot string
 	require.Eventually(t, func() bool {
-		waitingSlot = executionActiveSlotForTask(t, mailbox, "second")
+		waitingSlot = executionNewActivatedSlot(t, mailbox, priorSlots)
 		return waitingSlot != ""
 	}, 60*time.Second, 50*time.Millisecond, "the second run did not activate its slot notice")
 	require.Never(t, func() bool {
-		return len(second.runs()) != 0 || executionActiveSlotForTask(t, mailbox, "second") != waitingSlot
+		return len(second.runs()) != 0 || executionNewActivatedSlot(t, mailbox, priorSlots) != waitingSlot
 	}, 700*time.Millisecond, 50*time.Millisecond,
 		"a full worker must leave the second notice unchanged and the task unclaimed")
 	require.NoError(t, os.WriteFile(gate, nil, 0o600))
@@ -365,19 +378,25 @@ func TestExecutionWorkerCapacityHoldsAcrossRuns(t *testing.T) {
 // executionActiveSlotForTask returns the build notice for a package while a
 // node is full. The signed assignment supplies the package and task kind;
 // graph task IDs are deliberately opaque here.
-func executionActiveSlotForTask(t *testing.T, mailbox, packageName string) string {
+func executionNewActivatedSlot(t *testing.T, mailbox string, priorSlots map[string]bool) string {
 	t.Helper()
 	for _, branch := range executionProtocolRefs(t, mailbox, "dispat-slot-") {
-		notice := executionMessage(t, mailbox, branch, "slot")
-		taskBranch, _ := notice["taskBranch"].(string)
-		if taskBranch == "" {
+		if priorSlots[branch] {
 			continue
 		}
-		assignment := executionTaskAssignment(t, mailbox, taskBranch)
-		pkg, _ := assignment["package"].(map[string]any)
-		if assignment["kind"] == "build" && pkg["name"] == packageName {
-			return strings.TrimSpace(bareGit(t, mailbox, "rev-parse", "refs/heads/"+branch))
+		notice := executionMessage(t, mailbox, branch, "slot")
+		root, _ := notice["graphRootOid"].(string)
+		if root == "" {
+			continue
 		}
+		require.NotEmpty(t, notice["bootstrapOid"], "activated v3 slot binds the signed bootstrap")
+		require.Empty(t, notice["taskBranch"], "compiled pickup notices are task-neutral")
+		require.Empty(t, notice["assignment"], "a busy worker has no assigned task in this run")
+		document := bareGit(t, mailbox, "show", "refs/heads/"+branch+":dispat/slot.json")
+		signature := strings.TrimSpace(bareGit(t, mailbox, "show", "refs/heads/"+branch+":dispat/slot.sig"))
+		require.Equal(t, executionSign("slot", executionSecret, []byte(document)), signature,
+			"the activated notice is signed by the run")
+		return strings.TrimSpace(bareGit(t, mailbox, "rev-parse", "refs/heads/"+branch))
 	}
 	return ""
 }
@@ -396,6 +415,9 @@ func newExecutionRepositoryOn(t *testing.T, mailbox, label string, gate ...strin
 	}
 	cfg := libsConfig(script+" && "+
 		repo.TsmarkScript("timeline.log", label, 3*time.Second), 1)
+	pinPackages(map[string]*models.RunOnly{
+		label: placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+	})(&cfg)
 	cfg.Execution = &models.ExecutionConfig{
 		SecretEnv: executionSecretEnv,
 		Workers:   []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
@@ -601,13 +623,12 @@ func TestExecutionStrayWritesAreReported(t *testing.T) {
 	stopAll(t, []*executionWorker{worker})
 }
 
-// TestExecutionTaskTimeoutCancelsAndSettlesAttempt: a timed-out command is
-// stopped by a signed Cancel and Ack before its terminal decision. The
-// capacity-one node does not start a duplicate command while later tasks may
-// use the released slot and fail independently without publishing anything.
+// TestExecutionTaskTimeoutCancelsAndSettlesAttempt: each bounded retry of a
+// timed-out build is stopped by a signed Cancel and Ack before one terminal
+// decision. Other packages may use the released slot once, and nothing is published.
 func TestExecutionTaskTimeoutCancelsAndSettlesAttempt(t *testing.T) {
 	rig := newExecutionWorkspace(t, func(*harness.Repo) string {
-		return executionRecordingScript + " && sleep 60"
+		return executionTaskTimeoutScript
 	}, func(cfg *models.File) {
 		cfg.Concurrency = []int{1, 1}
 		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 3}
@@ -615,18 +636,45 @@ func TestExecutionTaskTimeoutCancelsAndSettlesAttempt(t *testing.T) {
 	})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
 
-	res := rig.release()
+	startedRelease := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
+	res := startedRelease.WaitForDiagnostic(executionTaskTimeoutSettlementWait, func() {
+		stdout, stderr := startedRelease.CapturedOutput()
+		t.Logf("first-node stdout:\n%s\nstderr:\n%s", stdout, stderr)
+		t.Logf("signed task-timeout ledger: %+v", executionLateJoinLedgerEvents(t, rig.mailbox))
+		stopped := worker.proc.KillForDiagnostic(executionTaskTimeoutWorkerDiagnosticWait)
+		t.Logf("worker stdout:\n%s\nstderr:\n%s", stopped.Stdout, stopped.Stderr)
+	})
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode),
 		"the timed-out attempt is reported\nstdout:\n%s", res.Stdout)
 	requireChoreographyTaskChain(t, rig.mailbox, rig.branches(),
 		"choreography-claim", "cancel", "ack", "choreography-decision")
-	assert.Equal(t, 1, executionBuildsOf(rig, "assets"),
-		"the cancelled command started once")
+	assert.Equal(t, 3, executionBuildsOf(rig, "assets"),
+		"each of the three signed cancelled attempts started one command")
+	var accepted, cancelled, acknowledged, terminal int
+	for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+		if event.Task != "assets:1:" {
+			continue
+		}
+		switch event.Kind {
+		case "claim-accepted":
+			accepted++
+		case "cancel-issued":
+			cancelled++
+		case "ack-accepted":
+			acknowledged++
+		case "terminal":
+			terminal++
+		}
+	}
+	assert.Equal(t, 3, accepted, "the bounded retry policy signed each new attempt")
+	assert.Equal(t, accepted, cancelled, "each accepted timed-out attempt was cancelled")
+	assert.Equal(t, accepted, acknowledged, "each cancellation received its exact Ack")
+	assert.Equal(t, 1, terminal, "the logical task has one final decision")
 	for _, name := range []string{"docs", "ui", "app"} {
 		assert.LessOrEqual(t, executionBuildsOf(rig, name), 1,
-			"a later task may use the settled slot, but its command cannot run twice")
+			"a later package may use the settled slot but cannot run a duplicate command: %s", name)
 	}
 	assert.Empty(t, rig.repo.TagList(), "nothing was published")
 	assert.False(t, remoteHoldsLock(t, rig.origin), "and the lock was given back")
@@ -815,22 +863,23 @@ func TestExecutionWorkerTaskGitFaults(t *testing.T) {
 }
 
 // TestExecutionFirstNodeOwnsClaimAndSettlesOneAttempt: the serving node can
-// read work and return a Result while all of its Git pushes are refused. The
-// first node alone advances the canonical task through one Claim and Result.
+// read work and return a Result while canonical task pushes are refused. The
+// first node alone advances the canonical task through one Claim and Decision,
+// while the separate signed ledger records the accepted worker Result.
 // Lost HTTPS replies are exercised by the exact-proposal Worker receipt tests.
 func TestExecutionFirstNodeOwnsClaimAndSettlesOneAttempt(t *testing.T) {
 	rig := newExecutionRig(t, func(cfg *models.File) {
 		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
 		cfg.Scripts["build"] = models.Script{executionRecordingScript}
 	})
-	peerPush := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerPush := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60, peerPush.Env()...)
 	defer worker.stop(t)
 
 	res := rig.release()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	require.Zero(t, peerPush.Matches(), "the serving node never pushes a coordination ref")
+	require.Zero(t, peerPush.Matches(), "the serving node never pushes a canonical task ref")
 	require.Equal(t, 1, executionBuildsOf(rig, "core"), "one build executed")
 	buildBranches := 0
 	for _, branch := range executionProtocolRefs(t, rig.mailbox, "dispat-task-") {
@@ -838,11 +887,21 @@ func TestExecutionFirstNodeOwnsClaimAndSettlesOneAttempt(t *testing.T) {
 			continue
 		}
 		buildBranches++
+		assignment := executionTaskAssignment(t, rig.mailbox, branch)
+		taskID, _ := assignment["task"].(string)
+		require.NotEmpty(t, taskID)
 		chain := strings.Split(strings.TrimSpace(bareGit(t, rig.mailbox, "log", "--first-parent",
 			"--reverse", "--format=%s", "refs/heads/"+branch)), "\n")
-		for _, kind := range []string{"choreography-claim", "choreography-result", "choreography-decision"} {
+		for _, kind := range []string{"choreography-claim", "choreography-decision"} {
 			assert.Equal(t, 1, strings.Count(strings.Join(chain, "\n"), "dispat transport "+kind), kind)
 		}
+		acceptedResults := 0
+		for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+			if event.Task == taskID && event.Kind == "result-accepted" {
+				acceptedResults++
+			}
+		}
+		assert.Equal(t, 1, acceptedResults, "one signed worker Result was accepted")
 	}
 	require.Equal(t, 1, buildBranches, "one canonical build task ref remains for recovery")
 }

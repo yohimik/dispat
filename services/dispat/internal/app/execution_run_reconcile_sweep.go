@@ -17,7 +17,7 @@ import (
 func retainedRunSealed(ctx context.Context, persist *execution.GitChoreographyPersist) (bool, error) {
 	replay := &retainedSweepAttemptReplay{attempts: make(map[string]retainedSweepAttempt)}
 	if err := replay.advance(ctx, persist); err != nil {
-		return false, err
+		return retainedSweepUnsealedState, err
 	}
 	return replay.sealed, nil
 }
@@ -37,13 +37,13 @@ type retainedSweepAttemptReplay struct {
 func (r *retainedSweepAttemptReplay) advance(ctx context.Context,
 	persist *execution.GitChoreographyPersist) error {
 	for {
-		page, err := persist.ReadEvents(ctx, r.cursor, 32)
+		page, err := persist.ReadEvents(ctx, r.cursor, retainedRunEventPageSizeCount)
 		if err != nil {
-			return fmt.Errorf("execution: retained sweep events cannot be read: %w", err)
+			return fmt.Errorf(retainedSweepEventReadErrorFormat, err)
 		}
 		if page.Cursor.Sequence != r.cursor.Sequence+uint64(len(page.Events)) ||
-			len(page.Events) == 0 && page.More {
-			return fmt.Errorf("execution: retained sweep event sequence has a gap")
+			len(page.Events) == retainedRunNoEntriesCount && page.More {
+			return fmt.Errorf(retainedSweepEventSequenceGapErrorText)
 		}
 		for _, event := range page.Events {
 			switch event.Kind {
@@ -61,7 +61,7 @@ func (r *retainedSweepAttemptReplay) advance(ctx context.Context,
 				execution.ChoreographyBlocked:
 				delete(r.attempts, event.Task)
 			case execution.ChoreographyRunSealed:
-				r.sealed = true
+				r.sealed = retainedSweepSealedState
 			}
 		}
 		r.cursor = page.Cursor
@@ -71,14 +71,23 @@ func (r *retainedSweepAttemptReplay) advance(ctx context.Context,
 	}
 }
 
+type retainedSweepSettlementOptions struct {
+	Identity firstRunIdentity
+	Signer   *execution.Signer
+	Limits   execution.TransferLimits
+	Binding  execution.ChoreographyRunBinding
+	Mailbox  *execution.GitMailbox
+	Broker   *execution.FirstNodeBroker
+	Persist  *execution.GitChoreographyPersist
+}
+
 // settleRetainedSweepAttempts stops new claims, serves the old pinned HTTPS
 // identity for existing workers, and decides only outcomes proved by signed
 // ResultAccepted or AckAccepted events. A live command whose stop is unknown
 // leaves the old generation and its physical capacity fenced after the wait.
-func (a *App) settleRetainedSweepAttempts(ctx context.Context, identity firstRunIdentity,
-	signer *execution.Signer, limits execution.TransferLimits,
-	binding execution.ChoreographyRunBinding, mailbox *execution.GitMailbox,
-	broker *execution.FirstNodeBroker, persist *execution.GitChoreographyPersist) (err error) {
+func (a *App) settleRetainedSweepAttempts(ctx context.Context, options retainedSweepSettlementOptions) (err error) {
+	identity, signer, limits, binding := options.Identity, options.Signer, options.Limits, options.Binding
+	mailbox, broker, persist := options.Mailbox, options.Broker, options.Persist
 	replay := &retainedSweepAttemptReplay{attempts: make(map[string]retainedSweepAttempt)}
 	if err := replay.advance(ctx, persist); err != nil {
 		return err
@@ -89,37 +98,37 @@ func (a *App) settleRetainedSweepAttempts(ctx context.Context, identity firstRun
 			err = errors.Join(err, channel.close())
 		}
 	}()
-	deadline := time.NewTimer(20 * time.Second)
+	deadline := time.NewTimer(retainedSweepSettlementTimeoutSeconds * time.Second)
 	defer deadline.Stop()
 	for {
 		if err := replay.advance(ctx, persist); err != nil {
 			return err
 		}
 		if replay.sealed {
-			return fmt.Errorf("execution: retained sweep was sealed during reconciliation")
+			return fmt.Errorf(retainedSweepSealDuringReconciliationErrorText)
 		}
-		if len(replay.attempts) == 0 {
+		if len(replay.attempts) == retainedRunNoEntriesCount {
 			return nil
 		}
-		advanced := false
+		advanced := retainedSweepNoProgressState
 		for task, attempt := range replay.attempts {
-			if attempt.claim.TaskOID == "" {
-				return fmt.Errorf("execution: retained sweep task %s has a reply without a signed claim", task)
+			if attempt.claim.TaskOID == retainedRunAbsentValueText {
+				return fmt.Errorf(retainedSweepReplyWithoutClaimErrorFormat, task)
 			}
-			if attempt.reply.TaskOID != "" {
-				succeeded := false
+			if attempt.reply.TaskOID != retainedRunAbsentValueText {
+				succeeded := retainedSweepUnsuccessfulState
 				if attempt.reply.Kind == execution.ChoreographyResultAccepted {
 					result, err := mailbox.ReadVerifiedChoreographyAcceptedResultFromAssignment(
 						ctx, binding, attempt.reply, int64(limits.MaxManifestBytes))
 					if err != nil {
-						return fmt.Errorf("execution: retained sweep result %s is not admissible: %w", task, err)
+						return fmt.Errorf(retainedSweepInadmissibleResultErrorFormat, task, err)
 					}
 					succeeded = result.Status == execution.StatusSucceeded
 				} else if attempt.reply.Kind != execution.ChoreographyAckAccepted ||
-					attempt.cancel.TaskOID == "" {
-					return fmt.Errorf("execution: retained sweep task %s has no verified stop", task)
+					attempt.cancel.TaskOID == retainedRunAbsentValueText {
+					return fmt.Errorf(retainedSweepUnverifiedTaskStopErrorFormat, task)
 				}
-				outcome := ""
+				outcome := retainedRunAbsentValueText
 				if !succeeded {
 					outcome = string(release.OutcomeFailed)
 				}
@@ -130,9 +139,9 @@ func (a *App) settleRetainedSweepAttempts(ctx context.Context, identity firstRun
 					ResultOID: attempt.reply.TaskOID, Succeeded: succeeded,
 					PackageOutcome: outcome,
 				}); err != nil {
-					return fmt.Errorf("execution: retained sweep result %s cannot reach finality: %w", task, err)
+					return fmt.Errorf(retainedSweepResultFinalityErrorFormat, task, err)
 				}
-				advanced = true
+				advanced = retainedSweepProgressState
 				continue
 			}
 			if channel == nil {
@@ -144,17 +153,17 @@ func (a *App) settleRetainedSweepAttempts(ctx context.Context, identity firstRun
 					return err
 				}
 			}
-			if attempt.cancel.TaskOID == "" {
+			if attempt.cancel.TaskOID == retainedRunAbsentValueText {
 				_, err := broker.CancelClaim(ctx, execution.ChoreographyCancellation{
 					ChoreographyRunBinding: binding, Task: task,
 					Branch:  execution.FormatChoreographyTaskBranch(binding.Run, task),
 					Attempt: attempt.claim.Attempt, Node: attempt.claim.Node,
-					AssignmentOID: attempt.claim.PriorTaskOID, ClaimOID: attempt.claim.TaskOID,
+					AssignmentOID: attempt.claim.AssignmentOID, ClaimOID: attempt.claim.TaskOID,
 				})
 				if err != nil && !errors.Is(err, execution.ErrChoreographyResultWon) {
-					return fmt.Errorf("execution: retained sweep task %s cannot be cancelled: %w", task, err)
+					return fmt.Errorf(retainedSweepTaskCancellationErrorFormat, task, err)
 				}
-				advanced = true
+				advanced = retainedSweepProgressState
 			}
 		}
 		if advanced {
@@ -164,8 +173,8 @@ func (a *App) settleRetainedSweepAttempts(ctx context.Context, identity firstRun
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline.C:
-			return fmt.Errorf("execution: retained sweep has an accepted attempt without verified stop")
-		case <-time.After(250 * time.Millisecond):
+			return fmt.Errorf(retainedSweepUnverifiedAcceptedStopErrorText)
+		case <-time.After(retainedSweepPollIntervalMilliseconds * time.Millisecond):
 		}
 	}
 }

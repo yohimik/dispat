@@ -86,6 +86,8 @@ const (
 	// MessageClaim is the worker taking the assignment, which it does only
 	// when it has a free slot for it.
 	MessageClaim MessageKind = "claim"
+	// MessagePending is the worker's signed, immutable pickup branch root.
+	MessagePending MessageKind = "pending"
 	// MessageReady is retained for reading and refusing legacy publish chains.
 	MessageReady MessageKind = "ready"
 	// MessageGo is retained for reading and refusing legacy publish chains.
@@ -149,20 +151,23 @@ func FormatBranch(node, kind string, at time.Time) string {
 
 const reservationBranchPrefix = "dispat-task-"
 const slotBranchPrefix = "dispat-slot-"
+const choreographyTaskBranchSeparator = "-"
+const choreographyTaskHashPrefixBytes = 16
+const compiledClaimAssignmentDomain = "assignment:"
 
 // FormatChoreographyTaskBranch names the one authoritative ref of a logical
 // task across every attempt. No node or attempt is in the ref name: competing
 // workers must race on one CAS domain rather than different replicas.
 func FormatChoreographyTaskBranch(run, task string) string {
 	sum := sha256.Sum256([]byte(task))
-	return reservationBranchPrefix + run + "-" + hex.EncodeToString(sum[:16])
+	return reservationBranchPrefix + run + choreographyTaskBranchSeparator + hex.EncodeToString(sum[:choreographyTaskHashPrefixBytes])
 }
 
 // CompiledClaimInputDigest binds a compilation-mode claim to the complete
 // signed Assignment commit, including its exact source and provider inputs.
 // Interpretation mode derives its input digest from accepted input events.
 func CompiledClaimInputDigest(assignmentOID string) string {
-	sum := sha256.Sum256([]byte("assignment:" + assignmentOID))
+	sum := sha256.Sum256([]byte(compiledClaimAssignmentDomain + assignmentOID))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -573,6 +578,24 @@ type Claim struct {
 	Assignment string `json:"assignment"`
 }
 
+// Pending binds one worker-owned branch to an accepted claim and its durable
+// local capacity lease. Its commit descends directly from the signed Claim;
+// the worker creates its ref before beginning command effects.
+type Pending struct {
+	Header
+	TaskBranch          string `json:"taskBranch"`
+	PickupID            string `json:"pickupId"`
+	ClaimOID            string `json:"claimOid"`
+	AssignmentOID       string `json:"assignmentOid"`
+	GraphDigest         string `json:"graphDigest"`
+	GraphRootOID        string `json:"graphRootOid"`
+	InputsDigest        string `json:"inputsDigest"`
+	MembershipEpochOID  string `json:"membershipEpochOid"`
+	CapacityAuthorityID string `json:"capacityAuthorityId"`
+	LeaseIntentID       string `json:"leaseIntentId"`
+	LeaseWeight         int    `json:"leaseWeight"`
+}
+
 // Ready is the legacy worker publication message kept for chain parsing.
 type Ready struct {
 	Header
@@ -594,8 +617,9 @@ type Go struct {
 // work that started after it was written.
 type Withdrawal struct {
 	Header
-	Assignment string `json:"assignment"`
-	Tip        string `json:"tip"`
+	Assignment             string `json:"assignment"`
+	Tip                    string `json:"tip"`
+	CancelReplyDeadlineUTC string `json:"cancelReplyDeadlineUtc,omitempty"`
 }
 
 // Ack is the worker confirming that a cancelled attempt has stopped. It names
@@ -640,6 +664,13 @@ type Result struct {
 	Header
 	// Assignment is the object id of the assignment this result answers.
 	Assignment string `json:"assignment"`
+	// A compiled pickup's output or failed branch is an immutable child of
+	// its signed pending commit. Branch in Header still names the canonical
+	// task ref whose logical outcome the first node settles.
+	PickupID      string `json:"pickupId,omitempty"`
+	PendingBranch string `json:"pendingBranch,omitempty"`
+	PendingOID    string `json:"pendingOid,omitempty"`
+	OutcomeBranch string `json:"outcomeBranch,omitempty"`
 	// Status is one of StatusSucceeded, StatusFailed or StatusCancelled.
 	Status string `json:"status"`
 	// FailedPart names the part of the frame that failed, empty for a

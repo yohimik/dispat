@@ -25,7 +25,13 @@ func TestCompiledTemplateBindsOnlyEffectiveInputs(t *testing.T) {
 	header := Header{Protocol: ChoreographyProtocolVersion, Kind: KindBuild,
 		Run: "run", Generation: "generation", PlanDigest: "plan", Task: compiledTemplateTestTask,
 		Attempt: 1, Node: "worker", Branch: compiledTemplateTestBranch}
-	assignment, err := BindChoreographyCompiledTemplate(template, bindings, header, "bootstrap", "graph")
+	assignment, err := BindChoreographyCompiledTemplate(ChoreographyTemplateBindingOptions{
+		Template:     template,
+		Bindings:     bindings,
+		Header:       header,
+		BootstrapOID: "bootstrap",
+		GraphDigest:  "graph",
+	})
 	require.NoError(t, err)
 	require.Equal(t, staticDigest, assignment.TemplateDigest)
 	require.Equal(t, "signed-predecessor", bindings.PredecessorResultOIDs[0])

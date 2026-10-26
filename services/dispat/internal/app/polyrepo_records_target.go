@@ -28,12 +28,12 @@ func (a *App) resolveRepositoryRecords(ctx context.Context, pkgs []*model.Packag
 			if a.planningRemotes != nil {
 				identity, exists := a.planningRemotes[r.Name]
 				if !exists {
-					return fmt.Errorf("execution: pinned remote identity of %q is absent", r.Name)
+					return fmt.Errorf(pinnedRepositoryRemoteAbsentErrorFormat, r.Name)
 				}
 				raw = identity.url()
 			} else {
-				remote := "origin"
-				if r.Commit != nil && r.Commit.Remote != "" {
+				remote := executionDefaultRemoteName
+				if r.Commit != nil && r.Commit.Remote != choreographyAbsentIdentityText {
 					remote = r.Commit.Remote
 				}
 				g := &gitx.LocalGitx{Dir: r.Root, Log: a.log}

@@ -8,6 +8,16 @@ import (
 	"fmt"
 )
 
+const (
+	choreographyLocalLeaseMissingIdentity  = ""
+	choreographyLocalLeaseMinimumWeight    = 1
+	choreographyLocalLeaseNotReusable      = false
+	choreographyLocalLeaseReusable         = true
+	choreographyLocalLeaseStopScan         = false
+	choreographyLocalLeaseContinueScan     = true
+	choreographyLocalLeaseUnavailableError = "execution: first-local outcome lease is unavailable"
+)
+
 // HasStoppedFirstLocalStage reports whether a package outcome hook can reuse
 // an already-held first-node physical slot. It accepts only an indexed signed
 // ResultAccepted whose command returned or an exact signed AckAccepted after
@@ -17,15 +27,15 @@ import (
 // task finality keeps the matching slot held until that hook completes.
 func (c *Coordinator) HasStoppedFirstLocalStage(ctx context.Context, pkg string,
 	requiredWeight int, slots *NodeSlotAuthority) (bool, error) {
-	if c == nil || c.choreographyBroker == nil || slots == nil || pkg == "" || requiredWeight < 1 {
-		return false, fmt.Errorf("execution: first-local outcome lease is unavailable")
+	if c == nil || c.choreographyBroker == nil || slots == nil || pkg == choreographyLocalLeaseMissingIdentity || requiredWeight < choreographyLocalLeaseMinimumWeight {
+		return choreographyLocalLeaseNotReusable, fmt.Errorf(choreographyLocalLeaseUnavailableError)
 	}
 	held, err := slots.Held(ctx)
 	if err != nil {
-		return false, err
+		return choreographyLocalLeaseNotReusable, err
 	}
 	binding := c.choreographyBroker.binding
-	reusable := false
+	reusable := choreographyLocalLeaseNotReusable
 	c.choreographyPending.Range(func(_, value any) bool {
 		pending := value.(*choreographyPendingDecision)
 		pending.mu.Lock()
@@ -33,8 +43,8 @@ func (c *Coordinator) HasStoppedFirstLocalStage(ctx context.Context, pkg string,
 		if pending.packageName != pkg || pending.lease == nil || !pending.lease.IsLocal ||
 			pending.decision.Unclaimed || pending.decided || pending.localEnded || pending.localError != nil ||
 			(!pending.resultAccepted && !pending.ackAccepted) ||
-			pending.decision.ResultOID == "" || pending.assignmentOID == "" {
-			return true
+			pending.decision.ResultOID == choreographyLocalLeaseMissingIdentity || pending.assignmentOID == choreographyLocalLeaseMissingIdentity {
+			return choreographyLocalLeaseContinueScan
 		}
 		for _, lease := range held {
 			locator := lease.Intent.Recovery
@@ -46,10 +56,10 @@ func (c *Coordinator) HasStoppedFirstLocalStage(ctx context.Context, pkg string,
 				locator.AssignmentOID != pending.assignmentOID {
 				continue
 			}
-			reusable = true
-			return false
+			reusable = choreographyLocalLeaseReusable
+			return choreographyLocalLeaseStopScan
 		}
-		return true
+		return choreographyLocalLeaseContinueScan
 	})
 	return reusable, nil
 }

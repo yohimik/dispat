@@ -13,6 +13,16 @@ const (
 	packagePolicyMissingErrorFormat    = "execution: compiled package policy for %q is absent"
 	packagePolicyOutcomeErrorFormat    = "execution: compiled package %q has invalid outcome %q"
 	packagePolicyTransitionErrorFormat = "execution: compiled package %q changed settled outcome from %q to %q"
+	packagePolicyMissingIdentity       = ""
+	packagePolicyPublishedOutcome      = "published"
+	packagePolicyFailedOutcome         = "failed"
+	packagePolicySkippedOutcome        = "skipped"
+	packagePolicyRecordBlockedOutcome  = "record-blocked"
+	packagePolicyCancelledOutcome      = "cancelled"
+	packagePolicyContinueOnError       = "continue"
+	packagePolicySkipOnError           = "skip"
+	packagePolicyDoNotSkip             = false
+	packagePolicySkip                  = true
 )
 
 // ChoreographyPackagePolicy carries the complete immutable §19.3 skip inputs
@@ -40,7 +50,7 @@ type ChoreographyPackageOutcomeEvaluator struct {
 func NewChoreographyPackageOutcomeEvaluator(policies []ChoreographyPackagePolicy) (*ChoreographyPackageOutcomeEvaluator, error) {
 	e := &ChoreographyPackageOutcomeEvaluator{policies: make(map[string]ChoreographyPackagePolicy, len(policies)), outcomes: make(map[string]string, len(policies))}
 	for _, policy := range policies {
-		if policy.Package == "" || e.policies[policy.Package].Package != "" {
+		if policy.Package == packagePolicyMissingIdentity || e.policies[policy.Package].Package != packagePolicyMissingIdentity {
 			return nil, fmt.Errorf(packagePolicyMissingErrorFormat, policy.Package)
 		}
 		e.policies[policy.Package] = policy
@@ -49,16 +59,18 @@ func NewChoreographyPackageOutcomeEvaluator(policies []ChoreographyPackagePolicy
 }
 
 func (e *ChoreographyPackageOutcomeEvaluator) ValidateOutcome(pkg, status string) error {
-	if e == nil || e.policies[pkg].Package == "" {
+	if e == nil || e.policies[pkg].Package == packagePolicyMissingIdentity {
 		return fmt.Errorf(packagePolicyMissingErrorFormat, pkg)
 	}
 	switch status {
-	case "published", "failed", "skipped", "record-blocked", "cancelled":
+	case packagePolicyPublishedOutcome, packagePolicyFailedOutcome, packagePolicySkippedOutcome,
+		packagePolicyRecordBlockedOutcome, packagePolicyCancelledOutcome:
 	default:
 		return fmt.Errorf(packagePolicyOutcomeErrorFormat, pkg, status)
 	}
 	prior := e.outcomes[pkg]
-	if prior != "" && prior != status && !(prior == "published" && status == "record-blocked") {
+	if prior != packagePolicyMissingIdentity && prior != status &&
+		!(prior == packagePolicyPublishedOutcome && status == packagePolicyRecordBlockedOutcome) {
 		return fmt.Errorf(packagePolicyTransitionErrorFormat, pkg, prior, status)
 	}
 	return nil
@@ -73,23 +85,23 @@ func (e *ChoreographyPackageOutcomeEvaluator) ApplyOutcome(pkg, status string) e
 }
 
 func (e *ChoreographyPackageOutcomeEvaluator) ShouldSkip(pkg string) (bool, string, error) {
-	if e == nil || e.policies[pkg].Package == "" {
-		return false, "", fmt.Errorf(packagePolicyMissingErrorFormat, pkg)
+	if e == nil || e.policies[pkg].Package == packagePolicyMissingIdentity {
+		return packagePolicyDoNotSkip, packagePolicyMissingIdentity, fmt.Errorf(packagePolicyMissingErrorFormat, pkg)
 	}
 	p := e.policies[pkg]
 	if p.Mode == KindRun {
-		if p.OnError == "continue" {
-			return false, "", nil
+		if p.OnError == packagePolicyContinueOnError {
+			return packagePolicyDoNotSkip, packagePolicyMissingIdentity, nil
 		}
-		if p.OnError != "skip" {
-			return false, "", fmt.Errorf(packagePolicyMissingErrorFormat, pkg)
+		if p.OnError != packagePolicySkipOnError {
+			return packagePolicyDoNotSkip, packagePolicyMissingIdentity, fmt.Errorf(packagePolicyMissingErrorFormat, pkg)
 		}
 		for _, provider := range p.Direct {
-			if e.outcomes[provider] == "failed" || e.outcomes[provider] == "skipped" {
-				return true, provider, nil
+			if e.outcomes[provider] == packagePolicyFailedOutcome || e.outcomes[provider] == packagePolicySkippedOutcome {
+				return packagePolicySkip, provider, nil
 			}
 		}
-		return false, "", nil
+		return packagePolicyDoNotSkip, packagePolicyMissingIdentity, nil
 	}
 	skip, blocker := release.EvaluateCompiledPackagePolicy(release.CompiledPackagePolicy{
 		Package: p.Package, Providers: p.Providers, Reached: p.Reached,

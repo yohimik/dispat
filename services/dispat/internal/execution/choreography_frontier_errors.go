@@ -42,6 +42,7 @@ const (
 	frontierWrongClaimRootError           = "execution: compiled claim has another exact task root"
 	frontierWrongOfferedClaimError        = "execution: claim does not answer the exact signed offer"
 	frontierResultWithoutClaimError       = "execution: result or acknowledgement has no active claim"
+	frontierPickupIdentityError           = "execution: pickup event differs from its signed claim, result, or canonical tip"
 	frontierCancelWithoutClaimError       = "execution: cancellation does not answer the exact active claim"
 	frontierRetryWithoutClaimError        = "execution: retry event has no active claim"
 	frontierUnclaimedRetryFenceError      = "execution: unclaimed retry does not fence its exact offer"

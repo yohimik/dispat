@@ -1936,6 +1936,63 @@ func TestLocalAuthoritySettlesPublishedRecordAfterEffects(t *testing.T) {
 	require.Equal(t, taskGraphID(task{pkg: "a", kind: taskPublish}), publishedTask)
 }
 
+func TestSignedPreEffectStopSettlesNativeTaskWithoutPublication(t *testing.T) {
+	for _, atReserve := range []bool{true, false} {
+		name := "after-local-claim"
+		if atReserve {
+			name = "before-physical-slot"
+		}
+		t.Run(name, func(t *testing.T) {
+			p := mkPlan(planSpec{Names: []string{"a"}})
+			runner := &fakeRunner{}
+			e := newExecutor(execSpec{Runner: runner, Tagger: &fakeTagger{},
+				Changelog: &fakeChangelog{}, Build: 1, Publish: 1})
+			publishTask := taskGraphID(task{pkg: "a", kind: taskPublish})
+			var physicalReleased, settled bool
+			e.ReserveFirstOnlyTask = func(_ context.Context, taskID string) (func(), error) {
+				if atReserve && taskID == publishTask {
+					return nil, ErrSignedPreEffectCancellation
+				}
+				return func() {}, nil
+			}
+			e.LocalTaskLifecycle = func(_ context.Context, taskID string) (func(context.Context, string) error, error) {
+				return func(context.Context, string) error {
+					if taskID == publishTask {
+						t.Error("signed refusal already released the native physical lease")
+					}
+					return nil
+				}, nil
+			}
+			e.BeginFirstOnlyTask = func(context.Context, string) (func(context.Context, bool, PackageOutcome) error, error) {
+				return func(context.Context, bool, PackageOutcome) error { return nil }, nil
+			}
+			e.BeginLocalAuthorityTask = func(_ context.Context, taskID string) error {
+				require.Equal(t, publishTask, taskID)
+				physicalReleased = true
+				return ErrSignedPreEffectCancellation
+			}
+			e.BlockFirstOnlyTask = func(context.Context, string, string, PackageOutcome) error { return nil }
+			e.BlockLocalAuthorityTask = func(context.Context, string, string, PackageOutcome) error { return nil }
+			e.LocalAuthoritySettled = func(context.Context, string, *plan.Release, bool, PackageOutcome) error {
+				t.Error("a stopped, unclaimed native task cannot report an effect")
+				return nil
+			}
+			e.TaskOutcomeSettled = func(_ context.Context, taskID string, outcome PackageOutcome) error {
+				if taskID == publishTask {
+					require.Equal(t, OutcomeCancelled, outcome)
+					settled = true
+				}
+				return nil
+			}
+			results := e.Run(t.Context(), p)
+			require.Equal(t, StatusCancelled, results["a"].Status)
+			require.True(t, settled, "the signed inert task must settle after package cancellation")
+			require.Equal(t, !atReserve, physicalReleased)
+			require.Equal(t, -1, runner.indexOf("publish a"))
+		})
+	}
+}
+
 func TestRunOutcomeScriptsSilentOnSuccess(t *testing.T) {
 	p := mkPlan(planSpec{Names: []string{"a"}})
 	sp := p.Releases["a"].Pkg.Space

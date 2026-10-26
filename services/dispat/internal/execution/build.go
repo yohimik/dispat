@@ -24,6 +24,26 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/release"
 )
 
+const (
+	buildNoInitialSourcesCount                = 0
+	buildMinimumLocalConcurrency              = 1
+	buildNoRepositoryName                     = ""
+	buildNoPackageName                        = ""
+	buildNoTaskID                             = ""
+	buildNoPreferredNode                      = ""
+	buildNoCanonicalEndpoint                  = ""
+	buildNoCapturedRepositoriesCount          = 0
+	buildNoPackageDirectory                   = ""
+	buildCompiledStageMissingTaskReason       = "execution: compiled choreography stage has no canonical task ID"
+	buildCompiledStageMissingReservationError = "execution: compiled choreography stage %s requires a pre-admission reservation"
+	buildDispatchNodesLogKey                  = "nodes"
+	buildDispatchConcurrencyLogKey            = "concurrency"
+	buildNoPackageSourcesCount                = 0
+	buildFirstSourceIndex                     = 0
+	buildRevertStageName                      = "revert"
+	buildMissingPackageRepositoryError        = "the package's input closure does not name the repository %q it belongs to"
+)
+
 // Dispatch is what a coordinator needs of the run before it places any work:
 // how much this node keeps for itself, which repositories a package's input
 // closure consists of, which shell its commands run through, and how one of
@@ -96,7 +116,7 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) error {
 	} else {
 		c.snapshots = newSnapshots()
 	}
-	if c.PinnedSources == nil && len(dispatch.InitialSources) > 0 {
+	if c.PinnedSources == nil && len(dispatch.InitialSources) > buildNoInitialSourcesCount {
 		if err := c.snapshots.captureBaselines(ctx, baselineCapture{sources: dispatch.InitialSources,
 			roots: dispatch.OutputRoots, open: dispatch.OpenRepository, log: c.Log}); err != nil {
 			c.snapshots.closeBaselines()
@@ -109,11 +129,11 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) error {
 	c.outputs = newOutputRegistry()
 	c.sweepOutputs = newSweepOutputs()
 	c.preparations = map[string]*preparation{}
-	c.local = make(chan struct{}, max(dispatch.Concurrency, 1))
+	c.local = make(chan struct{}, max(dispatch.Concurrency, buildMinimumLocalConcurrency))
 	c.watchers = make(map[string]*watcher, len(c.Links))
 	for _, link := range c.Links {
 		observer := &watcher{coordinator: c, link: link, mailbox: c.mailboxes[link.Name],
-			wake: make(chan struct{}, 1), attempts: map[string]*attemptState{}}
+			wake: make(chan struct{}, buildMinimumLocalConcurrency), attempts: map[string]*attemptState{}}
 		c.watchers[link.Name] = observer
 		c.watching.Add(1)
 		go func() {
@@ -121,7 +141,7 @@ func (c *Coordinator) Start(ctx context.Context, dispatch Dispatch) error {
 			observer.serve(watched)
 		}()
 	}
-	c.Log.Debug().Int("nodes", len(c.Links)).Int("concurrency", max(dispatch.Concurrency, 1)).
+	c.Log.Debug().Int(buildDispatchNodesLogKey, len(c.Links)).Int(buildDispatchConcurrencyLogKey, max(dispatch.Concurrency, buildMinimumLocalConcurrency)).
 		Str("run", c.Run).Msg("dispatch opened")
 	return nil
 }
@@ -139,18 +159,18 @@ func (c *Coordinator) Guard(ctx context.Context, stage, packageName string) (fun
 		return nil, fmt.Errorf("waiting for a local slot to run the %s stage: %w", stage, ctx.Err())
 	}
 	repository := c.dispatch.PackageRepositories[packageName]
-	if repository == "" && c.dispatch.Sources != nil {
-		if sources := c.dispatch.Sources(packageName); len(sources) > 0 {
-			repository = sources[0].Dir
+	if repository == buildNoRepositoryName && c.dispatch.Sources != nil {
+		if sources := c.dispatch.Sources(packageName); len(sources) > buildNoPackageSourcesCount {
+			repository = sources[buildFirstSourceIndex].Dir
 		}
 	}
 	var nativeLane *sync.Mutex
-	if repository != "" {
+	if repository != buildNoRepositoryName {
 		value, _ := c.nativeWriterLanes.LoadOrStore(repository, &sync.Mutex{})
 		nativeLane = value.(*sync.Mutex)
 		nativeLane.Lock()
 	}
-	if packageName != "" && stage != "revert" {
+	if packageName != buildNoPackageName && stage != buildRevertStageName {
 		c.guard.Lock()
 		err := c.cleanPreparationRoots(ctx, packageName)
 		c.guard.Unlock()
@@ -205,9 +225,9 @@ func (c *Coordinator) Stage(ctx context.Context, request release.StageRequest,
 	descriptor := request.Descriptor
 	task := request.Release.Pkg.Name + ":" + request.Stage
 	if c.choreographyBroker != nil {
-		if request.TaskID == "" {
+		if request.TaskID == buildNoTaskID {
 			return release.StageOutcome{FailedPart: release.PartInputs},
-				fmt.Errorf("execution: compiled choreography stage has no canonical task ID")
+				fmt.Errorf(buildCompiledStageMissingTaskReason)
 		}
 		task = request.TaskID
 	}
@@ -238,9 +258,9 @@ func (c *Coordinator) Stage(ctx context.Context, request release.StageRequest,
 		return c.publishHere(ctx, here)
 	}
 	if c.choreographyBroker != nil {
-		return release.StageOutcome{}, fmt.Errorf("execution: compiled choreography stage %s requires a pre-admission reservation", task)
+		return release.StageOutcome{}, fmt.Errorf(buildCompiledStageMissingReservationError, task)
 	}
-	preferred := ""
+	preferred := buildNoPreferredNode
 	if descriptor.Inputs == release.InputsOwnOutputs {
 		preferred = c.producerOf(request)
 	}
@@ -682,9 +702,9 @@ func (c *Coordinator) settleQueuedAttempt(ctx context.Context, lease *Lease, tas
 func (c *Coordinator) readTaskOutcome(ctx context.Context, task string, attempt int,
 	outcome release.StageOutcome, result Result, commit, branch string,
 	request release.StageRequest) (release.StageOutcome, error) {
-	if err := rehomeChoreographyExports(&result, request.Release.Pkg.Repository,
-		request.Release.Pkg.Name, request.Release.Pkg.Dir,
-		request.Release.Pkg.Space.BuildOutputs); err != nil {
+	if err := rehomeChoreographyExports(choreographyExportRehomeOptions{Result: &result,
+		Repository: request.Release.Pkg.Repository, Package: request.Release.Pkg.Name,
+		SourceRoot: request.Release.Pkg.Dir, Roots: request.Release.Pkg.Space.BuildOutputs}); err != nil {
 		outcome.FailedPart = release.PartOutputs
 		return outcome, err
 	}
@@ -785,7 +805,7 @@ func (c *Coordinator) captureInputs(ctx context.Context, sources []Source) ([]st
 	}
 	c.guard.Lock()
 	defer c.guard.Unlock()
-	captured := make([]string, 0, len(sources))
+	captured := make([]string, buildNoCapturedRepositoriesCount, len(sources))
 	for _, source := range sources {
 		commit, err := c.snapshots.capture(ctx, c.dispatch.OpenRepository(source.Dir), source, c.Log)
 		if err != nil {
@@ -798,7 +818,7 @@ func (c *Coordinator) captureInputs(ctx context.Context, sources []Source) ([]st
 
 // endpointOf is where one node reads its work, as the configuration named it.
 func (c *Coordinator) endpointOf(node string) string {
-	if node == c.Local.Name && c.CanonicalEndpoint != "" {
+	if node == c.Local.Name && c.CanonicalEndpoint != buildNoCanonicalEndpoint {
 		return c.CanonicalEndpoint
 	}
 	for _, link := range c.Links {
@@ -806,7 +826,7 @@ func (c *Coordinator) endpointOf(node string) string {
 			return link.Endpoint
 		}
 	}
-	return ""
+	return buildNoCanonicalEndpoint
 }
 
 // resolvePackageDir is where the package's commands run inside the checkout a
@@ -821,22 +841,22 @@ func resolvePackageDir(sources []Source, request release.StageRequest) (string, 
 		}
 		absoluteSource, err := filepath.Abs(source.Dir)
 		if err != nil {
-			return "", fmt.Errorf(packageDirOutsideSourceErrorFormat, request.Dir, source.Dir, err)
+			return buildNoPackageDirectory, fmt.Errorf(packageDirOutsideSourceErrorFormat, request.Dir, source.Dir, err)
 		}
 		absoluteTask, err := filepath.Abs(request.Dir)
 		if err != nil {
-			return "", fmt.Errorf(packageDirOutsideSourceErrorFormat, request.Dir, source.Dir, err)
+			return buildNoPackageDirectory, fmt.Errorf(packageDirOutsideSourceErrorFormat, request.Dir, source.Dir, err)
 		}
 		relative, err := filepath.Rel(absoluteSource, absoluteTask)
 		if err == nil && !filepath.IsLocal(relative) {
 			err = errors.New(packageDirEscapesSourceError)
 		}
 		if err != nil {
-			return "", fmt.Errorf(packageDirOutsideSourceErrorFormat, request.Dir, source.Dir, err)
+			return buildNoPackageDirectory, fmt.Errorf(packageDirOutsideSourceErrorFormat, request.Dir, source.Dir, err)
 		}
 		return filepath.ToSlash(relative), nil
 	}
-	return "", fmt.Errorf("the package's input closure does not name the repository %q it belongs to",
+	return buildNoPackageDirectory, fmt.Errorf(buildMissingPackageRepositoryError,
 		request.Release.Pkg.Repository)
 }
 

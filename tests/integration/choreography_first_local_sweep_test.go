@@ -32,7 +32,7 @@ printf 'recovery-finished %s\n' "$DISPAT_PACKAGE" >> "$DISPAT_IT_EXECUTION_LOG"`
 			Publish: models.RunOnlyOrchestrator}
 	})
 	firstHome, peerHome := t.TempDir(), t.TempDir()
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	peer := rig.startWorker(executionWorkerConfig(rig.mailbox), 90,
 		append(peerGit.Env(), "HOME="+peerHome,
 			"XDG_CONFIG_HOME="+filepath.Join(peerHome, "config"))...)
@@ -58,6 +58,17 @@ printf 'recovery-finished %s\n' "$DISPAT_PACKAGE" >> "$DISPAT_IT_EXECUTION_LOG"`
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+	claimAssignment := ""
+	for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+		if event.Kind != "claim-accepted" || event.Task != "core:run" {
+			continue
+		}
+		claimAssignment = event.AssignmentOID
+		require.NotEmpty(t, claimAssignment, "the retained Claim binds an exact signed Assignment")
+		require.NotEqual(t, event.PriorTaskOID, claimAssignment,
+			"the inert task tip is not the signed Assignment used for cancellation")
+	}
+	require.NotEmpty(t, claimAssignment, "the peer command started only after an accepted Claim")
 	started.Signal(syscall.SIGKILL)
 	first := started.Wait()
 	require.NotEqual(t, 0, first.Code)
@@ -94,7 +105,7 @@ func TestChoreographyCompiledSweepRecoversAcceptedResultBeforeDecision(t *testin
 			Publish: models.RunOnlyOrchestrator}
 	})
 	firstHome, peerHome := t.TempDir(), t.TempDir()
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	peer := rig.startWorker(executionWorkerConfig(rig.mailbox), 60,
 		append(peerGit.Env(), "HOME="+peerHome,
 			"XDG_CONFIG_HOME="+filepath.Join(peerHome, "config"))...)
@@ -184,7 +195,7 @@ printf 'timeout-finished %s\n' "$DISPAT_PACKAGE" >> "$DISPAT_IT_EXECUTION_LOG"`
 			Publish: models.RunOnlyOrchestrator}
 	})
 	firstHome, peerHome := t.TempDir(), t.TempDir()
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	peer := rig.startWorker(executionWorkerConfig(rig.mailbox), 60,
 		append(peerGit.Env(), "HOME="+peerHome,
 			"XDG_CONFIG_HOME="+filepath.Join(peerHome, "config"))...)
@@ -222,7 +233,7 @@ printf 'interrupt-finished %s\n' "$DISPAT_PACKAGE" >> "$DISPAT_IT_EXECUTION_LOG"
 			Publish: models.RunOnlyOrchestrator}
 	})
 	firstHome, peerHome := t.TempDir(), t.TempDir()
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	peer := rig.startWorker(executionWorkerConfig(rig.mailbox), 60,
 		append(peerGit.Env(), "HOME="+peerHome,
 			"XDG_CONFIG_HOME="+filepath.Join(peerHome, "config"))...)
@@ -284,7 +295,7 @@ func requireChoreographyTaskChain(t *testing.T, mailbox string, branches []strin
 
 // The linked peer answers preflight through HTTPS but has no task placement.
 // Each ordinary command still claims and returns through the signed broker
-// on the first node, and the peer's Git process must never push a ref.
+// on the first node, and the peer's Git process must never push a canonical task ref.
 func TestChoreographyCompiledSweepRunsFirstLocalThroughSignedBroker(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the distributed durable node-slot backend is not available on Windows")
@@ -295,7 +306,7 @@ func TestChoreographyCompiledSweepRunsFirstLocalThroughSignedBroker(t *testing.T
 		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyOrchestrator,
 			Publish: models.RunOnlyOrchestrator}
 	})
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	firstHome := t.TempDir()
 	peerHome := t.TempDir()
 	peerEnv := append(peerGit.Env(), "HOME="+peerHome,
@@ -329,7 +340,7 @@ func TestChoreographyCompiledSweepRunsFirstLocalThroughSignedBroker(t *testing.T
 	values := executionProbeValues(rig, "export")
 	require.Equal(t, "from-core", values["api"])
 	require.Equal(t, "from-core", values["web"])
-	require.Zero(t, peerGit.Matches(), "the peer attempted an engine Git push")
+	require.Zero(t, peerGit.Matches(), "the peer attempted a canonical task Git push")
 	require.False(t, remoteHoldsLock(t, rig.origin), "a sweep must not create a release lock")
 	require.Empty(t, rig.repo.TagList(), "a sweep must not publish release tags")
 	require.NotEmpty(t, rig.branches(), "the sealed canonical feed remains readable after the return listener closes")
@@ -444,7 +455,7 @@ esac`
 			Publish: models.RunOnlyOrchestrator}
 		cfg.RunOutputs = map[string][]string{"tests": {"coverage"}}
 	})
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	firstHome := t.TempDir()
 	peerHome := t.TempDir()
 	peer := rig.startWorker(executionWorkerConfig(rig.mailbox), 60,
@@ -469,7 +480,7 @@ esac`
 	values := executionProbeValues(rig, "path")
 	require.Equal(t, "from-core", values["api"])
 	require.Equal(t, "from-core", values["web"])
-	require.Zero(t, peerGit.Matches(), "the peer attempted an engine Git push")
+	require.Zero(t, peerGit.Matches(), "the peer attempted a canonical task Git push")
 	require.False(t, remoteHoldsLock(t, rig.origin), "a sweep must not create a release lock")
 	require.Empty(t, rig.repo.TagList(), "a sweep must not publish release tags")
 }
@@ -499,7 +510,7 @@ esac`
 			Publish: models.RunOnlyOrchestrator}
 		cfg.RunOutputs = map[string][]string{"tests": {"coverage"}}
 	})
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	firstHome, peerHome := t.TempDir(), t.TempDir()
 	peer := rig.startWorker(executionWorkerConfig(rig.mailbox), 60,
 		append(peerGit.Env(), "HOME="+peerHome,
@@ -516,7 +527,7 @@ esac`
 			"consumer did not receive both partial exports: %s\nstdout:\n%s\nstderr:\n%s",
 			content, res.Stdout, res.Stderr)
 	}
-	require.Zero(t, peerGit.Matches(), "the peer attempted an engine Git push")
+	require.Zero(t, peerGit.Matches(), "the peer attempted a canonical task Git push")
 	require.False(t, remoteHoldsLock(t, rig.origin))
 	require.Empty(t, rig.repo.TagList())
 }

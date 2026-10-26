@@ -29,8 +29,8 @@ func (a *App) releaseEffectEvidence(ctx context.Context,
 	request releaseEffectRequest) (execution.ChoreographyLocalEffectEvidence, error) {
 	c, rel := request.Coordinator, request.Release
 	if a == nil || c == nil || rel == nil || rel.Pkg == nil ||
-		(request.Kind != "publish" && request.Kind != "record") {
-		return execution.ChoreographyLocalEffectEvidence{}, fmt.Errorf("execution: incomplete release effect identity")
+		(request.Kind != choreographyPublishStageName && request.Kind != choreographyRecordStageName) {
+		return execution.ChoreographyLocalEffectEvidence{}, fmt.Errorf(choreographyIncompleteEffectIdentityErrorText)
 	}
 	repository := rel.Pkg.Repository
 	commit, err := a.releaseCommitConfig(repository)
@@ -45,13 +45,13 @@ func (a *App) releaseEffectEvidence(ctx context.Context,
 	if a.workspace == nil && commit.IsEnabled() {
 		mode = releaseEffectDeferredFinalizeMode
 	}
-	observation := "failed"
+	observation := choreographyFailedOutcomeName
 	if request.Succeeded {
-		observation = "succeeded"
+		observation = choreographySucceededOutcomeName
 	}
 	evidence := execution.ChoreographyLocalEffectEvidence{
 		Operation: request.Kind, Repository: repository, Package: rel.Pkg.Name,
-		Version: rel.Next.String(), Tag: rel.TagName(), Attempt: 1,
+		Version: rel.Next.String(), Tag: rel.TagName(), Attempt: choreographyInitialAttemptCount,
 		PlanDigest: c.PlanDigest, RecordingMode: mode, Observation: observation,
 	}
 	if !request.Succeeded {
@@ -59,7 +59,7 @@ func (a *App) releaseEffectEvidence(ctx context.Context,
 	}
 	if mode == releaseEffectDeferredFinalizeMode {
 		if a.returnJournal == nil {
-			return evidence, fmt.Errorf("execution: deferred release tag %s has no protected run journal", rel.TagName())
+			return evidence, fmt.Errorf(choreographyMissingDeferredTagJournalErrorFormat, rel.TagName())
 		}
 		if err := a.returnJournal.expectDeferredTag(rel.TagName()); err != nil {
 			return evidence, err
@@ -67,54 +67,54 @@ func (a *App) releaseEffectEvidence(ctx context.Context,
 	}
 	if receipt, held := a.receipts.findHeld(rel.TagName()); held {
 		if receipt.Package != rel.Pkg.Name || receipt.Tag != rel.TagName() ||
-			receipt.Object == "" || receipt.Commit == "" {
-			return evidence, fmt.Errorf("execution: held publication receipt differs from %s", rel.TagName())
+			receipt.Object == choreographyAbsentIdentityText || receipt.Commit == choreographyAbsentIdentityText {
+			return evidence, fmt.Errorf(choreographyHeldReceiptMismatchErrorFormat, rel.TagName())
 		}
 		evidence.ReceiptObject, evidence.ReceiptCommit = receipt.Object, receipt.Commit
 		if prepared, ok := a.receipts.preparedFor(rel.TagName()); ok {
 			if prepared.ReceiptObject != receipt.Object {
-				return evidence, fmt.Errorf("execution: prepared release differs from held receipt for %s", rel.TagName())
+				return evidence, fmt.Errorf(choreographyPreparedReceiptMismatchErrorFormat, rel.TagName())
 			}
 			evidence.PreparedHead, evidence.PreparedTarget = prepared.BranchHead, prepared.TagTarget
 		}
 	}
 	if mode == releaseEffectDeferredFinalizeMode && commit.IsPushEnabled() &&
-		(evidence.ReceiptObject == "" || evidence.ReceiptCommit == "") {
-		return evidence, fmt.Errorf("execution: deferred pushed release %s has no exact durable publication receipt",
+		(evidence.ReceiptObject == choreographyAbsentIdentityText || evidence.ReceiptCommit == choreographyAbsentIdentityText) {
+		return evidence, fmt.Errorf(choreographyMissingDeferredPushReceiptErrorFormat,
 			rel.TagName())
 	}
 	git := a.openRepositoryGit(repository)
-	if mode == "tag-push" || (mode == "commit-push" && evidence.ReceiptObject == "") {
+	if mode == choreographyTagPushModeName || (mode == choreographyCommitPushModeName && evidence.ReceiptObject == choreographyAbsentIdentityText) {
 		remote := commitRemote(commit)
 		object, err := git.RemoteTagObject(ctx, remote, rel.TagName())
 		if err != nil {
-			return evidence, fmt.Errorf("execution: reading exact pushed tag %s: %w", rel.TagName(), err)
+			return evidence, fmt.Errorf(choreographyPushedTagReadErrorFormat, rel.TagName(), err)
 		}
 		target, err := git.RemoteTagCommit(ctx, remote, rel.TagName())
 		if err != nil {
-			return evidence, fmt.Errorf("execution: reading pushed tag target %s: %w", rel.TagName(), err)
+			return evidence, fmt.Errorf(choreographyPushedTargetReadErrorFormat, rel.TagName(), err)
 		}
-		if object != "" && target != "" {
+		if object != choreographyAbsentIdentityText && target != choreographyAbsentIdentityText {
 			evidence.TagObject, evidence.TagTarget = object, target
 		}
 	}
-	if mode == "local-only" && evidence.ReceiptObject == "" {
+	if mode == choreographyLocalRecordingModeName && evidence.ReceiptObject == choreographyAbsentIdentityText {
 		object, err := git.TagObject(ctx, rel.TagName())
 		if err != nil {
-			return evidence, fmt.Errorf("execution: reading local release tag %s: %w", rel.TagName(), err)
+			return evidence, fmt.Errorf(choreographyLocalTagReadErrorFormat, rel.TagName(), err)
 		}
-		if object != "" {
+		if object != choreographyAbsentIdentityText {
 			target, err := git.ResolveCommit(ctx, rel.TagName())
 			if err != nil {
-				return evidence, fmt.Errorf("execution: reading local release target %s: %w", rel.TagName(), err)
+				return evidence, fmt.Errorf(choreographyLocalTargetReadErrorFormat, rel.TagName(), err)
 			}
 			evidence.TagObject, evidence.TagTarget = object, target
 		}
 	}
-	if mode != "local-only" && mode != releaseEffectDeferredFinalizeMode &&
+	if mode != choreographyLocalRecordingModeName && mode != releaseEffectDeferredFinalizeMode &&
 		request.Outcome != release.OutcomeRecordBlocked &&
-		evidence.ReceiptObject == "" && evidence.TagObject == "" {
-		return evidence, fmt.Errorf("execution: successful pushed release %s has no exact native record", rel.TagName())
+		evidence.ReceiptObject == choreographyAbsentIdentityText && evidence.TagObject == choreographyAbsentIdentityText {
+		return evidence, fmt.Errorf(choreographyMissingNativeRecordErrorFormat, rel.TagName())
 	}
 	return evidence, nil
 }
@@ -124,7 +124,7 @@ func (a *App) releaseCommitConfig(repository string) (*config.CommitConfig, erro
 	if a.workspace != nil {
 		owner := a.workspace.RepositoryByName(repository)
 		if owner == nil {
-			return nil, fmt.Errorf("execution: release effect has no source repository %q", repository)
+			return nil, fmt.Errorf(choreographyMissingEffectRepositoryErrorFormat, repository)
 		}
 		commit = owner.Commit
 	}
@@ -133,10 +133,10 @@ func (a *App) releaseCommitConfig(repository string) (*config.CommitConfig, erro
 
 func releaseRecordingMode(commit *config.CommitConfig) string {
 	if commit.IsPushEnabled() {
-		return "commit-push"
+		return choreographyCommitPushModeName
 	}
 	if commit.IsTagPushEnabled() {
-		return "tag-push"
+		return choreographyTagPushModeName
 	}
-	return "local-only"
+	return choreographyLocalRecordingModeName
 }

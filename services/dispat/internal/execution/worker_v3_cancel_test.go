@@ -18,7 +18,8 @@ func TestWorkerRecognizesSignedCancelOfCompiledClaim(t *testing.T) {
 	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 		ExpectedOID: offered.AssignmentOID, ExpectedLedgerOID: offered.Cursor.OID,
-		InputsDigest: spec.InputsDigest, ProposalID: "claim-worker-cancel"}
+		InputsDigest: spec.InputsDigest, PickupID: NewChoreographyPickupID(),
+		ProposalID: "claim-worker-cancel"}
 	completeChoreographyFixtureClaim(t, persist, &claim)
 	receipt, err := broker.AcceptClaim(t.Context(), claim)
 	require.NoError(t, err)

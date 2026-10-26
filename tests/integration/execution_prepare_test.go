@@ -42,6 +42,8 @@ import (
 var executionPreparePackages = []string{"assets", "docs", "solo", "ui"}
 
 const executionPreparedProviderSettlementWait = 60 * time.Second
+const executionFailedPreparedProviderAdmissionSeconds = 5
+const executionPreparedProviderWorkerDiagnosticWait = 5 * time.Second
 
 // executionPrepareBaseline is the version every package is tagged at before a
 // scenario commits anything, which is what lets one commit decide what this
@@ -175,15 +177,15 @@ func executionPlannedPackages(t *testing.T, rig *executionRig) []string {
 	return planned
 }
 
-// executionPrepareTasks are the preparations this run finished, read from
-// the first node's signed completion log. A local worker also reports command
-// completion, so counting both messages would count one task twice.
-func executionPrepareTasks(res harness.RunResult) []string {
+// executionPrepareTasks are the preparations with exact signed terminal
+// finality in the retained first-node ledger.
+func executionPrepareTasks(t *testing.T, mailbox string) []string {
+	t.Helper()
 	var tasks []string
-	for _, event := range executionEvents(res) {
-		if event.Str("message") == "task finished" && event.Str("commit") != "" &&
-			strings.HasSuffix(event.Str("task"), ":"+executionPrepareKind) {
-			tasks = append(tasks, event.Str("task"))
+	for _, event := range executionLateJoinLedgerEvents(t, mailbox) {
+		if event.Kind == executionSagaTerminalEventKind &&
+			strings.HasSuffix(event.Task, ":"+executionPrepareKind) {
+			tasks = append(tasks, event.Task)
 		}
 	}
 	return tasks
@@ -238,7 +240,7 @@ func TestExecutionUnselectedProviderIsPreparedNotReleased(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, 1, executionBuildCount(rig, "assets"),
 		"the provider was built once for both consumers: %v", rig.runs())
-	assert.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(res),
+	assert.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(t, rig.mailbox),
 		"and it was built as a preparation rather than as a release\nstdout:\n%s", res.Stdout)
 
 	produced := executionProbeValues(rig, "inputs")
@@ -358,7 +360,7 @@ func TestExecutionDevDependencyOutputReachesConsumer(t *testing.T) {
 		})
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(res),
+	assert.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(t, rig.mailbox),
 		"the development provider was built although nothing propagates along the edge; stdout:\n%s\nstderr:\n%s",
 		res.Stdout, res.Stderr)
 	produced := executionProbeValues(rig, "inputs")
@@ -510,7 +512,7 @@ func TestExecutionPreparationLeavesThePlanDigestUnchanged(t *testing.T) {
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, want, planDigestOf(t, res),
 		"the run that prepared a provider executed the plan the reader was shown")
-	require.Len(t, executionPrepareTasks(res), 1, "and it really did prepare one")
+	require.Len(t, executionPrepareTasks(t, rig.mailbox), 1, "and it really did prepare one")
 	assert.NotContains(t, executionPlannedPackages(t, rig), "assets",
 		"and the provider is no more pending afterwards than it was before")
 	stopAll(t, workers)
@@ -587,9 +589,11 @@ func TestExecutionPreparedProviderObeysItsOwnPlacement(t *testing.T) {
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	placed := rig.nodesByPackage()
-	assert.Equal(t, executionOrchestratorLabel, placed["assets"],
+	started, isStarted := executionLine(res, "plan fixed")
+	require.True(t, isStarted, "the signed run reports its first-node identity")
+	assert.Equal(t, started.Str("node"), placed["assets"],
 		"the pinned preparation ran here: %v", rig.runs())
-	assert.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(res))
+	assert.Equal(t, []string{"assets:" + executionPrepareKind}, executionPrepareTasks(t, rig.mailbox))
 	for _, name := range []string{"ui", "docs"} {
 		assert.Contains(t, []string{executionNode, executionSecondNode}, placed[name],
 			"%s was still delegated: %v", name, rig.runs())
@@ -646,14 +650,32 @@ func TestExecutionAPreparationThatFailedHereIsTheConsumersFailure(t *testing.T) 
 	rig := newExecutionPrepareWorkspace(t, func(_ *harness.Repo, cfg *models.File) {
 		cfg.Scripts["build"] = models.Script{executionPrepareFailingBuild}
 		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyBoth)
+		cfg.Execution.Timeouts.Admission = executionFailedPreparedProviderAdmissionSeconds
 	}, pinPreparedPackage("assets", placedOn(models.RunOnlyOrchestrator, models.RunOnlyOrchestrator)))
 	rig.commitTo("the page, the manual and the standalone all changed", "docs", "solo", "ui")
 	workers := rig.startWorkersHolding([]string{executionNode, executionSecondNode}, 2)
+	defer func() {
+		if t.Failed() {
+			t.Logf("signed provider and solo task ledger on assertion failure: %+v",
+				executionLateJoinLedgerEvents(t, rig.mailbox))
+		}
+	}()
 
-	res := rig.release()
+	startedRelease := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
+	res := startedRelease.WaitForDiagnostic(executionPreparedProviderSettlementWait, func() {
+		stdout, stderr := startedRelease.CapturedOutput()
+		t.Logf("first-node stdout:\n%s\nstderr:\n%s", stdout, stderr)
+		t.Logf("signed provider failure ledger: %+v", executionLateJoinLedgerEvents(t, rig.mailbox))
+		for index, worker := range workers {
+			stopped := worker.proc.KillForDiagnostic(executionPreparedProviderWorkerDiagnosticWait)
+			t.Logf("worker %d stdout:\n%s\nstderr:\n%s", index, stopped.Stdout, stopped.Stderr)
+		}
+	})
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Equal(t, executionOrchestratorLabel, rig.nodesByPackage()["assets"],
+	started, isStarted := executionLine(res, "plan fixed")
+	require.True(t, isStarted, "the failed run reports its first-node identity")
+	assert.Equal(t, started.Str("node"), rig.nodesByPackage()["assets"],
 		"the preparation that failed ran here: %v", rig.runs())
 	for _, name := range []string{"ui", "docs"} {
 		assert.Truef(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, name),
@@ -805,7 +827,7 @@ func TestStageRelationNoneNeedsNoPreparation(t *testing.T) {
 	res := rig.release(executionGateEnv + "=" + gate)
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Empty(t, executionPrepareTasks(res),
+	assert.Empty(t, executionPrepareTasks(t, rig.mailbox),
 		"nothing was built for a provider the consumer reads nothing of\nstdout:\n%s", res.Stdout)
 	assert.Empty(t, executionPreparedReports(res))
 	assert.Equal(t, 0, executionBuildCount(rig, "infra"), "runs: %v", rig.runs())

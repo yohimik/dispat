@@ -17,7 +17,7 @@ func TestSealedCompiledRunRetiresOnlyAfterLocalClaimAndProposalSettle(t *testing
 		pending:  map[string]*workerCompiledClaim{"task": {}}}
 	w := &Worker{compiledRuns: map[string]*workerCompiledRun{binding.Run: run},
 		returnChannels: map[string]*workerReturnChannel{binding.Run: channel},
-		claimed: map[string]*claimedTask{"branch": {assignment: Assignment{
+		claimed: map[workerClaimIdentity]*claimedTask{{Branch: "branch"}: {assignment: Assignment{
 			Header: Header{Run: binding.Run}}}}}
 	retired, err := w.retireSealedCompiledRun(t.Context(), run)
 	require.NoError(t, err)
@@ -26,7 +26,7 @@ func TestSealedCompiledRunRetiresOnlyAfterLocalClaimAndProposalSettle(t *testing
 	retired, err = w.retireSealedCompiledRun(t.Context(), run)
 	require.NoError(t, err)
 	require.False(t, retired)
-	delete(w.claimed, "branch")
+	delete(w.claimed, workerClaimIdentity{Branch: "branch"})
 	retired, err = w.retireSealedCompiledRun(t.Context(), run)
 	require.NoError(t, err)
 	require.True(t, retired)

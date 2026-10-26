@@ -19,14 +19,15 @@ const choreographyRefusalHookFileMode = 0o755
 
 type choreographyAtomicUnknownTransport struct {
 	transportx
-	apply bool
-	calls int
+	apply  bool
+	always bool
+	calls  int
 }
 
 func (t *choreographyAtomicUnknownTransport) PushAtomicAdvances(ctx context.Context, endpoint string,
 	refs []gitx.BranchAdvance) error {
 	t.calls++
-	if t.calls == 1 {
+	if t.calls == 1 || t.always {
 		if t.apply {
 			if err := t.transportx.PushAtomicAdvances(ctx, endpoint, refs); err != nil {
 				return err
@@ -35,6 +36,32 @@ func (t *choreographyAtomicUnknownTransport) PushAtomicAdvances(ctx context.Cont
 		return gitx.ErrPushUnknown
 	}
 	return t.transportx.PushAtomicAdvances(ctx, endpoint, refs)
+}
+
+func TestChoreographyPersistentUnknownClaimFailsBoundedlyWithoutInventedFence(t *testing.T) {
+	fixture, persist, binding, spec := newChoreographyLedgerFixture(t)
+	broker, err := RecoverFirstNodeBroker(t.Context(), choreographyFixtureBrokerOptions(persist))
+	require.NoError(t, err)
+	claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
+		Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
+		ExpectedOID: spec.ReservationOID, InputsDigest: spec.InputsDigest,
+		PickupID: NewChoreographyPickupID(), ProposalID: "persistent-unknown-claim"}
+	completeChoreographyFixtureClaim(t, persist, &claim)
+	transport := &choreographyAtomicUnknownTransport{transportx: fixture.mailbox.remote, always: true}
+	fixture.mailbox.remote = transport
+	wake := broker.EligibilityWake()
+	_, err = broker.AcceptClaim(t.Context(), claim)
+	require.ErrorIs(t, err, gitx.ErrPushUnknown)
+	require.ErrorIs(t, broker.fault, gitx.ErrPushUnknown)
+	require.NotNil(t, persist.pending)
+	require.Equal(t, spec.ReservationOID, remoteChoreographyOID(t, fixture, spec.Branch))
+	require.Equal(t, claim.ExpectedLedgerOID, remoteChoreographyOID(t, fixture, persist.opts.Ledger.Branch))
+	require.Empty(t, broker.tasks[spec.Task].claim)
+	select {
+	case <-wake:
+	default:
+		t.Fatal("persistent unknown claim did not wake task observers")
+	}
 }
 
 // Git's pre-receive hook refuses the atomic task/ledger Claim CAS. The first
@@ -55,6 +82,7 @@ func TestChoreographyAtomicClaimRefusalRetainsExactAttempt(t *testing.T) {
 			claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 				Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 				ExpectedOID: spec.ReservationOID, InputsDigest: spec.InputsDigest,
+				PickupID:   NewChoreographyPickupID(),
 				ProposalID: "refused-atomic-claim"}
 			completeChoreographyFixtureClaim(t, persist, &claim)
 			countFile := filepath.Join(fixture.endpoint, "hooks", "refused-count")
@@ -73,16 +101,20 @@ func TestChoreographyAtomicClaimRefusalRetainsExactAttempt(t *testing.T) {
 			receipt, err := broker.AcceptClaim(t.Context(), claim)
 			count, readErr := os.ReadFile(countFile)
 			require.NoError(t, readErr)
-			require.Equal(t, "2", strings.TrimSpace(string(count)))
 			if tc.firstRefused {
-				require.ErrorIs(t, err, errChoreographyAtomicRefused)
-				require.False(t, receipt.Accepted)
+				require.Equal(t, "4", strings.TrimSpace(string(count)))
+			} else {
+				require.Equal(t, "2", strings.TrimSpace(string(count)))
+			}
+			if tc.firstRefused {
+				require.NoError(t, err)
+				require.True(t, receipt.Refused)
+				require.Equal(t, ChoreographyRefusalStopping, receipt.RefusalReason)
 				require.Nil(t, persist.pending)
 				require.Equal(t, spec.ReservationOID, remoteChoreographyOID(t, fixture, spec.Branch))
-				require.Equal(t, claim.ExpectedLedgerOID, remoteChoreographyOID(t, fixture, persist.opts.Ledger.Branch))
 				require.Empty(t, broker.tasks[spec.Task].claim)
-				require.NoError(t, os.Remove(hookPath))
-				receipt, err = broker.AcceptClaim(t.Context(), claim)
+				require.True(t, broker.stopping)
+				return
 			}
 			require.NoError(t, err)
 			require.True(t, receipt.Accepted)
@@ -113,10 +145,12 @@ func TestChoreographyUnknownAtomicClaimStaysFenced(t *testing.T) {
 			claim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 				Task: spec.Task, Attempt: 1, Node: "node-a", Branch: spec.Branch,
 				ExpectedOID: spec.ReservationOID, InputsDigest: spec.InputsDigest,
+				PickupID:   NewChoreographyPickupID(),
 				ProposalID: "unknown-atomic-claim"}
 			completeChoreographyFixtureClaim(t, persist, &claim)
 			transport := &choreographyAtomicUnknownTransport{transportx: fixture.mailbox.remote, apply: applied}
 			fixture.mailbox.remote = transport
+			wake := broker.EligibilityWake()
 			first, err := broker.AcceptClaim(t.Context(), claim)
 			if applied {
 				require.NoError(t, err)
@@ -126,6 +160,12 @@ func TestChoreographyUnknownAtomicClaimStaysFenced(t *testing.T) {
 				return
 			}
 			require.ErrorIs(t, err, gitx.ErrPushUnknown)
+			require.ErrorIs(t, broker.fault, gitx.ErrPushUnknown)
+			select {
+			case <-wake:
+			default:
+				t.Fatal("unresolved claim did not wake task observers")
+			}
 			require.NotNil(t, persist.pending)
 			require.Empty(t, broker.tasks[spec.Task].claim)
 			require.Equal(t, spec.ReservationOID, remoteChoreographyOID(t, fixture, spec.Branch))
@@ -146,13 +186,16 @@ func TestChoreographyUnknownAtomicClaimStaysFenced(t *testing.T) {
 					require.Equal(t, 1, transport.calls)
 				})
 			}
-			receipt, err := broker.AcceptClaim(t.Context(), claim)
+			receipt, err := persist.PersistClaim(t.Context(), claim)
 			require.NoError(t, err)
 			require.True(t, receipt.Accepted)
 			require.Equal(t, 2, transport.calls)
 			require.Nil(t, persist.pending)
 			require.Equal(t, receipt.OID, remoteChoreographyOID(t, fixture, spec.Branch))
 			require.Equal(t, receipt.Cursor.OID, remoteChoreographyOID(t, fixture, persist.opts.Ledger.Branch))
+			replayed, err := broker.AcceptClaim(t.Context(), claim)
+			require.NoError(t, err)
+			require.Equal(t, receipt.OID, replayed.OID)
 		})
 	}
 }

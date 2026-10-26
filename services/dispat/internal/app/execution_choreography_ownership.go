@@ -15,8 +15,8 @@ import (
 func (a *App) choreographyFirstCheck(coordinator *execution.Coordinator,
 	ledgerRootOID string) (func(context.Context) error, error) {
 	journal := a.returnJournal
-	if coordinator == nil || journal == nil || ledgerRootOID == "" {
-		return nil, fmt.Errorf("execution: first-node choreography ownership is incomplete")
+	if coordinator == nil || journal == nil || ledgerRootOID == choreographyAbsentIdentityText {
+		return nil, fmt.Errorf(choreographyIncompleteFirstOwnershipErrorText)
 	}
 	if err := checkChoreographyJournal(journal, coordinator, ledgerRootOID); err != nil {
 		return nil, err
@@ -39,18 +39,18 @@ func checkChoreographyJournal(journal *firstRunJournal,
 	coordinator *execution.Coordinator, ledgerRootOID string) error {
 	if journal == nil || journal.lock == nil || journal.gate == nil ||
 		coordinator == nil || journal.run != coordinator.Run {
-		return fmt.Errorf("execution: first-node run journal has no current owner")
+		return fmt.Errorf(choreographyMissingJournalOwnerErrorText)
 	}
 	identity, err := journal.read()
 	if err != nil {
-		return fmt.Errorf("execution: first-node run identity cannot be verified: %w", err)
+		return fmt.Errorf(choreographyUnverifiedFirstIdentityErrorFormat, err)
 	}
 	if identity.Run != coordinator.Run || identity.Generation != coordinator.Generation ||
 		identity.BootstrapOID != coordinator.BootstrapOID ||
 		identity.LedgerRootOID != ledgerRootOID ||
 		identity.Endpoint != coordinator.ReturnEndpoint ||
 		identity.CertPin != coordinator.ReturnCertSHA256 {
-		return fmt.Errorf("execution: first-node journal differs from the retained choreography run")
+		return fmt.Errorf(choreographyRetainedJournalMismatchErrorText)
 	}
 	return nil
 }

@@ -606,6 +606,9 @@ func (p *Proc) Signal(sig os.Signal) {
 // whole suite until `go test -timeout` fired an hour later, and the gate
 // reported a timeout rather than the test that caused it.
 const waitLimit = 3 * time.Minute
+const minimumProcessWaitLimit = 0
+const processWaitLimitError = "process wait limit must be positive"
+const processDescendantOutputOpenError = "a descendant kept its output open"
 
 // Wait blocks until the process exits and returns the run's outcome. The
 // output buffers are only read here, after the process is gone, so the
@@ -623,12 +626,26 @@ func (p *Proc) WaitFor(limit time.Duration) RunResult {
 	return p.WaitForDiagnostic(limit, nil)
 }
 
+// CapturedOutput reads a process's buffers after its wait has ended. It lets
+// bounded failure diagnostics include the first node's output before the test
+// aborts, without starting a second wait or reading a live writer.
+func (p *Proc) CapturedOutput() (string, string) {
+	return p.stdout.String(), p.stderr.String()
+}
+
+// KillForDiagnostic collects a worker's output after a bounded release has
+// already failed and been killed. Its nonzero exit is diagnostic evidence.
+func (p *Proc) KillForDiagnostic(limit time.Duration) RunResult {
+	_ = p.cmd.Process.Kill()
+	return p.WaitFor(limit)
+}
+
 // WaitForDiagnostic observes retained state after a bounded child is killed
 // and before the test fails with its captured process output.
 func (p *Proc) WaitForDiagnostic(limit time.Duration, onTimeout func()) RunResult {
 	p.repo.T.Helper()
-	if limit <= 0 {
-		p.repo.T.Fatal("process wait limit must be positive")
+	if limit <= minimumProcessWaitLimit {
+		p.repo.T.Fatal(processWaitLimitError)
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- p.cmd.Wait() }()
@@ -648,7 +665,7 @@ func (p *Proc) WaitForDiagnostic(limit time.Duration, onTimeout func()) RunResul
 			// A descendant still holds the output pipes, so the buffers are
 			// still being written and must not be read.
 			p.repo.T.Fatalf("dispat was still running %s after the test began waiting for it, and was killed; "+
-				"a descendant kept its output open", limit)
+				processDescendantOutputOpenError, limit)
 		}
 	}
 	code := 0

@@ -11,6 +11,11 @@ import (
 type choreographyFrontierState uint8
 
 const (
+	frontierPickupContactLossRecorded = true
+	frontierPickupSettlementRecorded  = true
+)
+
+const (
 	frontierReady choreographyFrontierState = iota + frontierFirstStateOrdinal
 	frontierPending
 	frontierOffered
@@ -58,7 +63,19 @@ type choreographyFrontierTask struct {
 	offeredNode string
 	// A prepared-provider edge carries required build input. Its failure
 	// blocks this task independently of release-package cause policy.
-	failedPrepared string
+	failedPrepared  string
+	pickups         map[string]*choreographyFrontierPickup
+	currentPickupID string
+}
+
+// A pickup remains indexed after contact loss or logical completion so a
+// later signed result can be identified without treating it as the current
+// canonical task attempt.
+type choreographyFrontierPickup struct {
+	claimOID, node, cancelOID, cancelReplyDeadlineUTC string
+	resultReceiptOID, outputOID                       string
+	attempt                                           int
+	contactLost, settled                              bool
 }
 
 func (t *choreographyFrontierTask) noteFailedPrepared(packageName string) {
@@ -103,14 +120,27 @@ type ChoreographyFrontier struct {
 	blockedHead   int
 }
 
+type CompiledChoreographyFrontierOptions struct {
+	Binding      ChoreographyRunBinding
+	GraphRootOID string
+	Node         ChoreographyRuntimeNode
+	Tasks        []ChoreographyTaskSpec
+}
+
 // NewCompiledChoreographyFrontier requires the exact signed complete graph
 // root and admitted node policy before any compiled task can be selected.
-func NewCompiledChoreographyFrontier(binding ChoreographyRunBinding, graphRootOID string,
-	node ChoreographyRuntimeNode, specs []ChoreographyTaskSpec) (*ChoreographyFrontier, error) {
+func NewCompiledChoreographyFrontier(options CompiledChoreographyFrontierOptions) (*ChoreographyFrontier, error) {
+	binding, graphRootOID, node, specs := options.Binding, options.GraphRootOID, options.Node, options.Tasks
+
 	if graphRootOID == frontierNoGraphRootOID {
 		return nil, fmt.Errorf(frontierMissingSignedRootError)
 	}
-	frontier, err := NewChoreographyFrontier(binding, node.Name, specs, node)
+	frontier, err := NewChoreographyFrontier(ChoreographyFrontierOptions{
+		Binding:    binding,
+		Node:       node.Name,
+		Tasks:      specs,
+		NodePolicy: []ChoreographyRuntimeNode{node},
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -118,8 +148,16 @@ func NewCompiledChoreographyFrontier(binding ChoreographyRunBinding, graphRootOI
 	return frontier, nil
 }
 
-func NewChoreographyFrontier(binding ChoreographyRunBinding, node string,
-	specs []ChoreographyTaskSpec, nodePolicy ...ChoreographyRuntimeNode) (*ChoreographyFrontier, error) {
+type ChoreographyFrontierOptions struct {
+	Binding    ChoreographyRunBinding
+	Node       string
+	Tasks      []ChoreographyTaskSpec
+	NodePolicy []ChoreographyRuntimeNode
+}
+
+func NewChoreographyFrontier(options ChoreographyFrontierOptions) (*ChoreographyFrontier, error) {
+	binding, node, specs, nodePolicy := options.Binding, options.Node, options.Tasks, options.NodePolicy
+
 	if !binding.valid() || node == frontierNoNode {
 		return nil, fmt.Errorf(frontierIncompleteIdentityError)
 	}
@@ -140,7 +178,7 @@ func NewChoreographyFrontier(binding ChoreographyRunBinding, node string,
 		}
 		f.tasks[spec.Task] = &choreographyFrontierTask{spec: spec,
 			remaining: len(spec.Predecessors), attempt: frontierFirstAttemptNumber, state: frontierReady,
-			tipOID: spec.ReservationOID}
+			tipOID: spec.ReservationOID, pickups: make(map[string]*choreographyFrontierPickup)}
 		f.hasPackages = f.hasPackages || spec.Package != frontierNoPackage && spec.Kind != KindPrepare
 		f.order = append(f.order, spec.Task)
 	}
@@ -251,7 +289,9 @@ func (f *ChoreographyFrontier) completeVirtual(first *choreographyFrontierTask) 
 				f.packageStatus[task.spec.Package] != frontierPackageOutcomeFailed)
 		for _, child := range task.children {
 			next := f.tasks[child]
-			next.noteFailedPrepared(task.failedPrepared)
+			if choreographyPreparedProviderFor(next.spec, task.failedPrepared) {
+				next.noteFailedPrepared(task.failedPrepared)
+			}
 			next.remaining--
 			if next.remaining == frontierNoPredecessors {
 				if next.spec.Virtual {
@@ -566,10 +606,22 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 			continue
 		}
 		task := f.tasks[event.Task]
-		if task == nil || task.spec.Virtual || event.Attempt != task.attempt ||
+		var pickup *choreographyFrontierPickup
+		if task != nil && event.PickupID != frontierNoProposalID {
+			pickup = task.pickups[event.PickupID]
+		}
+		priorPickupEvent := pickup != nil &&
+			(event.Kind == ChoreographyResultAccepted || event.Kind == ChoreographyAckAccepted ||
+				event.Kind == ChoreographyPickupSettled || event.Kind == ChoreographyTerminal)
+		settledWinnerEvent := task != nil && event.Kind == ChoreographyTaskPackageSettled &&
+			task.terminal.Kind == ChoreographyTerminal && event.Attempt == task.terminal.Attempt
+		if task == nil || task.spec.Virtual ||
+			(event.Attempt != task.attempt && !settledWinnerEvent &&
+				(!priorPickupEvent || event.Attempt != pickup.attempt)) ||
 			event.Kind != ChoreographyClaimRefused &&
 				event.Kind != ChoreographyInertCancelled &&
-				event.Kind != ChoreographyInertCancelSettled && task.remaining != frontierNoPredecessors {
+				event.Kind != ChoreographyInertCancelSettled &&
+				event.Kind != ChoreographyPickupSettled && task.remaining != frontierNoPredecessors {
 			f.failed = frontierQuarantined
 			return fmt.Errorf(frontierUnreadyTaskEventError)
 		}
@@ -667,9 +719,47 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 				return fmt.Errorf(frontierWrongOfferedClaimError)
 			}
 			task.tipOID = event.TaskOID
+			if event.PickupID != frontierNoProposalID {
+				if task.spec.ExecutorOwned ||
+					event.GraphRootOID != f.graphRootOID || task.pickups[event.PickupID] != nil {
+					f.failed = frontierQuarantined
+					return fmt.Errorf(frontierPickupIdentityError)
+				}
+				task.pickups[event.PickupID] = &choreographyFrontierPickup{
+					claimOID: event.TaskOID, node: event.Node, attempt: event.Attempt}
+				task.currentPickupID = event.PickupID
+			}
 			task.offeredOID, task.offeredNode = frontierNoOfferOID, frontierNoNode
 			task.state = frontierBusy
 		case ChoreographyResultAccepted, ChoreographyAckAccepted:
+			if event.PickupID != frontierNoProposalID {
+				if pickup == nil || pickup.settled || pickup.claimOID != event.ClaimOID ||
+					pickup.node != event.Node || pickup.attempt != event.Attempt ||
+					pickup.resultReceiptOID != frontierNoResultReceiptOID ||
+					event.GraphRootOID != f.graphRootOID ||
+					event.ProposalDigest == frontierNoProposalDigest || event.ProposalID == frontierNoProposalID ||
+					event.Kind == ChoreographyResultAccepted &&
+						(event.TaskOID != task.tipOID || event.PriorTaskOID != task.tipOID ||
+							event.ResultReceiptOID == frontierNoResultReceiptOID || event.OutputOID == frontierNoOutputOID) ||
+					event.Kind == ChoreographyAckAccepted &&
+						(event.OutputOID != frontierNoOutputOID || pickup.cancelOID == frontierNoTaskOID ||
+							event.ResultReceiptOID != frontierNoResultReceiptOID &&
+								(event.TaskOID != task.tipOID || event.PriorTaskOID != task.tipOID) ||
+							event.ResultReceiptOID == frontierNoResultReceiptOID &&
+								(task.currentPickupID != event.PickupID || task.state != frontierBusy ||
+									event.PriorTaskOID != task.tipOID)) {
+					f.failed = frontierQuarantined
+					return fmt.Errorf(frontierPickupIdentityError)
+				}
+				if event.Kind == ChoreographyResultAccepted || event.ResultReceiptOID != frontierNoResultReceiptOID {
+					pickup.resultReceiptOID = event.ResultReceiptOID
+				} else {
+					pickup.resultReceiptOID = event.TaskOID
+					task.tipOID = event.TaskOID
+				}
+				pickup.outputOID = event.OutputOID
+				continue
+			}
 			if task.state != frontierBusy || event.ProposalDigest == frontierNoProposalDigest || event.ProposalID == frontierNoProposalID ||
 				event.Kind == ChoreographyResultAccepted && event.OutputOID == frontierNoOutputOID ||
 				event.Kind == ChoreographyAckAccepted && event.OutputOID != frontierNoOutputOID {
@@ -678,6 +768,11 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 			}
 		case ChoreographyCancelIssued:
 			if task.state != frontierBusy || event.PriorTaskOID != task.tipOID ||
+				event.PickupID != frontierNoProposalID &&
+					(pickup == nil || task.currentPickupID != event.PickupID ||
+						pickup.claimOID != event.ClaimOID || pickup.cancelOID != frontierNoTaskOID ||
+						event.CancelReplyDeadlineUTC == frontierNoAdmissionDeadlineUTC ||
+						event.GraphRootOID != f.graphRootOID) ||
 				event.Node == frontierNoNode ||
 				event.ResultReceiptOID != frontierNoResultReceiptOID || event.OutputOID != frontierNoOutputOID ||
 				event.Weight != frontierNoTransferWeight || event.Budget != frontierNoBudget {
@@ -685,7 +780,60 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 				return fmt.Errorf(frontierCancelWithoutClaimError)
 			}
 			task.tipOID = event.TaskOID
+			if pickup != nil {
+				pickup.cancelOID = event.TaskOID
+				pickup.cancelReplyDeadlineUTC = event.CancelReplyDeadlineUTC
+			}
+		case ChoreographyPickupContactLost:
+			if pickup == nil || pickup.settled || pickup.contactLost ||
+				task.state != frontierBusy || task.spec.ExecutorOwned ||
+				task.currentPickupID != event.PickupID ||
+				pickup.claimOID != event.ClaimOID || pickup.node != event.Node ||
+				pickup.attempt != event.Attempt || event.TaskOID != task.tipOID ||
+				event.PriorTaskOID != task.tipOID || event.GraphRootOID != f.graphRootOID ||
+				pickup.cancelOID == frontierNoTaskOID ||
+				event.CancelReplyDeadlineUTC != pickup.cancelReplyDeadlineUTC {
+				f.failed = frontierQuarantined
+				return fmt.Errorf(frontierPickupIdentityError)
+			}
+			pickup.contactLost = frontierPickupContactLossRecorded
+			task.currentPickupID = frontierNoProposalID
+			task.attempt++
+			task.state = frontierReady
+			f.ready = append(f.ready, event.Task)
+		case ChoreographyPickupSettled:
+			if pickup == nil || pickup.settled || pickup.claimOID != event.ClaimOID ||
+				pickup.node != event.Node || pickup.attempt != event.Attempt ||
+				pickup.resultReceiptOID == frontierNoResultReceiptOID ||
+				pickup.resultReceiptOID != event.ResultReceiptOID ||
+				pickup.outputOID != event.OutputOID ||
+				event.TaskOID != task.tipOID || event.PriorTaskOID != task.tipOID ||
+				event.GraphRootOID != f.graphRootOID {
+				f.failed = frontierQuarantined
+				return fmt.Errorf(frontierPickupIdentityError)
+			}
+			pickup.settled = frontierPickupSettlementRecorded
 		case ChoreographyRetryReady:
+			if event.PickupID != frontierNoProposalID {
+				if pickup == nil || pickup.settled || task.state != frontierBusy ||
+					task.currentPickupID != event.PickupID ||
+					pickup.claimOID != event.ClaimOID || pickup.node != event.Node ||
+					pickup.attempt != event.Attempt || pickup.resultReceiptOID == frontierNoResultReceiptOID ||
+					pickup.resultReceiptOID != event.ResultReceiptOID ||
+					pickup.outputOID != event.OutputOID ||
+					event.PriorTaskOID != task.tipOID || event.GraphRootOID != f.graphRootOID ||
+					event.Succeeded || event.PackageOutcome != frontierNoPackageOutcome {
+					f.failed = frontierQuarantined
+					return fmt.Errorf(frontierPickupIdentityError)
+				}
+				pickup.settled = frontierPickupSettlementRecorded
+				task.currentPickupID = frontierNoProposalID
+				task.tipOID = event.TaskOID
+				task.attempt++
+				task.state = frontierReady
+				f.ready = append(f.ready, event.Task)
+				continue
+			}
 			if task.state != frontierBusy && task.state != frontierOffered {
 				f.failed = frontierQuarantined
 				return fmt.Errorf(frontierRetryWithoutClaimError)
@@ -709,6 +857,35 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 				f.ready = append(f.ready, event.Task)
 			}
 		case ChoreographyTerminal:
+			if event.PickupID != frontierNoProposalID {
+				if pickup == nil || pickup.settled || task.state == frontierTerminal ||
+					pickup.claimOID != event.ClaimOID || pickup.node != event.Node ||
+					pickup.attempt != event.Attempt || pickup.resultReceiptOID == frontierNoResultReceiptOID ||
+					pickup.resultReceiptOID != event.ResultReceiptOID ||
+					pickup.outputOID != event.OutputOID ||
+					event.PriorTaskOID != task.tipOID || event.GraphRootOID != f.graphRootOID ||
+					event.Succeeded && event.OutputOID == frontierNoOutputOID {
+					f.failed = frontierQuarantined
+					return fmt.Errorf(frontierPickupIdentityError)
+				}
+				pickup.settled = frontierPickupSettlementRecorded
+				task.currentPickupID = frontierNoProposalID
+				task.tipOID = event.TaskOID
+				task.state = frontierTerminal
+				task.terminal = event
+				task.outputOID = event.OutputOID
+				pendingPackageSettlement := task.spec.Kind != KindPrepare &&
+					task.spec.Package != frontierNoPackage &&
+					event.PackageOutcome == frontierNoPackageOutcome
+				task.packageSettled = !pendingPackageSettlement
+				if !pendingPackageSettlement {
+					if err := f.releaseChildren(task); err != nil {
+						f.failed = frontierQuarantined
+						return err
+					}
+				}
+				continue
+			}
 			unclaimed := task.state == frontierQueueFenced
 			if !task.spec.LocalAuthority && task.state != frontierBusy && !unclaimed ||
 				task.state == frontierTerminal {
@@ -725,7 +902,8 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 			task.state = frontierTerminal
 			task.terminal = event
 			pendingPackageSettlement := f.graphRootOID != frontierNoGraphRootOID &&
-				task.spec.Package != frontierNoPackage && event.PackageOutcome == frontierNoPackageOutcome &&
+				!task.spec.ExecutorOwned && task.spec.Kind != KindPrepare && task.spec.Package != frontierNoPackage &&
+				event.PackageOutcome == frontierNoPackageOutcome &&
 				event.ResultReceiptOID != frontierNoResultReceiptOID
 			task.packageSettled = !pendingPackageSettlement
 			if event.Succeeded && !task.spec.LocalAuthority && event.OutputOID == frontierNoOutputOID {
@@ -852,7 +1030,8 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 func (f *ChoreographyFrontier) releaseChildren(task *choreographyFrontierTask) error {
 	for _, child := range task.children {
 		next := f.tasks[child]
-		if task.spec.Kind == KindPrepare && !task.terminal.Succeeded {
+		if task.spec.Kind == KindPrepare && !task.terminal.Succeeded &&
+			choreographyPreparedProviderFor(next.spec, task.spec.Package) {
 			next.noteFailedPrepared(task.spec.Package)
 		}
 		next.remaining--

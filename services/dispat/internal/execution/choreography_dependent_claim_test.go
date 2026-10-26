@@ -5,8 +5,6 @@ package execution
 
 import (
 	"context"
-	"encoding/json"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,7 +29,7 @@ func testChoreographyDependentClaimUsesAcceptedResultAfterColdReplay(t *testing.
 	providerClaim := ChoreographyClaimProposal{ChoreographyRunBinding: binding,
 		Task: provider.Task, Attempt: 1, Node: "node-a", Branch: provider.Branch,
 		ExpectedOID: provider.ReservationOID, InputsDigest: provider.InputsDigest,
-		ProposalID: "provider-claim"}
+		PickupID: NewChoreographyPickupID(), ProposalID: "provider-claim"}
 	completeChoreographyFixtureClaim(t, persist, &providerClaim)
 	providerReceipt, err := broker.AcceptClaim(t.Context(), providerClaim)
 	require.NoError(t, err)
@@ -45,25 +43,16 @@ func testChoreographyDependentClaimUsesAcceptedResultAfterColdReplay(t *testing.
 		PlanDigest: binding.PlanDigest, Task: provider.Task, Attempt: 1,
 		Node: "node-a", Branch: provider.Branch}, Assignment: providerReceipt.OID,
 		Status: status}
-	resultDocument, err := json.Marshal(result)
-	require.NoError(t, err)
-	rawResultOID, err := fixture.mailbox.commitMessage(t.Context(), MessageResult, resultDocument, nil, nil)
-	require.NoError(t, err)
-	pack, err := os.CreateTemp(t.TempDir(), "dependent-result-*.pack")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = pack.Close() })
-	require.NoError(t, fixture.git.ExportCommitPack(t.Context(), rawResultOID, pack))
-	resultProposal := ChoreographyResultProposal{ChoreographyRunBinding: binding,
-		Task: provider.Task, Attempt: 1, Node: "node-a", Branch: provider.Branch,
-		ClaimOID: providerReceipt.OID, InputsDigest: providerClaim.InputsDigest,
-		ProposalID: "provider-result", ResultDigest: rawResultOID}
-	resultProposal, err = PrepareChoreographyResult(t.Context(), resultProposal, pack, 1<<20)
-	require.NoError(t, err)
+	resultProposal, pack := prepareChoreographyFixturePickupResult(t, fixture,
+		choreographyFixturePickupResult{Claim: providerClaim, Accepted: providerReceipt,
+			Result: result, ProposalID: "provider-result"})
+	rawResultOID := resultProposal.ResultDigest
 	accepted, err := broker.AcceptResult(t.Context(), resultProposal, pack)
 	require.NoError(t, err)
+
 	require.NoError(t, broker.DecideAttempt(t.Context(), ChoreographyDecision{
 		ChoreographyRunBinding: binding, Task: provider.Task, Branch: provider.Branch,
-		Attempt: 1, Node: "node-a", ResultOID: accepted.OID, Succeeded: succeeded}))
+		Attempt: providerClaim.Attempt, Node: "node-a", ResultOID: accepted.OID, Succeeded: succeeded}))
 	readyDigest, predecessorOIDs, err := broker.ExpectedInputIdentity(consumer.Task)
 	require.NoError(t, err)
 	require.Equal(t, []string{rawResultOID}, predecessorOIDs)

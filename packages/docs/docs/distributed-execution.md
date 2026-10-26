@@ -1,9 +1,9 @@
 # Distributed execution
 
 Use workers to run parts of a release on other machines. The first node is the **orchestrator**. It also
-executes eligible tasks, and it alone pushes Git coordination and release refs, publishes artifacts, and writes
-release records. Other **workers** execute eligible work and return claim and result requests to the
-orchestrator over the authenticated non-Git channel. They do not push Git refs.
+executes eligible tasks, and it alone advances canonical task and ledger refs, publishes artifacts, and writes
+release records. Other **workers** execute eligible work, create their own pending and outcome Git branches,
+and return claim and result requests to the orchestrator over the authenticated non-Git channel.
 
 `--distribution-mode=compilation` is the only supported mode. The future `interpretation` and `hybrid`
 values are refused before task effects. The orchestrator computes the plan and graph,
@@ -50,10 +50,11 @@ that a larger pool will shorten the release.
 ### Recommended layout with one orchestrator
 
 Run one release job as the orchestrator and start its workers beside it. Every node can run eligible build,
-test and custom stages before the records. The orchestrator performs the publish stage and all Git pushes. Keep
-registry, release-write and Git-push credentials there. Workers need the shared execution signing secret,
-read access to exact pinned inputs, and access to the authenticated return channel; build commands may need
-separate credentials for private inputs.
+test and custom stages before the records. The orchestrator performs the publish stage and pushes canonical
+coordination and release refs. Keep registry and release-write credentials there. Workers need a Git credential
+that can create their own pending and outcome branches, read access to exact pinned inputs, the shared execution
+signing secret, and access to the authenticated return channel; build commands may need separate credentials for
+private inputs.
 
 The orchestrator plans and compiles the graph, checks locks, validates and persists claims and results,
 prepares native source state, authorizes publication, and writes native Git and release records. Run-level hooks
@@ -70,7 +71,9 @@ the run-level hooks. It executes eligible build and validation tasks.
 
 **A worker executes work.** It verifies the signed compiled task graph and exact inputs, chooses compatible ready
 work within its physical capacity, and requests an exact claim. It runs a task only after
-the orchestrator confirms that the authoritative claim landed. It returns the result without pushing a Git ref.
+the orchestrator confirms that the authoritative claim landed and it has created its pending branch from the
+accepted task tip. It pushes a signed output or failed branch descended from that pending tip, then returns the
+result for the orchestrator to verify and settle.
 A stage and its surrounding hooks form a **frame**, which always runs together on one node.
 
 The `dispat worker` command serves a node; it does not initiate a release. Processes running under a task's
@@ -142,14 +145,18 @@ in its configuration.
 
 ### The coordination repository
 
-The coordination repository holds authoritative task refs. The orchestrator alone pushes those refs. Without an
+The coordination repository holds authoritative task refs. The orchestrator alone advances those refs. Without an
 explicit `endpoint`, it uses the push URL of `commit.remote`, falling back to `origin`; in a composed workspace,
-this is the entry repository's remote. A worker may fetch the pinned inputs and coordination state, but
-returns claim and result requests through the authenticated non-Git channel to the orchestrator.
+this is the entry repository's remote. A worker fetches pinned inputs and coordination state, creates its own
+pickup branches there, and returns claim and result requests through the authenticated non-Git channel.
 
 Task reservations live under `refs/heads/dispat-task-*`, reusable worker notices under
 `refs/heads/dispat-slot-*`, and preflight probes under `refs/heads/dispat-worker-*`. Completed task branches
-remain as signed records of their finished work, including tasks that produced no files. Using the source
+remain as signed records of their finished work, including tasks that produced no files. A worker creates an
+immutable `dispat-pending-*` branch for each physical pickup and a descendant `dispat-output-*` or
+`dispat-failed-*` branch for its result. These branches have unique pickup IDs; a retry after failure or lost contact
+uses a new pickup while an uncertain old lease stays charged until its exact finality is known. The first verified
+success settles the logical task. Using the source
 repository avoids retransferring objects the remote already has; it receives only the task's changes.
 
 Using the repository itself has consequences worth knowing before the first run:
@@ -159,9 +166,12 @@ Using the repository itself has consequences worth knowing before the first run:
   public. A snapshot is the working tree as the orchestrator had it, which includes files that are untracked and not
   ignored and commits that were never pushed, and a host keeps an object fetchable by its id for a while after the
   branch that carried it is deleted.
-- **The host's ref rules keep publication under one authority.** Give Git-push credentials only to the orchestrator.
-  Workers need read access to the pinned Git inputs they execute, and no ability to push coordination,
-  release or lock refs.
+- **The host's ref rules keep publication under one authority.** Workers need Git write access for their own
+  `dispat-pending-*`, `dispat-output-*` and `dispat-failed-*` refs. Protect canonical task and ledger refs,
+  release branches, tags and the lock tag from worker credentials on the Git host. A repository-wide contents-write
+  token does not by itself restrict which refs its holder can push. On GitHub, use
+  [branch and tag rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
+  to restrict creation and updates of the protected refs for the worker App identity.
 - **The host's size limits apply.** GitHub warns about a file over 50 MB, rejects a file over 100 MB and rejects a push
   over 2 GB, and one task's output set travels in one push. `transfer.maxBytes` bounds what dispat sends; the host's
   limits bound what it accepts.
@@ -372,11 +382,12 @@ package, version, platform and output sets used as inputs.
 The orchestrator checks the manifest against the tree before accepting the outputs. The consumer node checks them
 again against its signed task's digest before installing any file.
 
-After accepting a result, the orchestrator advances that task's assigned Git branch. Its completed tip contains
-the verified bytes at `outputs/<declared-root>/...` and a signed task decision. A task with no output files still
-gets a signed finished tip on its branch. The task tip records command finality; package outcome and release
-publication settle separately after dependent work and any failure hooks. These retained refs make the run's
-steps inspectable without granting workers Git push authority.
+A worker first creates a signed pending commit parented by the exact accepted task tip. It then creates a signed
+output or failed commit parented by that pending tip; declared output bytes live at
+`outputs/<declared-root>/...` on the outcome branch. The orchestrator verifies the branch and result before
+advancing the assigned canonical task branch. Its completed tip carries the verified bytes and a signed task
+decision. A task with no output files still gets a signed finished tip. The task tip records command finality;
+package outcome and release publication settle separately after dependent work and any failure hooks.
 
 ### Installing the outputs
 
@@ -432,8 +443,8 @@ record in order; independent repositories retain their dependency-safe concurren
 
 Keep registry credentials on the orchestrator. Configuration `env` values such as `$NPM_TOKEN` are expanded on the
 machine that runs the command, so a publish secret need not reach a worker. A worker needs the shared
-execution secret, read access to pinned Git inputs, and access to the authenticated return channel, but no Git-push
-credentials. Custom stage scripts and their hooks are executable policy; keep publication commands out of stages
+execution secret, read access to pinned Git inputs, Git write access for its own pickup branches and access to the
+authenticated return channel, but no permission to update release refs. Custom stage scripts and their hooks are executable policy; keep publication commands out of stages
 placed on workers when their credentials must exclude publication.
 
 ## Running scripts on workers
@@ -614,8 +625,9 @@ environment and its own credentials. That is what a worker is for, and it means 
 node it reaches.
 
 Run workers on dedicated machines, preferably ephemeral ones, with least-privilege credentials:
-Git credentials that read coordination and source refs, and no release or registry credentials
-unless a worker script itself needs another credential. Do not serve tasks on a shared machine or an untrusted runner.
+Git credentials that read coordination and source refs and that dispat uses to create worker-owned pickup refs,
+with host rules denying canonical and release writes. Give workers no release or registry credentials unless a
+worker script itself needs another credential. Do not serve tasks on a shared machine or an untrusted runner.
 
 **4. A worker's build output becomes a published artefact.** Outputs are verified for integrity and origin, through
 the digest, the signature and the identity in the manifest, and not for honesty. A compromised worker can return a
@@ -646,8 +658,8 @@ Before starting the pool, confirm:
 - Release branches, release tags and the lock tag are protected from worker credentials by the host's ref rules.
 - The signing secret comes from a secret store, is shared only inside one trust zone, and is rotated when a worker
   leaves or is suspected.
-- Workers run on dedicated, preferably ephemeral machines, with no credentials beyond the coordination branches, the
-  sources and what their own builds need.
+- Workers run on dedicated, preferably ephemeral machines, with no release or registry credentials beyond what
+  their own builds need; host rules deny their Git credential canonical and release ref writes.
 - No secret is written literally in `env` or in a command, and no script exports one.
 - Packages whose artefacts are signed or shipped to users are pinned with `runOnly: orchestrator`.
 - Publishing and release Git writes stay on the orchestrator; worker credentials cannot write release refs.
@@ -683,10 +695,11 @@ one of those values is signed-refused; there is no mutable-capacity administrati
 workers add usable capacity. A worker shutdown can sign a drain, but an occupied lease remains charged until its
 exact task finality is settled.
 
-Each admitted node discovers compatible ready tasks from the same graph. The first node accepts at most one
-claim against the exact task tip and ledger epoch, then records the result and terminal decision atomically with its
-capacity changes. A peer sends claims and results through the authenticated return channel; only the first node
-pushes coordination or release Git refs. Unknown push outcomes are resolved by exact ref readback before any retry.
+Each admitted node discovers compatible ready tasks from the same graph. The first node accepts a claim against
+the exact task tip and ledger epoch, then records verified result and terminal decisions with its capacity changes.
+A peer sends claims and results through the authenticated return channel and pushes only its own immutable pickup
+branches; only the first node advances canonical coordination and release refs. Unknown push outcomes are resolved
+by exact ref readback before any retry.
 If the admission deadline passes while a worker-only task is still inert and no compatible peer has joined, the
 first node records a signed no-claim terminal event. It does not invent a command result or expire an accepted claim.
 Unrelated ready tasks continue using their available capacity.
@@ -730,13 +743,18 @@ Existing record and lock diagnostics keep their codes and use the `native-record
 - **A heterogeneous pool can wait for a slow claimant.** Once a compatible node claims work, its capacity stays
   occupied until signed finality. Prefer a homogeneous pool, or separate machine classes with `runOnly` and
   `buildPlatforms`.
-- **A preempted or evicted worker holds its task until the deadline.** There is no retry on another node inside a
-  run, so a spot machine that disappears mid-build costs that package this run, and `timeouts.task` is how long the
-  run waits before saying so.
+- **A preempted or evicted worker retains its physical charge.** A run may retry after signed Cancel and its bounded
+  reply grace only when `execution.retryAfterUncertainAttempt: true` asserts that its delegated commands are safe to
+  repeat after an uncertain external effect. The default is `false`. The old pickup remains charged until its
+  exact signed finality; a late old outcome cannot replace the accepted winner. No second pickup begins merely
+  because another worker is idle.
 - **`dispat status` is how a pool is sized.** More workers help only while more builds are ready at once than there
   are slots. No run is shorter than its longest chain, and one repository's publications happen one after another.
-- **A worker's task deadline is enforced by the node itself.** The orchestrator's wait and the node's own are the
-  same number, so a task that overruns is stopped on the machine rather than abandoned while it is still running.
+- **A worker's task deadline is enforced by the node itself.** The orchestrator and worker use the same task bound.
+  Before reporting completion or acknowledging cancellation, the worker stops and checks the process group it
+  created for the command. If it cannot prove that group is gone, it retains the physical lease. This check cannot
+  prove that a child which deliberately escaped the group or an external upload has stopped; task scripts must
+  settle those effects before exiting.
 - **Two workers must not share one state folder for one node name.** The second one to start refuses. Give each node
   its own `--state-dir`, and expect the folder to be disposable: everything in it is rebuilt. The owning worker's
   process id is in `worker.lock`; a worker that finds the id of a process that is gone, or its own id left by an

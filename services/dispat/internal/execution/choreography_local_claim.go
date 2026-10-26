@@ -9,6 +9,8 @@ import (
 )
 
 const (
+	localClaimMissingIdentity            = ""
+	localClaimProposalFieldSeparator     = "\x00"
 	localClaimMissingGraphAuthorityError = "execution: first-local claim has no complete graph authority"
 	localClaimUnavailableTaskErrorFormat = "execution: first node cannot claim task %q from its current state"
 	localClaimMissingLeaseError          = "execution: first-local claim lacks its exact held physical lease"
@@ -21,7 +23,7 @@ const (
 // accepted signed task/ledger receipt is durable.
 func (c *Coordinator) ClaimChoreographyLocalTask(ctx context.Context,
 	taskID string, lease NodeSlotLease) (ChoreographyReceipt, error) {
-	if c == nil || c.choreographyBroker == nil || c.GraphRootOID == "" {
+	if c == nil || c.choreographyBroker == nil || c.GraphRootOID == localClaimMissingIdentity {
 		return ChoreographyReceipt{}, fmt.Errorf(localClaimMissingGraphAuthorityError)
 	}
 	b := c.choreographyBroker
@@ -31,14 +33,14 @@ func (c *Coordinator) ClaimChoreographyLocalTask(ctx context.Context,
 	}
 	b.mu.Lock()
 	task := b.tasks[taskID]
-	if task == nil || !b.nodeEligible(task.spec, c.Local.Name) || task.claim != "" {
+	if task == nil || !b.nodeEligible(task.spec, c.Local.Name) || task.claim != localClaimMissingIdentity {
 		b.mu.Unlock()
 		return ChoreographyReceipt{}, fmt.Errorf(localClaimUnavailableTaskErrorFormat, taskID)
 	}
 	branch, tip, attempt, templateDigest, weight, preparedInputOID := task.spec.Branch, task.tip,
 		task.attempt, task.spec.TemplateDigest, task.spec.Weight, task.preparedInputOID
 	b.mu.Unlock()
-	if lease.ID == "" || lease.ID != nodeSlotLeaseID(lease.Intent) ||
+	if lease.ID == localClaimMissingIdentity || lease.ID != nodeSlotLeaseID(lease.Intent) ||
 		lease.Intent.Run != c.Run || lease.Intent.Task != taskID ||
 		lease.Intent.Attempt != attempt || lease.Intent.Weight != weight {
 		return ChoreographyReceipt{}, fmt.Errorf(localClaimMissingLeaseError)
@@ -47,7 +49,7 @@ func (c *Coordinator) ClaimChoreographyLocalTask(ctx context.Context,
 	if err != nil {
 		return ChoreographyReceipt{}, err
 	}
-	if templateDigest == "" || branch == "" || tip == "" {
+	if templateDigest == localClaimMissingIdentity || branch == localClaimMissingIdentity || tip == localClaimMissingIdentity {
 		return ChoreographyReceipt{}, fmt.Errorf(localClaimMissingTemplateError)
 	}
 	if b.resolveBindings == nil {
@@ -71,7 +73,8 @@ func (c *Coordinator) ClaimChoreographyLocalTask(ctx context.Context,
 		LeaseIntentID: lease.ID, LeaseWeight: weight,
 		TemplateDigest: templateDigest, Bindings: identity,
 		BindingsDigest: identityDigest,
-		ProposalID: returnProposalID(choreographyClaimKind, c.Run, taskID,
-			attempt, tip+"\x00"+head.OID)}
+		ProposalID: returnProposalID(returnProposalIdentity{Kind: choreographyClaimKind,
+			Run: c.Run, Task: taskID, Attempt: attempt,
+			OID: tip + localClaimProposalFieldSeparator + head.OID})}
 	return acceptFirstLocalClaim(ctx, b, proposal)
 }

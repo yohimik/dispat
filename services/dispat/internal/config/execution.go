@@ -87,6 +87,7 @@ const (
 	executionEndpointFieldKey       = "endpoint"
 	executionSecretEnvFieldKey      = "secretenv"
 	executionIdentityKeyEnvFieldKey = "identitykeyenv"
+	executionRetryUncertainFieldKey = "retryafteruncertainattempt"
 	executionWorkersFieldKey        = "workers"
 	executionTimeoutsFieldKey       = "timeouts"
 	executionTransferFieldKey       = "transfer"
@@ -120,6 +121,7 @@ func executionFields(dst *ExecutionConfig) fields {
 		executionEndpointFieldKey:       str(&dst.Endpoint),
 		executionSecretEnvFieldKey:      str(&dst.SecretEnv),
 		executionIdentityKeyEnvFieldKey: str(&dst.IdentityKeyEnv),
+		executionRetryUncertainFieldKey: flag(&dst.RetryAfterUncertainAttempt),
 		executionWorkersFieldKey:        objList(&dst.Workers, executionWorkerFields),
 		executionTimeoutsFieldKey:       obj(&dst.Timeouts, executionTimeoutsFields),
 		executionTransferFieldKey:       obj(&dst.Transfer, executionTransferFields),

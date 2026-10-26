@@ -112,11 +112,20 @@ func DigestChoreographyTaskBindings(bindings ChoreographyTaskBindings) (string, 
 	return hex.EncodeToString(digest[:]), nil
 }
 
+type ChoreographyTemplateBindingOptions struct {
+	Template     ChoreographyCompiledTemplate
+	Bindings     ChoreographyTaskBindings
+	Header       Header
+	BootstrapOID string
+	GraphDigest  string
+}
+
 // BindChoreographyCompiledTemplate fills only the template's declared input
 // fields. The caller must verify the bindings against signed finality before
 // accepting a claim and must sign the resulting Assignment on the task ref.
-func BindChoreographyCompiledTemplate(template ChoreographyCompiledTemplate,
-	bindings ChoreographyTaskBindings, header Header, bootstrapOID, graphDigest string) (Assignment, error) {
+func BindChoreographyCompiledTemplate(options ChoreographyTemplateBindingOptions) (Assignment, error) {
+	template, bindings, header, bootstrapOID, graphDigest := options.Template, options.Bindings, options.Header, options.BootstrapOID, options.GraphDigest
+
 	templateDigest, err := DigestChoreographyCompiledTemplate(template)
 	if err != nil {
 		return Assignment{}, err

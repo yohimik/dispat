@@ -3,9 +3,8 @@
 
 package gitx
 
-// Stream an exact commit's reachable objects over the non-Git return channel.
-// Workers write no remote refs; only the first node imports and later
-// pushes the accepted task commit from its own object store.
+// Stream signed result objects over the return channel independently of
+// worker outcome refs. Only the first node admits canonical task outcomes.
 
 import (
 	"context"
@@ -15,9 +14,48 @@ import (
 	"strings"
 )
 
+const (
+	resultPackNoBaseOID                  = ""
+	resultPackExcludeRevisionPrefix      = "^"
+	resultPackInvalidBaseErrorText       = "gitx: result pack has an invalid known ancestor"
+	resultPackBaseUnavailableErrorFormat = "gitx: result pack ancestor is unavailable: %w"
+	resultPackBaseNotAncestorErrorText   = "gitx: result pack base is not an ancestor of the result"
+)
+
+type CommitPackDeltaOptions struct {
+	CommitOID string
+	BaseOID   string
+	Writer    io.Writer
+}
+
 // ExportCommitPack writes a Git pack containing the exact commit closure.
 // It never buffers artifact bytes in the Go process.
 func (c *LocalGitx) ExportCommitPack(ctx context.Context, oid string, to io.Writer) error {
+	return c.exportCommitPack(ctx, CommitPackDeltaOptions{CommitOID: oid, Writer: to})
+}
+
+// ExportCommitPackSince excludes an ancestor already held by the receiver.
+// Pending and outcome commits stay in the pack without retransmitting the
+// accepted claim's complete source and graph ancestry.
+func (c *LocalGitx) ExportCommitPackSince(ctx context.Context, options CommitPackDeltaOptions) error {
+	if !transportOID(options.CommitOID) {
+		return fmt.Errorf(invalidResultCommitIDErrorText)
+	}
+	if !transportOID(options.BaseOID) {
+		return fmt.Errorf(resultPackInvalidBaseErrorText)
+	}
+	isAncestor, err := c.mergeBaseIsAncestor(ctx, options.BaseOID, options.CommitOID)
+	if err != nil {
+		return fmt.Errorf(resultPackBaseUnavailableErrorFormat, err)
+	}
+	if !isAncestor {
+		return fmt.Errorf(resultPackBaseNotAncestorErrorText)
+	}
+	return c.exportCommitPack(ctx, options)
+}
+
+func (c *LocalGitx) exportCommitPack(ctx context.Context, options CommitPackDeltaOptions) error {
+	oid, to := options.CommitOID, options.Writer
 	if !transportOID(oid) {
 		return fmt.Errorf(invalidResultCommitIDErrorText)
 	}
@@ -25,7 +63,11 @@ func (c *LocalGitx) ExportCommitPack(ctx context.Context, oid string, to io.Writ
 	if err != nil || resolved != oid {
 		return fmt.Errorf(resultCommitUnavailableErrorFormat, ErrCommitNotOnRef)
 	}
-	_, err = c.runStream(ctx, gitStream{stdin: strings.NewReader(oid + transportObjectLineSeparatorText), stdout: to},
+	revisions := oid + transportObjectLineSeparatorText
+	if options.BaseOID != resultPackNoBaseOID {
+		revisions += resultPackExcludeRevisionPrefix + options.BaseOID + transportObjectLineSeparatorText
+	}
+	_, err = c.runStream(ctx, gitStream{stdin: strings.NewReader(revisions), stdout: to},
 		transportPackObjectsCommandName, transportPackOutputStreamFlag, transportPackRevisionsFlag)
 	if err != nil {
 		return fmt.Errorf(resultCommitExportErrorFormat, oid, err)

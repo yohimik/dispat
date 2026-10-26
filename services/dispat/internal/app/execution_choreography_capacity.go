@@ -23,36 +23,36 @@ const localTaskSettlementLeaseMissingError = "execution: local task settlement h
 func (a *App) installChoreographyOutcomeHookSlots(executor *release.Executor,
 	pl *plan.Plan, c *execution.Coordinator) error {
 	if a == nil || executor == nil || pl == nil || c == nil || a.localNodeSlots == nil {
-		return fmt.Errorf("execution: outcome hooks have no first-node slot authority")
+		return fmt.Errorf(choreographyMissingOutcomeSlotAuthorityErrorText)
 	}
 	weights := make(map[string]int, len(pl.Releases))
 	for name, rel := range pl.Releases {
-		if rel == nil || rel.Pkg == nil || rel.Pkg.BuildWeight <= 0 ||
+		if rel == nil || rel.Pkg == nil || rel.Pkg.BuildWeight <= choreographyNoCapacityCount ||
 			rel.Pkg.BuildWeight > c.Local.Capacity {
-			return fmt.Errorf("execution: release %s outcome hook exceeds first-node capacity", name)
+			return fmt.Errorf(choreographyOutcomeHookCapacityErrorFormat, name)
 		}
 		weights[name] = rel.Pkg.BuildWeight
 	}
 	slots := a.localNodeSlots
 	wait := time.Duration(a.cfg.Execution.ResolveTimeouts().Task) * time.Second
 	executor.LocalOutcomeLeaseReusable = func(ctx context.Context, pkg string) (bool, error) {
-		if weights[pkg] == 0 {
-			return false, fmt.Errorf("execution: unknown package %s in outcome hook", pkg)
+		if weights[pkg] == choreographyNoEntriesCount {
+			return choreographyOutcomeLeaseUnavailableState, fmt.Errorf(choreographyUnknownOutcomePackageErrorFormat, pkg)
 		}
 		return c.HasStoppedFirstLocalStage(ctx, pkg, weights[pkg], slots)
 	}
 	executor.LocalOutcomeHookLifecycle = func(ctx context.Context, pkg, hook string) (
 		func(context.Context, string) error, error) {
 		weight := weights[pkg]
-		if hook == "" {
-			hook = "revert"
+		if hook == choreographyAbsentIdentityText {
+			hook = choreographyRevertHookName
 		}
-		if weight == 0 || (hook != "onFail" && hook != "onSkip" && hook != "revert") {
-			return nil, fmt.Errorf("execution: unknown outcome hook %s for %s", hook, pkg)
+		if weight == choreographyNoCapacityCount || (hook != choreographyFailureHookName && hook != choreographySkipHookName && hook != choreographyRevertHookName) {
+			return nil, fmt.Errorf(choreographyUnknownOutcomeHookErrorFormat, hook, pkg)
 		}
-		id := "outcome:" + pkg + ":" + hook
+		id := choreographyOutcomeTaskPrefixText + pkg + choreographyTaskPartSeparatorText + hook
 		lease, err := waitLocalSweepSlot(ctx, slots, execution.NodeSlotIntent{
-			Run: c.Run, Task: id, Attempt: 1, Weight: weight,
+			Run: c.Run, Task: id, Attempt: choreographyInitialAttemptCount, Weight: weight,
 		}, wait)
 		if err != nil {
 			return nil, err
@@ -60,10 +60,17 @@ func (a *App) installChoreographyOutcomeHookSlots(executor *release.Executor,
 		return func(settleCtx context.Context, status string) error {
 			return slots.ReleaseLocalSettled(settleCtx, lease.ID,
 				execution.NodeSlotLocalCompletion{Run: c.Run,
-					Task: id, Attempt: 1, Status: status})
+					Task: id, Attempt: choreographyInitialAttemptCount, Status: status})
 		}, nil
 	}
 	return nil
+}
+
+type choreographyReleaseSlotOptions struct {
+	Executor    *release.Executor
+	Plan        *plan.Plan
+	Compiled    *release.CompiledTaskGraph
+	Coordinator *execution.Coordinator
 }
 
 // installChoreographyReleaseSlots joins native first-node commands to the
@@ -71,11 +78,12 @@ func (a *App) installChoreographyOutcomeHookSlots(executor *release.Executor,
 // ReserveFirstOnlyTask obtains the Pool lease before entering this callback.
 // A delegated Stage obtains its own physical slot in Worker after the signed
 // Claim, so this callback intentionally does not reserve one for it.
-func (a *App) installChoreographyReleaseSlots(executor *release.Executor,
-	pl *plan.Plan, compiled *release.CompiledTaskGraph, coordinator *execution.Coordinator) error {
+func (a *App) installChoreographyReleaseSlots(options choreographyReleaseSlotOptions) error {
+	executor, pl, compiled, coordinator := options.Executor, options.Plan, options.Compiled, options.Coordinator
+
 	if a == nil || executor == nil || pl == nil || compiled == nil || coordinator == nil ||
-		a.localNodeSlots == nil || coordinator.Run == "" {
-		return fmt.Errorf("execution: release has no first-node capacity authority")
+		a.localNodeSlots == nil || coordinator.Run == choreographyAbsentIdentityText {
+		return fmt.Errorf(choreographyMissingReleaseSlotAuthorityErrorText)
 	}
 	shapes := make(map[string]firstReleaseSlotShape)
 	capacity := coordinator.Local.Capacity
@@ -83,18 +91,18 @@ func (a *App) installChoreographyReleaseSlots(executor *release.Executor,
 		if shape.Virtual || shape.Kind == execution.KindPrepare {
 			continue
 		}
-		if !shape.FirstOnly && shape.Kind != "publish" && shape.Kind != "record" {
+		if !shape.FirstOnly && shape.Kind != choreographyPublishStageName && shape.Kind != choreographyRecordStageName {
 			continue
 		}
 		weight := shape.Weight
 		if rel := pl.Releases[shape.Package]; rel != nil && rel.Pkg != nil && rel.Pkg.Space != nil {
 			space := rel.Pkg.Space
-			if space.RevertOnFail || len(space.OnFailScript) > 0 || len(space.OnSkipScript) > 0 {
+			if space.RevertOnFail || len(space.OnFailScript) > choreographyNoEntriesCount || len(space.OnSkipScript) > choreographyNoEntriesCount {
 				weight = max(weight, rel.Pkg.BuildWeight)
 			}
 		}
-		if weight <= 0 || weight > capacity {
-			return fmt.Errorf("execution: first-only task %s exceeds node capacity", shape.ID)
+		if weight <= choreographyNoCapacityCount || weight > capacity {
+			return fmt.Errorf(choreographyFirstOnlyNodeCapacityErrorFormat, shape.ID)
 		}
 		shapes[shape.ID] = firstReleaseSlotShape{weight: weight}
 	}
@@ -112,7 +120,7 @@ func (a *App) installChoreographyReleaseSlots(executor *release.Executor,
 			return nil, err
 		}
 		lease, err := waitLocalSweepSlot(ctx, slots, execution.NodeSlotIntent{
-			Run: coordinator.Run, Task: taskID, Attempt: 1, Weight: shape.weight,
+			Run: coordinator.Run, Task: taskID, Attempt: choreographyInitialAttemptCount, Weight: shape.weight,
 			NativeRecovery: &locator,
 		}, wait)
 		if err != nil {
@@ -124,12 +132,12 @@ func (a *App) installChoreographyReleaseSlots(executor *release.Executor,
 			// failed settlement retains the durable lease for cold recovery.
 			current, held := a.localTaskLeases.Load(taskID)
 			settledLease, valid := current.(execution.NodeSlotLease)
-			if !held || !valid || settledLease.ID == "" {
+			if !held || !valid || settledLease.ID == choreographyAbsentIdentityText {
 				return fmt.Errorf(localTaskSettlementLeaseMissingError)
 			}
 			err := slots.ReleaseLocalSettled(settleCtx, settledLease.ID,
 				execution.NodeSlotLocalCompletion{Run: coordinator.Run,
-					Task: taskID, Attempt: 1, Status: status})
+					Task: taskID, Attempt: choreographyInitialAttemptCount, Status: status})
 			if err == nil {
 				a.localTaskLeases.Delete(taskID)
 			}

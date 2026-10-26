@@ -17,6 +17,16 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 )
 
+const (
+	choreographySnapshotNoSources              = 0
+	choreographySnapshotMissingSourceIdentity  = ""
+	choreographySnapshotIncompleteSourcesError = "execution: preflight planning sources are incomplete"
+	choreographySnapshotMissingDirectoryFormat = "execution: preflight source %q has no repository directory"
+	choreographySnapshotResolveDirectoryFormat = "execution: resolving preflight source %q: %w"
+	choreographySnapshotRepeatedSourceFormat   = "execution: repeated or incomplete preflight source %q"
+	choreographySnapshotSourceSeen             = true
+)
+
 type PinnedSourceCaptureOptions struct {
 	Sources        []Source
 	OutputRoots    map[string][]string
@@ -39,18 +49,18 @@ type PinnedRunSources struct {
 }
 
 func CapturePinnedRunSources(ctx context.Context, opts PinnedSourceCaptureOptions) (*PinnedRunSources, error) {
-	if len(opts.Sources) == 0 || opts.OpenRepository == nil || opts.Store == nil {
-		return nil, fmt.Errorf("execution: preflight planning sources are incomplete")
+	if len(opts.Sources) == choreographySnapshotNoSources || opts.OpenRepository == nil || opts.Store == nil {
+		return nil, fmt.Errorf(choreographySnapshotIncompleteSourcesError)
 	}
 	normalized := make([]Source, len(opts.Sources))
 	normalizedRoots := make(map[string][]string, len(opts.OutputRoots))
 	for index, source := range opts.Sources {
-		if source.Dir == "" {
-			return nil, fmt.Errorf("execution: preflight source %q has no repository directory", source.Name)
+		if source.Dir == choreographySnapshotMissingSourceIdentity {
+			return nil, fmt.Errorf(choreographySnapshotMissingDirectoryFormat, source.Name)
 		}
 		absoluteDir, err := filepath.Abs(source.Dir)
 		if err != nil {
-			return nil, fmt.Errorf("execution: resolving preflight source %q: %w", source.Name, err)
+			return nil, fmt.Errorf(choreographySnapshotResolveDirectoryFormat, source.Name, err)
 		}
 		normalizedRoots[absoluteDir] = opts.OutputRoots[source.Dir]
 		source.Dir = absoluteDir
@@ -65,11 +75,11 @@ func CapturePinnedRunSources(ctx context.Context, opts PinnedSourceCaptureOption
 	result := &PinnedRunSources{snapshots: s, Trees: make(map[string]string, len(normalized))}
 	seen := map[string]bool{}
 	for _, source := range normalized {
-		if source.Dir == "" || source.Head == "" || seen[source.Name] {
+		if source.Dir == choreographySnapshotMissingSourceIdentity || source.Head == choreographySnapshotMissingSourceIdentity || seen[source.Name] {
 			result.Close()
-			return nil, fmt.Errorf("execution: repeated or incomplete preflight source %q", source.Name)
+			return nil, fmt.Errorf(choreographySnapshotRepeatedSourceFormat, source.Name)
 		}
-		seen[source.Name] = true
+		seen[source.Name] = choreographySnapshotSourceSeen
 		commit, err := s.capture(ctx, opts.OpenRepository(source.Dir), source, opts.Log)
 		if err != nil {
 			result.Close()

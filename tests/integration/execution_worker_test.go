@@ -40,7 +40,7 @@ func TestExecutionWorkerAnswersProbe(t *testing.T) {
 		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker,
 			Publish: models.RunOnlyOrchestrator}
 	})
-	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*", Code: 128})
+	peerGit := harness.NewGitFault(t, harness.GitFault{Pattern: "*push*refs/heads/dispat-task-*", Code: 128})
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox,
 		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(3) }), 20,
 		peerGit.Env()...)
@@ -58,7 +58,7 @@ func TestExecutionWorkerAnswersProbe(t *testing.T) {
 	assert.NotEmpty(t, ready.Str("dispat"))
 	assert.Equal(t, executionNode, rig.nodesByPackage()["core"],
 		"the accepted report made the peer eligible for the real build")
-	assert.Zero(t, peerGit.Matches(), "the peer returned Probe, Claim and Result without a Git push")
+	assert.Zero(t, peerGit.Matches(), "the peer returned Probe, Claim and Result without pushing a canonical task ref")
 	started, isStarted := executionLine(res, "worker started")
 	require.True(t, isStarted, "stdout:\n%s", res.Stdout)
 	assert.Equal(t, executionNode, started.Str("node"))
@@ -649,7 +649,7 @@ func TestExecutionWorkerSurvivesALostStateDir(t *testing.T) {
 // Transient Git read errors on the v3 serving node cannot make it push or
 // start a command twice. Its next poll may reread the same signed task and
 // complete the actual compiled sweep. A push-reject transport is also used
-// as a capability check: the worker never invokes push at all.
+// as an authority check: the worker never pushes a canonical task ref.
 func TestExecutionWorkerGitFaults(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the distributed durable node-slot backend is not available on Windows")
@@ -664,7 +664,7 @@ func TestExecutionWorkerGitFaults(t *testing.T) {
 		{"blob write fails once", "*hash-object*", 1, true},
 		{"tree write fails once", "*mktree*", 1, true},
 		{"commit write fails once", "*commit-tree*", 1, true},
-		{"remote mutation forbidden", "*push*", 0, false},
+		{"canonical task mutation forbidden", "*push*refs/heads/dispat-task-*", 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := newExecutionSweepRig(t,
@@ -677,7 +677,7 @@ func TestExecutionWorkerGitFaults(t *testing.T) {
 				})
 			nth := 1
 			if tc.wantMatches == 0 {
-				nth = 0 // reject every attempted peer push
+				nth = 0 // reject every attempted canonical task push
 			}
 			fault := harness.NewGitFault(t, harness.GitFault{Pattern: tc.pattern, Nth: nth, Code: 128})
 			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60, fault.Env()...)
@@ -687,7 +687,7 @@ func TestExecutionWorkerGitFaults(t *testing.T) {
 				require.Equal(t, 0, res.Code, "v3 sweep after %s:\n%s\n%s", tc.name, res.Stdout, res.Stderr)
 			}
 			if tc.wantMatches == 0 {
-				assert.Zero(t, fault.Matches(), "the worker must never push")
+				assert.Zero(t, fault.Matches(), "the worker must never push a canonical task ref")
 			} else {
 				assert.Positive(t, fault.Matches(), "the injected Git operation was reached")
 			}

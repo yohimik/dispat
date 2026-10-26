@@ -5,7 +5,8 @@ package integration
 
 // The former push barrier held a v2 withdrawal update so a peer could push a
 // terminal Result or Ack onto the same branch. V3 peers return proposals to
-// the first node without Git write authority. The live v3 Result/Cancel race
+// the first node and write only their own pending and outcome refs. The live
+// v3 Result/Cancel race
 // is TestExecutionWorkerAcknowledgesWithdrawalThatBeatsItsResult; foreign
 // Result and Ack binding is also checked by the signed broker and worker
 // tests in services/dispat/internal/execution.

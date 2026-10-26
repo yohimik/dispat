@@ -70,6 +70,8 @@ const (
 	RecordingNone     = "none"
 )
 
+const summaryPackageTaskSeparator = ":"
+
 // TaskRecord is what one task of a distributed run came to, in the vocabulary
 // §28.9 requires the summary to distinguish.
 //
@@ -377,7 +379,7 @@ func (c *Coordinator) TaskRecords() []TaskRecord {
 		// run:tests), while the signed task identity remains package:run.
 		// Use that exact kind-bearing identity so a custom release stage with
 		// a similar display name cannot consume a sweep output verdict.
-		if records[index].Task != records[index].Package+":"+KindRun || c.sweepOutputs == nil {
+		if records[index].Task != records[index].Package+summaryPackageTaskSeparator+KindRun || c.sweepOutputs == nil {
 			continue
 		}
 		outcome, manifest := c.sweepOutputs.resolveOutcome(records[index].Task)

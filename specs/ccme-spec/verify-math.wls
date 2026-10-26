@@ -132,6 +132,158 @@ requireTrue["independent equal-job integer packing, n <= 20",
     listTime[{}, ConstantArray[d, n], slots, Range[n]]/v ==
       (d/v) Ceiling[n/slots],
     {n, 1, 20}, {slots, 1, 8}, {d, 1, 4}, {v, 1, 3}]]];
+
+(* Width uses transitive reachability: counting comparable tasks as an
+   antichain would give a false sufficient saturation threshold. *)
+horizontalZeroCount = 0;
+horizontalOneCount = 1;
+horizontalZeroWork = 0;
+horizontalZeroDuration = 0;
+horizontalZeroRate = 0;
+horizontalOneSpeedup = 1;
+horizontalPairSize = 2;
+horizontalMinimumVertexCount = 1;
+horizontalMaximumVertexCount = 4;
+horizontalReverseChainVertexCount = 3;
+horizontalShortDuration = 1;
+horizontalLongDuration = 2;
+horizontalPackingLongestDuration = 3;
+horizontalPackingSlotCount = 3;
+horizontalFiniteLimitSeconds = 180;
+horizontalWidthCounterexampleTag = "horizontalWidthCounterexample";
+horizontalWidthLabel = "bounded width slots attain weighted DAG span";
+horizontalReverseWidthLabel = "reverse-labeled reachability preserves poset width";
+horizontalCrossoverLabel = "work/span crossover is only a lower-bound crossover";
+horizontalPackingWitnessLabel = "work/span crossover can precede ideal saturation";
+horizontalTailLabel = "serial setup model rises by a after task-time saturation";
+horizontalImprovementLabel = "exact improvement requires saved compute to exceed added setup";
+horizontalSharedBoundLabel = "shared mandatory bottleneck contributes Q/R lower bound";
+horizontalTransferLabel = "mandatory edge delays augment the path lower bound";
+horizontalWidthReportPrefix = "Horizontal width checks: ";
+horizontalWidthReportSeparator = " DAGs, ";
+horizontalWidthReportSuffix = " schedules.";
+
+posetWidth[edges_, vertexCount_] := Module[{closure, antichains},
+  closure = TransitiveClosureGraph[
+    Graph[Range[vertexCount], DirectedEdge @@@ edges]];
+  antichains = Select[Subsets[Range[vertexCount]],
+    Function[vertices, AllTrue[Subsets[vertices, {horizontalPairSize}],
+      Function[pair, !EdgeQ[closure, DirectedEdge @@ pair] &&
+        !EdgeQ[closure, DirectedEdge @@ Reverse[pair]]]]]];
+  Max[Length /@ antichains]
+];
+requireTrue[horizontalReverseWidthLabel,
+  posetWidth[{{horizontalReverseChainVertexCount, horizontalPairSize},
+    {horizontalPairSize, horizontalOneCount}},
+    horizontalReverseChainVertexCount] == horizontalOneCount];
+
+horizontalWidthGraphCount = horizontalZeroCount;
+horizontalWidthScheduleCount = horizontalZeroCount;
+horizontalWidthResult = Check[TimeConstrained[Catch[
+  Do[
+    horizontalCandidateEdges = Subsets[Range[horizontalVertexCount],
+      {horizontalPairSize}];
+    horizontalPriorities = DeleteDuplicates[{
+      Range[horizontalVertexCount], Reverse[Range[horizontalVertexCount]],
+      RotateLeft[Range[horizontalVertexCount], horizontalOneCount]}];
+    Do[
+      horizontalWidthGraphCount++;
+      horizontalWidth = posetWidth[horizontalEdges, horizontalVertexCount];
+      Do[
+        horizontalExpectedSpan = span[horizontalEdges, horizontalDurations];
+        Do[
+          horizontalObservedTime = listTime[horizontalEdges,
+            horizontalDurations, horizontalWidth, horizontalPriority];
+          horizontalWidthScheduleCount++;
+          If[horizontalObservedTime =!= horizontalExpectedSpan,
+            Throw[{horizontalVertexCount, horizontalEdges,
+              horizontalDurations, horizontalWidth, horizontalPriority,
+              horizontalObservedTime, horizontalExpectedSpan},
+              horizontalWidthCounterexampleTag]],
+          {horizontalPriority, horizontalPriorities}],
+        {horizontalDurations, Tuples[
+          {horizontalShortDuration, horizontalLongDuration},
+          horizontalVertexCount]}],
+      {horizontalEdges, Subsets[horizontalCandidateEdges]}],
+    {horizontalVertexCount, horizontalMinimumVertexCount,
+      horizontalMaximumVertexCount}];
+  True,
+  horizontalWidthCounterexampleTag
+], horizontalFiniteLimitSeconds, $TimedOut], $Failed];
+requireTrue[horizontalWidthLabel, horizontalWidthResult === True];
+Print[horizontalWidthReportPrefix, horizontalWidthGraphCount,
+  horizontalWidthReportSeparator, horizontalWidthScheduleCount,
+  horizontalWidthReportSuffix];
+
+requireTrue[horizontalCrossoverLabel,
+  FullSimplify[
+    (W/(h c v) <= L/v) \[Equivalent] (h >= W/(c L)),
+    Element[{W, L, h, c, v}, Reals] && W >= horizontalZeroWork &&
+      L > horizontalZeroDuration && h > horizontalZeroCount &&
+      c > horizontalZeroCount && v >= horizontalOneSpeedup]];
+horizontalPackingDurations = {horizontalPackingLongestDuration,
+  horizontalLongDuration, horizontalLongDuration, horizontalLongDuration};
+horizontalPackingAllSlots = Length[horizontalPackingDurations];
+requireTrue[horizontalPackingWitnessLabel,
+  Module[{packingWork = Total[horizontalPackingDurations],
+    packingSpan = Max[horizontalPackingDurations]},
+    packingWork/horizontalPackingSlotCount == packingSpan &&
+      listTime[{}, horizontalPackingDurations, horizontalPackingSlotCount,
+        Range[horizontalPackingAllSlots]] > packingSpan &&
+      listTime[{}, horizontalPackingDurations, horizontalPackingAllSlots,
+        Range[horizontalPackingAllSlots]] == packingSpan
+  ]];
+
+horizontalRunTime[hostCount_, taskCount_, slotsPerHost_, taskDuration_,
+    speedup_, setupPerAdditionalHost_] :=
+  (taskDuration/speedup) Ceiling[taskCount/(hostCount slotsPerHost)] +
+    setupPerAdditionalHost (hostCount - horizontalOneCount);
+horizontalModelAssumptions = Element[{h, n, c}, Integers] &&
+  h >= horizontalOneCount && n >= horizontalOneCount &&
+  c >= horizontalOneCount && Element[{d, v, a}, Reals] &&
+  d > horizontalZeroDuration && v >= horizontalOneSpeedup &&
+  a > horizontalZeroDuration;
+requireTrue[horizontalTailLabel,
+  FullSimplify[
+    horizontalRunTime[h, n, c, d, v, a] ==
+      d/v + a (h - horizontalOneCount) &&
+    horizontalRunTime[h + horizontalOneCount, n, c, d, v, a] -
+      horizontalRunTime[h, n, c, d, v, a] == a,
+    horizontalModelAssumptions && h >= Ceiling[n/c]]];
+requireTrue[horizontalImprovementLabel,
+  FullSimplify[
+    (horizontalRunTime[h + horizontalOneCount, n, c, d, v, a] <
+      horizontalRunTime[h, n, c, d, v, a]) \[Equivalent]
+      ((d/v) (Ceiling[n/(h c)] -
+        Ceiling[n/((h + horizontalOneCount) c)]) > a),
+    horizontalModelAssumptions]];
+
+(* Mandatory serial work and delayed predecessor edges may overlap in elapsed
+   time; their maximum is a lower bound, while their sum could double count. *)
+requireTrue[horizontalSharedBoundLabel,
+  FullSimplify[
+    (T >= Q/R && T >= L) \[Implies] T >= Max[Q/R, L],
+    Element[{T, Q, R, L}, Reals] && Q >= horizontalZeroWork &&
+      R > horizontalZeroRate && L >= horizontalZeroDuration]];
+requireTrue[horizontalTransferLabel,
+  Reduce[
+    Element[{taskStartA, taskStartB, taskStartC, taskDurationA,
+      taskDurationB, taskDurationC, transferDelayAB, transferDelayBC,
+      completionTime}, Reals] &&
+    taskDurationA >= horizontalZeroDuration &&
+    taskDurationB >= horizontalZeroDuration &&
+    taskDurationC >= horizontalZeroDuration &&
+    transferDelayAB >= horizontalZeroDuration &&
+    transferDelayBC >= horizontalZeroDuration &&
+    taskStartA >= horizontalZeroDuration &&
+    taskStartB >= taskStartA + taskDurationA + transferDelayAB &&
+    taskStartC >= taskStartB + taskDurationB + transferDelayBC &&
+    completionTime >= taskStartC + taskDurationC &&
+    completionTime < taskDurationA + transferDelayAB + taskDurationB +
+      transferDelayBC + taskDurationC,
+    {taskStartA, taskStartB, taskStartC, taskDurationA, taskDurationB,
+      taskDurationC, transferDelayAB, transferDelayBC, completionTime},
+    Reals] === False];
 (* Two independent jobs start together at time zero: the duration-1 job
    occupies the sole task slot, and the duration-100 record occupies the
    separate recording unit without taking a task slot. *)

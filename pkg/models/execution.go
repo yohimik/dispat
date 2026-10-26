@@ -85,6 +85,10 @@ const (
 // makes distributed execution an addition rather than a new code path every
 // existing repository travels.
 type ExecutionConfig struct {
+	// RetryAfterUncertainAttempt is an operator assertion that every delegated
+	// command in this run can be repeated after uncertain external effects
+	// without creating a conflicting side effect. It is false by default.
+	RetryAfterUncertainAttempt bool `json:"retryAfterUncertainAttempt,omitempty"`
 	// Concurrency bounds the assigned command tasks this node runs at once,
 	// across runs. It is a pointer because a stated 0 is a mistake worth
 	// refusing while an absent key means DefaultExecutionConcurrency, and a

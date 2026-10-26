@@ -70,12 +70,12 @@ func (a *App) startExecutionRun() {
 		return
 	}
 	a.coordinator = nil
-	a.isCoordinatorClosed = false
+	a.isCoordinatorClosed = executionCoordinatorOpenState
 	a.coordinatorCloseErr = nil
 	a.localNodeSlots = nil
-	a.localSlotRunID = ""
-	a.choreographyRetained = false
-	a.choreographyBound = false
+	a.localSlotRunID = choreographyAbsentIdentityText
+	a.choreographyRetained = executionChoreographyUnretainedState
+	a.choreographyBound = executionChoreographyUnboundState
 	a.runID = execution.FormatRunID()
 }
 
@@ -98,12 +98,12 @@ func (a *App) calculatePlanDigest(ctx context.Context, computed *plan.Plan, opts
 		},
 	}
 	if len(computed.RepositoryHeads) == 0 {
-		head := a.plannedHeads[""]
-		if head == "" {
+		head := a.plannedHeads[choreographyAbsentIdentityText]
+		if head == choreographyAbsentIdentityText {
 			var err error
 			head, err = a.git.HeadSHA(ctx)
 			if err != nil {
-				return "", err
+				return choreographyAbsentIdentityText, err
 			}
 		}
 		input.Heads = map[string]string{"": head}

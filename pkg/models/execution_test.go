@@ -120,11 +120,12 @@ func TestExecutionModelRoundTrip(t *testing.T) {
 	// field is a pointer.
 	f := File{
 		Execution: &ExecutionConfig{
-			Concurrency:    Int(2),
-			Name:           "Build-A",
-			Endpoint:       "ssh://build.example.test/srv/mailbox.git",
-			SecretEnv:      "DISPAT_EXECUTION_SECRET",
-			IdentityKeyEnv: "DISPAT_JOIN_SEED",
+			Concurrency:                Int(2),
+			Name:                       "Build-A",
+			Endpoint:                   "ssh://build.example.test/srv/mailbox.git",
+			SecretEnv:                  "DISPAT_EXECUTION_SECRET",
+			IdentityKeyEnv:             "DISPAT_JOIN_SEED",
+			RetryAfterUncertainAttempt: true,
 			Workers: []ExecutionWorkerConfig{
 				{Name: "Build-B", Endpoint: "https://git.example.test/mailbox-b.git", LateJoin: true,
 					IdentityPublicKey: "public-key-model-roundtrip"},
@@ -152,7 +153,7 @@ func TestExecutionModelRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("the execution key must marshal back into a loadable file: %s", data)
 	}
-	for _, key := range []string{"concurrency", "name", "endpoint", "secretEnv", "identityKeyEnv", "workers", "timeouts", "transfer"} {
+	for _, key := range []string{"concurrency", "name", "endpoint", "secretEnv", "identityKeyEnv", "retryAfterUncertainAttempt", "workers", "timeouts", "transfer"} {
 		if _, stated := execution[key]; !stated {
 			t.Errorf("execution is missing key %q: %v", key, execution)
 		}

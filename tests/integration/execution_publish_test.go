@@ -24,6 +24,11 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
+const (
+	executionPublishRunStoppingEventKind    = "run-stopping"
+	executionPublishInertCancelledEventKind = "inert-cancelled"
+)
+
 // The probes a publication leaves: which node ran the hook, the command and
 // the orchestrator-side tail. The third field is the node, so that
 // executionProbeValues answers "where did this stage run" by package.
@@ -240,13 +245,28 @@ func TestExecutionChangedProviderWithholdsDependentPublications(t *testing.T) {
 		filepath.Join("packages", "assets", "late-input.txt"), "app"))
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
 
-	res := rig.release()
+	res := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL).
+		WaitForDiagnostic(90*time.Second, func() {
+			t.Logf("changed-provider signed ledger: %+v", executionLateJoinLedgerEvents(t, rig.mailbox))
+		})
 
 	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.True(t, rig.repo.IsTagged("assets@0.1.0"), "the provider published before its hook changed the checkout")
+	assert.True(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, "docs"),
+		"docs' pre-publish check must identify the changed provider input\nstdout:\n%s", res.Stdout)
+	var stopping bool
+	inertCancelled := make(map[string]bool)
+	for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+		if event.Kind == executionPublishRunStoppingEventKind {
+			stopping = true
+		}
+		if event.Kind == executionPublishInertCancelledEventKind {
+			inertCancelled[event.Package] = true
+		}
+	}
+	require.True(t, stopping, "the relevant native change fences later claims in the signed ledger")
+	assert.True(t, inertCancelled["ui"], "ui's unclaimed native effect ends with signed inert cancellation")
 	for _, name := range []string{"ui", "docs", "app"} {
-		assert.True(t, harness.IsCodePresentForPackage(executionEvents(res), executionIntegrityCode, name),
-			"%s cannot publish an artefact built against the earlier provider inputs", name)
 		assert.NotContains(t, executionProbeValues(rig, "publish"), name,
 			"%s's publish command never ran", name)
 		assert.False(t, rig.repo.IsTagged(name+"@0.1.0"))
