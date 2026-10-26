@@ -27,6 +27,12 @@ name: Release
 # courier's. What remains here is keeping their records as an artifact.
 on:
   workflow_dispatch:
+    inputs:
+      announce:
+        description: Ping announcement platforms and publish social posts when credentials are present
+        required: false
+        type: boolean
+        default: true
 
 # Read by default; the two jobs that push (the badge branch, the release
 # itself) widen to write on their own. The gate and the install check hold
@@ -153,13 +159,13 @@ jobs:
     # env for the same reason as the release job: a step's `if` is evaluated
     # before its own `env`.
     #
-    # ANNOUNCE is the one switch: set when the repository holds any of the
-    # announcement's secrets. It gates the steps here and, in the release job,
+    # ANNOUNCE is the one switch: set when this dispatch enables announcements
+    # and the repository holds any of their secrets. It gates the steps here and, in the release job,
     # the docs package's announce stage (packages/docs/dispat.yaml), which
     # posts once the site is live. Without it this job still succeeds, so the
     # release keeps its normal dependencies.
     env:
-      ANNOUNCE: ${{ (secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || secrets.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || secrets.LINKEDIN_URN != '' || secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != '') && 'true' || '' }}
+      ANNOUNCE: ${{ inputs.announce && (secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || secrets.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || secrets.LINKEDIN_URN != '' || secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != '') && 'true' || '' }}
       CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN }}
       CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID }}
       CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
@@ -445,7 +451,7 @@ jobs:
     # is the escape hatch from the tunnel: setting it to s3 or url points the
     # staging somewhere that needs no ngrok.
     env:
-      ANNOUNCE: ${{ (secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || secrets.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || secrets.LINKEDIN_URN != '' || secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != '') && 'true' || '' }}
+      ANNOUNCE: ${{ inputs.announce && (secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN != '' || secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID != '' || secrets.CRIER_PUBLISH_LINKEDIN_TOKEN != '' || secrets.LINKEDIN_URN != '' || secrets.CRIER_PUBLISH_DISCORD_WEBHOOK_URL != '') && 'true' || '' }}
       CRIER_PUBLISH_INSTAGRAM_TOKEN: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_TOKEN }}
       CRIER_PUBLISH_INSTAGRAM_USER_ID: ${{ secrets.CRIER_PUBLISH_INSTAGRAM_USER_ID }}
       CRIER_PUBLISH_LINKEDIN_TOKEN: ${{ secrets.CRIER_PUBLISH_LINKEDIN_TOKEN }}
