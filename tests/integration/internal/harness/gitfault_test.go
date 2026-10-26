@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -163,4 +165,63 @@ func TestGitFaultSelectsMatchesAndPassesTheRestThrough(t *testing.T) {
 		assert.Equal(t, 2, first.Matches())
 		assert.Equal(t, 2, second.Matches(), "each fault counts what it saw")
 	})
+}
+
+func TestGitFaultReservesOrdinalsAfterALongPrefix(t *testing.T) {
+	const priorMatches = 512
+	fault := NewGitFault(t, GitFault{Pattern: "*--version*", Nth: priorMatches + 1, Code: 128})
+	for ordinal := 1; ordinal <= priorMatches; ordinal++ {
+		require.NoError(t, os.Mkdir(filepath.Join(fault.matches, strconv.Itoa(ordinal)), 0o700))
+	}
+
+	code, _, stderr := runThroughFault(t, fault, "--version")
+	assert.Equal(t, 128, code, "the first unclaimed ordinal is selected")
+	assert.Contains(t, stderr, GitFaultMarker)
+	assert.Equal(t, priorMatches+1, fault.Matches())
+}
+
+func TestGitFaultConcurrentMatchesReserveDistinctOrdinals(t *testing.T) {
+	const invocations = 32
+	const selectedOrdinal = 17
+	fault := NewGitFault(t, GitFault{Pattern: "*--version*", Nth: selectedOrdinal, Code: 128})
+	type outcome struct {
+		code   int
+		output string
+		err    error
+	}
+	finished := make(chan outcome, invocations)
+	faultEnv := fault.Env()
+	for range invocations {
+		go func() {
+			cmd := exec.Command("sh", "-c", `exec git "$@"`, "sh", "--version")
+			cmd.Env = append(os.Environ(), faultEnv...)
+			output, err := cmd.CombinedOutput()
+			code := 0
+			if err != nil {
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					code = exitErr.ExitCode()
+				}
+			}
+			finished <- outcome{code: code, output: string(output), err: err}
+		}()
+	}
+
+	selected := 0
+	for range invocations {
+		select {
+		case result := <-finished:
+			if result.code == 128 {
+				selected++
+				assert.Contains(t, result.output, GitFaultMarker)
+				continue
+			}
+			require.NoError(t, result.err)
+			assert.Contains(t, result.output, "git version")
+		case <-time.After(20 * time.Second):
+			t.Fatal("concurrent fault invocations did not finish")
+		}
+	}
+	assert.Equal(t, 1, selected, "exactly one process claims the requested ordinal")
+	assert.Equal(t, invocations, fault.Matches(), "all concurrent matches reserve one ordinal")
 }

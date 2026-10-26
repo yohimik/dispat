@@ -281,7 +281,25 @@ if [ -n "$DISPAT_IT_GIT_FAULT_ARM" ] && [ ! -f "$DISPAT_IT_GIT_FAULT_HOLD_DIR/ar
 fi
 case "$*" in
 $DISPAT_IT_GIT_FAULT_PATTERN)
-	ordinal=1
+	# Claimed directories form a contiguous prefix. Find its first hole with
+	# shell builtins; probing every earlier ordinal with mkdir becomes quadratic
+	# when a worker verifies hundreds of signed Git objects. Another invocation
+	# may claim the hole meanwhile, so the final mkdir still arbitrates the race.
+	lower=0
+	upper=1
+	while [ -d "$DISPAT_IT_GIT_FAULT_DIR/$upper" ]; do
+		lower=$upper
+		upper=$((upper * 2))
+	done
+	while [ $((lower + 1)) -lt "$upper" ]; do
+		middle=$(((lower + upper) / 2))
+		if [ -d "$DISPAT_IT_GIT_FAULT_DIR/$middle" ]; then
+			lower=$middle
+		else
+			upper=$middle
+		fi
+	done
+	ordinal=$upper
 	while ! mkdir "$DISPAT_IT_GIT_FAULT_DIR/$ordinal" 2>/dev/null; do
 		ordinal=$((ordinal + 1))
 	done

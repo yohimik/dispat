@@ -1019,6 +1019,7 @@ func (b *FirstNodeBroker) AcceptClaim(ctx context.Context, p ChoreographyClaimPr
 			if err := b.persist.PersistFrameReady(ctx, ChoreographyFrameReadyRequest{
 				TaskID: p.Task, Attempt: task.attempt, TaskOID: task.tip,
 				PreparedInputOID: resolved.PreparedInputOID, InputsDigest: task.inputsDigest}); err != nil {
+				b.latchFrameReadyCASFailure(err)
 				return ChoreographyReceipt{}, err
 			}
 			task.frameReady, task.preparedInputOID = choreographyBrokerTaskFrameReady, resolved.PreparedInputOID
@@ -1055,7 +1056,7 @@ func (b *FirstNodeBroker) AcceptClaim(ctx context.Context, p ChoreographyClaimPr
 			b.wakeBudgetWaiters()
 			return b.persist.PersistRefusal(ctx, p, ChoreographyRefusalStopping)
 		}
-		if errors.Is(err, gitx.ErrPushUnknown) {
+		if errors.Is(err, gitx.ErrPushUnknown) || errors.Is(err, errChoreographyAtomicUnresolved) {
 			// The exact task and ledger CAS may still land after readback.
 			// Keep its pending identity and every physical lease fenced, but
 			// wake task observers so the run fails boundedly instead of waiting
@@ -1300,10 +1301,21 @@ func (b *FirstNodeBroker) MarkFrameReady(ctx context.Context, taskID, preparedIn
 	if err := b.persist.PersistFrameReady(ctx, ChoreographyFrameReadyRequest{
 		TaskID: taskID, Attempt: task.attempt, TaskOID: task.tip,
 		PreparedInputOID: preparedInputOID, InputsDigest: inputsDigest}); err != nil {
+		b.latchFrameReadyCASFailure(err)
 		return err
 	}
 	task.frameReady, task.preparedInputOID = choreographyBrokerTaskFrameReady, preparedInputOID
 	return nil
+}
+
+// A failed atomic ready-frame write cannot be inferred from an absent event.
+// Keep uncertain CAS state and wake observers instead of waiting for admission.
+func (b *FirstNodeBroker) latchFrameReadyCASFailure(err error) {
+	if errors.Is(err, errChoreographyAtomicUnresolved) ||
+		errors.Is(err, errChoreographyAtomicRefused) {
+		b.fault = err
+		b.wakeBudgetWaiters()
+	}
 }
 
 // AcceptResult imports bytes and records an attempt result. It deliberately

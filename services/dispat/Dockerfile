@@ -168,6 +168,14 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
       echo "built $name (version ${DISPAT_VERSION})"; \
     done
 
+# The fork's Linux socket writes can raise SIGPIPE before returning EPIPE.
+# Run the real pinned compiler's regression on this builder's Linux arch;
+# normal Go tests exclude the TinyGo-only signal registration by build tag.
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/root/.cache/tinygo \
+    --mount=type=cache,target=/go/pkg/mod \
+    GOMAXPROCS=2 GOMEMLIMIT=6GiB tinygo test -p 2 -v -run '^TestTinyGoLinux' .
+
 # The two binaries joined to the six, and the asset list extended with their
 # names. The list is rewritten as one line because that is what the staged
 # stage below joins paths onto; the tiny names go last, so the six the

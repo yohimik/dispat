@@ -66,6 +66,7 @@ const choreographyLedgerStaleEpochErr = "execution: claim proposal names a stale
 const choreographyLedgerTaskTipDiffersFromSignedHistoryErr = "execution: canonical task tip differs from exact signed ledger history"
 const choreographyLedgerEventSizeErr = "execution: signed ledger event exceeds the documented transfer limit"
 const choreographyLedgerCASUnresolvedFormat = "execution: task and capacity CAS is unresolved (task %s, ledger %s): %w"
+const choreographyLedgerCASUnresolvedErrorMessage = "execution: atomic task and ledger CAS has no verified outcome"
 const choreographyLedgerRemoteRefsErr = "remote refs do not name the proposed transaction"
 const choreographyLedgerRootInvalidErr = "execution: invalid choreography ledger root"
 const choreographyLedgerRosterSizeErr = "execution: signed roster exceeds the documented transfer limit"
@@ -105,7 +106,10 @@ const choreographyLedgerHistoryErr = "execution: ledger tip is outside signed fi
 const choreographyLedgerUnsignedObjectErr = "execution: ledger object is not a signed ledger commit"
 const choreographyLedgerAnotherRunErr = "execution: ledger record belongs to another pinned run"
 
-var errChoreographyAtomicRefused = errors.New(choreographyAtomicRefusedErrorMessage)
+var (
+	errChoreographyAtomicRefused    = errors.New(choreographyAtomicRefusedErrorMessage)
+	errChoreographyAtomicUnresolved = errors.New(choreographyLedgerCASUnresolvedErrorMessage)
+)
 
 // ChoreographyLedgerReservation is the signed, inert root created in the
 // initial bounded batch beside every logical task ref.
@@ -510,7 +514,8 @@ func (g *GitChoreographyPersist) persistAtomic(ctx context.Context, mutation cho
 		}
 		return fmt.Errorf(choreographyLedgerCASUnresolvedFormat,
 			pending.mutation.TaskBranch, g.opts.Ledger.Branch,
-			joinAtomicPushErrors(pushErr, taskReadErr, slotReadErr, ledgerReadErr))
+			errors.Join(errChoreographyAtomicUnresolved,
+				joinAtomicPushErrors(pushErr, taskReadErr, slotReadErr, ledgerReadErr)))
 	}
 	if g.opts.OnRefAdvance != nil {
 		if pending.mutation.TaskBranch != choreographyLedgerMissingIdentity {
