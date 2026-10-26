@@ -122,16 +122,24 @@ func executionBuildCount(rig *executionRig, packageName string) int {
 // `app` build on other machines from the bytes it produced, without rebuilding
 // anything of their closures.
 func TestExecutionIgnoredOutputsReachConsumersOnOtherWorkers(t *testing.T) {
+	gate := filepath.Join(t.TempDir(), "consumers")
 	rig := newExecutionOutputWorkspaceWith(t, func(repo *harness.Repo) string {
-		return executionOutputBuild + " && " +
-			repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE", executionStageWindow)
+		return executionOutputBuild + ` &&
+case "$DISPAT_PACKAGE" in
+  ui) ` + stageRelationRendezvous(`"$DISPAT_IT_EXECUTION_GATE.ui"`,
+			`"$DISPAT_IT_EXECUTION_GATE.docs"`) + ` ;;
+  docs) ` + stageRelationRendezvous(`"$DISPAT_IT_EXECUTION_GATE.docs"`,
+			`"$DISPAT_IT_EXECUTION_GATE.ui"`) + ` ;;
+esac &&
+` + repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE", 0)
 	}, func(cfg *models.File) {
 		cfg.Execution.Workers = append(cfg.Execution.Workers,
 			models.ExecutionWorkerConfig{Name: executionThirdNode, Endpoint: cfg.Execution.Workers[0].Endpoint})
 	})
-	workers := rig.startWorkers([]string{executionNode, executionSecondNode, executionThirdNode}, 1)
+	workers := rig.startWorkersHolding([]string{executionNode, executionSecondNode, executionThirdNode}, 1,
+		executionGateEnv+"="+gate)
 
-	res := rig.release()
+	res := rig.release(executionGateEnv + "=" + gate)
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	for _, name := range executionWorkspacePackages {
@@ -142,7 +150,9 @@ func TestExecutionIgnoredOutputsReachConsumersOnOtherWorkers(t *testing.T) {
 	assert.NotEqual(t, placed["ui"], placed["docs"],
 		"the two consumers of assets built on two machines: %v", rig.runs())
 	timeline := rig.repo.Timeline("timeline.log")
-	harness.AssertOverlaps(t, harness.Find(t, timeline, "ui"), harness.Find(t, timeline, "docs"))
+	// Each consumer waits for the other inside its build command. Completing
+	// the release proves both commands were live together, independent of
+	// scheduling delays between their claims.
 	harness.AssertSequential(t, harness.Find(t, timeline, "assets"), harness.Find(t, timeline, "ui"))
 
 	produced := executionProbeValues(rig, "inputs")
