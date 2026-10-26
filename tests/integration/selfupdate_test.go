@@ -1637,6 +1637,16 @@ func TestSelfUpdateRollbackChecksTheBackupFirst(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in backups are shell scripts")
 	}
+	standInBackup := func(t *testing.T, r *suRepo, content string) {
+		t.Helper()
+		// The old executable was renamed to backup. Replace its directory
+		// entry instead of opening that executable inode for writing: Linux
+		// may still have it mapped and refuse the write with ETXTBSY.
+		standIn := filepath.Join(filepath.Dir(r.backup), "stand-in-backup")
+		require.NoError(t, os.WriteFile(standIn, []byte(content), 0o755))
+		require.NoError(t, os.Chmod(standIn, 0o755))
+		require.NoError(t, os.Rename(standIn, r.backup))
+	}
 	updated := func(t *testing.T) *suRepo {
 		t.Helper()
 		r := newSURepo(t)
@@ -1647,7 +1657,7 @@ func TestSelfUpdateRollbackChecksTheBackupFirst(t *testing.T) {
 
 	t.Run("a backup that is not a program refuses the rollback", func(t *testing.T) {
 		r := updated(t)
-		require.NoError(t, os.WriteFile(r.backup, []byte("this was never a binary\n"), 0o755))
+		standInBackup(t, r, "this was never a binary\n")
 
 		res := r.CommandBin(r.exe, "self-update", "--rollback")
 		assert.NotEqual(t, 0, res.Code, "stdout:\n%s", res.Stdout)
@@ -1657,7 +1667,7 @@ func TestSelfUpdateRollbackChecksTheBackupFirst(t *testing.T) {
 
 	t.Run("a backup that says nothing rolls back with the version unstated", func(t *testing.T) {
 		r := updated(t)
-		require.NoError(t, os.WriteFile(r.backup, []byte("#!/bin/sh\nexit 0\n"), 0o755))
+		standInBackup(t, r, "#!/bin/sh\nexit 0\n")
 
 		res := r.CommandBin(r.exe, "self-update", "--check", "--rollback")
 		assert.Equal(t, 1, res.Code, "there is still something to restore; stdout:\n%s", res.Stdout)
