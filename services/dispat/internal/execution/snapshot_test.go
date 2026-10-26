@@ -24,7 +24,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/yohimik/dispat/pkg/ccme"
+	"github.com/yohimik/dispat/services/dispat/internal/changelog"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
+	"github.com/yohimik/dispat/services/dispat/internal/model"
+	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
 
 // snapshotFixture is one repository with a committed history and a working
@@ -320,6 +324,100 @@ func TestSnapshotNeverSeesAHalfWrittenFile(t *testing.T) {
 	writing.Wait()
 }
 
+// The changelog's same-directory temp is visible to Git. A capture must wait
+// for its atomic rename rather than pinning that short-lived file as build input.
+func TestSnapshotWaitsForChangelogAtomicWrite(t *testing.T) {
+	fixture := newSnapshotFixture(t)
+	release, err := fixture.git.AcquireSnapshotWrite(t.Context())
+	require.NoError(t, err)
+	firstRelease := release
+	t.Cleanup(func() { _ = firstRelease() })
+	fixture.write(t, "CHANGELOG.md.tmp-123456", "unfinished\n")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	_, err = newSnapshots().capture(ctx, fixture.git, fixture.source(), zerolog.Nop())
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, os.Remove(filepath.Join(fixture.dir, "CHANGELOG.md.tmp-123456")))
+	require.NoError(t, release())
+	fixture.write(t, "notes.tmp-user", "real input\n")
+
+	commit, err := newSnapshots().capture(t.Context(), fixture.git, fixture.source(), zerolog.Nop())
+	require.NoError(t, err)
+	assert.NotContains(t, fixture.listing(t, commit), "CHANGELOG.md.tmp-123456")
+	assert.Contains(t, fixture.listing(t, commit), "notes.tmp-user")
+
+	// The direct recorder and a separate `dispat changelog` invocation use
+	// the same checkout lock before fsx creates a temporary file.
+	release, err = fixture.git.AcquireSnapshotWrite(t.Context())
+	require.NoError(t, err)
+	secondRelease := release
+	t.Cleanup(func() { _ = secondRelease() })
+	entry := &plan.Release{Pkg: &model.Package{Name: "assets", Dir: fixture.dir,
+		Space: &model.Space{Name: "libs"}}, Next: ccme.Version{Major: 1}, Channel: ccme.ChannelStable}
+	ctx, cancel = context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	_, err = (&changelog.FileWriter{}).RecordEntry(ctx, entry)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.NoFileExists(t, filepath.Join(fixture.dir, "CHANGELOG.md"))
+	require.NoError(t, release())
+	_, err = (&changelog.FileWriter{}).RecordEntry(t.Context(), entry)
+	require.NoError(t, err)
+	assert.FileExists(t, filepath.Join(fixture.dir, "CHANGELOG.md"))
+}
+
+func TestSnapshotBaselineRefusesAnInterruptedWriterLock(t *testing.T) {
+	fixture := newSnapshotFixture(t)
+	gitDir := strings.TrimSpace(fixture.run(t, "rev-parse", "--path-format=absolute", "--git-dir"))
+	lock := filepath.Join(gitDir, "dispat-snapshot-write.lock")
+	require.NoError(t, os.Mkdir(lock, 0o700))
+	t.Cleanup(func() { _ = os.Remove(lock) })
+	fixture.write(t, "CHANGELOG.md.tmp-orphan", "unfinished\n")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	err := newSnapshots().captureBaselines(ctx, baselineCapture{sources: []Source{fixture.source()},
+		open: func(string) *gitx.LocalGitx { return fixture.git }, log: zerolog.Nop()})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorContains(t, err, lock)
+	assert.FileExists(t, filepath.Join(fixture.dir, "CHANGELOG.md.tmp-orphan"))
+}
+
+func TestSnapshotLockSeparatesLinkedWorktrees(t *testing.T) {
+	fixture := newSnapshotFixture(t)
+	other := filepath.Join(t.TempDir(), "other")
+	fixture.run(t, "worktree", "add", "-q", "-b", "other", other)
+	firstRelease, err := fixture.git.AcquireSnapshotWrite(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = firstRelease() })
+	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
+	defer cancel()
+	secondRelease, err := (&gitx.LocalGitx{Dir: other, Log: zerolog.Nop()}).AcquireSnapshotWrite(ctx)
+	require.NoError(t, err)
+	require.NoError(t, secondRelease())
+	require.NoError(t, firstRelease())
+}
+
+func TestSnapshotLockReleaseCannotRemoveANewHolder(t *testing.T) {
+	fixture := newSnapshotFixture(t)
+	firstRelease, err := fixture.git.AcquireSnapshotWrite(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, firstRelease())
+	secondRelease, err := fixture.git.AcquireSnapshotWrite(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = secondRelease() })
+	require.NoError(t, firstRelease())
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	_, err = fixture.git.AcquireSnapshotWrite(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, secondRelease())
+	finalRelease, err := fixture.git.AcquireSnapshotWrite(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, finalRelease())
+}
+
 // captureUnderGuard is what a dispatch does: the exclusive side of the guard
 // around one capture.
 func captureUnderGuard(t *testing.T, coordinator *Coordinator, captures *snapshots, fixture *snapshotFixture) (string, error) {
@@ -420,9 +518,9 @@ func TestACapturedStateSurvivesOneRacingWriter(t *testing.T) {
 }
 
 // TestSnapshotAsksForTheIndexOncePerRepository: where a repository keeps its
-// index does not move during a run, so a capture after the first costs the
-// staging and the tree and nothing else. It is all under the exclusive guard,
-// where every process is a wait for every frame.
+// index does not move during a run, so a capture after the first asks Git for
+// the worktree lock directory, stages the tree, and writes it. It is all under
+// the exclusive guard, where every process is a wait for every frame.
 func TestSnapshotAsksForTheIndexOncePerRepository(t *testing.T) {
 	fixture := newSnapshotFixture(t)
 	captures := newSnapshots()
@@ -434,7 +532,7 @@ func TestSnapshotAsksForTheIndexOncePerRepository(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, first, again)
-	assert.Equal(t, uint64(2), gitx.GitInvocations()-before, "git add and git write-tree")
+	assert.Equal(t, uint64(3), gitx.GitInvocations()-before, "gitdir resolution, git add and git write-tree")
 }
 
 // BenchmarkSnapshotCaptureUnchanged captures one repository whose working

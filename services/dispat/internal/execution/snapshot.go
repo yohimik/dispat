@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -295,28 +296,36 @@ func (s *snapshots) refreshPackageRoots(ctx context.Context, request packageRoot
 		return err
 	}
 	defer closeIndex()
-	tree, err := writeStateTree(ctx, stateTreeCapture{git: git, index: index, source: source,
-		log: log, excluded: other, baselineTree: baseline.tree})
+	var tree string
+	err = withSnapshotWrite(ctx, git, func() error {
+		var captureErr error
+		tree, captureErr = writeStateTree(ctx, stateTreeCapture{git: git, index: index, source: source,
+			log: log, excluded: other, baselineTree: baseline.tree})
+		if captureErr != nil {
+			return captureErr
+		}
+		current, scanErr := scanOutputRootFiles(git.Dir, packageRoots)
+		if scanErr != nil {
+			return scanErr
+		}
+		var changed []string
+		for path, fingerprint := range current {
+			if baseline.files[path] != fingerprint {
+				changed = append(changed, path)
+			}
+		}
+		sort.Strings(changed)
+		if len(changed) > 0 {
+			plumbing := gitx.NewPlumbing(git)
+			tree = plumbing.WriteTreeFromPaths(ctx, git.Dir, index, changed, true)
+			if err := plumbing.Err(); err != nil {
+				return fmt.Errorf("execution: capturing prepared declared roots of %s: %w", packageName, err)
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return err
-	}
-	current, err := scanOutputRootFiles(git.Dir, packageRoots)
-	if err != nil {
-		return err
-	}
-	var changed []string
-	for path, fingerprint := range current {
-		if baseline.files[path] != fingerprint {
-			changed = append(changed, path)
-		}
-	}
-	sort.Strings(changed)
-	if len(changed) > 0 {
-		plumbing := gitx.NewPlumbing(git)
-		tree = plumbing.WriteTreeFromPaths(ctx, git.Dir, index, changed, true)
-		if err := plumbing.Err(); err != nil {
-			return fmt.Errorf("execution: capturing prepared declared roots of %s: %w", packageName, err)
-		}
 	}
 	updated, err := os.Open(index)
 	if err != nil {
@@ -358,12 +367,17 @@ func (s *snapshots) captureBaselines(ctx context.Context, request baselineCaptur
 		if err != nil {
 			return err
 		}
-		tree, err := writeStateTree(ctx, stateTreeCapture{git: git, index: index, source: source, log: log})
-		if err != nil {
-			closeIndex()
-			return err
-		}
-		files, err := scanOutputRootFiles(source.Dir, roots[source.Dir])
+		var tree string
+		var files map[string]sourceFileFingerprint
+		err = withSnapshotWrite(ctx, git, func() error {
+			var captureErr error
+			tree, captureErr = writeStateTree(ctx, stateTreeCapture{git: git, index: index, source: source, log: log})
+			if captureErr != nil {
+				return captureErr
+			}
+			files, captureErr = scanOutputRootFiles(source.Dir, roots[source.Dir])
+			return captureErr
+		})
 		if err != nil {
 			closeIndex()
 			return err
@@ -439,8 +453,13 @@ func (s *snapshots) capture(ctx context.Context, git *gitx.LocalGitx, source Sou
 		return "", err
 	}
 	defer done()
-	tree, err := writeStateTree(ctx, stateTreeCapture{git: git, index: index, source: source,
-		log: log, excluded: baseline.roots, baselineTree: baseline.tree})
+	var tree string
+	err = withSnapshotWrite(ctx, git, func() error {
+		var captureErr error
+		tree, captureErr = writeStateTree(ctx, stateTreeCapture{git: git, index: index, source: source,
+			log: log, excluded: baseline.roots, baselineTree: baseline.tree})
+		return captureErr
+	})
 	if err != nil {
 		return "", err
 	}
@@ -460,19 +479,21 @@ func (s *snapshots) capture(ctx context.Context, git *gitx.LocalGitx, source Sou
 	return commit, nil
 }
 
+func withSnapshotWrite(ctx context.Context, git *gitx.LocalGitx, capture func() error) error {
+	release, err := git.AcquireSnapshotWrite(ctx)
+	if err != nil {
+		return err
+	}
+	return errors.Join(capture(), release())
+}
+
 // writeStateTree hashes one repository's whole working state into a tree, and
 // tries a second time when the first attempt raced somebody writing a file.
 //
-// The staging walks the repository and then hashes what it found, so a file
-// that exists when it is listed and is gone when it is read fails the whole
-// capture: git reports the path it could not stat and exits. That is not a
-// condition of the repository but of the instant, and a release produces such
-// instants by itself, since the recorder writes a changelog through a
-// temporary file and renames it while another package is being dispatched. The
-// exclusive side of the snapshot guard keeps this run's own version and
-// lockfile frames out of the way; it cannot keep out a build command writing
-// into its own folder, and nothing should, because a build is exactly what a
-// node was asked to do.
+// Git can fail if a file disappears between its directory walk and read.
+// Callers hold the per-worktree snapshot/write lock against dispat's atomic
+// changelog temp files. The snapshot guard excludes native version and lock
+// writes, but an uncoordinated build command can still move its own files.
 //
 // One retry, because the second attempt walks a tree from which the file is
 // either present or absent rather than becoming one or the other. A capture

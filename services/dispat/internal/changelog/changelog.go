@@ -10,6 +10,7 @@ package changelog
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/yohimik/dispat/pkg/ccme"
 	models "github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/fsx"
+	"github.com/yohimik/dispat/services/dispat/internal/gitx"
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
 )
@@ -211,7 +213,7 @@ func NoteEntry(rel *plan.Release, note string) (string, bool, error) {
 		// rewrites the whole file after the package is already published, in
 		// the middle of the merge recovery, so a plain write interrupted
 		// halfway would take the package's history with it.
-		if err := fsx.WriteFileAtomic(path, []byte(bom+strings.Join(out, "\n")), mode); err != nil {
+		if err := writeEntryAtomic(context.Background(), path, []byte(bom+strings.Join(out, "\n")), mode); err != nil {
 			return "", false, fmt.Errorf("changelog: %w", err)
 		}
 		return path, true, nil
@@ -492,12 +494,9 @@ func (w *FileWriter) path(rel *plan.Release) string {
 // Record writes the release entry for rel at the top of the package
 // changelog, creating the file when missing.
 //
-// The context is deliberately unused. Every operation here is a local read and
-// one atomic replace, none of which takes a context, and the recording runs
-// after the package is published: a cancelled run that skipped it would leave
-// a published package with no record, which is the one state the next run
-// cannot reason about. The parameter stays because ReleaseRecorderx is what
-// the GitHub recorder implements too, and that one does reach the network.
+// Recording runs after publication under a detached bounded context: a
+// cancelled run that skipped it would leave a published package unrecorded.
+// The context also bounds waiting for another process's snapshot/write lock.
 func (w *FileWriter) Record(ctx context.Context, rel *plan.Release) error {
 	_, err := w.RecordEntry(ctx, rel)
 	return err
@@ -507,7 +506,7 @@ func (w *FileWriter) Record(ctx context.Context, rel *plan.Release) error {
 // file already carried it and the write was the W226 skip. A caller that
 // tells a fresh write from a skip asks here rather than reading the file a
 // second time.
-func (w *FileWriter) RecordEntry(_ context.Context, rel *plan.Release) (bool, error) {
+func (w *FileWriter) RecordEntry(ctx context.Context, rel *plan.Release) (bool, error) {
 	now := time.Now
 	if w.Now != nil {
 		now = w.Now
@@ -580,10 +579,24 @@ func (w *FileWriter) RecordEntry(_ context.Context, rel *plan.Release) (bool, er
 	// The write replaces the whole file after the publish already happened; an
 	// interrupted plain write here would take the package's history with it,
 	// so it goes through the atomic replace.
-	if err := fsx.WriteFileAtomic(path, b.Bytes(), mode); err != nil {
+	if err := writeEntryAtomic(ctx, path, b.Bytes(), mode); err != nil {
 		return false, fmt.Errorf("changelog: %w", err)
 	}
 	return true, nil
+}
+
+func writeEntryAtomic(ctx context.Context, path string, content []byte, mode os.FileMode) error {
+	release, err := gitx.AcquireSnapshotWriteForFile(ctx, path)
+	if err != nil {
+		return err
+	}
+	writeErr := fsx.WriteFileAtomic(path, content, mode)
+	if errors.Is(writeErr, fsx.ErrAtomicTempRetained) {
+		// The checkout stays closed to snapshots until the retained temp and
+		// persistent lock have been investigated together.
+		return fmt.Errorf("changelog: snapshot write lock retained after failed temp cleanup: %w", writeErr)
+	}
+	return errors.Join(writeErr, release())
 }
 
 // fileParts is how an existing changelog divides for a rewrite: what stays

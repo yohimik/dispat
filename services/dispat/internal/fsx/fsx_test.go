@@ -1,6 +1,7 @@
 package fsx
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -71,11 +72,31 @@ func TestWriteFileAtomicRenameFailureCleansUp(t *testing.T) {
 	target := filepath.Join(dir, "dispat.json")
 	require.NoError(t, os.Mkdir(target, 0o755))
 
-	assert.Error(t, WriteFileAtomic(target, []byte("{}"), 0o644))
+	err := WriteFileAtomic(target, []byte("{}"), 0o644)
+	assert.Error(t, err)
+	assert.NotErrorIs(t, err, ErrAtomicTempRetained)
 
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 	assert.Len(t, entries, 1, "only the pre-existing folder remains")
+}
+
+func TestAtomicTempCleanupFailureIsReported(t *testing.T) {
+	writeErr := errors.New("write failed")
+	cleanupErr := errors.New("remove failed")
+	path := filepath.Join(t.TempDir(), "CHANGELOG.md.tmp-123")
+	err := removeAtomicTemp(path, writeErr, func(got string) error {
+		assert.Equal(t, path, got)
+		return cleanupErr
+	})
+	assert.ErrorIs(t, err, writeErr)
+	assert.ErrorIs(t, err, cleanupErr)
+	assert.ErrorIs(t, err, ErrAtomicTempRetained)
+	assert.ErrorContains(t, err, path)
+
+	err = removeAtomicTemp(path, writeErr, func(string) error { return nil })
+	assert.ErrorIs(t, err, writeErr)
+	assert.NotErrorIs(t, err, ErrAtomicTempRetained)
 }
 
 func TestWriteFileAtomicRefusesSymlink(t *testing.T) {

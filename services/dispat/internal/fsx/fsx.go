@@ -7,15 +7,27 @@
 package fsx
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 )
 
+// ErrAtomicTempRetained means an interrupted atomic write could not remove
+// its same-directory temporary file. A snapshot must not capture that file.
+var ErrAtomicTempRetained = errors.New("atomic write temporary file retained")
+
+func removeAtomicTemp(path string, writeErr error, remove func(string) error) error {
+	if cleanupErr := remove(path); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+		return errors.Join(writeErr, fmt.Errorf("%w at %s: %w", ErrAtomicTempRetained, path, cleanupErr))
+	}
+	return writeErr
+}
+
 // WriteFileAtomic replaces path via a same-directory temp file, fsync and
 // rename. The temp file lands beside the target so the rename never crosses a
-// filesystem, and it is removed on every failure.
+// filesystem. Failed cleanup is reported so snapshot users can retain exclusion.
 func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("refusing to replace symlink %s", path)
@@ -36,25 +48,20 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 	}
 	if err != nil {
 		tmp.Close()
-		os.Remove(name)
-		return err
+		return removeAtomicTemp(name, err, os.Remove)
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
-		os.Remove(name)
-		return err
+		return removeAtomicTemp(name, err, os.Remove)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(name)
-		return err
+		return removeAtomicTemp(name, err, os.Remove)
 	}
 	if err := os.Chmod(name, mode); err != nil {
-		os.Remove(name)
-		return err
+		return removeAtomicTemp(name, err, os.Remove)
 	}
 	if err := os.Rename(name, path); err != nil {
-		os.Remove(name)
-		return err
+		return removeAtomicTemp(name, err, os.Remove)
 	}
 	return nil
 }
