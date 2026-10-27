@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,7 +26,8 @@ func TestRunBinCommandUsesDebuggerOnlyForOptedInRelease(t *testing.T) {
 	require.Equal(t, releaseArgs, debugged.Args[len(debugged.Args)-len(releaseArgs):])
 	require.Contains(t, debugged.Args, testDebuggerSignalPipe)
 	require.Contains(t, debugged.Args, testDebuggerGCSignals)
-	require.Contains(t, debugged.Args, testDebuggerSignalInfo)
+	require.Contains(t, debugged.Args, fmt.Sprintf(testDebuggerFaultTraceFormat, testDebuggerFaultTrace))
+	require.Contains(t, debugged.Args, testDebuggerQuietThreads)
 
 	require.Equal(t, []string{binary}, runBinCommand(binary, nil).Args)
 	t.Setenv(testDebuggerEnv, "lldb")

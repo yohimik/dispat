@@ -1,29 +1,40 @@
 package harness
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 )
 
 const (
-	testDebuggerEnv         = "DISPAT_TEST_DEBUGGER"
-	testDebuggerGDB         = "gdb"
-	testDebuggerRelease     = "release"
-	testDebuggerFirstArg    = 0
-	testDebuggerNoArgs      = 0
-	testDebuggerBatch       = "--batch"
-	testDebuggerChildResult = "--return-child-result"
-	testDebuggerQuiet       = "-q"
-	testDebuggerExecute     = "-ex"
-	testDebuggerLogToStderr = "set logging file /dev/stderr"
-	testDebuggerRedirectLog = "set logging redirect on"
-	testDebuggerEnableLog   = "set logging enabled on"
-	testDebuggerSignalPipe  = "handle SIGPIPE nostop noprint pass"
-	testDebuggerGCSignals   = "handle SIG40 SIG41 nostop noprint pass"
-	testDebuggerRun         = "run"
-	testDebuggerBacktrace   = "thread apply all bt"
-	testDebuggerSignalInfo  = "p $_siginfo"
-	testDebuggerChildArgs   = "--args"
+	testDebuggerEnv              = "DISPAT_TEST_DEBUGGER"
+	testDebuggerGDB              = "gdb"
+	testDebuggerRelease          = "release"
+	testDebuggerFirstArg         = 0
+	testDebuggerNoArgs           = 0
+	testDebuggerBatch            = "--batch"
+	testDebuggerChildResult      = "--return-child-result"
+	testDebuggerQuiet            = "-q"
+	testDebuggerExecute          = "-ex"
+	testDebuggerLogToStderr      = "set logging file /dev/stderr"
+	testDebuggerRedirectLog      = "set logging redirect on"
+	testDebuggerEnableLog        = "set logging enabled on"
+	testDebuggerQuietThreads     = "set print thread-events off"
+	testDebuggerSignalPipe       = "handle SIGPIPE nostop noprint pass"
+	testDebuggerGCSignals        = "handle SIG40 SIG41 nostop noprint pass"
+	testDebuggerRun              = "run"
+	testDebuggerFaultTraceFormat = "python exec(%q)"
+	testDebuggerFaultTrace       = `for fault in range(4):
+ if not gdb.selected_inferior().threads():
+  break
+ for command in ('info registers', 'x/8i $pc', 'info auxv', 'info proc mappings', 'info proc status', 'thread apply all bt', 'p $_siginfo'):
+  try:
+   gdb.execute(command)
+  except gdb.error as error:
+   gdb.write(str(error) + '\n', gdb.STDERR)
+ gdb.execute('continue')
+`
+	testDebuggerChildArgs = "--args"
 )
 
 // runBinCommand traces only synchronous release calls when explicitly enabled
@@ -42,11 +53,11 @@ func runBinCommand(bin string, args []string) *exec.Cmd {
 		testDebuggerExecute, testDebuggerLogToStderr,
 		testDebuggerExecute, testDebuggerRedirectLog,
 		testDebuggerExecute, testDebuggerEnableLog,
+		testDebuggerExecute, testDebuggerQuietThreads,
 		testDebuggerExecute, testDebuggerSignalPipe,
 		testDebuggerExecute, testDebuggerGCSignals,
 		testDebuggerExecute, testDebuggerRun,
-		testDebuggerExecute, testDebuggerBacktrace,
-		testDebuggerExecute, testDebuggerSignalInfo,
+		testDebuggerExecute, fmt.Sprintf(testDebuggerFaultTraceFormat, testDebuggerFaultTrace),
 		testDebuggerChildArgs, bin,
 	}
 	return exec.Command(testDebuggerGDB, append(debuggerArgs, args...)...)

@@ -154,7 +154,9 @@ func (twin *executionParityTwin) release(t *testing.T) []string {
 	}
 
 	twin.setGate(t, true)
-	record("bootstrap", twin.run())
+	bootstrap := record("bootstrap", twin.run())
+	require.Equal(t, 0, bootstrap.Code,
+		"bootstrap release failed; stdout:\n%s; stderr:\n%s", bootstrap.Stdout, bootstrap.Stderr)
 
 	repo.WriteFile("packages/libs/core/work.txt", "streaming\n")
 	repo.WriteFile("packages/apps/cli/work.txt", "own flag\n")
