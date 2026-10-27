@@ -399,6 +399,7 @@ func (r *Repo) Shell(script string) RunResult {
 			r.T.Fatalf("launching the shell: %v", err)
 		}
 		code = exitErr.ExitCode()
+		logSignaledChildExit(r.T, exitErr)
 	}
 	return RunResult{Code: code, Stdout: stdout.String(), Stderr: stderr.String(), Events: ParseEvents(stdout.String())}
 }
@@ -469,6 +470,7 @@ func (r *Repo) runBin(bin, root string, env []string, stdin string, args ...stri
 			r.T.Fatalf("launching dispat: %v", err)
 		}
 		code = exitErr.ExitCode()
+		logSignaledChildExit(r.T, exitErr)
 	}
 	return RunResult{Code: code, Stdout: stdout.String(), Stderr: stderr.String(), Events: ParseEvents(stdout.String())}
 }
@@ -675,8 +677,24 @@ func (p *Proc) WaitForDiagnostic(limit time.Duration, onTimeout func()) RunResul
 			p.repo.T.Fatalf("waiting for dispat: %v", err)
 		}
 		code = exitErr.ExitCode()
+		logSignaledChildExit(p.repo.T, exitErr)
 	}
 	return RunResult{Code: code, Stdout: p.stdout.String(), Stderr: p.stderr.String(), Events: ParseEvents(p.stdout.String())}
+}
+
+const (
+	signaledChildExitCode         = -1
+	signaledChildDiagnosticFormat = "child exited by signal: error=%q process_status=%#v"
+)
+
+// ExitCode collapses every terminating signal to -1. Keep the raw status so a
+// native test failure can distinguish a broken pipe from a killed process.
+func logSignaledChildExit(t testing.TB, exitErr *exec.ExitError) {
+	t.Helper()
+	if exitErr.ExitCode() != signaledChildExitCode {
+		return
+	}
+	t.Logf(signaledChildDiagnosticFormat, exitErr.Error(), exitErr.ProcessState.Sys())
 }
 
 // ShQuote single-quotes s for safe interpolation into a /bin/sh -c command

@@ -171,6 +171,8 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 		stopping := c.choreographyBroker.stopping
 		brokerFault := c.choreographyBroker.fault
 		indexed := c.choreographyBroker.tasks[taskID]
+		waitingForPredecessor := indexed != nil && indexed.remaining > compiledStageNoPredecessors &&
+			!indexed.terminal && indexed.claim == compiledStageAbsentIdentity
 		preparedBlocked := indexed != nil && indexed.remaining == compiledStageNoPredecessors &&
 			indexed.preparedBlockedBy != compiledStageAbsentIdentity && !indexed.terminal &&
 			indexed.claim == compiledStageAbsentIdentity
@@ -225,7 +227,7 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 		if stopping && stopSettlement == nil {
 			err = context.Canceled
 		} else if admissionClosed && claimOID == compiledStageAbsentIdentity {
-			if !c.choreographyBroker.IsEligibleNodeAdmitted(taskID) {
+			if !waitingForPredecessor && !c.choreographyBroker.IsEligibleNodeAdmitted(taskID) {
 				if expireErr := c.choreographyBroker.ExpireUnclaimed(activeCtx, taskID); expireErr != nil {
 					done()
 					return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, expireErr
@@ -331,9 +333,10 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 				return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, err
 			}
 			if claimOID == compiledStageAbsentIdentity {
-				if c.choreographyBroker.IsEligibleNodeAdmitted(taskID) {
-					// Admission has ended, but an admitted compatible node can
-					// still claim as soon as its accepted work releases capacity.
+				if waitingForPredecessor || c.choreographyBroker.IsEligibleNodeAdmitted(taskID) {
+					// A successor cannot expire before its predecessor has signed
+					// finality. A compatible admitted node may also claim after
+					// its occupied capacity becomes free.
 					deadline = time.Time{}
 					admissionClosed = compiledStageAdmissionWindowClosed
 					continue
