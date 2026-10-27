@@ -3838,6 +3838,69 @@ not a wall-clock deadline or instantaneous cancellation guarantee for the §28 e
    configurations can share a plateau. Performance improvements must be assessed within their stated
    dependency and resource bounds; those bounds do not guarantee every intermediate time is attainable or
    a universal best number of words, cores or machines.
+
+   *Joint processor, compiler and device optimality for the same task.* A comparison fixes the task to be
+   solved: the same input instance, or the same declared instance family and evaluation rule, with the same
+   required outputs, numerical accuracy, observable effects and allowed initial information. Correct designs
+   may use different algorithms, instructions and schedules to solve that task. They need not execute the
+   same operation DAG, but cannot omit required results or effects. A joint design `z` includes the algorithm,
+   compiler and options, instruction semantics and word representation, processor and memory architecture,
+   admitted resources and scheduling policy. Word widths, operation meanings, primitive latencies and
+   bandwidths have explicit costs in one declared physical or abstract comparison model. Defining an
+   instruction to solve the whole task does not give its implementation zero cost. The largest word width,
+   clock rate or core count chosen independently need not give the fastest feasible combination.
+
+   Let `K` be a nonempty finite set of correct joint designs for this same task contract. Give each design a
+   finite nonnegative elapsed-time metric `T(z)` and a finite nonnegative resource vector `R(z)` with fixed
+   dimensions and units. The metric may be time for one specified instance or a declared aggregate over the
+   instance family; an aggregate optimum need not be fastest on each individual instance. For a fixed budget
+   vector `B`, let `K_B = {z in K : R_j(z) <= B_j for every resource j}` and assume `K_B` is nonempty. Then
+   `T_star(B) = min_{z in K_B} T(z)` is attained. Among those time minimizers choose `z_star` minimizing
+   `sum_j alpha_j R_j(z)`, with fixed positive weights `alpha_j` in stated compatible units. A declared total
+   tie order can select one design if several remain. Both minima exist by finiteness; this supplies neither
+   an efficient design search nor an intrinsically unique optimum.
+
+   The selected design is Pareto-undominated within `K`: no correct competing `y` in `K` has
+   `T(y) <= T(z_star)` and `R_j(y) <= R_j(z_star)` for every `j`, with at least one strict inequality.
+   To prove this, such a `y` would also belong to `K_B`. Strictly smaller time contradicts the first minimum;
+   equal time with a strictly smaller resource component contradicts the positive-weight second minimum.
+   This expresses both "no faster solution within this resource budget" and, after the tie rule,
+   "no equally fast solution using componentwise fewer resources" for the specified same task and class.
+   Pareto efficiency alone is weaker than fastest under a budget. For example, with all other costs equal,
+   designs taking `(1 second, 2 joules)` and `(2 seconds, 1 joule)` do not dominate each other. The first is
+   faster under a two-joule budget; only the second meets a one-joule budget. These are illustrative values,
+   not measurements or a claimed physical implementation. A best-time design can therefore trade resources
+   against time rather than minimizing every resource independently.
+
+   The earlier work/span lower bound applies to one fixed computation and resource model. A new compiler,
+   algorithm, instruction set or device can change both the operation graph and its costs, so that bound
+   alone cannot prove optimality against all such alternatives. A broader minimum-time certificate requires
+   a lower bound `LB(task, B)` valid for every correct design in the declared admissible class under budget
+   `B`, together with a feasible design attaining it. The two inequalities then prove its minimum time in
+   that class. This does not also prove minimum resource use or a unique architecture. A complete finite
+   class can instead be certified by exact exhaustive comparison under its cost model. Without such a class
+   restriction or a separate attainment proof, the finite-set argument gives no best device over an
+   unrestricted infinite design space. No hardware-independent lower bound or universal best compiler is
+   established here.
+
+   Experiments test these claims by solving the same task under a common protocol. Fix input bytes or the
+   declared workload distribution, correctness and accuracy checks, allowed cached information, and the
+   timing boundary from the agreed initial state through the required result and effects. Pin compiler and
+   software versions and flags, disclose each hardware configuration, and control or report clock, thermal,
+   cold/warm cache and JIT conditions. Single-task latency and throughput over many tasks are different
+   objectives; choose one explicitly. Record each resource dimension separately, such as provisioned compute,
+   memory bits, bandwidth, peak power and energy per solved task. Equal core counts or equal stored word
+   counts at different word widths do not by themselves establish equal resources. Hidden accelerators,
+   extra storage, communication or prior computation cannot be supplied free to one candidate.
+   Include compilation, setup, profiling and precomputation in the end-to-end account, or explicitly report
+   their separate costs and the number of uses over which they are amortized. A solution precomputed before
+   timing is a different initial-information condition unless that preparation is accounted for equally.
+   Repeat measurements, report their uncertainty and publish enough configuration and raw observations to
+   reproduce the comparison. A reliably faster correct candidate within the budget refutes fastest-under-
+   budget status; an established dominating candidate refutes Pareto status. Absence of such a candidate in
+   finite noisy tests supports only "best tested" or "undominated among tested" under that protocol, not
+   impossibility of an untested better device. The finite-set proof is about defined costs; measurement
+   estimates alone do not prove exact ties or strict inequalities between the underlying costs.
 5. **Recovery is a separate property.** The failure-free inequalities do not bound a run across failures,
    retries, outages or reconciliation. §19.1 and §19.3 require durable publication records and failure blocking;
    §17.2 recomputes a later plan from the records. A publication and its record are separate writes, so there

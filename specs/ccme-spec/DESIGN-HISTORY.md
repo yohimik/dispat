@@ -866,3 +866,19 @@ An actual best resource configuration is relative to a stated feasible set and e
 mandatory overhead or changed resource behavior can make excess capacity slower. No unique hardware optimum,
 one-word-per-clock physical speed limit or lower bound across all algorithms is claimed. Runtime semantics,
 release behavior and the existing mathematical check script are unchanged.
+
+## 2026-10-27: Joint device and compiler comparison for the same task
+
+Section 13.11 defines a joint design by its algorithm, compiler, instruction and word semantics, processor,
+memory and scheduling policy, all solving the same task with the same required outputs, accuracy and effects.
+A finite nonempty feasible design set has an attained minimum time under a declared resource-vector budget.
+A positive-weight resource tie rule then selects a Pareto-undominated design: no competing design in that
+class is no slower and uses no more of any resource, with a strict improvement somewhere. This distinguishes
+minimum time under a budget from minimum resource use, unique architecture and per-instance superiority.
+
+Changing the compiler or architecture can change the operation DAG and costs, so a bound for one fixed DAG
+does not certify superiority over every design. Such a claim requires a bound covering the entire admissible
+class and an attaining design, or an exact complete finite comparison. Experimental comparisons pin the same
+task and initial information, charge shared resources and preparation consistently, disclose configuration,
+and repeat measurements with uncertainty. They can identify the best tested designs or refute an optimality
+claim, but do not exclude every untested device. No new hardware experiment or implementation is claimed.
