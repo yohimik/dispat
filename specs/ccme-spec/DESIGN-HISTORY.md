@@ -933,3 +933,18 @@ recognize it. Missing URLs, unresolved checkout initialization, and withheld rev
 `--write` incomplete with a nonzero result and staged edits retained for review.
 This entry describes the specification choice; it claims no new version, hold, publication or measured
 performance result.
+
+## 2026-10-28: Information acquisition remains necessary for compiled plans
+
+Section 13.11 separates semantic discovery and compilation from acquiring and validating an existing
+representation. An indistinguishability argument requires enough information before a decision when
+otherwise compatible inputs require disjoint correct decisions. Scoped record-query, byte-inspection
+and explicit-materialization bounds state their access units and exclude uncharged trusted summaries.
+They do not require every program byte or the entire graph to be loaded before any execution: demand
+loading, certified subsets, retained state and overlapping acquisition have their stated premises.
+Preprocessing and reuse move or amortize costs rather than implying repeated semantic discovery at
+every node. Fresh necessary acquisition takes positive time under a positive-latency model; improvements
+can minimize its cost within that model, while retained information can eliminate additional discovery
+in a later invocation. The dispat example distinguishes CLI `compute` configuration repair from semantic planning
+and runtime task-graph compilation, and preserves every mode's pinned-input and authority obligations.
+This is an informative theorem clarification, with no new runtime behavior, experiment or publication.

@@ -4781,6 +4781,76 @@ distinguishing observation; otherwise it makes the same choice.
 At least one execution run follows only when execution is the sole way to obtain that observation.
 No universal one-run or `P` versus `NP` claim follows.
 
+**Discovery and acquisition requirement, including compiled plans.** Separate semantic discovery or
+construction of a plan from acquisition of an already constructed representation. A compiler can perform
+semantic discovery earlier and preserve its result in code, a graph, an index or a signed descriptor.
+Before using that result, an executor needs sufficient information for the decision it is making,
+including whatever identity, completeness and authority checks its contract requires. That information
+can already be present in trusted initial state or be acquired incrementally; compilation does not make
+every consumer repeat semantic discovery. The fixed-graph scheduling bounds condition on the graph and
+required inputs being available. They do not account for acquiring them merely by bounding task work.
+
+The information requirement has a direct indistinguishability proof. Fix an exact deterministic procedure,
+its initial state, allowed observations and a decision that must be correct for every admitted input.
+Suppose two inputs remain consistent with everything it has observed but require disjoint correct
+decisions. Any committed decision made before distinguishing information is obtained is identical on
+both inputs, so it cannot be correct on both. A procedure that must eventually decide must therefore
+obtain enough information to exclude such ambiguity before committing that decision. This applies to a
+compiled representation just as to an uncompiled input; a trusted cached summary changes the available
+initial information. Waiting or refusing is not a solution to a contract that also requires completion.
+The result concerns required information, not a requirement to execute a task to learn it or to inspect
+every part of a file before any task can start.
+
+Fresh necessary information acquisition has nonzero time under a positive-latency model. If the ambiguity
+just described remains in the initial state, at least one distinguishing acquisition step is required.
+If every such step has latency at least `delta > 0` and is initiated no earlier than the start of the
+measured discovery interval, acquisition cannot complete sooner than `delta` after that interval starts.
+Parallel acquisition does not remove this lower bound. Better representations, indexes, reuse and
+parallelism can reduce discovery cost within the declared resource and access model; they do not make
+a required positive-latency step instantaneous. Additional discovery in a later invocation can be zero
+when sufficient trusted information is already available: its earlier acquisition remains in the
+end-to-end account. Zero-overhead discovery in an ideal scheduling model is an abstraction, not a
+physical zero-time measurement. No positive universal latency constant or attained minimum over all
+possible machines follows without further model restrictions.
+
+For a scoped input lower bound, use a fresh query model with `R` independently addressable records and no
+trusted summary. If, at a base input, each record can be changed alone to an admitted input requiring a
+different exact decision, every record must be queried on that base input: otherwise the unchanged
+transcript also fits one of those variants. This gives `Omega(R)` record queries in that model. For example,
+let `r` independent input bits specify the presence of edges `u_i -> v_i` on `2r` known vertices, with no
+other edges. The complete initial ready set changes when any one bit changes. Computing that whole set
+requires all `r` bit queries, although the known sources `u_i` can be admitted without those queries.
+Similarly, a contract requiring a fresh full inspection of `Breq` encoded bytes charges that byte volume;
+it does not follow merely from the representation having `Breq` bytes. A byte-at-a-time reader needs
+`Omega(Breq)` accesses, while a reader accessing at most `w` bits per operation needs at least
+`Omega(ceil(8 Breq / w))` accesses for that inspection. These are aggregate access-work or volume bounds,
+not elapsed-time bounds independent of parallel readers, bandwidth or storage. Newly materializing all
+vertices and edges of an explicit graph also requires `Omega(Tk + Dk)` fixed-size record writes when one
+operation writes only a bounded number of records; packed or implicit representations use their own
+size and access model. Decoding, validation and indexing have their own costs and may share passes.
+
+Consequently, obtaining a compiled program does not universally require loading the whole file into
+physical memory before execution. Demand paging can keep only needed information resident
+([Linux memory-management concepts](https://docs.kernel.org/admin-guide/mm/concepts.html)); streaming,
+validated indexes and retained state can likewise supply a required subset. Unknown incoming edges
+cannot simply be treated as absent when declaring a task ready: a complete predecessor description or
+other sufficient validated evidence must justify that decision. A contract demanding complete graph
+validation before effects imposes a stronger barrier than admission of one independently certified task.
+Charge acquisition and validation where they occur, including preprocessing, transfers and actual
+initializations or restarts; reuse can amortize earlier work. When acquisition overlaps task execution,
+their times cannot simply be added. An additive startup term requires a preceding nonoverlapping phase.
+
+For dispat, the CLI `compute` command discovers package/dependency relationships and proposes or writes
+configuration repairs; its printed result is not the compiled release task graph consumed by the executor.
+Release planning acquires the pinned workspace inputs, computes the semantic `Plan(input)`, and compiles
+the task graph. In compilation, the first node constructs the graph and task descriptors, while pickup
+nodes acquire and verify the signed representation required by §28. In interpretation, nodes acquire
+the pinned envelope and rederive the plan and graph, including the required digest comparisons. The
+specified hybrid model retains acquisition obligations across its compiled and interpreted portions.
+This is a cost and information clarification, not an implementation claim for hybrid or a relaxation of
+§28's complete-plan, preflight, task-reference and authority requirements. Discovery, transport and
+validation remain charged even when scheduling an already available graph is efficient.
+
 **Unknown graph as a separate online model.** Suppose roots `A`, `B` and `C` are known at time zero, each
 takes one unit on either of two nonpreemptive slots, and one unit task `D` depends on exactly one root.
 The identity of `D` and its parent is revealed only when that parent finishes. These are three fixed
