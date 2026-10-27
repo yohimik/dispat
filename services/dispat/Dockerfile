@@ -143,6 +143,7 @@ RUN --mount=type=secret,id=GITHUB_TOKEN \
 # when the compile fails. Exactly what the spike does with the same noise.
 FROM tiny-toolchain AS tiny-build
 ARG DISPAT_VERSION=dev
+ARG TINYGO_STACK_SIZE=1MB
 WORKDIR /src
 COPY pkg ./pkg
 COPY services/dispat ./services/dispat
@@ -157,7 +158,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     tinygo version; \
     for arch in amd64 arm64; do \
       name="dispat-tiny-linux-${arch}"; \
-      if GOOS=linux GOARCH="$arch" tinygo build -opt=z -no-debug \
+      if GOOS=linux GOARCH="$arch" tinygo build -opt=z -no-debug -stack-size="${TINYGO_STACK_SIZE}" \
         -ldflags "-X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${DISPAT_VERSION}" \
         -o "/out/$name" . > /tmp/tinygo.raw 2>&1; then :; else \
         cat /tmp/tinygo.raw >&2; exit 1; fi; \
@@ -174,7 +175,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/root/.cache/tinygo \
     --mount=type=cache,target=/go/pkg/mod \
-    GOMAXPROCS=2 GOMEMLIMIT=6GiB tinygo test -p 2 -v -run '^TestTinyGoLinux' .
+    GOMAXPROCS=2 GOMEMLIMIT=6GiB tinygo test -p 2 -stack-size="${TINYGO_STACK_SIZE}" -v -run '^TestTinyGoLinux' .
 
 # The two binaries joined to the six, and the asset list extended with their
 # names. The list is rewritten as one line because that is what the staged
@@ -242,7 +243,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     set -eu; \
     mkdir -p /fixtures; \
     for version in 1.0.0 1.1.0 1.2.0 1.2.0-rc.1; do \
-      if GOMAXPROCS=2 GOMEMLIMIT=6GiB tinygo build -opt=z -no-debug -p 2 \
+      if GOMAXPROCS=2 GOMEMLIMIT=6GiB tinygo build -opt=z -no-debug -stack-size="${TINYGO_STACK_SIZE}" -p 2 \
         -ldflags "-X github.com/yohimik/dispat/services/dispat/internal/cli.Version=${version}" \
         -o "/fixtures/dispat-${version}" . > /tmp/tinygo.raw 2>&1; then :; else \
         cat /tmp/tinygo.raw >&2; exit 1; fi; \
@@ -269,7 +270,6 @@ ARG TARGETARCH
 # published.
 COPY --from=dist /dispat-tiny-linux-${TARGETARCH} /dist/dispat-tiny-linux-${TARGETARCH}
 RUN apt-get update && apt-get install -y --no-install-recommends git jq \
- && if [ "$TARGETARCH" = amd64 ]; then apt-get install -y --no-install-recommends gdb; fi \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --uid 1001 gopher
 COPY tests/integration /src/tests/integration
@@ -292,22 +292,13 @@ ENV DISPAT_TEST_VERSIONED_BINARY_DIR=/fixtures
 # failed tests. Dumping a full suite hides its failures behind BuildKit's
 # per-step log limit.
 #
-# The suite runs in six go test processes over an exact round-robin split of
-# its tests (`testreport test --shards`, as the integration gate of
-# Dockerfile.gotest does), and still leaves the one log the check below
-# reads. It waits far more than it computes, so the processes wait side by
-# side rather than one after another. Memory does not bound the count: no
-# shard builds a TinyGo binary of its own (the fixtures come from the
-# tiny-fixtures stage, whose one link at a time peaks between 1.7 and
-# 3.3 GiB), and this stage's cgroup peaks at 0.8 GiB with four shards and with
-# six alike. Six is the integration gate's count: on one builder six finish
-# in 13 minutes where four take 21, and pinned to the four CPUs of a release
-# runner six still finish in 14. Each -timeout bounds one shard.
+# Six shards match the Go integration gate in Dockerfile.gotest and leave
+# one combined log. Reusing versioned fixtures avoids concurrent TinyGo
+# links inside the shards. Each -timeout bounds one shard.
 RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     --mount=type=cache,target=/home/gopher/go/pkg/mod,uid=1001,gid=1001 \
     set -eu; \
     git --version; \
-    if [ "$TARGETARCH" = amd64 ]; then export DISPAT_TEST_DEBUGGER=gdb; fi; \
     DISPAT_TEST_BINARY="/dist/dispat-tiny-linux-${TARGETARCH}" \
       testreport test tiny-integration --shards 6 -- \
         -C /src/tests/integration -count=1 -timeout 120m \

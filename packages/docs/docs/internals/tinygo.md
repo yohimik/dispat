@@ -6,6 +6,10 @@ explains the experiments behind that choice, including upstream limitations, for
 The spike is a manual investigation, separate from the release gates. Its historical measurements found smaller
 TinyGo binaries from the same source. For current release sizes, use the generated table in [Sizes](#sizes).
 
+The release build uses fixed goroutine stacks of one MiB (`-stack-size=1MB`). The fork's default 64 KiB stack is too
+small for the compiled Git claim path and Linux signal frames. The native acceptance suite and its version-stamped
+self-update fixtures use the same stack setting as the release binaries.
+
 ## What the spike is
 
 [`Dockerfile.tinygo`](https://github.com/yohimik/dispat/blob/main/Dockerfile.tinygo) at the repository root, run by the

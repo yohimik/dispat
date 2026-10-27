@@ -29,9 +29,9 @@ across all tests. Each test builds its repository in a fresh `t.TempDir()`, so y
 any subset safely.
 
 `DISPAT_TEST_COMPILER=<go-or-tinygo-path>` selects the compiler for every dispat binary the harness builds, including
-the version-stamped candidates used by the self-update tests. TinyGo builds use the release flags `-opt=z -no-debug`,
-compile with `-p 2`, and run with `GOMAXPROCS=2` and a 6 GiB Go heap limit. The test runner and the `tsmark` timing
-helper still use Go.
+the version-stamped candidates used by the self-update tests. TinyGo builds use the release flags
+`-opt=z -no-debug -stack-size=1MB`, giving each goroutine a fixed stack of one MiB. They compile with `-p 2` and run
+with `GOMAXPROCS=2` and a 6 GiB Go heap limit. The test runner and the `tsmark` timing helper still use Go.
 
 `DISPAT_TEST_BINARY=<path>` makes the harness drive an already-built ordinary binary. It may be paired with
 `DISPAT_TEST_COMPILER=tinygo` so version-stamped fixtures use the same compiler, with

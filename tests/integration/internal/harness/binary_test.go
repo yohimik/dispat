@@ -57,7 +57,7 @@ func TestCompilerSelection(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "tinygo", kind)
 	require.True(t, IsTinyGo())
-	require.Equal(t, []string{"-opt=z", "-no-debug", "-p", "2"}, compilerBuildArgs())
+	require.Equal(t, []string{"-opt=z", "-no-debug", "-stack-size=1MB", "-p", "2"}, compilerBuildArgs())
 	require.NoError(t, validateBuildSelection())
 }
 
@@ -168,6 +168,10 @@ func TestTinyFixtureStageBuildsTheFixtureVersions(t *testing.T) {
 	require.NoError(t, err)
 	dockerfile, err := os.ReadFile(filepath.Join(root, "services", "dispat", "Dockerfile"))
 	require.NoError(t, err)
+	releaseBuild := dockerfileStage(t, string(dockerfile), "FROM tiny-toolchain AS tiny-build")
+	require.Contains(t, releaseBuild, "ARG TINYGO_STACK_SIZE=1MB")
+	require.Contains(t, releaseBuild, `tinygo build -opt=z -no-debug -stack-size="${TINYGO_STACK_SIZE}"`)
+	require.Contains(t, releaseBuild, `tinygo test -p 2 -stack-size="${TINYGO_STACK_SIZE}"`)
 	stage := dockerfileStage(t, string(dockerfile), "FROM tiny-build AS tiny-fixtures")
 
 	loop := regexp.MustCompile(`(?m)for version in ([^;]+); do`).FindStringSubmatch(stage)
@@ -175,7 +179,8 @@ func TestTinyFixtureStageBuildsTheFixtureVersions(t *testing.T) {
 	require.Equal(t, SelfUpdateFixtureVersions, strings.Fields(loop[1]))
 
 	build := "tinygo build " + strings.Join(tinyGoBuildArgs, " ")
-	require.Contains(t, stage, build, "the fixtures are built with the harness's TinyGo flags")
+	resolvedStage := strings.ReplaceAll(stage, `-stack-size="${TINYGO_STACK_SIZE}"`, tinyGoStackSizeArgument)
+	require.Contains(t, resolvedStage, build, "the fixtures are built with the harness's TinyGo flags")
 	require.Contains(t, stage, `-ldflags "`+versionLDFlag+`${version}"`,
 		"the fixtures carry the stamp BuildVersioned would have given them")
 	require.Contains(t, stage, `-o "/fixtures/dispat-${version}"`,

@@ -110,12 +110,14 @@ func IsTinyGo() bool {
 	return err == nil && kind == "tinygo"
 }
 
+const tinyGoStackSizeArgument = "-stack-size=1MB"
+
 // tinyGoBuildArgs are the flags of every TinyGo build of dispat the suite
 // drives: the release's size flags, and two compile jobs so a build's memory
 // stays bounded. services/dispat/Dockerfile builds the self-update fixtures
 // with the same flags, which TestTinyFixtureStageBuildsTheFixtureVersions
 // holds it to.
-var tinyGoBuildArgs = []string{"-opt=z", "-no-debug", "-p", "2"}
+var tinyGoBuildArgs = []string{"-opt=z", "-no-debug", tinyGoStackSizeArgument, "-p", "2"}
 
 // tinyGoBuildEnv bounds the compiler process itself the same way: two threads
 // and a 6 GiB Go heap limit.
