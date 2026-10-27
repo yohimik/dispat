@@ -358,9 +358,9 @@ func TestApplyLinkChangesCreatesBothHalvesOfALink(t *testing.T) {
 			{Name: "api", Root: api, ConfigPath: filepath.Join(api, "dispat.json"), Config: apiCfg, Commit: apiCfg.Commit, Imported: true, Entry: true},
 		}}
 	var out bytes.Buffer
-	require.NoError(t, a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
+	require.NoError(t, a.applyLinkChanges(t.Context(), applyLinkChangesOptions{configPath: filepath.Join(api, "dispat.json"), changes: []linkSuggestion{{
 		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk", url: sdk, branch: "main",
-	}}, "minimal", true, &out))
+	}}, topology: "minimal", isFollowing: true, output: &out}))
 
 	assert.FileExists(t, filepath.Join(api, ".links", "sdk", "pkg", "input"), "the forward half is a checkout")
 	assert.Contains(t, settleGit(t, api, "config", "--file", ".gitmodules", "submodule.sdk.url"), "sdk")
@@ -406,9 +406,9 @@ func TestApplyLinkChangesRejectsUnverifiableRecomposition(t *testing.T) {
 		Name: "api", Root: api, Config: apiCfg, Commit: apiCfg.Commit, Imported: true, Entry: true,
 	}}}
 	var out bytes.Buffer
-	err := a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
+	err := a.applyLinkChanges(t.Context(), applyLinkChangesOptions{configPath: filepath.Join(api, "dispat.json"), changes: []linkSuggestion{{
 		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk", url: sdk, branch: "main",
-	}}, "minimal", true, &out)
+	}}, topology: "minimal", isFollowing: true, output: &out})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "repaired fleet produced no workspace")
 	assert.Contains(t, err.Error(), "completion cannot be verified")
@@ -463,9 +463,9 @@ func TestApplyLinkChangesReportsStarConflictRevealedByCheckout(t *testing.T) {
 		Commit: apiCfg.Commit, Imported: true, Entry: true,
 	}}}
 	var out bytes.Buffer
-	err := a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
+	err := a.applyLinkChanges(t.Context(), applyLinkChangesOptions{configPath: filepath.Join(api, "dispat.json"), changes: []linkSuggestion{{
 		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk", url: sdk, branch: "main",
-	}}, "star", true, &out)
+	}}, topology: "star", isFollowing: true, output: &out})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "incompatible with star topology")
 	assert.Contains(t, err.Error(), "existing link sdk <-> web")
@@ -490,14 +490,14 @@ func TestApplyLinkChangesLeavesALinkItCannotCreate(t *testing.T) {
 			{Name: "api", Root: api, Config: apiCfg, Commit: apiCfg.Commit, Imported: true, Entry: true},
 		}}
 	var out bytes.Buffer
-	require.Error(t, a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
-		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk"}}, "minimal", true, &out))
+	require.Error(t, a.applyLinkChanges(t.Context(), applyLinkChangesOptions{configPath: filepath.Join(api, "dispat.json"), changes: []linkSuggestion{{
+		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk"}}, topology: "minimal", isFollowing: true, output: &out}))
 	assert.NoDirExists(t, filepath.Join(api, ".links", "sdk"))
 	assert.Empty(t, out.String())
 
 	// A repository this run did not compose is not one it can write into.
-	require.Error(t, a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
-		kind: linkChangeLink, repository: "absent", peer: "sdk", path: ".links/sdk", url: "https://example.test/sdk.git"}}, "minimal", true, &out))
+	require.Error(t, a.applyLinkChanges(t.Context(), applyLinkChangesOptions{configPath: filepath.Join(api, "dispat.json"), changes: []linkSuggestion{{
+		kind: linkChangeLink, repository: "absent", peer: "sdk", path: ".links/sdk", url: "https://example.test/sdk.git"}}, topology: "minimal", isFollowing: true, output: &out}))
 	assert.Empty(t, out.String())
 }
 

@@ -44,6 +44,23 @@ const (
 	linkChangeRepository = "repository"
 )
 
+const (
+	linkRepairRoundsPerRosterEntry         = 2
+	linkRepairFinalRoundCount              = 1
+	linkRepairInitialRoundIndex            = 0
+	linkRepairNoPendingChangeCount         = 0
+	linkRepairNoProgress                   = false
+	linkRepairMadeProgress                 = true
+	linkRepairEmptyPeerURL                 = ""
+	starExistingLinkErrorFormat            = "star topology is incompatible with existing link %s <-> %s; compute retains existing links; choose a compatible topology or resolve the links explicitly"
+	linkRepairNoProgressErrorFormat        = "fleet repair is incomplete after %d staged link operation(s); no further change could be applied; review the staged changes and remaining links before retrying"
+	linkRepairLimitErrorFormat             = "fleet repair reached its discovery limit after %d staged link operation(s); review the staged changes and run compute again"
+	linkRepairIncompleteLogMessage         = "the fleet could not be completed"
+	linkRepairMissingWorkspaceErrorMessage = "the repaired fleet produced no workspace; completion cannot be verified"
+	linkRepairMissingRepositoryErrorFormat = "repository %s is unavailable; cannot apply the link to %s"
+	linkRepairMissingPeerURLErrorFormat    = "repository %s: no roster URL for %s; the fleet link cannot be created"
+)
+
 // linkSuggestion is one proposed fleet change: a link to create, a link
 // checkout to materialize, or a roster entry to add.
 type linkSuggestion struct {
@@ -205,7 +222,7 @@ func (a *App) suggestStarLinks(fleet []rosterEntry) ([]linkSuggestion, error) {
 		repository := &a.workspace.Repositories[i]
 		for _, peer := range repository.LinkPeers() {
 			if !strings.EqualFold(repository.Name, entry.Name) && !strings.EqualFold(peer, entry.Name) {
-				return nil, fmt.Errorf("star topology is incompatible with existing link %s <-> %s; compute retains existing links; choose a compatible topology or resolve the links explicitly", repository.Name, peer)
+				return nil, fmt.Errorf(starExistingLinkErrorFormat, repository.Name, peer)
 			}
 		}
 	}
@@ -215,7 +232,7 @@ func (a *App) suggestStarLinks(fleet []rosterEntry) ([]linkSuggestion, error) {
 		if strings.EqualFold(peer.name, entry.Name) || isRepositoryLinkedToPeer(entry, peer.name) || isRepositoryLinkedToPeer(composedPeer, entry.Name) {
 			continue
 		}
-		if peer.url != "" && !a.ownerNamesPeer(entry.Name, peer.name) {
+		if peer.url != linkRepairEmptyPeerURL && !a.ownerNamesPeer(entry.Name, peer.name) {
 			// A newly discovered identity needs an entry roster declaration
 			// before composition can follow the new spoke.
 			continue
@@ -349,15 +366,20 @@ func resolveRepositoryLinkPath(owner *config.Repository, peer string) string {
 	return config.DefaultLinkPath(peer)
 }
 
-// applyLinkChanges performs the accepted fleet changes, after the
-// configuration edits have been written: a link is a checkout and a staged
-// pin, and it is only ever created for a fleet the file already describes.
-//
-// The loop is the fixed point: creating a link makes another peer's roster
-// readable, which can name members this run had never heard of. It is bounded
-// by the fleet's size, so a fleet that keeps describing new members stops
-// rather than spinning.
-func (a *App) applyLinkChanges(ctx context.Context, cfgPath string, apply []linkSuggestion, topology string, follow bool, out io.Writer) error {
+type applyLinkChangesOptions struct {
+	configPath  string
+	changes     []linkSuggestion
+	topology    string
+	isFollowing bool
+	output      io.Writer
+}
+
+// applyLinkChanges performs the accepted fleet changes after configuration
+// edits are written. The fixed-point loop is bounded because new checkouts
+// can expose more roster members on each round.
+func (a *App) applyLinkChanges(ctx context.Context, options applyLinkChangesOptions) error {
+	cfgPath, apply, topology := options.configPath, options.changes, options.topology
+	isFollowing, out := options.isFollowing, options.output
 	if len(apply) == 0 {
 		return nil
 	}
@@ -366,9 +388,9 @@ func (a *App) applyLinkChanges(ctx context.Context, cfgPath string, apply []link
 	pending := apply
 	// A snapshot budget prevents an endlessly expanding remote roster from
 	// keeping this invocation alive. Further repairs can be previewed again.
-	limit := 2*len(a.fleetRoster()) + len(apply) + 1
-	for round := 0; round < limit && len(pending) > 0; round++ {
-		progress := false
+	limit := linkRepairRoundsPerRosterEntry*len(a.fleetRoster()) + len(apply) + linkRepairFinalRoundCount
+	for round := linkRepairInitialRoundIndex; round < limit && len(pending) > linkRepairNoPendingChangeCount; round++ {
+		isProgressing := linkRepairNoProgress
 		for _, change := range pending {
 			key := change.kind + "\x00" + globx.Fold(change.repository) + "\x00" + globx.Fold(change.peer)
 			if done[key] {
@@ -377,7 +399,7 @@ func (a *App) applyLinkChanges(ctx context.Context, cfgPath string, apply []link
 			done[key] = true
 			if change.kind == linkChangeRepository {
 				// collectLinkEdits already wrote this accepted roster entry.
-				progress = true
+				isProgressing = linkRepairMadeProgress
 				continue
 			}
 			created, err := a.applyLinkChange(ctx, change, out)
@@ -393,7 +415,7 @@ func (a *App) applyLinkChanges(ctx context.Context, cfgPath string, apply []link
 			}
 			if created {
 				applied++
-				progress = true
+				isProgressing = linkRepairMadeProgress
 			}
 		}
 		var err error
@@ -404,18 +426,18 @@ func (a *App) applyLinkChanges(ctx context.Context, cfgPath string, apply []link
 				Msg("the fleet could not be verified after applying link changes")
 			return wrapped
 		}
-		if !follow {
+		if !isFollowing {
 			break // Compute lists all remaining suggestions for a new selection.
 		}
-		if len(pending) > 0 && !progress {
-			err := fmt.Errorf("fleet repair is incomplete after %d staged link operation(s); no further change could be applied; review the staged changes and remaining links before retrying", applied)
-			a.log.Error().Err(err).Msg("the fleet could not be completed")
+		if len(pending) > linkRepairNoPendingChangeCount && !isProgressing {
+			err := fmt.Errorf(linkRepairNoProgressErrorFormat, applied)
+			a.log.Error().Err(err).Msg(linkRepairIncompleteLogMessage)
 			return err
 		}
 	}
-	if follow && len(pending) > 0 {
-		err := fmt.Errorf("fleet repair reached its discovery limit after %d staged link operation(s); review the staged changes and run compute again", applied)
-		a.log.Error().Err(err).Msg("the fleet could not be completed")
+	if isFollowing && len(pending) > linkRepairNoPendingChangeCount {
+		err := fmt.Errorf(linkRepairLimitErrorFormat, applied)
+		a.log.Error().Err(err).Msg(linkRepairIncompleteLogMessage)
 		return err
 	}
 	if applied > 0 {
@@ -438,7 +460,7 @@ func (a *App) linksAfterRepair(ctx context.Context, cfgPath, topology string) ([
 		return nil, fmt.Errorf("the repaired fleet cannot be read again: %w", err)
 	}
 	if fresh == nil {
-		return nil, errors.New("the repaired fleet produced no workspace; completion cannot be verified")
+		return nil, errors.New(linkRepairMissingWorkspaceErrorMessage)
 	}
 	a.workspace = fresh
 	var pending []linkSuggestion
@@ -460,7 +482,7 @@ func (a *App) linksAfterRepair(ctx context.Context, cfgPath, topology string) ([
 func (a *App) applyLinkChange(ctx context.Context, change linkSuggestion, out io.Writer) (bool, error) {
 	owner := a.workspace.RepositoryByName(change.repository)
 	if owner == nil {
-		return false, fmt.Errorf("repository %s is unavailable; cannot apply the link to %s", change.repository, change.peer)
+		return false, fmt.Errorf(linkRepairMissingRepositoryErrorFormat, change.repository, change.peer)
 	}
 	git := &gitx.LocalGitx{Dir: owner.Root, Log: a.log, LinkPaths: linkPathsOf(owner)}
 	switch change.kind {
@@ -481,7 +503,7 @@ func (a *App) applyLinkChange(ctx context.Context, change linkSuggestion, out io
 		if change.url == "" {
 			a.log.Warn().Str("repository", owner.Name).Str("peer", change.peer).
 				Msg("the roster states no url for this peer, so the fleet link cannot be created")
-			return false, fmt.Errorf("repository %s: no roster URL for %s; the fleet link cannot be created", owner.Name, change.peer)
+			return false, fmt.Errorf(linkRepairMissingPeerURLErrorFormat, owner.Name, change.peer)
 		}
 		if err := git.AddSubmodule(ctx, gitx.Submodule{
 			Name: change.peer, URL: change.url, Path: change.path, Branch: change.branch}); err != nil {

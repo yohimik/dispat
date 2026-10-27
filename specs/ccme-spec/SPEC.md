@@ -8710,7 +8710,8 @@ missing checkouts before new joins, applies a writable endpoint join, recomposes
 the next join. It MUST recheck for cycles, branches and newly discovered membership
 before each round; if newly discovered links conflict with the path, it fails and leaves earlier staged
 edits for review. A later checkout can expose roster entries needing configuration edits; the current
-invocation MUST NOT silently add them. After a completed repair pass, compute MUST list all remaining fleet suggestions from a fresh composition. `--write` MUST report incomplete repair as an error while any
+invocation MUST NOT silently add them. After a completed repair pass, compute MUST list all remaining fleet
+suggestions from a fresh composition. `--write` MUST report incomplete repair as an error while any
 remain, leaving staged changes for review and the remaining configuration edits for another invocation.
 `--interactive` applies only suggestions the operator explicitly accepts, displays newly discovered
 suggestions for the next invocation, and never accepts them implicitly.

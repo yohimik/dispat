@@ -11,12 +11,34 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/globx"
 )
 
+const (
+	chainInitialIndex                  = 0
+	chainInitialDegreeSum              = 0
+	chainNoMissingCheckoutCount        = 0
+	chainMaximumNeighborCount          = 2
+	chainEndpointDegreeLimit           = 2
+	chainEdgeEndpointCount             = 2
+	chainTreeEdgeDifferenceCount       = 1
+	chainMinimumDisconnectedGroupCount = 2
+	chainEmptyRepositoryName           = ""
+	chainEmptyPeerURL                  = ""
+	fleetLinkPairSeparator             = "\x00"
+	isChainMemberSeen                  = true
+	isFleetRosterMember                = true
+	isFleetLinkRecorded                = true
+	isOwnerPeerDeclared                = true
+	isOwnerPeerUndeclared              = false
+	chainBranchErrorFormat             = "minimal topology requires a chain: repository %s has %d neighbors; compute retains existing links and cannot remove this branch"
+	chainCycleErrorMessage             = "minimal topology requires an acyclic chain; existing fleet links contain a cycle; compute never removes links"
+	chainIncompleteErrorMessage        = "minimal chain is incomplete: no available endpoint checkout can join the remaining repositories; initialize the missing path endpoints before retrying"
+)
+
 // chainGroup is a path component, including a singleton. A singleton has one
 // endpoint which can accept two links over successive repair rounds.
 type chainGroup struct {
-	ends     []rosterEntry
-	entry    bool
-	composed bool
+	ends       []rosterEntry
+	isEntry    bool
+	isComposed bool
 }
 
 // suggestChainLink preserves a linear forest and joins two of its components
@@ -25,7 +47,7 @@ type chainGroup struct {
 func (a *App) suggestChainLink(fleet []rosterEntry) ([]linkSuggestion, error) {
 	adjacency := fleetLinkAdjacency(fleet, a.workspace.Repositories)
 	byFold := make(map[string]rosterEntry, len(fleet))
-	ordered := make([]string, 0, len(fleet))
+	ordered := make([]string, chainInitialIndex, len(fleet))
 	for _, member := range fleet {
 		key := globx.Fold(member.name)
 		byFold[key] = member
@@ -33,11 +55,11 @@ func (a *App) suggestChainLink(fleet []rosterEntry) ([]linkSuggestion, error) {
 	}
 	sort.Strings(ordered)
 	for _, key := range ordered {
-		if len(adjacency[key]) > 2 {
-			return nil, fmt.Errorf("minimal topology requires a chain: repository %s has %d neighbors; compute retains existing links and cannot remove this branch", byFold[key].name, len(adjacency[key]))
+		if len(adjacency[key]) > chainMaximumNeighborCount {
+			return nil, fmt.Errorf(chainBranchErrorFormat, byFold[key].name, len(adjacency[key]))
 		}
 	}
-	entry := ""
+	entry := chainEmptyRepositoryName
 	if repository := a.workspace.EntryRepository(); repository != nil {
 		entry = globx.Fold(repository.Name)
 	}
@@ -49,25 +71,25 @@ func (a *App) suggestChainLink(fleet []rosterEntry) ([]linkSuggestion, error) {
 		}
 		group := chainGroup{}
 		queue := []string{start}
-		seen[start] = true
-		degreeSum := 0
-		for i := 0; i < len(queue); i++ {
+		seen[start] = isChainMemberSeen
+		degreeSum := chainInitialDegreeSum
+		for i := chainInitialIndex; i < len(queue); i++ {
 			current := queue[i]
-			group.entry = group.entry || current == entry
-			group.composed = group.composed || byFold[current].composed
+			group.isEntry = group.isEntry || current == entry
+			group.isComposed = group.isComposed || byFold[current].composed
 			degreeSum += len(adjacency[current])
-			if len(adjacency[current]) < 2 {
+			if len(adjacency[current]) < chainEndpointDegreeLimit {
 				group.ends = append(group.ends, byFold[current])
 			}
 			for _, peer := range adjacency[current] {
 				if !seen[peer] {
-					seen[peer] = true
+					seen[peer] = isChainMemberSeen
 					queue = append(queue, peer)
 				}
 			}
 		}
-		if degreeSum/2 != len(queue)-1 {
-			return nil, fmt.Errorf("minimal topology requires an acyclic chain; existing fleet links contain a cycle; compute never removes links")
+		if degreeSum/chainEdgeEndpointCount != len(queue)-chainTreeEdgeDifferenceCount {
+			return nil, fmt.Errorf(chainCycleErrorMessage)
 		}
 		sort.Slice(group.ends, func(i, j int) bool {
 			if group.ends[i].composed != group.ends[j].composed {
@@ -77,23 +99,23 @@ func (a *App) suggestChainLink(fleet []rosterEntry) ([]linkSuggestion, error) {
 		})
 		groups = append(groups, group)
 	}
-	if len(groups) < 2 {
+	if len(groups) < chainMinimumDisconnectedGroupCount {
 		return nil, nil
 	}
 	// Existing but unread checkouts may reveal more edges or a branch. Read
 	// them before choosing any new edge from the incomplete view.
-	if len(a.missingCheckouts()) > 0 {
+	if len(a.missingCheckouts()) > chainNoMissingCheckoutCount {
 		return nil, nil
 	}
-	first := 0
+	first := chainInitialIndex
 	for i, group := range groups {
-		if group.composed {
+		if group.isComposed {
 			first = i
 			break
 		}
 	}
 	for i, group := range groups {
-		if group.entry {
+		if group.isEntry {
 			first = i
 			break
 		}
@@ -110,7 +132,7 @@ func (a *App) suggestChainLink(fleet []rosterEntry) ([]linkSuggestion, error) {
 					// learned from a different peer is not yet a declaration
 					// in this owner: repair its roster before staging a link
 					// that recomposition would otherwise overlook.
-					if peer.url != "" && !a.ownerNamesPeer(owner.name, peer.name) {
+					if peer.url != chainEmptyPeerURL && !a.ownerNamesPeer(owner.name, peer.name) {
 						return nil, nil
 					}
 					return []linkSuggestion{a.proposeLink(owner, peer)}, nil
@@ -118,21 +140,21 @@ func (a *App) suggestChainLink(fleet []rosterEntry) ([]linkSuggestion, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("minimal chain is incomplete: no available endpoint checkout can join the remaining repositories; initialize the missing path endpoints before retrying")
+	return nil, fmt.Errorf(chainIncompleteErrorMessage)
 }
 
 // ownerNamesPeer checks the configuration that will own the new gitlink.
 func (a *App) ownerNamesPeer(owner, peer string) bool {
 	repository := a.workspace.RepositoryByName(owner)
 	if repository == nil || repository.Config == nil {
-		return false
+		return isOwnerPeerUndeclared
 	}
 	for _, declared := range repository.Config.Repositories {
 		if globx.Fold(declared.Name) == globx.Fold(peer) {
-			return true
+			return isOwnerPeerDeclared
 		}
 	}
-	return false
+	return isOwnerPeerUndeclared
 }
 
 // fleetLinkAdjacency maps every fleet identity, folded, to the identities its
@@ -147,7 +169,7 @@ func (a *App) ownerNamesPeer(owner, peer string) bool {
 func fleetLinkAdjacency(fleet []rosterEntry, repositories []config.Repository) map[string][]string {
 	isMember := make(map[string]bool, len(fleet))
 	for _, entry := range fleet {
-		isMember[globx.Fold(entry.name)] = true
+		isMember[globx.Fold(entry.name)] = isFleetRosterMember
 	}
 	composed := make(map[string]*config.Repository, len(repositories))
 	for i := range repositories {
@@ -161,10 +183,10 @@ func fleetLinkAdjacency(fleet []rosterEntry, repositories []config.Repository) m
 		// LinkPeers answers nothing for it.
 		for _, name := range composed[linker].LinkPeers() {
 			peer := globx.Fold(name)
-			if peer == linker || !isMember[peer] || recorded[linker+"\x00"+peer] {
+			if peer == linker || !isMember[peer] || recorded[linker+fleetLinkPairSeparator+peer] {
 				continue
 			}
-			recorded[linker+"\x00"+peer], recorded[peer+"\x00"+linker] = true, true
+			recorded[linker+fleetLinkPairSeparator+peer], recorded[peer+fleetLinkPairSeparator+linker] = isFleetLinkRecorded, isFleetLinkRecorded
 			adjacency[linker] = append(adjacency[linker], peer)
 			adjacency[peer] = append(adjacency[peer], linker)
 		}

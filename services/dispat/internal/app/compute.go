@@ -17,6 +17,14 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/model"
 )
 
+const (
+	computeNoLinkSuggestionsCount      = 0
+	computeRemainingLinksLogMessage    = "cannot verify the remaining fleet repairs"
+	computeRemainingSuggestionsFormat  = "%d fleet suggestion(s) remain after rereading the checkouts:\n"
+	computeIncompleteRepairErrorFormat = "fleet repair is incomplete: %d suggestion(s) remain; review the staged changes and run compute again"
+	computeIncompleteRepairLogMessage  = "the fleet still needs configuration repairs"
+)
+
 // ComputeOptions selects what `dispat compute` does with its suggestions.
 type ComputeOptions struct {
 	// Topology selects the fleet-link shape proposed by compute. Empty and
@@ -217,30 +225,33 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	if apply.len() == 0 {
 		return sugs.len(), nil
 	}
-	err = a.applySuggestions(ctx, cfgPath, apply, declared, topology, !opts.Interactive, out)
+	err = a.applySuggestions(ctx, applySuggestionsOptions{
+		configPath: cfgPath, changes: apply, declared: declared,
+		topology: topology, isFollowing: !opts.Interactive, output: out,
+	})
 	a.forgetDiscovery()
 	if err != nil {
 		return sugs.len(), err
 	}
 	remaining := sugs.len() - apply.len()
-	if len(apply.links) > 0 {
+	if len(apply.links) > computeNoLinkSuggestionsCount {
 		// Recomposition can expose more work than the initial preview knew.
 		// In particular, interactive acceptance of one edge does not accept
 		// the next edge discovered through its new checkout.
 		links, err := a.suggestLinks(topology)
 		if err != nil {
-			a.log.Error().Err(err).Msg("cannot verify the remaining fleet repairs")
+			a.log.Error().Err(err).Msg(computeRemainingLinksLogMessage)
 			return remaining, err
 		}
 		remaining += len(links) - (len(sugs.links) - len(apply.links))
-		if len(links) > 0 {
-			fmt.Fprintf(out, "%d fleet suggestion(s) remain after rereading the checkouts:\n", len(links))
+		if len(links) > computeNoLinkSuggestionsCount {
+			fmt.Fprintf(out, computeRemainingSuggestionsFormat, len(links))
 			for _, change := range links {
 				fmt.Fprintln(out, change.render())
 			}
 			if !opts.Interactive {
-				err := fmt.Errorf("fleet repair is incomplete: %d suggestion(s) remain; review the staged changes and run compute again", len(links))
-				a.log.Error().Err(err).Msg("the fleet still needs configuration repairs")
+				err := fmt.Errorf(computeIncompleteRepairErrorFormat, len(links))
+				a.log.Error().Err(err).Msg(computeIncompleteRepairLogMessage)
 				return remaining, err
 			}
 		}
@@ -358,11 +369,21 @@ func (f *fileEdits) add(path string, e config.Edit) error {
 	return nil
 }
 
+type applySuggestionsOptions struct {
+	configPath  string
+	changes     changeSet
+	declared    []config.DeclaredDependency
+	topology    string
+	isFollowing bool
+	output      io.Writer
+}
+
 // applySuggestions writes the accepted changes, one pass per affected file. A
 // TOML file cannot be edited format-preservingly, so it gets a rendered block
 // to paste and an error.
-func (a *App) applySuggestions(ctx context.Context, cfgPath string, apply changeSet,
-	declared []config.DeclaredDependency, topology string, follow bool, out io.Writer) error {
+func (a *App) applySuggestions(ctx context.Context, options applySuggestionsOptions) error {
+	cfgPath, apply, declared := options.configPath, options.changes, options.declared
+	topology, out := options.topology, options.output
 	var edits fileEdits
 	for _, collect := range []func() error{
 		func() error { return a.collectDepEdits(&edits, cfgPath, apply.deps, declared) },
@@ -441,7 +462,10 @@ func (a *App) applySuggestions(ctx context.Context, cfgPath string, apply change
 	}
 	// The fleet links come last: a link is created against the configuration
 	// that describes it, so the file has to hold the roster first.
-	return a.applyLinkChanges(ctx, cfgPath, apply.links, topology, follow, out)
+	return a.applyLinkChanges(ctx, applyLinkChangesOptions{
+		configPath: cfgPath, changes: apply.links, topology: topology,
+		isFollowing: options.isFollowing, output: out,
+	})
 }
 
 // configuredChanges counts the accepted changes that land in a configuration
