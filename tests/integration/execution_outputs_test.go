@@ -133,6 +133,7 @@ case "$DISPAT_PACKAGE" in
 esac &&
 ` + repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE", 0)
 	}, func(cfg *models.File) {
+		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker, Publish: models.RunOnlyBoth}
 		cfg.Execution.Workers = append(cfg.Execution.Workers,
 			models.ExecutionWorkerConfig{Name: executionThirdNode, Endpoint: cfg.Execution.Workers[0].Endpoint})
 	})

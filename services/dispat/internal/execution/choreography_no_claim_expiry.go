@@ -17,6 +17,39 @@ const (
 	choreographyNoAdmittedWorkerCause                             = "no-admitted-worker"
 	choreographyNoCompatibleAdmittedNodeCause                     = "no-compatible-admitted-node"
 	choreographyNoClaimStateError                                 = "execution: no-claim deadline cannot terminalize a noninert or eligible task"
+	choreographyNoClaimRefusalFormat                              = "%s: %s task %q: %s"
+	choreographyNoClaimBrokerPhase                                = "broker"
+	choreographyNoClaimPersistPhase                               = "persistence"
+	choreographyNoClaimVerifyPhase                                = "verification"
+	choreographyNoClaimNotStartedReason                           = "execution has not started"
+	choreographyNoClaimStoppingReason                             = "claims are stopped"
+	choreographyNoClaimSealedReason                               = "run is sealed"
+	choreographyNoClaimMissingTaskReason                          = "task is absent"
+	choreographyNoClaimVirtualTaskReason                          = "task is virtual"
+	choreographyNoClaimPlacementReason                            = "placement cannot expire unclaimed"
+	choreographyNoClaimAuthorityReason                            = "task requires local authority"
+	choreographyNoClaimPredecessorsReasonFormat                   = "%d predecessor edges remain"
+	choreographyNoClaimTerminalReason                             = "task is already terminal"
+	choreographyNoClaimClaimedReason                              = "task has an accepted claim"
+	choreographyNoClaimOfferedReason                              = "task has an offered assignment"
+	choreographyNoClaimResultReason                               = "task has an accepted result"
+	choreographyNoClaimQueueReason                                = "task has a queue fence"
+	choreographyNoClaimAttemptReason                              = "task is past its first attempt"
+	choreographyNoClaimTipReason                                  = "canonical tip differs from the inert reservation"
+	choreographyNoClaimDeadlineReasonFormat                       = "signed admission deadline has not elapsed (remaining %s)"
+	choreographyNoClaimEligibleReasonFormat                       = "compatible node %q remains admitted"
+	choreographyNoClaimBindingReason                              = "run binding differs from the signed graph"
+	choreographyNoClaimRootReason                                 = "complete graph root differs"
+	choreographyNoClaimBranchReason                               = "canonical branch differs from the signed task"
+	choreographyNoClaimExpectedReason                             = "expected tip differs from the signed reservation"
+	choreographyNoClaimPackageReason                              = "package differs from the signed task"
+	choreographyNoClaimDeadlineIdentityReason                     = "admission deadline differs from the signed execution start"
+	choreographyNoClaimPriorReason                                = "event prior tip differs from the signed reservation"
+	choreographyNoClaimParentReason                               = "no-claim commit does not have the signed reservation as its sole parent"
+	choreographyNoClaimKindReason                                 = "no-claim commit has another message kind"
+	choreographyNoClaimAttemptIdentityReason                      = "attempt differs from the first signed attempt"
+	choreographyNoClaimMissingPlacementReason                     = "missing placement differs from the signed task"
+	choreographyNoClaimDocumentReason                             = "signed no-claim document differs from the ledger event"
 	choreographyNoClaimPolicyError                                = "execution: no-claim expiry differs from fixed admission policy"
 	choreographyNoClaimPersistError                               = "execution: no-claim expiry has no canonical task persistence"
 	choreographyNoClaimNoIdentity                                 = ""
@@ -37,6 +70,10 @@ const (
 	choreographyNoClaimSettlementFound                            = true
 	choreographyNoClaimSettlementOutcomeMismatchError             = "execution: no-claim package settlement differs from exact signed record"
 )
+
+func formatChoreographyNoClaimRefusal(phase, task, reason string) error {
+	return fmt.Errorf(choreographyNoClaimRefusalFormat, choreographyNoClaimStateError, phase, task, reason)
+}
 
 func choreographyNoClaimCause(placement Placement) string {
 	if placement == PlacementWorker {
@@ -82,17 +119,48 @@ func (b *FirstNodeBroker) ExpireUnclaimed(ctx context.Context, taskID string) er
 		return fmt.Errorf(choreographyNoClaimPolicyError)
 	}
 	task := b.tasks[taskID]
-	if !b.executionStarted || b.stopping || b.sealed || task == nil || task.spec.Virtual ||
-		!isChoreographyNoClaimPlacement(task.spec.Placement) || task.spec.LocalAuthority ||
-		task.remaining != choreographyNoClaimNoRemainingEdges ||
-		task.terminal || task.claim != choreographyNoClaimNoIdentity || task.offeredNode != choreographyNoClaimNoIdentity || task.result != choreographyNoClaimNoIdentity ||
-		task.queueFence != choreographyNoClaimNoIdentity || task.attempt != choreographyNoClaimFirstAttempt || task.tip != task.spec.ReservationOID ||
-		time.Now().Before(deadline) {
-		return fmt.Errorf(choreographyNoClaimStateError)
+	switch {
+	case !b.executionStarted:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimNotStartedReason)
+	case b.stopping:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimStoppingReason)
+	case b.sealed:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimSealedReason)
+	case task == nil:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimMissingTaskReason)
+	case task.spec.Virtual:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimVirtualTaskReason)
+	case !isChoreographyNoClaimPlacement(task.spec.Placement):
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimPlacementReason)
+	case task.spec.LocalAuthority:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimAuthorityReason)
+	case task.remaining != choreographyNoClaimNoRemainingEdges:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID,
+			fmt.Sprintf(choreographyNoClaimPredecessorsReasonFormat, task.remaining))
+	case task.terminal:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimTerminalReason)
+	case task.claim != choreographyNoClaimNoIdentity:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimClaimedReason)
+	case task.offeredNode != choreographyNoClaimNoIdentity:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimOfferedReason)
+	case task.result != choreographyNoClaimNoIdentity:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimResultReason)
+	case task.queueFence != choreographyNoClaimNoIdentity:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimQueueReason)
+	case task.attempt != choreographyNoClaimFirstAttempt:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimAttemptReason)
+	case task.tip != task.spec.ReservationOID:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimTipReason)
+	}
+	now := time.Now()
+	if now.Before(deadline) {
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID,
+			fmt.Sprintf(choreographyNoClaimDeadlineReasonFormat, deadline.Sub(now)))
 	}
 	for node := range b.members {
 		if b.nodeEligible(task.spec, node) {
-			return fmt.Errorf(choreographyNoClaimStateError)
+			return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID,
+				fmt.Sprintf(choreographyNoClaimEligibleReasonFormat, node))
 		}
 	}
 	policyDigest, err := digestChoreographyAdmissionPolicy(b.joinPolicy)
@@ -137,15 +205,31 @@ func (g *GitChoreographyPersist) PersistNoClaim(ctx context.Context,
 	deadlineUTC, started := g.admissionDeadlineUTC, g.executionStarted
 	g.mu.Unlock()
 	spec := g.tasks[outcome.Task]
-	if spec.Task == choreographyNoClaimNoIdentity ||
-		!isChoreographyNoClaimPlacement(spec.Placement) || spec.LocalAuthority ||
-		outcome.ChoreographyRunBinding != g.opts.Binding ||
-		outcome.GraphRootOID != g.opts.GraphRootOID ||
-		outcome.Branch != spec.Branch || outcome.ExpectedOID != spec.ReservationOID ||
-		outcome.Attempt != choreographyNoClaimFirstAttempt || outcome.Package != spec.Package ||
-		outcome.MissingPlacement != string(spec.Placement) ||
-		outcome.AdmissionDeadlineUTC != deadlineUTC || !started {
-		return choreographyNoClaimNoIdentity, fmt.Errorf(choreographyNoClaimStateError)
+	switch {
+	case spec.Task == choreographyNoClaimNoIdentity:
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimMissingTaskReason)
+	case !isChoreographyNoClaimPlacement(spec.Placement):
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimPlacementReason)
+	case spec.LocalAuthority:
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimAuthorityReason)
+	case outcome.ChoreographyRunBinding != g.opts.Binding:
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimBindingReason)
+	case outcome.GraphRootOID != g.opts.GraphRootOID:
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimRootReason)
+	case outcome.Branch != spec.Branch:
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimBranchReason)
+	case outcome.ExpectedOID != spec.ReservationOID:
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimExpectedReason)
+	case outcome.Attempt != choreographyNoClaimFirstAttempt:
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimAttemptIdentityReason)
+	case outcome.Package != spec.Package:
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimPackageReason)
+	case outcome.MissingPlacement != string(spec.Placement):
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimMissingPlacementReason)
+	case outcome.AdmissionDeadlineUTC != deadlineUTC:
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimDeadlineIdentityReason)
+	case !started:
+		return choreographyNoClaimNoIdentity, formatChoreographyNoClaimRefusal(choreographyNoClaimPersistPhase, outcome.Task, choreographyNoClaimNotStartedReason)
 	}
 	digest, err := digestChoreographyAdmissionPolicy(g.opts.JoinPolicy)
 	if err != nil {
@@ -187,27 +271,35 @@ func (g *GitChoreographyPersist) PersistNoClaim(ctx context.Context,
 func (g *GitChoreographyPersist) verifyNoClaimEvent(ctx context.Context,
 	event ChoreographyEvent) error {
 	spec := g.tasks[event.Task]
-	if spec.Task == choreographyNoClaimNoIdentity ||
-		!isChoreographyNoClaimPlacement(spec.Placement) || spec.LocalAuthority ||
-		event.GraphRootOID != g.opts.GraphRootOID ||
-		event.PriorTaskOID != spec.ReservationOID ||
-		event.MissingPlacement != string(spec.Placement) ||
-		event.BlockedBy != choreographyNoClaimCause(spec.Placement) {
-		return fmt.Errorf(choreographyNoClaimStateError)
+	switch {
+	case spec.Task == choreographyNoClaimNoIdentity:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimVerifyPhase, event.Task, choreographyNoClaimMissingTaskReason)
+	case !isChoreographyNoClaimPlacement(spec.Placement):
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimVerifyPhase, event.Task, choreographyNoClaimPlacementReason)
+	case spec.LocalAuthority:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimVerifyPhase, event.Task, choreographyNoClaimAuthorityReason)
+	case event.GraphRootOID != g.opts.GraphRootOID:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimVerifyPhase, event.Task, choreographyNoClaimRootReason)
+	case event.PriorTaskOID != spec.ReservationOID:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimVerifyPhase, event.Task, choreographyNoClaimPriorReason)
+	case event.MissingPlacement != string(spec.Placement):
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimVerifyPhase, event.Task, choreographyNoClaimMissingPlacementReason)
+	case event.BlockedBy != choreographyNoClaimCause(spec.Placement):
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimVerifyPhase, event.Task, choreographyNoClaimDocumentReason)
 	}
 	parents, err := g.opts.Mailbox.plumbing.CommitParents(ctx, event.TaskOID)
 	if err != nil {
 		return err
 	}
 	if len(parents) != choreographyNoClaimParentCount || parents[choreographyNoClaimFirstParentIndex] != spec.ReservationOID {
-		return fmt.Errorf(choreographyNoClaimStateError)
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimVerifyPhase, event.Task, choreographyNoClaimParentReason)
 	}
 	tree, err := g.opts.Mailbox.readTree(ctx, event.TaskOID)
 	if err != nil {
 		return err
 	}
 	if tree.kind != choreographyNoClaimKind {
-		return fmt.Errorf(choreographyNoClaimStateError)
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimVerifyPhase, event.Task, choreographyNoClaimKindReason)
 	}
 	document, err := g.opts.Mailbox.Read(ctx, ChainTip{OID: event.TaskOID,
 		Kind: tree.kind, document: tree.document, signature: tree.signature}, returnReplyLimit)

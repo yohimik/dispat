@@ -269,6 +269,7 @@ ARG TARGETARCH
 # published.
 COPY --from=dist /dispat-tiny-linux-${TARGETARCH} /dist/dispat-tiny-linux-${TARGETARCH}
 RUN apt-get update && apt-get install -y --no-install-recommends git jq \
+ && if [ "$TARGETARCH" = amd64 ]; then apt-get install -y --no-install-recommends gdb; fi \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --uid 1001 gopher
 COPY tests/integration /src/tests/integration
@@ -306,6 +307,7 @@ RUN --mount=type=cache,target=/home/gopher/.cache,uid=1001,gid=1001 \
     --mount=type=cache,target=/home/gopher/go/pkg/mod,uid=1001,gid=1001 \
     set -eu; \
     git --version; \
+    if [ "$TARGETARCH" = amd64 ]; then export DISPAT_TEST_DEBUGGER=gdb; fi; \
     DISPAT_TEST_BINARY="/dist/dispat-tiny-linux-${TARGETARCH}" \
       testreport test tiny-integration --shards 6 -- \
         -C /src/tests/integration -count=1 -timeout 120m \

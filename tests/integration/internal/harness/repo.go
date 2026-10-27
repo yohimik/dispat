@@ -445,7 +445,7 @@ func (r *Repo) runAtEnv(root string, env []string, stdin string, args ...string)
 // binary is being driven.
 func (r *Repo) runBin(bin, root string, env []string, stdin string, args ...string) RunResult {
 	r.T.Helper()
-	cmd := exec.Command(bin, withRoot(args, root)...)
+	cmd := runBinCommand(bin, withRoot(args, root))
 	cmd.Dir = r.workDir // empty inherits the test process's folder
 	// No test may reach api.github.com, and most fixtures have no remote to
 	// take the release lock on. Both kill switches go in before the caller's
