@@ -1,5 +1,18 @@
 # Changelog
 
+## services/dispat/v1.11.0-rc.11 (2026-10-27)
+
+### Fixes
+
+- resume interrupted signed ledger replay ([5784a09](https://github.com/yohimik/dispat/commit/5784a091c43dc2bca816e82ac49d32b0c7826775)) (by yohimik, Codex)
+  Checkpoint each fully verified ledger event with its cached state so an interrupted suffix read resumes without replaying accepted events. Validate execution-start events before mutating indexes and preserve read-error causes.
+
+### Authors
+
+- yohimik
+- Codex
+
+
 ## services/dispat/v1.11.0-rc.10 (2026-10-27)
 
 ### Fixes
