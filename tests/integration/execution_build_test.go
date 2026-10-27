@@ -331,19 +331,32 @@ func TestExecutionTransportCommitsStayOutsideReleaseHistory(t *testing.T) {
 // whatever the pool underneath it is, so three nodes do not make a budget of
 // two into a budget of six.
 func TestExecutionBudgetsHoldAcrossNodes(t *testing.T) {
+	gate := filepath.Join(t.TempDir(), "consumers")
 	rig := newExecutionWorkspace(t, func(repo *harness.Repo) string {
-		return executionRecordingScript + " && " +
-			repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE", executionStageWindow)
+		meeting := `
+case "$DISPAT_PACKAGE" in
+  ui) ` + stageRelationRendezvous(`"$DISPAT_IT_EXECUTION_GATE.ui"`,
+			`"$DISPAT_IT_EXECUTION_GATE.docs"`) + ` ;;
+  docs) ` + stageRelationRendezvous(`"$DISPAT_IT_EXECUTION_GATE.docs"`,
+			`"$DISPAT_IT_EXECUTION_GATE.ui"`) + ` ;;
+esac`
+		return executionRecordingScript + " && " + repo.TsmarkCommandScript(harness.TsmarkCommandOptions{
+			LogFile: "timeline.log", Label: "$DISPAT_PACKAGE", Sleep: executionStageWindow,
+			Command: meeting,
+		})
 	}, func(cfg *models.File) { cfg.Concurrency = []int{2, 1} })
-	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
+	workers := rig.startWorkersHolding([]string{executionNode, executionSecondNode}, 2,
+		executionGateEnv+"="+gate)
+	defer stopAll(t, workers)
 
-	res := rig.release()
+	res := rig.release(executionGateEnv + "=" + gate)
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	require.FileExists(t, gate+".ui", "ui entered the bounded consumer rendezvous")
+	require.FileExists(t, gate+".docs", "docs entered the bounded consumer rendezvous")
 	timeline := rig.repo.Timeline("timeline.log")
 	require.Len(t, timeline, len(executionWorkspacePackages))
 	harness.AssertConcurrencyBudget(t, timeline, 2)
-	stopAll(t, workers)
 }
 
 // TestExecutionWorkerCapacityHoldsAcrossRuns: a node's capacity is the node's,

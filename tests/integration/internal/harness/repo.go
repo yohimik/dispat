@@ -273,6 +273,25 @@ func (r *Repo) TsmarkScript(logFile, label string, sleep time.Duration) string {
 		shQuote(r.tsmarkBin), shQuote(r.Path(logFile)), label, sleep.Milliseconds())
 }
 
+// TsmarkCommandOptions places a shell command inside a measured interval.
+type TsmarkCommandOptions struct {
+	LogFile string
+	Label   string
+	Sleep   time.Duration
+	Command string
+}
+
+const tsmarkCommandScriptFormat = "%s %s %s %d -- sh -c %s"
+
+// TsmarkCommandScript records the command's entire lifetime, including a
+// bounded wait inside it. A failed command leaves a complete interval and
+// fails the enclosing stage with its original exit status.
+func (r *Repo) TsmarkCommandScript(options TsmarkCommandOptions) string {
+	return fmt.Sprintf(tsmarkCommandScriptFormat,
+		shQuote(r.tsmarkBin), shQuote(r.Path(options.LogFile)), options.Label,
+		options.Sleep.Milliseconds(), shQuote(options.Command))
+}
+
 // Timeline parses logFile (relative to the repository root) as a tsmark log.
 func (r *Repo) Timeline(logFile string) []Interval {
 	return ParseTimeline(r.T, r.Path(logFile))
