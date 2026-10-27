@@ -308,6 +308,64 @@ RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/dispa
 FROM scratch AS export-dispat
 COPY --from=test-dispat /src/coverage /
 
+# Race suites are independent gates with unique logs. They intentionally have
+# no coverage profile or commit stamp: the normal suites own those artifacts.
+FROM src-ccme AS test-ccme-race
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/ccme && go run github.com/yohimik/dispat/tools/testreport test ccme-race -- \
+    ./... -count=1 -timeout 10m -race
+FROM scratch AS export-ccme-race
+COPY --from=test-ccme-race /src/coverage/testlog/ccme-race.json /testlog/ccme-race.json
+
+FROM src-config AS test-config-race
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/config && go run github.com/yohimik/dispat/tools/testreport test config-race -- \
+    ./... -count=1 -timeout 10m -race
+FROM scratch AS export-config-race
+COPY --from=test-config-race /src/coverage/testlog/config-race.json /testlog/config-race.json
+
+FROM src-manifest AS test-manifest-race
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/manifest && go run github.com/yohimik/dispat/tools/testreport test manifest-race -- \
+    ./... -count=1 -timeout 10m -race
+FROM scratch AS export-manifest-race
+COPY --from=test-manifest-race /src/coverage/testlog/manifest-race.json /testlog/manifest-race.json
+
+FROM src-models AS test-models-race
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/models && go run github.com/yohimik/dispat/tools/testreport test models-race -- \
+    ./... -count=1 -timeout 10m -race
+FROM scratch AS export-models-race
+COPY --from=test-models-race /src/coverage/testlog/models-race.json /testlog/models-race.json
+
+FROM src-scanner AS test-scanner-race
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/scanner && go run github.com/yohimik/dispat/tools/testreport test scanner-race -- \
+    ./... -count=1 -timeout 10m -race
+FROM scratch AS export-scanner-race
+COPY --from=test-scanner-race /src/coverage/testlog/scanner-race.json /testlog/scanner-race.json
+
+FROM src-writer AS test-writer-race
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd pkg/writer && go run github.com/yohimik/dispat/tools/testreport test writer-race -- \
+    ./... -count=1 -timeout 10m -race
+FROM scratch AS export-writer-race
+COPY --from=test-writer-race /src/coverage/testlog/writer-race.json /testlog/writer-race.json
+
+FROM src-tools AS test-tools-race
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd tools && go run github.com/yohimik/dispat/tools/testreport test tools-race -- \
+    ./... -count=1 -timeout 10m -race
+FROM scratch AS export-tools-race
+COPY --from=test-tools-race /src/coverage/testlog/tools-race.json /testlog/tools-race.json
+
+FROM src-dispat AS test-dispat-race
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 \
+    cd services/dispat && go run github.com/yohimik/dispat/tools/testreport test dispat-race -- \
+    ./... -count=1 -timeout 10m -race
+FROM scratch AS export-dispat-race
+COPY --from=test-dispat-race /src/coverage/testlog/dispat-race.json /testlog/dispat-race.json
+
 # The black-box suite: the harness builds an instrumented dispat from the
 # workspace, drives it against disposable git repositories, and the covdata
 # folder becomes integration.out. The race pass keeps its own log, as it
@@ -322,7 +380,7 @@ COPY --from=test-dispat /src/coverage /
 # bounds one shard, a sixth of the suite. Every shard's dispat writes its
 # counters into the one DISPAT_COVERDIR, and every shard builds its binaries
 # in a temp folder of its own.
-FROM src-integration AS test-integration
+FROM src-integration AS test-integration-normal
 RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 <<'EOF'
 set -eu
 cd services/dispat
@@ -335,6 +393,18 @@ go run github.com/yohimik/dispat/tools/testreport test integration --shards 6 --
 go tool covdata textfmt -i="$DISPAT_COVERDIR" -o=/src/coverage/cli-integration.out
 { head -n 1 /src/coverage/cli-integration.out; tail -q -n +2 /src/coverage/cli-integration.out /src/coverage/publicapi.out; } \
   > /src/coverage/integration.out
+EOF
+ARG TEST_COMMIT
+RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/integration.commit
+FROM scratch AS export-integration-normal
+COPY --from=test-integration-normal /src/coverage/integration.out /integration.out
+COPY --from=test-integration-normal /src/coverage/integration.commit /integration.commit
+COPY --from=test-integration-normal /src/coverage/testlog/integration.json /testlog/integration.json
+
+FROM src-integration AS test-integration-race
+RUN --mount=type=cache,target=/home/gopher/.cache/go-build,uid=1001,gid=1001 <<'EOF'
+set -eu
+cd services/dispat
 # Every black-box CLI is race-instrumented. Go's default one-second race
 # runtime exit sleep would therefore be paid hundreds of times. Reports go
 # to a shared directory so TestMain can fail even when a scenario expects the
@@ -347,12 +417,15 @@ GORACE="atexit_sleep_ms=0 log_path=$race_log_dir/race" \
   go run github.com/yohimik/dispat/tools/testreport test integration-race --shards 6 -- \
   -C ../../tests/integration ./... -count=1 -timeout 90m -race
 EOF
-ARG TEST_COMMIT
-RUN test -n "$TEST_COMMIT" && printf '%s\n' "$TEST_COMMIT" > /src/coverage/integration.commit
+FROM scratch AS export-integration-race
+COPY --from=test-integration-race /src/coverage/testlog/integration-race.json /testlog/integration-race.json
+
+# The historical entrypoint still runs both black-box passes.
 FROM scratch AS export-integration
-COPY --from=test-integration /src/coverage/integration.out /integration.out
-COPY --from=test-integration /src/coverage/integration.commit /integration.commit
-COPY --from=test-integration /src/coverage/testlog /testlog
+COPY --from=test-integration-normal /src/coverage/integration.out /integration.out
+COPY --from=test-integration-normal /src/coverage/integration.commit /integration.commit
+COPY --from=test-integration-normal /src/coverage/testlog/integration.json /testlog/integration.json
+COPY --from=test-integration-race /src/coverage/testlog/integration-race.json /testlog/integration-race.json
 
 # The benchmark gates: one stage per module that has benchmarks, each writing
 # its stream to /src/coverage/benchlog for the report to read. Separate from
@@ -606,9 +679,18 @@ COPY --from=test-scanner /src/coverage ./coverage
 COPY --from=test-writer /src/coverage ./coverage
 COPY --from=test-tools /src/coverage ./coverage
 COPY --from=test-dispat /src/coverage ./coverage
-COPY --from=test-integration /src/coverage/integration.out ./coverage/integration.out
-COPY --from=test-integration /src/coverage/integration.commit ./coverage/integration.commit
-COPY --from=test-integration /src/coverage/testlog ./coverage/testlog
+COPY --from=test-integration-normal /src/coverage/integration.out ./coverage/integration.out
+COPY --from=test-integration-normal /src/coverage/integration.commit ./coverage/integration.commit
+COPY --from=test-integration-normal /src/coverage/testlog/integration.json ./coverage/testlog/integration.json
+COPY --from=test-ccme-race /src/coverage/testlog/ccme-race.json ./coverage/testlog/ccme-race.json
+COPY --from=test-config-race /src/coverage/testlog/config-race.json ./coverage/testlog/config-race.json
+COPY --from=test-manifest-race /src/coverage/testlog/manifest-race.json ./coverage/testlog/manifest-race.json
+COPY --from=test-models-race /src/coverage/testlog/models-race.json ./coverage/testlog/models-race.json
+COPY --from=test-scanner-race /src/coverage/testlog/scanner-race.json ./coverage/testlog/scanner-race.json
+COPY --from=test-writer-race /src/coverage/testlog/writer-race.json ./coverage/testlog/writer-race.json
+COPY --from=test-tools-race /src/coverage/testlog/tools-race.json ./coverage/testlog/tools-race.json
+COPY --from=test-dispat-race /src/coverage/testlog/dispat-race.json ./coverage/testlog/dispat-race.json
+COPY --from=test-integration-race /src/coverage/testlog/integration-race.json ./coverage/testlog/integration-race.json
 COPY --from=bench-ccme /src/coverage/benchlog ./coverage/benchlog
 COPY --from=bench-config /src/coverage/benchlog ./coverage/benchlog
 COPY --from=bench-dispat /src/coverage/benchlog ./coverage/benchlog
@@ -746,3 +828,34 @@ fi
 echo "config scripts: $*"
 python3 /src/scripts/lint-config-scripts.py "$@"
 EOF
+
+# Every CI lane exports its own manifest. The aggregate checks its source and
+# complete file inventory before any artifact is admitted to the shared report.
+FROM runner AS test-fragment
+ARG TEST_COMMIT
+ARG TEST_LANE
+ARG TEST_REQUIRE_ALL=false
+COPY --chown=gopher:gopher coverag[e] ./coverage
+RUN go run github.com/yohimik/dispat/tools/testreport fragments -mode collect \
+    -lane "$TEST_LANE" -commit "$TEST_COMMIT" -coverage coverage \
+    -full="$TEST_REQUIRE_ALL" -out /src/coverage-fragment
+FROM scratch AS test-fragment-export
+COPY --from=test-fragment /src/coverage-fragment /
+
+FROM runner AS test-fragments
+ARG TEST_COMMIT
+ARG TEST_REQUIRE_ALL=false
+COPY --chown=gopher:gopher coverage-fragments ./coverage-fragments
+RUN <<'EOF'
+set -eu
+go run github.com/yohimik/dispat/tools/testreport fragments -mode merge \
+  -commit "$TEST_COMMIT" -input coverage-fragments \
+  -full="$TEST_REQUIRE_ALL" -out /src/merged-coverage
+if [ "$TEST_REQUIRE_ALL" = true ]; then
+  go run github.com/yohimik/dispat/tools/testreport coverage \
+    -coverage /src/merged-coverage -commit "$TEST_COMMIT" \
+    -minimum-total 0 -minimum-integration 0
+fi
+EOF
+FROM scratch AS test-fragments-export
+COPY --from=test-fragments /src/merged-coverage /

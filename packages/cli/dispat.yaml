@@ -8,6 +8,7 @@ scripts:
   tests: >-
     docker buildx build --file Dockerfile --target typecheck
     $(sh ../../scripts/buildx-cache.sh cli-npm) --output type=cacheonly ../..
+  test:checks: dispat exec tests --for pkg:cli
   release-metadata: node build/scripts/package-release.js
   # Ordinary CI compiles and exercises fixture packaging inside Docker. It
   # must not require host Node tools or an unpublished provider release.

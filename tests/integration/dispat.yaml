@@ -12,3 +12,11 @@ scripts:
     docker buildx build --file ../../Dockerfile.gotest --target export-integration
     $(sh ../../scripts/buildx-cache.sh gotest-integration)
     --output type=local,dest=../../coverage ../..
+  test:integration: >-
+    docker buildx build --file ../../Dockerfile.gotest --target export-integration-normal
+    $(sh ../../scripts/buildx-cache.sh gotest-integration-normal)
+    --output type=local,dest=../../coverage ../..
+  test:race: >-
+    docker buildx build --file ../../Dockerfile.gotest --target export-integration-race
+    $(sh ../../scripts/buildx-cache.sh gotest-integration-race)
+    --output type=local,dest=../../coverage ../..

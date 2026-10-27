@@ -10,6 +10,7 @@ versionGroup: ccme
 scripts:
   verify-spec: sh verify.sh
   tests: sh test.sh
+  test:checks: dispat exec tests --for pkg:ccme-spec
   # The release's test stage: the same suite, after the build has verified
   # the document. Inside the suite's own fixture releases it does nothing,
   # because those releases read this file too (see test.sh).

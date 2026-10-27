@@ -256,6 +256,12 @@ Reference integrity is not the same claim as coverage. A named assertion is evid
 it has run: `testreport coverage -minimum-integration 95 -minimum-total 95` is the separate gate over the profiles, and
 it rejects missing, stale, mixed-commit, unexpected and orphan evidence before reporting a number.
 
+Parallel CI jobs contribute separate unit, integration, race, and package-check fragments. Their merge requires all
+four jobs at the same revision and verifies each fragment's inventory and file hashes. The tooling regressions
+`TestFragmentsCollectAndMergeCompleteEvidence`, `TestFragmentsAcceptAggregateTerminalForShardedStarts`,
+`TestFragmentsRejectPartialStaleAndUnsafeEvidence`, `TestFragmentsMergeRequiresFourBoundLanes`, and
+`TestFragmentsPartialSuitesAndMergeTamper` cover complete, sharded, missing, stale, failed, and altered evidence.
+
 The environmental limits stand. Disposable local Git repositories and deterministic HTTP fixtures do not exhaust every
 hosting provider failure, filesystem, credential helper or network partition. The release experiments supplement those
 fixtures with selected partial-publication protocols, and a recorded failure there stays a failure rather than being

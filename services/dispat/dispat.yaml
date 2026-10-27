@@ -110,23 +110,29 @@ scripts:
   # each run leaves its machine-readable log beside its profile and the job
   # needs Docker and nothing else. The exports land the profiles and logs in
   # coverage/, exactly where the host runs always put them.
-  tests:unit: >-
+  test:unit: >-
     docker buildx build --file ../../Dockerfile.gotest --target export-dispat
     $(sh ../../scripts/buildx-cache.sh gotest-dispat)
+    --output type=local,dest=../../coverage ../..
+  tests:unit: dispat exec test:unit --for pkg:dispat
+  test:race: >-
+    docker buildx build --file ../../Dockerfile.gotest --target export-dispat-race
+    $(sh ../../scripts/buildx-cache.sh gotest-dispat-race)
     --output type=local,dest=../../coverage ../..
   # The black-box suite of exactly this checkout's dispat, so it belongs to
   # this package rather than to a space of its own. Inside the target,
   # DISPAT_COVERDIR makes the harness build dispat with -cover and point
   # every invocation's GOCOVERDIR at the folder, which is the only coverage
   # much of the app and cli packages get; the covdata is condensed to
-  # integration.out before export. The race pass runs the root package only,
-  # as it always has, and keeps its own log so the report can say the suite
-  # is race-clean rather than have someone assert it.
+  # integration.out before export. The legacy combined export runs both
+  # normal and race passes, with separate logs for the report.
   tests:integration: >-
     docker buildx build --file ../../Dockerfile.gotest --target export-integration
     $(sh ../../scripts/buildx-cache.sh gotest-integration)
     --output type=local,dest=../../coverage ../..
-  tests: dispat exec tests:unit --for pkg:dispat
+  tests:
+    - dispat exec test:unit --for pkg:dispat
+    - dispat exec test:race --for pkg:dispat
   # The post-version gate the services space hooks into beforeBuild: the unit
   # suite against this module as autoVersion rewrote it and syncLock tidied
   # it, resolving the pkg/* tags the earlier legs of this run pushed, with no

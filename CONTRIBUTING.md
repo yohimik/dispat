@@ -345,6 +345,11 @@ go run ./tools/testreport coverage -coverage coverage -commit "$(git rev-parse H
 
 Run targeted tests while editing, then the full required gates before declaring a candidate ready. The [script guide](scripts/README.md) describes the Docker-based test, race, formatting, vet, coverage, and report pipeline. The npm distribution and documentation have their own package tests. Do not publish stale reports or describe untested platform artifacts as verified.
 
+CI runs `dispat run test:unit`, `dispat run test:integration`, `dispat run test:race`, and `dispat run test:checks`
+in separate jobs. Each command uses the package's declared script and dispat's dependency scheduling. The release
+runs every job with `--since all` and combines their source-bound results only after all four succeed. Keep test
+outputs disjoint and retain the complete coverage and race inventories when changing these jobs.
+
 ### npm distribution
 
 The `@dispat/bin` package in [`packages/cli`](packages/cli) has a suite of its own. It uses local files, processes,

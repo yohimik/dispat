@@ -30,6 +30,7 @@ scripts:
   tests: >-
     docker buildx build --file Dockerfile --target typecheck
     $(sh ../../scripts/buildx-cache.sh docs) --output type=cacheonly ../..
+  test:checks: dispat exec tests --for pkg:docs
   # Read binary sizes from GitHub metadata for the exact CLI release.
   # The site plugin validates its schema and complete asset set, then archives
   # it under the docs major/minor. A release must never fall back to an older
@@ -122,7 +123,11 @@ scripts:
       --build-arg COVERAGE_MINIMUM="${DISPAT_COVERAGE_MINIMUM:-95}" \
       $(sh ../../scripts/buildx-cache.sh measured \
         gotest-ccme gotest-config gotest-manifest gotest-models \
-        gotest-scanner gotest-writer gotest-tools gotest-dispat gotest-integration) \
+        gotest-scanner gotest-writer gotest-tools gotest-dispat \
+        gotest-integration-normal gotest-integration-race \
+        gotest-ccme-race gotest-config-race gotest-manifest-race \
+        gotest-models-race gotest-scanner-race gotest-writer-race \
+        gotest-tools-race gotest-dispat-race gotest-integration) \
       --output type=local,dest=data ../..
     echo "REPORT_BENCHMARKS=$(tr '\n' ' ' < data/benchmarked.txt)" >> "$DISPAT_OUTPUT"
     echo "REPORT_COMMIT=$commit" >> "$DISPAT_OUTPUT"

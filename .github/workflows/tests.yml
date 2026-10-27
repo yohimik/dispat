@@ -126,9 +126,13 @@ jobs:
           dispat scanner --verify-unlinked
           sh scripts/verify-go-sums.sh services/dispat/go.mod services/dispat/go.sum pre
 
-  test:
-    name: Tests
+  test-lane:
+    name: Test ${{ matrix.lane }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [unit, integration, race, checks]
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -169,10 +173,10 @@ jobs:
       # --consumers is the point of running this through dispat: a change to
       # pkg/manifest tests scanner, writer and the CLI too, because they are
       # what the change can break.
-      - name: Run the tests dispat selects
+      - name: Run the ${{ matrix.lane }} tests dispat selects
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: dispat run tests --since "$(sh scripts/ci-base.sh)" --consumers
+        run: dispat run "test:${{ matrix.lane }}" --distribution-mode=interpretation --since "$(sh scripts/ci-base.sh)" --consumers
 
       # always(): the redirects must not outlive the job whatever the suite
       # did, and unlink is idempotent, so closing an already-closed bracket is
@@ -185,6 +189,57 @@ jobs:
         run: |
           dispat run unlink --since all -p dispat
           dispat run verify-unlinked --since all -p dispat
+
+      # The fragment manifest binds this lane's profiles and logs to HEAD.
+      # It is created only after both the selected sweep and unlink passed.
+      - name: Collect the ${{ matrix.lane }} test fragment
+        env:
+          DISPAT_TEST_LANE: ${{ matrix.lane }}
+          DISPAT_TEST_REQUIRE_ALL: 'false'
+        run: dispat exec test-fragment-collect
+
+      - name: Keep the ${{ matrix.lane }} test fragment
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-fragment-${{ matrix.lane }}
+          path: coverage-fragment/
+          retention-days: 7
+          if-no-files-found: error
+
+  test:
+    name: Tests
+    needs: test-lane
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
+
+      - name: Set up dispat
+        uses: ./
+
+      - name: Build dispat from the checkout
+        run: |
+          # shellcheck disable=SC2046
+          docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
+            $(sh scripts/buildx-cache.sh bootstrap) \
+            --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
+          echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
+
+      - name: Gather the four test fragments
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-fragment-*
+          path: coverage-fragments
+
+      - name: Verify and merge the four source-bound fragments
+        env:
+          DISPAT_TEST_REQUIRE_ALL: 'false'
+        run: dispat exec test-fragment-merge
 
   build:
     name: Build

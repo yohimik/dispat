@@ -7,10 +7,17 @@ scripts:
   build: >-
     docker buildx build --file ../Dockerfile.gotest --target vet-tools
     $(sh ../scripts/buildx-cache.sh vet-tools) --output type=cacheonly ..
-  tests: >-
+  test:unit: >-
     docker buildx build --file ../Dockerfile.gotest --target export-tools
     $(sh ../scripts/buildx-cache.sh gotest-tools)
     --output type=local,dest=../coverage ..
+  test:race: >-
+    docker buildx build --file ../Dockerfile.gotest --target export-tools-race
+    $(sh ../scripts/buildx-cache.sh gotest-tools-race)
+    --output type=local,dest=../coverage ..
+  tests:
+    - dispat exec test:unit --for pkg:tools
+    - dispat exec test:race --for pkg:tools
 
   # The two document gates the lint job runs, as a build like every other gate.
   # They live here because the programs behind them are this package's:

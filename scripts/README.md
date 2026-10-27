@@ -13,7 +13,7 @@ exported by CI.
 | Script                                     | Called from                                            | Reads                                   | Produces |
 |--------------------------------------------|--------------------------------------------------------|-----------------------------------------|----------|
 | [`buildx-cache.sh`](./buildx-cache.sh)     | every `docker buildx build` in a dispat script         | `GITHUB_ACTIONS`, its write scope and optional read-only scopes | `TEST_COMMIT`, plus the Actions cache flags in CI. Aggregate builds can import package scopes while updating only their own. |
-| [`ci-worker.sh`](./ci-worker.sh)           | the release's full-suite job                           | `DISPAT_EXECUTION_SECRET`, `DISPAT_CI_WORKER_TOKEN` (a GitHub App contents-write token minted for the run), `DISPAT_CI_WORKER_*`, the Workload Identity credentials | One Compute Engine worker per run: created, started as `dispat worker` reading this repository over HTTPS and writing its own pending/output/failed branches, reached through a runner-owned loopback SSH return tunnel, then logged and deleted. The job supplies `--worker <name>=<endpoint>` with the worker's exact repository URL; Git host rules must protect canonical coordination and release refs from the worker App. Cleanup prunes leftover node-addressed probe branches. |
+| [`ci-worker.sh`](./ci-worker.sh)           | the release's unit-test job                           | `DISPAT_EXECUTION_SECRET`, `DISPAT_CI_WORKER_TOKEN` (a GitHub App contents-write token minted for the run), `DISPAT_CI_WORKER_*`, the Workload Identity credentials | One Compute Engine worker per run: created, started as `dispat worker` reading this repository over HTTPS and writing its own pending/output/failed branches, reached through a runner-owned loopback SSH return tunnel, then logged and deleted. The job supplies `--worker <name>=<endpoint>` with the worker's exact repository URL; Git host rules must protect canonical coordination and release refs from the worker App. Cleanup prunes leftover node-addressed probe branches. |
 | [`check-action.sh`](./check-action.sh)     | the Action workflow and the release's post-release job | its arguments                           | Assertions that the composite action installed what it promised. |
 | [`install-tools.sh`](./install-tools.sh)   | the release job and its ping job, the `tiny-toolchain` stage of [`services/dispat/Dockerfile`](../services/dispat/Dockerfile), the `tinygo-spike-fork` stage of [`Dockerfile.tinygo`](../Dockerfile.tinygo) and `tinygo-spike-darwin.sh` | `GITHUB_TOKEN`, `DISPAT_BIN_DIR`; optionally `[all\|crier\|tinygo] [destination]` | Installs the pinned Aqua with dispat, then the repository-recorded crier and TinyGo fork through `.aqua/aqua.yaml`. The destination receives `aqua` and the selected tools: a real `crier` binary and/or a link to the complete TinyGo tree at `tinygo`. |
 | [`lint-config-scripts.py`](./lint-config-scripts.py) | the `shellcheck` target of [`Dockerfile.gotest`](../Dockerfile.gotest) | every committed dispat config named on its command line | Each `scripts` entry as one shell file, held to `sh -n` and to shellcheck. It refuses a configuration shape it cannot read rather than skipping it, and `--self-test` holds the reader to the four shapes an entry is written in. |
@@ -50,7 +50,7 @@ the exit status of the underlying test run. Pass a `<log-name>` that matches the
 Add `--shards N` before the `--` to split a slow suite over N concurrent `go test` processes. The command lists the
 tests with the same arguments, runs an exact round-robin share of them in each process, and still writes one log, one
 summary and one exit status. A `-coverprofile` is written per shard and merged into the file it names. The
-`test-integration` target of [`Dockerfile.gotest`](../Dockerfile.gotest) runs both integration passes in six shards:
+normal and race integration targets of [`Dockerfile.gotest`](../Dockerfile.gotest) each run six shards:
 the suite spends most of its time waiting on the processes it drives, so a single process inside a container needs
 about twice the hour a pass is allowed.
 
@@ -63,10 +63,32 @@ and [test results](https://dispat.dev/internals/test-results/) pages. The
 [Release workflow](../.github/workflows/release.yml) runs both through `dispat exec` because only a `--since all` run
 generates a complete profile set across all packages.
 
-Run these commands to reproduce the entire test and report pipeline locally:
+CI uses four independent jobs. Each invokes the same package scripts available locally, with dispat selecting and
+scheduling packages within the job:
+
+| Command | Checks |
+| --- | --- |
+| `dispat run test:unit --since all` | Unit tests and coverage for the six public Go libraries, the CLI, and repository tools. |
+| `dispat run test:integration --since all` | The black-box CLI and public API suite, measuring integration coverage across all seven production modules. |
+| `dispat run test:race --since all` | The eight Go unit suites and the integration suite under the race detector, including the CLI subprocesses the integration tests start. |
+| `dispat run test:checks --since all` | Documentation, npm packaging and installation, specification fixtures, and image Compose configuration checks. |
+
+The jobs have separate checkouts and link brackets, and explicitly use `--distribution-mode=interpretation` to
+exercise independent task planning. Only the release's unit job adds the cloud worker. Each job
+collects a fragment with `dispat exec test-fragment-collect`, using `DISPAT_TEST_LANE` to identify its job and
+`DISPAT_TEST_REQUIRE_ALL=true` for a release. The aggregate runs `dispat exec test-fragment-merge` after all four jobs
+succeed. It requires matching source revisions and complete, disjoint inventories, verifies file hashes, and rejects
+failed or incomplete test logs before admitting files into `coverage/`. A release also checks the full coverage
+denominator and commit stamps, including prereleases whose coverage minimum is zero.
+
+`dispat run tests --since all` remains the local convenience command for all four sets of checks. Its commands within
+one package run sequentially; CI obtains concurrency between the four sets by running the named commands in separate
+jobs. Use the same commands in isolated checkouts when running those sets concurrently by hand.
+
+Run these commands to reproduce the complete test and report pipeline locally:
 
 ```sh
-dispat run tests --since all      # ~6 min: every module's profile and log
+dispat run tests --since all      # every package's checks, profiles and race logs
 dispat exec coverage-badge        # the merged profiles and the badge JSON
 dispat exec experiments --for pkg:experiments --in pkg:experiments   # the release experiment matrix
 dispat exec test-report           # packages/docs/data/report.json

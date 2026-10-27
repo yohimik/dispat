@@ -83,6 +83,19 @@ scripts:
     # A package gate that overrides its space's, and the space gate beside it.
     holds tests cli cli-npm
     holds tests docs 'buildx-cache.sh docs'
+    holds test:unit ccme 'export-$DISPAT_PACKAGE'
+    holds test:race ccme 'export-$DISPAT_PACKAGE-race'
+    holds test:unit dispat export-dispat
+    holds test:race dispat export-dispat-race
+    holds test:unit tools export-tools
+    holds test:race tools export-tools-race
+    holds test:integration integration export-integration-normal
+    holds test:race integration export-integration-race
+    holds test:checks docs '--for pkg:docs'
+    holds test:checks cli '--for pkg:cli'
+    holds test:checks dispat-alpine '--for cwd --fallback'
+    absent test:integration ccme
+    absent test:race docs
     # The record step the services space names in flow.publish, where it lives.
     holds github dispat 'dispat github'
     absent github docs
@@ -150,6 +163,20 @@ scripts:
     docker buildx build --file Dockerfile.gotest --target report-export
     --build-arg COMMIT="${GITHUB_SHA:-$(git rev-parse HEAD)}"
     $(sh scripts/buildx-cache.sh report) --output type=local,dest=packages/docs/data .
+
+  test-fragment-collect: |
+    set -eu
+    mkdir -p coverage
+    docker buildx build --file Dockerfile.gotest --target test-fragment-export \
+      --build-arg TEST_LANE="${DISPAT_TEST_LANE:?Missing test lane}" \
+      --build-arg TEST_REQUIRE_ALL="${DISPAT_TEST_REQUIRE_ALL:-false}" \
+      $(sh scripts/buildx-cache.sh "test-fragment-$DISPAT_TEST_LANE") \
+      --output type=local,dest=coverage-fragment .
+  test-fragment-merge: >-
+    docker buildx build --file Dockerfile.gotest --target test-fragments-export
+    --build-arg TEST_REQUIRE_ALL="${DISPAT_TEST_REQUIRE_ALL:-false}"
+    $(sh scripts/buildx-cache.sh test-fragments)
+    --output type=local,dest=coverage .
 
   # Publish the coverage badge: force-push coverage/coverage.json to an orphan
   # badges branch, a single commit with no history, the same mechanism
@@ -244,6 +271,10 @@ execution:
     cancel: 120
 runOutputs:
   tests: [coverage]
+  test:unit: [coverage]
+  test:integration: [coverage]
+  test:race: [coverage]
+  test:checks: [coverage]
 
 # What every record says beside the notes themselves, stated once for each
 # destination because the two are separate policies rather than one with two

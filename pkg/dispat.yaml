@@ -28,10 +28,17 @@ scripts:
   # coverage and test-results pages are built from the pair, rather than from
   # numbers typed by hand. The export lands the profile and the log in
   # coverage/, exactly where the host run always put them.
-  tests: >-
+  test:unit: >-
     docker buildx build --file ../../Dockerfile.gotest --target export-$DISPAT_PACKAGE
     $(sh ../../scripts/buildx-cache.sh gotest-$DISPAT_PACKAGE)
     --output type=local,dest=../../coverage ../..
+  test:race: >-
+    docker buildx build --file ../../Dockerfile.gotest --target export-$DISPAT_PACKAGE-race
+    $(sh ../../scripts/buildx-cache.sh gotest-$DISPAT_PACKAGE-race)
+    --output type=local,dest=../../coverage ../..
+  tests:
+    - dispat exec test:unit --for cwd --fallback
+    - dispat exec test:race --for cwd --fallback
   # The post-version gate: the module as autoVersion rewrote it and syncLock
   # tidied it, resolving its providers from the tags this run just pushed,
   # with no workspace — exactly what `go get` will serve to a consumer. The

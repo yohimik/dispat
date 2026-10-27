@@ -63,6 +63,7 @@ packages/docs/demo/illustration/out
 # stage in here writes or reads the raw counters.
 !coverage
 coverage/covdata
+!coverage-fragments
 
 # The shell sweep's inputs. Shell files only: scripts/ also holds a python
 # renderer. The announcement folder holds no shell, only crier configuration,

@@ -74,6 +74,7 @@ scripts:
     fi
     docker compose -f docker-compose.yml -f "$DISPAT_CHANNEL.yml" build
   tests: docker compose -f docker-compose.yml -f $DISPAT_CHANNEL.yml config -q
+  test:checks: dispat exec tests --for cwd --fallback
   # `build --push`, not `push`: the images build multi-platform, and a
   # multi-platform result lives in the buildx builder's cache rather than in
   # the engine's image store, so a separate `compose push` finds no local tag

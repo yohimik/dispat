@@ -25,6 +25,9 @@ const usage = `usage:
   testreport experiments [-markdown] [dir]                      summarise a release experiments campaign
   testreport testplan [-plan file] [-requirements file] [-minimum-mapped pct]
                     [-minimum-critical pct] [root]              check the test plan and the requirement matrix
+  testreport fragments -mode collect|merge [-lane unit|integration|race|checks]
+                    -commit <40-hex-sha> [-coverage coverage] [-input coverage-fragments]
+                    -out <fresh-dir> [-full=true|false]          collect or merge verified CI evidence
 `
 
 func main() {
@@ -68,6 +71,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = experiments(args[1:], stdout)
 	case "testplan":
 		err = testPlanCheck(args[1:], stdout)
+	case fragmentVerb:
+		err = fragments(args[1:])
 	default:
 		fmt.Fprint(stderr, usage)
 		return 2
