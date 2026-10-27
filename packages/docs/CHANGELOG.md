@@ -1,5 +1,307 @@
 # Changelog
 
+## packages/docs/v1.11.0-rc.8 (2026-10-27)
+
+### Features
+
+- preserve worker pickups through failure and recovery ([4a2d83a](https://github.com/yohimik/dispat/commit/4a2d83a9e2df5bb5d9d1a1308ffb3c23792075f8)) (by yohimik, Codex)
+  Give every physical pickup a durable unique identity and immutable pending,
+  output or failed branch. Admit a replacement after failure or signed contact
+  loss only under the signed retry-safety policy. Keep unknown physical work
+  charged until its exact acknowledgement settles, and preserve the first
+  verified eligible success across replay and late returns.
+
+  Retain unresolved child processes and publication requests without inventing
+  completion. Record known earlier publications while their successor remains
+  uncertain. Correct worker restart cleanup and pinned HTTPS transport for the
+  release TinyGo compiler, with integration and recovery regressions.
+
+  Integrate the reviewed CCME theorem, stopping, capacity and asynchronous
+  cancellation corrections with their executable specification fixtures. Keep
+  the existing release holds until the complete RC.9 gates pass.
+
+- run compiled tasks through durable saga branches ([12b94ba](https://github.com/yohimik/dispat/commit/12b94ba4d1abb29517bfac1aa34006c6b2774a9e)) (by yohimik, Codex)
+  Compile the complete task graph before execution, admit authenticated
+  workers, and let eligible nodes claim ready work through the first node's
+  signed ledger. Keep Git writes, publication and release records on the
+  first node, with durable cross-run capacity and cold recovery checks.
+
+  Retain verified outputs directly on each completed task branch. Tasks
+  without files keep signed completion records, and task capacity settles
+  before package hooks without exposing unfinished package results.
+
+  Preserve the worker command surface and compilation-only RC.9 mode.
+  Include protocol, recovery, integration and documentation updates. This
+  checkpoints the current implementation while full release validation
+  continues; the existing release holds remain in effect.
+
+- initialize worker task branches before execution ([def8e7d](https://github.com/yohimik/dispat/commit/def8e7d41914e266d474b04c43de31e07be5d0a4)) (by yohimik, Codex)
+  Reserve every eligible task attempt and bounded worker notice slots before
+  starting package frames. Activate ready work with atomic leased updates,
+  carry exact input commits with assignments, and keep publication on the
+  orchestrator. Workers verify and execute assignments without replanning.
+
+  Cover cancellation, uncertain pushes, carrier integrity and large fan-in.
+  Document the node-player execution game and prove its scoped equilibrium
+  and span optimum without claiming a unique algorithm or equilibrium.
+
+- parse and build semantic versions from the CLI ([b6facab](https://github.com/yohimik/dispat/commit/b6facab8c1a14b180ab6255353fb5e448369a87a)) (by yohimik, Codex)
+  Add configuration-free semver parse and build commands with strict SemVer
+  validation, full metadata round trips and decimal string core components.
+  Expose lexical version parts without imposing the release engine integer
+  bound or changing the existing bounded parser.
+
+  Cover large components, invalid identifiers, JSON output and CLI errors,
+  and compare the scanner with the specification regex on scoped fixtures.
+
+- execute configured stages with explicit dependency ordering ([1bf38e3](https://github.com/yohimik/dispat/commit/1bf38e3ab10c7f3f8ba6204033fbde8f4749066b)) (by yohimik, Codex)
+  Compile configured stage placement and selected provider outcomes before
+  dispatch, rejecting task cycles before effects. Carry verified predecessor
+  outputs between local and worker stages from pinned source inputs, including
+  idempotent preparation and providers that do not release.
+
+  Preserve durable publication receipts and suppress stages after a failed
+  required record. Document configuration inheritance, concurrency premises
+  and the boundary between declared dependencies and arbitrary script reads.
+
+- show each task's time, the relation and the edges each release honoured ([85a78dc](https://github.com/yohimik/dispat/commit/85a78dc1c482a15619682f9693e7540fcb69737e)) (by yohimik, Claude Opus 5.5)
+  The experiments page renders the relation each cell was measured under
+  beside the one its records show, the edges not honoured, the idle time, a
+  tasks table by kind with every task of each cell folded beneath it, and the
+  input each tool was told beside its plan. The text now says that s is the
+  observed concurrency and qualifies the bound as the comparison page does,
+  links §13.11, reads the ratio with clause 2, says what a publication timed at
+  the registry leaves out, why each tool has the relation it has, and that the
+  reference plan is only as wide as dispat's input, and drops the counts it had
+  typed in from the fixture.
+
+- show each tool's planning and release time and plan ([718d6e5](https://github.com/yohimik/dispat/commit/718d6e55ebf052e8898b06d41ee1a11ab49a4105)) (by yohimik, Claude Opus 5.5)
+  The experiments page gains Timing and Plans tables read from the
+  report, and a section on how the cells are timed, what the bound
+  max(Lk, Wk / s) is, how to read the ratio, and why the absolute seconds
+  of one container are not the figures to compare. The comparison page
+  says what the timing cells measure and links to them. The report's
+  validator holds the new fields to their shapes.
+
+- let a record command exit 0 when its record fails ([0e1ce95](https://github.com/yohimik/dispat/commit/0e1ce95aed15a6d79b2376902eae869063a56f2b)) (by yohimik, Claude Opus 5.5)
+  `dispat changelog` and `dispat github` take --ignore-errors, on by default.
+  A changelog entry or GitHub release that cannot be written is still logged
+  at error level under E222, and the sweep now closes with a warning naming
+  every package left failed or skipped, but the command exits 0. A publish
+  stage that runs `dispat github` after `dispat commit --tag --push` therefore
+  no longer reports a published package as failed and skips its consumers, as
+  release run 40177824466 did. --ignore-errors=false restores exit 1.
+
+  Only package failures are forgiven: a refused flag, selection or plan and an
+  interrupted sweep still fail. `dispat commit` is unchanged and refuses the
+  flag, because a tag it cannot create or push must keep failing the leg.
+
+  The github and changelog pages, the recovery guide and the agent skill
+  describe the new exit, and the failure-path tests that pin exit 1 now pass
+  --ignore-errors=false.
+
+- preview a past release's notes with --version ([7742b0c](https://github.com/yohimik/dispat/commit/7742b0c42e0bcb0ea522566f889a9ed56a7cd291)) (by yohimik, Claude Opus 5.5)
+  dispat preview --version renders the changelog entry and GitHub release
+  body a released version wrote, planned again at its tag's commit with the
+  release, every later release of the package and the other release tags on
+  that commit left out of the inventory. The value is a version of the
+  selected package, its full tag or alias, or latest, which the bare flag
+  means. Elsewhere --version still prints the dispat version.
+
+- add an optional tests stage and name the version stage by its key ([45c5768](https://github.com/yohimik/dispat/commit/45c57689121e31c15e86746dba32edab5d299ca4)) (by yohimik, Claude Opus 5.5)
+  A release can run a tests stage between the build and the publish:
+  `flow.tests`, `flow.beforeTests` and `flow.postTests` name its scripts and
+  hooks on every level a flow is stated. Its job is checking what the build
+  produced, so a package whose artefact fails is never published: the
+  failure is the `tests` stage, revertOnFail and onFail apply, and its
+  consumers are blocked as after a failed build. The build's exports reach
+  it and its own reach the publish. It shares the build budget, and with
+  worker nodes it is placed under the build's runOnly value, preferring
+  the node that built the package, and given the package's admitted
+  outputs. A package that configures none of the three has no tests
+  stage, and its release runs exactly as before.
+
+  The stages are data: one ordered table of descriptors (sign, version,
+  syncLock, build, tests, publish) states each stage's name and hook
+  spelling, its budget, where its frame may run, what a node installs
+  first, whether its outputs are admitted and whether its commands wait
+  for authorization. The task graph chains the stages a package has in
+  that order, and the executor reaches a coordinator through one Stage
+  call carrying the descriptor in place of one method per stage. Build
+  and publish assignments keep their kinds and formats; any other stage
+  travels under the generic kind `stage`, whose assignment names it.
+
+  The version stage now runs under the name of the key that configured
+  it. Under flow.propagate or autoPropagate it is `propagate` in
+  DISPAT_STAGE, DISPAT_FAILED_STAGE, the failed stage, the events, the
+  webhooks, the log and its hooks' names (beforePropagate,
+  postPropagate); under the version keys it stays `version`. The stage's
+  entry decides first, then the native block, then the hooks.
+
+  The plan digest carries the tests commands and the stage's name, so its
+  schema is dispat-plan-digest/3.
+
+### Fixes
+
+- link execution settings to the coordination repository ([2f327f1](https://github.com/yohimik/dispat/commit/2f327f171cdca1c256355ee17a4567ddbf6c3558)) (by yohimik, Codex)
+
+- select release experiments by the container version ([997746c](https://github.com/yohimik/dispat/commit/997746ce4420474dd354ba06a528f3203f582a93)) (by yohimik, Codex)
+  Use the Alpine package version when selecting the published experiment image. Label the report with the embedded CLI version without treating it as an image tag.
+
+- align pickup authority and failover conformance rules ([c6c9f57](https://github.com/yohimik/dispat/commit/c6c9f57cc4636b522c5bb477d6abacf9176eacd5)) (by yohimik, Codex)
+  Reserve canonical task, ledger and native release refs for the first node,
+  while workers create only their own immutable pending and outcome refs.
+  Require confirmation of the exact remote pending object before commands or
+  hooks start. Distinguish default retry refusal from explicitly repeat-safe
+  failover with spare capacity and the old attempt still charged.
+
+  Update the conformance vectors and worker documentation to agree with the
+  implemented pickup protocol. Preserve the reviewed mathematical statements.
+
+- admit completed native records across repository owners ([ace697e](https://github.com/yohimik/dispat/commit/ace697ea9f2c249264501bbf1b08e321b5d72d27)) (by yohimik, Codex)
+  Preserve parallel publication when a relevant peer completes a nested native
+  commit or link settlement. Validate its exact completed effects before
+  advancing the snapshot, and wait for unfinished transitions without locks.
+
+- keep publication on the orchestrator ([280d782](https://github.com/yohimik/dispat/commit/280d7823200c69be7a96a9b7c1b3ae02801f58ec)) (by yohimik, Codex)
+  Run publication and release recording on the orchestrator while workers
+  execute build, test and configured computation stages. Refuse worker
+  publication placement and signed publication permits, and remove the
+  worker publication executor and authorization handshake.
+
+  Keep local input and ownership validation, document the single entry
+  point and mailbox credentials, and replace obsolete worker-publication
+  tests with local publication and refusal coverage. Repair remaining
+  recovery and stage fixture assumptions without weakening their checks.
+
+- preserve recovery guarantees across release retries ([5bb70d5](https://github.com/yohimik/dispat/commit/5bb70d5b8260f893dc10d09a1f208c36be2560e8)) (by yohimik, Codex)
+  Complete receipt-backed releases when an immutable remote tag already names the prepared commit, and retry branch races from authoritative state. Report pinned-source capture errors and exercise recovery faults after the new dependency and output-preparation boundaries.
+
+- name the optional release stage test ([6a648af](https://github.com/yohimik/dispat/commit/6a648af70e9b8035d4dbc78d8e1991b76b536ecd)) (by yohimik, Codex)
+  Use the verb test in flow configuration, hooks, task identities and stage constraints. Refuse the former prerelease spellings with migration guidance while preserving scripts named tests. Align custom-stage docs, the agent guide and CCME, and keep skipped-consumer fixtures ordered before provider settlement.
+
+- validate the full versioned documentation build ([2ab8f74](https://github.com/yohimik/dispat/commit/2ab8f74c065940061667285721b2c1caf44dd546)) (by yohimik, Codex)
+  Give the documentation build a configurable Node heap for its archived
+  versions. Correct requirement references and goal assignments to match
+  the configured-stage tests and implemented dependency contracts.
+
+- recover published packages with durable receipts ([80ecde8](https://github.com/yohimik/dispat/commit/80ecde80937e618469fdd47b7e975a850fb9cf3e)) (by yohimik, Codex)
+  Persist per-package publication evidence before dependent publication and
+  optional recorders. Verify repeated artifact identity, preserve exported
+  source targets, and reject conflicting or unverifiable records.
+
+  Finalize release commits with atomic branch and immutable-tag pushes plus
+  leased receipt deletion. Bind local retries to prepared targets, reconcile
+  lost replies and remote advances, and keep optional aliases independent.
+
+  Cover rejected writes, interrupted finalization, same-checkout retries,
+  tag tampering, stale receipts and adoption mismatches with regressions.
+
+- apply the GitHub body limit to release previews ([e86a2b4](https://github.com/yohimik/dispat/commit/e86a2b4c86751d0258765a8a04d8bee6f579be43)) (by yohimik, Codex)
+  Render pending and historical GitHub previews through the publication body
+  renderer, preserving continuation links, release metadata and footers.
+  Report W245 for truncated previews and keep changelog previews complete.
+
+- render a past release's date and its run's providers in preview --version ([59701e4](https://github.com/yohimik/dispat/commit/59701e420e594b16920043197f4498a1a6bba03a)) (by yohimik, Claude Opus 5.5)
+  preview --version headed a past release with the pending form, the channel
+  in place of a date, and dropped the Dependencies section of a consumer whose
+  providers each made a release commit of their own in the same run: their
+  tags sit on the commits below the consumer's, so the replan read them as
+  older releases and planned nothing for them.
+
+  The header now carries the release tag's date (tagger date of an annotated
+  tag, commit date of a lightweight one, in UTC) through the changelog's own
+  entry header. The run's release commits are found by walking first parents
+  from the tag's commit while the message is commit.messageFormat rendered
+  with the release tags the commit carries; every other package's tag on them
+  is masked, so the providers plan again at the tag's commit as the run
+  planned them. A tag on an ordinary commit keeps the same-commit masking.
+
+  On this repository, services/dispat/v1.11.0-rc.8's previewed --changelog
+  entry now equals the entry the release wrote byte for byte; before, the
+  header and the four Dependencies lines differed.
+
+- cap a GitHub release body at the API limit instead of failing the release ([7ce87d5](https://github.com/yohimik/dispat/commit/7ce87d5fc82d6f902923d24282d0da0240cd69c3)) (by yohimik, Claude Opus 5.5)
+  Release run 40177824466 tagged services/dispat/v1.11.0-rc.8 and made its
+  release commit (908cbb9e), then failed at `dispat github`: GitHub refused
+  the body with a 422, "body is too long (maximum is 125000 characters)".
+  The package was marked failed after its tag was out, every consumer was
+  skipped, and the rc.8 release page does not exist.
+
+  `dispat preview -p dispat --github` at ef7c79c5, with GITHUB_REPOSITORY
+  set as in CI so commit references render as links, gives a body of
+  125,407 characters: 60 perf and fix entries with benchmark tables. The
+  ### Release block makes it 125,476. The changelog entry the run wrote is
+  125,269 bytes over 2,028 lines.
+
+  The recorder now keeps a body within 120,000 characters, counted as
+  runes. A longer one loses whole entries from the end of its sections,
+  and the sections close with a line linking the package's changelog file
+  at the tag. The header, authors, ### Release, note and footer are kept.
+  The cut is reported once as W245. A body within the limit is sent as
+  rendered, and any other refusal still fails the package.
+
+- repair an answered-work record changed outside or cut by a crash ([f771956](https://github.com/yohimik/dispat/commit/f77195625efb0460b14da0ab582ffac811950abc)) (by yohimik, Claude Opus 5.5)
+  Review blocker on dda1be5f. Appending over the closing brace trusted that
+  seen.json was still the file this process last wrote, and a process killed
+  mid-append left an object without its closing brace. Either way the next
+  `dispat worker` refused to start until someone deleted the record, which
+  gives up replay protection; the old whole-file rewrite healed both.
+
+  An append now checks the opened file first: the same file (identity),
+  the same size and modification time this process last left it at, and a
+  closing brace where the append starts. Anything else is a change from
+  outside and the claim rewrites the file whole through a temporary file
+  and a rename, as every claim did before the append. LoadSeenSet reads a
+  file that ends inside its object, with nothing before the end that a
+  reader would refuse, as the members before the cut: the member being
+  written belonged to a Record that never returned, so its attempt never
+  ran, and dropping it is safe. A file broken anywhere else, or one that
+  ends at its opening brace (no append can leave that), is still refused.
+  The next claim rewrites the file whole. A release older than the append
+  cannot read a cut file; the docs say so.
+
+  Record's comment no longer claims a record is never half there, and the
+  no-op for an already-known triple says why it is correct.
+
+  Failure behaviour that differs from the base on purpose: a claim succeeds
+  where only the temporary file or the folder is unwritable and seen.json
+  itself is writable, because an append needs neither (dda1be5f).
+
+  Tests: TestSeenSetRecordRepairsAFileChangedOutside (emptied in place,
+  replaced by a file of its size, edited in place to its size, cut short)
+  fails on dda1be5f..80227e39 in three of its four cases.
+  TestSeenSetLoadReadsARecordCutByACrash cuts an append at every byte and
+  fails there too. TestExecutionWorkerReadsAnAnsweredWorkRecordACrashCut
+  (integration, EXE-52) fails with the binaries of 1bfc3967 and c7b14d32.
+
+  testreport bench, ./internal/execution, -bench '^BenchmarkSeenSetRecord'
+  -benchmem -benchtime=10000x, darwin/arm64 Apple M5, shared machine:
+  allocs/op and B/op are stable, ns/op indicative. The after column is this
+  commit (tree a77c7ff9); the cost is the two fstat calls and the one-byte
+  read that make the append safe.
+
+  | benchmark     | revision  | allocs/op | B/op    | ns/op   |
+  |---------------|-----------|-----------|---------|---------|
+  | Record        | 80227e39  | 19        | 2370    | 17500   |
+  | Record        | this      | 21        | 2787    | 27659   |
+  | RecordPruning | c7b14d32  | 5022      | 1279911 | 1236039 |
+  | RecordPruning | 80227e39  | 30        | 3707    | 17878   |
+  | RecordPruning | this      | 32        | 4123    | 27917   |
+
+- name the agent guide the AI agent skill (agent work guide) ([07ed726](https://github.com/yohimik/dispat/commit/07ed726f4c2bd757c01f24477a859d8a7f5fc253)) (by yohimik, Claude Opus 5.5)
+  The guide is the skill an AI agent follows to inspect, test, release and
+  recover a dispat repository. Its title, the READMEs, CONTRIBUTING, the
+  CLI reference page, the requirement matrix and `dispat --help` now give
+  it that full name at their first mention, and the agent skill after it.
+
+### Authors
+
+- yohimik
+- Codex
+- Claude Opus 5.5
+
+
 ## packages/docs/v1.11.0-rc.6 (2026-10-24)
 
 ### Fixes
