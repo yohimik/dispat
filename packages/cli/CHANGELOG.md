@@ -1,5 +1,29 @@
 # Changelog
 
+## packages/cli/v1.11.0-rc.8 (2026-10-27)
+
+### Fixes
+
+- name the optional release stage test ([6a648af](https://github.com/yohimik/dispat/commit/6a648af70e9b8035d4dbc78d8e1991b76b536ecd)) (by yohimik, Codex)
+  Use the verb test in flow configuration, hooks, task identities and stage constraints. Refuse the former prerelease spellings with migration guidance while preserving scripts named tests. Align custom-stage docs, the agent guide and CCME, and keep skipped-consumer fixtures ordered before provider settlement.
+
+- name the agent guide the AI agent skill (agent work guide) ([07ed726](https://github.com/yohimik/dispat/commit/07ed726f4c2bd757c01f24477a859d8a7f5fc253)) (by yohimik, Claude Opus 5.5)
+  The guide is the skill an AI agent follows to inspect, test, release and
+  recover a dispat repository. Its title, the READMEs, CONTRIBUTING, the
+  CLI reference page, the requirement matrix and `dispat --help` now give
+  it that full name at their first mention, and the agent skill after it.
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.11.0-rc.9): 1.11.0-rc.8 -> 1.11.0-rc.9
+
+### Authors
+
+- yohimik
+- Codex
+- Claude Opus 5.5
+
+
 ## packages/cli/v1.11.0-rc.6 (2026-10-24)
 
 ### Fixes

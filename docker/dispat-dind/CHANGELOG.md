@@ -1,5 +1,22 @@
 # Changelog
 
+## docker/dispat-dind/v1.11.0-rc.8 (2026-10-27)
+
+### Fixes
+
+- link image notes to the CLI changelog ([8d246c0](https://github.com/yohimik/dispat/commit/8d246c00b15ffbf2dd9f9cea059bc084a9ba42b0)) (by yohimik, Codex)
+  Image and CLI release counters are independent, so an image version cannot identify the embedded CLI release tag.
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.11.0-rc.9): 1.11.0-rc.8 -> 1.11.0-rc.9
+
+### Authors
+
+- yohimik
+- Codex
+
+
 ## docker/dispat-dind/v1.11.0-rc.6 (2026-09-25)
 
 ### Fixes
