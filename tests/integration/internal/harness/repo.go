@@ -54,6 +54,11 @@ func New(t testing.TB) *Repo {
 // on.
 const DefaultBranch = "main"
 
+const bareRemoteAutoGCConfig = "gc.auto"
+const bareRemoteAutoGCDisabled = "0"
+const bareRemoteReceiveAutoGCConfig = "receive.autogc"
+const bareRemoteReceiveAutoGCDisabled = "false"
+
 // Clone makes a second working copy of a repository from a URL, on the same
 // footing as one New created: the binaries under test, the fixture identity
 // and the same invocation plumbing.
@@ -178,6 +183,14 @@ func (r *Repo) AddBareRemote() string {
 	r.T.Helper()
 	bare := r.T.TempDir()
 	r.Git("init", "-q", "--bare", bare)
+	// Detached receive-side maintenance must not outlive a disposable remote.
+	for _, setting := range [][2]string{
+		{bareRemoteAutoGCConfig, bareRemoteAutoGCDisabled},
+		{bareRemoteReceiveAutoGCConfig, bareRemoteReceiveAutoGCDisabled},
+	} {
+		out, err := exec.Command("git", "-C", bare, "config", setting[0], setting[1]).CombinedOutput()
+		require.NoError(r.T, err, "git config %s: %s", setting[0], out)
+	}
 	// Same reason as New: a bare repository's HEAD decides what a later clone
 	// checks out, and a clone landing on an unborn branch pushes somewhere the
 	// original never tracks.

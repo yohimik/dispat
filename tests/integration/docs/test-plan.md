@@ -2313,11 +2313,12 @@ until two commits are by two different people; the repository's own fixed identi
 | `TestAuthorsIdentityWithNoAddress` | Git accepts a commit whose author has a name and no address, and the attribution survives it in what it renders and in deciding that two such commits are by one person. |
 | `TestAuthorsFoldedSpellingsAreOnePerson`   | Two `Co-authored-by` trailers spelling one identity in two cases, differing by a final sigma that lowercasing keeps apart, credit one person on the line and in the section, under the fold every other name comparison uses. |
 
-### Goal 49: integration harness integrity (`internal/harness/race_test.go`, `internal/harness/binary_test.go`, `internal/harness/gitfault_test.go`, `internal/harness/go_install_test.go`, `internal/harness/proc_test.go`)
+### Goal 49: integration harness integrity (`internal/harness/race_test.go`, `internal/harness/binary_test.go`, `internal/harness/gitfault_test.go`, `internal/harness/go_install_test.go`, `internal/harness/proc_test.go`, `internal/harness/remote_test.go`)
 
 | Test | Claim proven |
 | --- | --- |
 | `TestCheckRaceReports` | Any recorded subprocess race fails the suite, even when a behavioral scenario accepts a nonzero exit. Unconfigured normal runs and empty report directories pass; unrelated files do not count as race reports. |
+| `TestBareRemotePushDoesNotStartAutomaticMaintenance` | A real push into a disposable bare remote invokes receive-pack without starting automatic maintenance that could outlive the fixture and race temporary-directory cleanup. A positive control explicitly enables receive-side maintenance and verifies its child in Git Trace2. |
 | `TestGitFaultSelectsMatchesAndPassesTheRestThrough` | The stand-in `git` is the real Git for every invocation a scenario did not name, fails exactly the selected matches — every one, only the Nth, the Nth onward, or the Nth through a later one — with the configured exit status and a recognisable marker, counts every match whether it failed it or not, and can answer with a reply of its own instead of running Git at all, or hold a selected invocation until the scenario resumes it and then run the real command; a chain of two faults hands whatever the first one runs to the second. |
 | `TestGitFaultReservesOrdinalsAfterALongPrefix` | A fault whose earlier match ordinals already exist reserves the next ordinal and applies its exact Nth rule after a long prefix. |
 | `TestGitFaultConcurrentMatchesReserveDistinctOrdinals` | Concurrent matching Git invocations reserve distinct ordinals, so exactly the configured Nth invocation receives the injected failure. |
