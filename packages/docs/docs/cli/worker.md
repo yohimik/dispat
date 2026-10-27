@@ -1,7 +1,8 @@
 # The worker command
 
 Run `dispat worker` on a peer node that can execute build, test and other eligible prepublication stages.
-It reads the signed compiled graph, discovers ready tasks, and executes only after its authenticated claim is
+In compilation it reads the signed compiled graph; in interpretation it independently derives the same plan and
+graph from pinned input, verifies both digests, then discovers ready tasks. It executes only after its authenticated claim is
 accepted and its pending Git branch's exact remote OID is confirmed. It writes its own output or failed branch. The orchestrator also
 executes ordinary work and alone advances canonical task, ledger and release refs, publishes artifacts and writes
 release records.
@@ -51,12 +52,16 @@ variable from its secret store. It holds the canonical unpadded base64url encodi
 seed; the orchestrator pins the matching `workers[].identityPublicKey`. The private seed never goes in the
 configuration or logs. The shared message secret alone cannot authorize a late join.
 
-A worker configuration does not need a separate release policy. The signed graph binds commands
-and exact inputs; the worker verifies its root and each eligible task before claiming. When `execution.endpoint` is set,
+A worker configuration does not need a separate release policy. The signed graph binds task identity and exact
+inputs; compilation also binds command templates. The worker verifies the graph and each eligible task before
+claiming. When `execution.endpoint` is set,
 the worker can start outside a Git checkout. The orchestrator advertises its HTTPS return URL and exact
 TLS leaf SHA-256 in signed per-run bootstrap data; the peer needs no independent return URL setting.
 The worker sends signed claim and result requests through that authenticated non-Git channel. It reads Git objects
-and creates only its own `dispat-pending-*`, `dispat-output-*` and `dispat-failed-*` refs. Configure Git host rules
+and creates only its own `dispat-pending-*`, `dispat-output-*` (compilation), `dispat-completed-*`
+(interpretation), and `dispat-failed-*` refs. An interpretation pickup name includes its creation time and a
+persisted random identity, so two pickups in the same clock tick remain distinct; time does not authorize a claim.
+Configure Git host rules
 to deny its credential writes to canonical task and ledger refs, release branches, tags and the lock tag.
 
 Set the signing secret and any credentials or variables the assigned commands need. Environment values are expanded

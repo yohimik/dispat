@@ -71,7 +71,7 @@ func (b *FirstNodeBroker) MarkPickupContactLost(ctx context.Context,
 		pickup.cancelReplyDeadlineUTC == choreographyPickupContactNoIdentity {
 		return fmt.Errorf(choreographyPickupContactNoActiveClaimError)
 	}
-	if task.attempt >= maxPlacementAttempts {
+	if task.attempt >= task.spec.EffectiveMaxAttempts() {
 		return fmt.Errorf(choreographyPickupContactAttemptsExhaustedError)
 	}
 	deadline, err := time.Parse(time.RFC3339, pickup.cancelReplyDeadlineUTC)
@@ -108,14 +108,16 @@ func (g *GitChoreographyPersist) PersistPickupContactLost(ctx context.Context,
 	if err := g.opts.VerifyFirst(ctx); err != nil {
 		return err
 	}
+	spec, knownTask := g.tasks[loss.Task]
 	if loss.ChoreographyRunBinding != g.opts.Binding || loss.Task == choreographyPickupContactNoIdentity ||
+		!knownTask ||
 		loss.PickupID == choreographyPickupContactNoIdentity ||
-		loss.Attempt >= maxPlacementAttempts ||
+		loss.Attempt >= spec.EffectiveMaxAttempts() ||
 		loss.ClaimOID == choreographyPickupContactNoIdentity ||
 		loss.CancelOID == choreographyPickupContactNoIdentity ||
 		loss.CancelReplyDeadlineUTC == choreographyPickupContactNoIdentity ||
-		g.tasks[loss.Task].Branch != loss.Branch ||
-		!g.tasks[loss.Task].RetryAfterUncertainAttempt {
+		spec.Branch != loss.Branch ||
+		!spec.RetryAfterUncertainAttempt {
 		return fmt.Errorf(choreographyPickupContactSignedClaimError)
 	}
 	g.mu.Lock()

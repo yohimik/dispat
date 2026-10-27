@@ -37,7 +37,7 @@ const releaseDeferredPublishReadinessErrorFormat = "consumer %s waits for provid
 // part of the monorepo. The zero value is the whole of it, which is what a bare
 // `dispat release` at the repository root asks for.
 type ReleaseOptions struct {
-	// DistributionMode selects the invocation mode; RC.9 accepts compilation only.
+	// DistributionMode selects compiled templates or independent interpretation.
 	// Empty preserves compilation for direct App callers.
 	DistributionMode public.DistributionMode
 	// ReturnEndpoint is the HTTPS address workers use to submit claims

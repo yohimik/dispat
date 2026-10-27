@@ -36,6 +36,11 @@ const (
 	// one task at a time, which is the only bound that is safe without
 	// knowing what the node runs.
 	DefaultExecutionConcurrency = 1
+	// DefaultExecutionMaxAttempts is the total accepted pickups permitted for
+	// one interpretation task when no attempt policy is stated.
+	DefaultExecutionMaxAttempts = 1
+	// MaximumExecutionMaxAttempts bounds signed task history and replay work.
+	MaximumExecutionMaxAttempts = 64
 	// DefaultExecutionPreflightTimeout bounds the probe that asks a worker
 	// what it is, in seconds. A node that cannot answer a question this small
 	// in a minute is not one to dispatch work to.
@@ -85,6 +90,11 @@ const (
 // makes distributed execution an addition rather than a new code path every
 // existing repository travels.
 type ExecutionConfig struct {
+	// MaxAttempts bounds total accepted pickups of a delegated interpretation
+	// task. Stating more than one asserts that a settled failed command and its
+	// hooks can safely be repeated. Contact-loss retry additionally requires
+	// RetryAfterUncertainAttempt. Compilation keeps its established policy.
+	MaxAttempts *int `json:"maxAttempts,omitempty"`
 	// RetryAfterUncertainAttempt is an operator assertion that every delegated
 	// command in this run can be repeated after uncertain external effects
 	// without creating a conflicting side effect. It is false by default.
@@ -132,6 +142,15 @@ type ExecutionConfig struct {
 	// Transfer bounds what one task's build outputs may weigh. nil means
 	// every default; see ExecutionTransferConfig.
 	Transfer *ExecutionTransferConfig `json:"transfer,omitempty"`
+}
+
+// ResolveMaxAttempts preserves an explicit zero for the loader to reject.
+// The optional interpretation setting defaults to one total accepted pickup.
+func (c *ExecutionConfig) ResolveMaxAttempts() int {
+	if c == nil || c.MaxAttempts == nil {
+		return DefaultExecutionMaxAttempts
+	}
+	return *c.MaxAttempts
 }
 
 // ExecutionWorkerConfig is one entry of `execution.workers`: a

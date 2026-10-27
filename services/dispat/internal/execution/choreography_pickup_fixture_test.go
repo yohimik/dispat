@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
@@ -37,6 +38,11 @@ func prepareChoreographyFixturePickupResult(t *testing.T, fixture *mailboxFixtur
 		MembershipEpochOID:  claim.MembershipEpochOID,
 		CapacityAuthorityID: claim.CapacityAuthorityID,
 		LeaseIntentID:       claim.LeaseIntentID, LeaseWeight: claim.LeaseWeight}
+	if len(claim.PickupID) == choreographyInterpretedIDHexChars {
+		issuedAt, timeErr := interpretedPickupTime(claim.PickupID)
+		require.NoError(t, timeErr)
+		pending.IssuedAt = issuedAt.Format(time.RFC3339Nano)
+	}
 	pending.Branch = pendingBranch
 	pendingDocument, err := json.Marshal(pending)
 	require.NoError(t, err)

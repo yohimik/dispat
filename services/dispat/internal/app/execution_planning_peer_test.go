@@ -32,6 +32,9 @@ func TestPeerReleaseRecomputesFromCapturedBytesAndRefusesDifferentGraph(t *testi
 	loaded, err := config.Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
 	first := New(root, loaded, zerolog.Nop())
+	// Simulate a first node whose CPU-derived defaults differ from this peer's.
+	// The raw captured config still has no explicit concurrency values.
+	first.cfg.BuildConcurrency, first.cfg.PublishConcurrency = 7, 5
 	selected, err := first.selectedPlan(t.Context(), ReleaseOptions{})
 	require.NoError(t, err)
 	planDigest, err := first.calculatePlanDigest(t.Context(), selected, ReleaseOptions{})
@@ -86,6 +89,24 @@ func TestPeerReleaseRecomputesFromCapturedBytesAndRefusesDifferentGraph(t *testi
 		MaxPackBytes: 1 << 20,
 	})
 	require.ErrorContains(t, err, "task graph differs")
+
+	wrongPlan := binding
+	wrongPlan.PlanDigest = "different"
+	_, err = recomputePeerReleasePlan(t.Context(), peerReleasePlanningOptions{
+		Inputs: inputs, Binding: wrongPlan, SemanticGraphDigest: graph.Digest(),
+		SourceDirs: map[string]string{"": root}, Log: zerolog.Nop(),
+		MaxPackBytes: 1 << 20,
+	})
+	require.ErrorContains(t, err, pinnedPlanningPeerPlanMismatchErrorText)
+
+	wrongPolicy := inputs
+	wrongPolicy.Options = []byte("[]")
+	_, err = recomputePeerReleasePlan(t.Context(), peerReleasePlanningOptions{
+		Inputs: wrongPolicy, Binding: binding, SemanticGraphDigest: graph.Digest(),
+		SourceDirs: map[string]string{"": root}, Log: zerolog.Nop(),
+		MaxPackBytes: 1 << 20,
+	})
+	require.ErrorContains(t, err, pinnedPlanningPeerPolicyMismatchErrorText)
 }
 
 func TestPeerReleaseRecomputesFleetFromCapturedOwners(t *testing.T) {

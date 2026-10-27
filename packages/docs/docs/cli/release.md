@@ -111,12 +111,15 @@ See [Distributed execution](../distributed-execution.md).
 
 ### `--distribution-mode`
 
-Selects `compilation`, the only supported mode. The orchestrator computes the plan, publishes ready work,
-validates claims, and alone publishes or pushes Git refs. Other values are refused before task effects.
+Selects `compilation` (default) or `interpretation`. In compilation the first node compiles task descriptors;
+in interpretation each admitted node independently derives and verifies the pinned plan and graph before it
+proposes locally ready work. The first node validates exact claims and alone advances canonical task, ledger and
+release refs. `hybrid` and unknown values are refused before task effects.
 
 ### `--return-endpoint`, `--return-listen`
 
 When remote workers participate, `--return-endpoint` names the orchestrator's advertised authenticated
 HTTPS return channel, such as `https://runner.example:8443`. `--return-listen` optionally selects a different
 local `host:port` to bind; otherwise the listener address is derived from the advertised endpoint. Workers
-send claim and result requests there. They do not push Git refs. A local-only release needs no return listener.
+send claim and result requests there. They create only their own signed pending and outcome Git refs. A local-only
+release needs no return listener.

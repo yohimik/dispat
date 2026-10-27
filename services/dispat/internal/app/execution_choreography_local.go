@@ -51,7 +51,8 @@ func (a *App) bindFirstLocalWorker(c *execution.Coordinator,
 			Node: c.Local.Name, Endpoint: endpoint, StateDir: stateDir,
 			Report: report, Mailbox: mailbox, ReturnSigner: c.Signer,
 			NodeSlots: slots, Cache: a.git, Seen: seen, Log: a.log,
-			TransferTimeout: time.Duration(a.cfg.Execution.ResolveTransfer().Timeout) * time.Second,
+			PrepareInterpretedRun: a.interpretedRunPlanner(c.Local.Name, c.Signer),
+			TransferTimeout:       time.Duration(a.cfg.Execution.ResolveTransfer().Timeout) * time.Second,
 			VerifyOwner: func() error {
 				checkCtx, cancel := context.WithTimeout(context.Background(), choreographyOwnershipCheckTimeoutSeconds*time.Second)
 				defer cancel()

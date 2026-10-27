@@ -6,7 +6,7 @@ package cli
 const (
 	compiledDistributionModeName         = "compilation"
 	distributionModeFlagName             = "distribution-mode"
-	distributionModeUsageText            = "release, run and status: compilation only"
+	distributionModeUsageText            = "release, run and status: compilation or interpretation"
 	invalidInvocationExitCode            = 2
 	invalidPlanningConcurrencyErrorText  = "invalid concurrency override"
 	invalidReturnChannelAddressErrorText = "invalid return channel address"
@@ -25,7 +25,7 @@ const (
 	returnEndpointUsageText              = "release and run: reachable HTTPS address of this run's first-node return channel"
 	returnListenFlagName                 = "return-listen"
 	returnListenUsageText                = "release and run: local host:port binding for the return channel (defaults to the address in --return-endpoint)"
-	unsupportedDistributionModeErrorText = "unsupported --distribution-mode value (this build supports compilation)"
+	unsupportedDistributionModeErrorText = "unsupported --distribution-mode value (this build supports compilation and interpretation)"
 	workerCompiledUsageText              = `Serve the build and validation tasks another node's release assigns to this
 one, and nothing else. A worker never starts a release, never writes a
 release record and never plans: it reads the work addressed to it, runs

@@ -22,13 +22,14 @@ func (b *FirstNodeBroker) decidePickupAttempt(ctx context.Context,
 	if d.ChoreographyRunBinding != b.binding || d.Branch != task.spec.Branch ||
 		d.Attempt != pickup.attempt || d.Node != pickup.node ||
 		d.ResultOID != pickup.resultReceiptOID || pickup.settled || task.terminal ||
-		d.Retry && (d.Succeeded || pickup.attempt >= maxPlacementAttempts) {
+		d.Retry && (d.Succeeded || pickup.attempt >= task.spec.EffectiveMaxAttempts()) {
 		return fmt.Errorf(choreographyBrokerInvalidAttemptDecisionError)
 	}
-	if d.Retry && !task.spec.RetryAfterUncertainAttempt {
+	if d.Retry && !task.spec.IsPickupRetryAllowed(pickup.resultOutputOID != choreographyNoAcceptedResultOutputOID) {
 		return fmt.Errorf(choreographyBrokerInvalidAttemptDecisionError)
 	}
-	if !d.Succeeded && !d.Retry && task.attempt < maxPlacementAttempts && !b.stopping && task.spec.RetryAfterUncertainAttempt {
+	if !d.Succeeded && !d.Retry && task.attempt < task.spec.EffectiveMaxAttempts() && !b.stopping &&
+		task.spec.IsPickupRetryAllowed(pickup.resultOutputOID != choreographyNoAcceptedResultOutputOID) {
 		return fmt.Errorf(choreographyBrokerInvalidAttemptDecisionError)
 	}
 	if d.Retry && task.claim != pickup.claimOID {

@@ -18,7 +18,6 @@ const (
 	executionDefaultRemoteName                  = "origin"
 	firstNodeCapacityUnavailableErrorFormat     = "first-node shared task capacity cannot be established: %w"
 	firstRunRetainedLogText                     = "first-node run identity remains for reconciliation"
-	interpretationUnavailableErrorText          = "distribution mode interpretation is not available in this build"
 	pinnedRepositoryRemoteAbsentErrorFormat     = "execution: pinned remote identity of %q is absent"
 	preflightMissingGraphErrorText              = "distributed preflight has no compiled task graph"
 	preflightMissingReturnChannelErrorText      = "distributed preflight has no return channel"
@@ -36,6 +35,6 @@ const (
 	sweepPlanningBytesChangedErrorText          = "execution: source or configuration bytes changed while the run plan was computed"
 	sweepTaskFailedState                        = true
 	sweepTaskSettlementErrorFormat              = "execution: signed sweep task %s cannot settle: %w"
-	unsupportedDistributionModeErrorFormat      = "unsupported distribution mode %q (this build supports compilation)"
+	unsupportedDistributionModeErrorFormat      = "unsupported distribution mode %q (this build supports compilation and interpretation)"
 	workerDefaultEndpointUnavailableErrorFormat = "a worker link states no endpoint, and the release remote it would reach could not be resolved: %w"
 )

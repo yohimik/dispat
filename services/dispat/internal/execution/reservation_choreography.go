@@ -95,7 +95,7 @@ func validateChoreographyReservation(reservation *Reservation) error {
 		reservation.PlanDigest == choreographyReservationMissingOID || reservation.Kind == choreographyReservationMissingOID ||
 		reservation.Task == choreographyReservationMissingOID || reservation.Attempt != choreographyReservationFirstAttempt || reservation.Node != choreographyReservationMissingOID ||
 		reservation.Branch != FormatChoreographyTaskBranch(reservation.Run, reservation.Task) ||
-		reservation.BootstrapOID == choreographyReservationMissingOID || reservation.MaxAttempts != maxPlacementAttempts {
+		reservation.BootstrapOID == choreographyReservationMissingOID || !validChoreographyAttemptLimit(reservation.MaxAttempts) {
 		return fmt.Errorf(choreographyReservationInvalidError)
 	}
 	if _, err := time.Parse(time.RFC3339, reservation.IssuedAt); err != nil {

@@ -3,6 +3,7 @@ import {usePluginData} from '@docusaurus/useGlobalData';
 import {README_PLUGIN} from '@site/plugins/readme/name';
 import type {Argument, ReadmeData} from '@site/plugins/readme/types';
 import {DemoCarousel} from '@site/src/components/DemoCarousel';
+import {DispatTheorem} from '@site/src/components/DispatTheorem';
 import {DownloadCounter} from '@site/src/components/DownloadCounter';
 import {Inlines} from '@site/src/components/Inline';
 import {DESCRIPTION, PAGE_TITLE, TAGLINE_NOTE} from '@site/src/site-metadata';
@@ -73,39 +74,6 @@ function Section({chip, title, id, children}: {chip: string; title: string; id: 
 const INSTALL_CURL = 'curl -fsSL https://raw.githubusercontent.com/yohimik/dispat/main/install.sh | sh';
 const INSTALL_WINDOWS = 'irm https://raw.githubusercontent.com/yohimik/dispat/main/install.ps1 | iex';
 
-/** A small dependency sketch, with the same example versions as the README. */
-function ReleaseSketch(): React.ReactElement {
-  return (
-    <figure className={styles.sketch}>
-      <figcaption><span>Fig. 01</span> A release follows its dependencies.</figcaption>
-      <svg viewBox="0 0 360 270" role="img" aria-labelledby="release-sketch-title release-sketch-description">
-        <title id="release-sketch-title">A release plan for three packages</title>
-        <desc id="release-sketch-description">The core library changes from 1.2.3 to 1.3.0. Its app consumer follows with a patch, from 0.8.1 to 0.8.2. An unchanged docs package stays out of the plan.</desc>
-        <g className={styles.sketchLines}>
-          <rect x="25" y="32" width="184" height="66" />
-          <path d="M117 98 V132 H233 V162 M227 155 L233 162 L239 155" />
-          <rect x="141" y="163" width="194" height="66" />
-          <path d="M26 197 H103" strokeDasharray="3 5" />
-        </g>
-        <g className={styles.sketchText}>
-          <text x="40" y="57">core</text>
-          <text x="40" y="79" className={styles.sketchVersion}>1.2.3 → 1.3.0</text>
-          <text x="157" y="188">app</text>
-          <text x="157" y="210" className={styles.sketchVersion}>0.8.1 → 0.8.2</text>
-          <text x="25" y="181" className={styles.sketchMuted}>docs</text>
-          <text x="25" y="218" className={styles.sketchSmall}>unchanged</text>
-          <text x="137" y="119" className={styles.sketchSmall}>dependency first</text>
-        </g>
-        <g className={styles.sketchTicks}>
-          <path d="M185 49 l4 4 7-9 M310 180 l4 4 7-9" />
-        </g>
-      </svg>
-      <div className={styles.sketchCommand}><span aria-hidden="true">$ </span><code>dispat status</code><span>2 releasing / 3 packages</span></div>
-      <p className={styles.sketchNote}>Look at the plan. Then let it run.</p>
-    </figure>
-  );
-}
-
 function Hero(): React.ReactElement {
   return (
     <header className={styles.hero}>
@@ -122,16 +90,15 @@ function Hero(): React.ReactElement {
               packages in dependency order. One package, a monorepo, or several repositories.
             </p>
             <div className={styles.buttons}>
-              <Link className={`button ${styles.installButton}`} to="#install">Install dispat <span aria-hidden="true">↓</span></Link>
-              <Link className={styles.textLink} to="/getting-started">Read the guide <span aria-hidden="true">↗</span></Link>
+              <Link className={`button ${styles.installButton}`} to="/getting-started">Get started <span aria-hidden="true">↗</span></Link>
             </div>
             <p className={styles.heroNote}>{TAGLINE_NOTE}</p>
           </div>
-          <ReleaseSketch />
+          <DispatTheorem />
         </div>
         <div className={styles.heroFootnote}>
           <span>A Go binary. Your shell commands. Your Git history.</span>
-          <Link to="#demos">See it work <span aria-hidden="true">↓</span></Link>
+          <span>One plan, many independent tasks.</span>
         </div>
       </div>
     </header>

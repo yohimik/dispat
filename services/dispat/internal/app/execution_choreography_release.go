@@ -35,6 +35,7 @@ func (a *App) bindReleaseChoreography(ctx context.Context, options releaseChoreo
 		return nil, err
 	}
 	applyChoreographyRetrySafety(specs, coordinator.JoinPolicy.RetryAfterUncertainAttempt)
+	applyChoreographyAttemptLimit(specs, coordinator.JoinPolicy)
 	templates, err := compileReleaseChoreographyTemplates(coordinator, compiled, specs)
 	if err != nil {
 		return nil, err

@@ -25,6 +25,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/yohimik/dispat/pkg/models"
 	"github.com/yohimik/dispat/services/dispat/internal/config"
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
@@ -66,6 +67,9 @@ func (a *App) preflightWorkers(ctx context.Context, request releasePreflightRequ
 		return nil, a.reportPreflightFailure(err)
 	}
 	a.coordinator = coordinator
+	if err := setChoreographyCoordinatorMode(coordinator, request.mode, a.cfg.Execution); err != nil {
+		return coordinator, a.reportPreflightFailure(err)
+	}
 	if compiled == nil {
 		return coordinator, a.reportPreflightFailure(execution.NewDiagnostic(
 			execution.CodeConfiguration, execution.CategoryConfiguration,
@@ -76,7 +80,6 @@ func (a *App) preflightWorkers(ctx context.Context, request releasePreflightRequ
 		return coordinator, a.reportPreflightFailure(err)
 	}
 	coordinator.GraphDigest = graphDigest
-	coordinator.Mode = request.mode
 	if returnChannel == nil {
 		return coordinator, a.reportPreflightFailure(execution.NewDiagnostic(
 			execution.CodeConfiguration, execution.CategoryConfiguration,
@@ -182,6 +185,19 @@ func (a *App) newCoordinator(generation string, ownership *execution.OwnershipGa
 	}
 	coordinator.UseOwnership(ownership)
 	return coordinator, nil
+}
+
+func setChoreographyCoordinatorMode(coordinator *execution.Coordinator,
+	mode string, settings *models.ExecutionConfig) error {
+	coordinator.Mode = mode
+	if mode == string(models.DistributionModeInterpretation) {
+		coordinator.JoinPolicy.MaxAttempts = settings.ResolveMaxAttempts()
+	}
+	if err := coordinator.JoinPolicy.Validate(coordinator.CanonicalEndpoint); err != nil {
+		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
+			invalidExecutionAdmissionPolicyErrorFormat, err)
+	}
+	return nil
 }
 
 // resolveOwnershipGeneration names the exclusion this run holds (§28.3): the

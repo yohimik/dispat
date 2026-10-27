@@ -26,6 +26,27 @@ func TestChoreographyRetryPolicyIsExactSignedTaskPolicy(t *testing.T) {
 	require.ErrorContains(t, validateChoreographyRetryPolicy(ChoreographyJoinPolicy{}, specs), choreographyRetryPolicyMismatchError)
 }
 
+func TestChoreographyInterpretationAttemptPolicyIsSignedAndScoped(t *testing.T) {
+	policy := ChoreographyJoinPolicy{MaxAttempts: 2}
+	specs := []ChoreographyTaskSpec{
+		{Task: "interpreted-build", MaxAttempts: 2},
+		{Task: "native-publish", MaxAttempts: 1, ExecutorOwned: true},
+	}
+	require.NoError(t, validateChoreographyRetryPolicy(policy, specs))
+	require.Equal(t, 2, specs[0].EffectiveMaxAttempts())
+	require.True(t, specs[0].IsSettledFailureRetryAllowed())
+	require.False(t, specs[0].IsPickupRetryAllowed(false))
+	require.False(t, specs[1].IsSettledFailureRetryAllowed())
+	specs[0].MaxAttempts = 1
+	require.ErrorContains(t, validateChoreographyRetryPolicy(policy, specs), choreographyRetryPolicyMismatchError)
+	specs[0].MaxAttempts = 2
+	specs[1].MaxAttempts = 2
+	require.ErrorContains(t, validateChoreographyRetryPolicy(policy, specs), choreographyRetryPolicyMismatchError)
+	specs[1].MaxAttempts = 1
+	require.ErrorContains(t, validateChoreographyRetryPolicy(ChoreographyJoinPolicy{}, specs), choreographyRetryPolicyMismatchError)
+	require.Equal(t, maxPlacementAttempts, (ChoreographyTaskSpec{}).EffectiveMaxAttempts())
+}
+
 func TestChoreographyContactLossWithoutRetrySafetyRetainsClaim(t *testing.T) {
 	_, persist, binding, spec := newChoreographyLedgerFixtureWithSettings(t,
 		choreographyLedgerFixtureSettings{AuthorityID: "0123456789abcdef0123456789abcdef",

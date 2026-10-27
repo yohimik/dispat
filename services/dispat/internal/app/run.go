@@ -39,7 +39,7 @@ const SinceAll = "all"
 
 // RunOptions selects what RunScript runs over, beyond the script name.
 type RunOptions struct {
-	// DistributionMode selects the invocation mode; RC.9 accepts compilation only.
+	// DistributionMode selects compiled templates or independent interpretation.
 	// Empty preserves compilation for direct App callers.
 	DistributionMode public.DistributionMode
 	ReturnEndpoint   string

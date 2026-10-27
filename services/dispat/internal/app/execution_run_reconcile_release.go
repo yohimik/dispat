@@ -73,7 +73,7 @@ func (a *App) reconcileCompletedRelease(ctx context.Context,
 		return fmt.Errorf(retainedReleaseBootstrapUnauthenticErrorFormat, err)
 	}
 	binding := bootstrap.ChoreographyRunBinding
-	if bootstrap.Mode != retainedRunCompilationModeName || binding.Run != identity.Run ||
+	if (bootstrap.Mode != retainedRunCompilationModeName && bootstrap.Mode != interpretedModeName) || binding.Run != identity.Run ||
 		binding.Generation != identity.Generation ||
 		bootstrap.ReturnEndpoint != identity.Endpoint ||
 		bootstrap.ReturnCertSHA256 != identity.CertPin {
@@ -112,6 +112,7 @@ func (a *App) reconcileCompletedRelease(ctx context.Context,
 		return fmt.Errorf(retainedReleaseRosterPolicyErrorFormat, err)
 	}
 	applyChoreographyRetrySafety(recomputedSpecs, bootstrap.JoinPolicy.RetryAfterUncertainAttempt)
+	applyChoreographyAttemptLimit(recomputedSpecs, bootstrap.JoinPolicy)
 	specs := retained.Carrier.Tasks
 	if err := verifyRetainedChoreographyPolicy(retainedChoreographyPolicyOptions{
 		RecomputedTasks:    recomputedSpecs,

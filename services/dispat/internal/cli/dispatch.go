@@ -261,7 +261,7 @@ func (r *runner) validateFlags() (int, bool) {
 	if code, done := r.validateWorkerLinks(); done {
 		return code, true
 	}
-	if mode := public.DistributionMode(*r.o.distributionMode); mode != public.DistributionModeCompilation {
+	if mode := public.DistributionMode(*r.o.distributionMode); mode != public.DistributionModeCompilation && mode != public.DistributionModeInterpretation {
 		r.boot.Error().Str(distributionModeFlagName, *r.o.distributionMode).
 			Msg(unsupportedDistributionModeErrorText)
 		return invalidInvocationExitCode, invocationValidationCompleteState

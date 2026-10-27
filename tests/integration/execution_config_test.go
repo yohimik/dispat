@@ -67,8 +67,8 @@ func TestExecutionWorkerCommandDoesNotRunScript(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// The RC.9 CLI keeps the worker spelling and only the compiled runtime.
-// Future names and modes are refused by the real executable before a hook
+// The CLI keeps the worker spelling and refuses hybrid execution.
+// Future names and unsupported modes are refused by the real executable before a hook
 // can run, even when the repository would otherwise be releasable.
 func TestExecutionFutureNamesAndModesRefuseBeforeEffects(t *testing.T) {
 	r := executionLocalRepo(t, func(r *harness.Repo) {
@@ -77,10 +77,9 @@ func TestExecutionFutureNamesAndModesRefuseBeforeEffects(t *testing.T) {
 	})
 	for _, args := range [][]string{
 		{"release", "--choreographer", "future"},
-		{"release", "--distribution-mode", "interpretation"},
 		{"release", "--distribution-mode", "hybrid"},
 		{"release", "--distribution-mode", "mixed"},
-		{"run", "build", "--since", "all", "--distribution-mode", "interpretation"},
+		{"run", "build", "--since", "all", "--distribution-mode", "hybrid"},
 	} {
 		res := r.CommandEnv(nil, args...)
 		require.NotEqual(t, 0, res.Code, "args: %v\nstdout:\n%s\nstderr:\n%s", args, res.Stdout, res.Stderr)

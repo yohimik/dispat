@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,7 @@ const (
 	pickupFailoverSecondMarkerName     = "second-computed"
 	pickupFailoverTaskPackage          = "alpha"
 	pickupFailoverOutputPushPattern    = "*push*refs/heads/dispat-output-*"
+	pickupFailoverCompletedPushPattern = "*push*refs/heads/dispat-completed-*"
 	pickupFailoverContactLostKind      = "pickup-contact-lost"
 	pickupFailoverClaimKind            = "claim-accepted"
 	pickupFailoverResultKind           = "result-accepted"
@@ -58,6 +60,14 @@ func pickupFailoverFindEvent(events []executionLateJoinLedgerEvent, kind, node s
 }
 
 func TestExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t *testing.T) {
+	testExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t, false)
+}
+
+func TestExecutionInterpretationTwoWorkersFailOverAfterSignedPickupContactLoss(t *testing.T) {
+	testExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t, true)
+}
+
+func testExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t *testing.T, interpreted bool) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the durable distributed node-slot backend is unavailable on Windows")
 	}
@@ -73,6 +83,9 @@ func TestExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t *testing.T) {
 		},
 		func(cfg *models.File) {
 			cfg.Execution.RetryAfterUncertainAttempt = true
+			if interpreted {
+				cfg.Execution.MaxAttempts = models.Int(interpretationSecondAttemptLimit)
+			}
 			cfg.Concurrency = []int{pickupFailoverRunBudget, pickupFailoverWorkerCapacity}
 			cfg.Execution.Concurrency = models.Int(pickupFailoverRunBudget)
 			cfg.Execution.Timeouts.Admission = pickupFailoverAdmissionSeconds
@@ -85,8 +98,12 @@ func TestExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t *testing.T) {
 		pinPackages(map[string]*models.RunOnly{
 			pickupFailoverTaskPackage: placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
 		}))
+	outputPushPattern := pickupFailoverOutputPushPattern
+	if interpreted {
+		outputPushPattern = pickupFailoverCompletedPushPattern
+	}
 	oldOutcomeGate := harness.NewGitFault(t, harness.GitFault{
-		Pattern: pickupFailoverOutputPushPattern, Nth: 1, Hold: true})
+		Pattern: outputPushPattern, Nth: 1, Hold: true})
 	firstWorker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, oldOutcomeGate.Env()...)
 	firstStopped := false
 	defer func() {
@@ -95,7 +112,11 @@ func TestExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t *testing.T) {
 			firstWorker.stop(t)
 		}
 	}()
-	firstNode := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
+	releaseArgs := []string{"release", "--return-endpoint", rig.returnURL}
+	if interpreted {
+		releaseArgs = append(releaseArgs, "--distribution-mode", "interpretation")
+	}
+	firstNode := rig.repo.StartReleaseEnv(rig.env(), releaseArgs...)
 	require.Eventually(t, oldOutcomeGate.IsHeld, pickupFailoverJoinWait, pickupFailoverPoll,
 		"the first worker must complete its command and hold the immutable outcome push")
 	require.FileExists(t, firstComputed)
@@ -167,7 +188,19 @@ func TestExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t *testing.T) {
 	require.Equal(t, firstClaim.PickupID, oldAck.PickupID)
 	require.Equal(t, firstClaim.PickupID, oldSettled.PickupID)
 	require.NotEqual(t, lost.PickupID, secondClaim.PickupID)
-	outputTips := executionSagaWorkerOutcomeTips(t, rig.mailbox, executionSagaSuccessfulStatus)
+	var outputTips []string
+	if interpreted {
+		statuses := interpretationPickupOutcomes(t, rig.mailbox,
+			[]executionLateJoinLedgerEvent{firstClaim, secondClaim})
+		require.Equal(t, executionSagaSuccessfulStatus, statuses[firstClaim.PickupID])
+		require.Equal(t, executionSagaSuccessfulStatus, statuses[secondClaim.PickupID])
+		for _, ref := range executionProtocolRefs(t, rig.mailbox, interpretationCompletedBranchPrefix) {
+			outputTips = append(outputTips, strings.TrimSpace(bareGit(t, rig.mailbox,
+				"rev-parse", "refs/heads/"+ref)))
+		}
+	} else {
+		outputTips = executionSagaWorkerOutcomeTips(t, rig.mailbox, executionSagaSuccessfulStatus)
+	}
 	require.Len(t, outputTips, pickupFailoverRunBudget,
 		"both distinct pickups retain signed pending and outcome branches")
 	require.Contains(t, outputTips, winner.OutputOID,

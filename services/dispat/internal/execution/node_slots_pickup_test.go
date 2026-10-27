@@ -39,3 +39,31 @@ func TestNodeSlotsKeepIndependentPickupsChargedAcrossRestart(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, available, "unknown pickups remain charged against capacity")
 }
+
+func TestNodeSlotsAcceptInterpretedPickupAndRejectMalformedIdentity(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.Chmod(root, 0o700))
+	authority, err := OpenNodeSlotAuthority(root, "worker", 1)
+	require.NoError(t, err)
+	intent := NodeSlotIntent{Run: "run", Task: "build", Attempt: 1, Weight: 1,
+		PickupID: NewInterpretedChoreographyPickupID()}
+	malformed := []string{
+		intent.PickupID[:len(intent.PickupID)-1],
+		"z" + intent.PickupID[1:],
+		"0000000000000000" + intent.PickupID[choreographyInterpretedTimeHexChars:],
+	}
+	for _, pickupID := range malformed {
+		invalid := intent
+		invalid.PickupID = pickupID
+		_, _, err = authority.TryReserve(t.Context(), invalid)
+		require.Error(t, err)
+	}
+	lease, acquired, err := authority.TryReserve(t.Context(), intent)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	reopened, err := OpenNodeSlotAuthority(root, "worker", 1)
+	require.NoError(t, err)
+	held, err := reopened.Held(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, []NodeSlotLease{lease}, held)
+}

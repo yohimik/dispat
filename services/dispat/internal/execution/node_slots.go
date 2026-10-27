@@ -584,7 +584,8 @@ func (a *NodeSlotAuthority) readLease(id string) (NodeSlotLease, error) {
 
 func validNodeSlotPickup(intent NodeSlotIntent) bool {
 	return intent.PickupID == nodeSlotAbsentIdentityText ||
-		validSlotHex(intent.PickupID, choreographyPickupIDHexChars)
+		ValidateChoreographyPickupID(bootstrapCompilationModeName, intent.PickupID) == nil ||
+		ValidateChoreographyPickupID(bootstrapInterpretationModeName, intent.PickupID) == nil
 }
 
 func validNodeSlotRecovery(intent NodeSlotIntent) bool {

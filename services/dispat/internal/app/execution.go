@@ -26,16 +26,11 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 )
 
-// checkDistributionMode keeps direct App callers from silently using the
-// compiled executor when they requested interpretation. The interpretation
-// branch is enabled when the peer protocol and interpreter are installed.
+// Hybrid remains unavailable until its semantic transition can be verified.
 func (a *App) checkDistributionMode(mode public.DistributionMode) error {
 	switch mode {
-	case choreographyAbsentIdentityText, public.DistributionModeCompilation:
+	case choreographyAbsentIdentityText, public.DistributionModeCompilation, public.DistributionModeInterpretation:
 		return nil
-	case public.DistributionModeInterpretation:
-		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
-			interpretationUnavailableErrorText)
 	default:
 		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
 			unsupportedDistributionModeErrorFormat, mode)

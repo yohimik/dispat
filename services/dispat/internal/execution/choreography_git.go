@@ -461,6 +461,9 @@ func (g *GitChoreographyPersist) PersistClaim(ctx context.Context, p Choreograph
 	if spec.Task == choreographyGitAbsentState || spec.Branch != p.Branch || p.GraphRootOID != g.opts.GraphRootOID {
 		return ChoreographyReceipt{}, fmt.Errorf(choreographyGitClaimNamesNoTaskInTheCompleteSignedGraphRootError)
 	}
+	if err := validateChoreographySignedPickupID(g.opts.JoinPolicy, spec, p.PickupID); err != nil {
+		return ChoreographyReceipt{}, err
+	}
 	assignmentOID := choreographyGitAbsentState
 	if spec.TemplateDigest != choreographyGitAbsentState {
 		if p.resolvedBindings == nil {
@@ -714,6 +717,9 @@ func (g *GitChoreographyPersist) PersistResult(ctx context.Context, p Choreograp
 	if err := p.validate(g.opts.MaxPackBytes); err != nil {
 		return ChoreographyReceipt{}, err
 	}
+	if err := validateChoreographySignedPickupID(g.opts.JoinPolicy, g.tasks[p.Task], p.PickupID); err != nil {
+		return ChoreographyReceipt{}, err
+	}
 	digest, err := ChoreographyProposalDigest(p)
 	if err != nil {
 		return ChoreographyReceipt{}, err
@@ -771,7 +777,8 @@ func (g *GitChoreographyPersist) PersistResult(ctx context.Context, p Choreograp
 	}
 	if p.PickupID != choreographyGitAbsentState {
 		if err := m.VerifyChoreographyPickupResult(ctx, ChoreographyPickupResultProof{
-			Proposal: p, Result: result, MaxDocumentBytes: g.opts.MaxPackBytes}); err != nil {
+			Proposal: p, Result: result, Mode: g.opts.JoinPolicy.pickupMode(),
+			MaxDocumentBytes: g.opts.MaxPackBytes}); err != nil {
 			return ChoreographyReceipt{}, err
 		}
 	}
@@ -1108,9 +1115,6 @@ func (g *GitChoreographyPersist) PersistDecision(ctx context.Context, d Choreogr
 	if spec.Task == choreographyGitAbsentState || spec.Branch != branch {
 		return choreographyGitAbsentState, fmt.Errorf(choreographyGitDecisionNamesNoCanonicalTaskRefError)
 	}
-	if d.Retry && !spec.RetryAfterUncertainAttempt {
-		return choreographyGitAbsentState, fmt.Errorf(choreographyGitInvalidTaskDecisionError)
-	}
 	if err := validateChoreographyPackageOutcome(ChoreographyPackageOutcomeCheck{
 		Task: spec, Outcome: d.PackageOutcome, Succeeded: d.Succeeded, Retry: d.Retry}); err != nil {
 		return choreographyGitAbsentState, err
@@ -1120,6 +1124,10 @@ func (g *GitChoreographyPersist) PersistDecision(ctx context.Context, d Choreogr
 	resultTree, err := m.readTree(ctx, d.ResultOID)
 	if err != nil {
 		return choreographyGitAbsentState, err
+	}
+	if d.Retry && (d.Attempt >= spec.EffectiveMaxAttempts() ||
+		!spec.IsPickupRetryAllowed(resultTree.kind == choreographyResultKind)) {
+		return choreographyGitAbsentState, fmt.Errorf(choreographyGitInvalidTaskDecisionError)
 	}
 	if resultTree.kind == choreographyResultKind {
 		outputOID, outputEntries, err = g.decisionOutputEntries(ctx, d)
@@ -1148,6 +1156,20 @@ func (g *GitChoreographyPersist) PersistDecision(ctx context.Context, d Choreogr
 			return choreographyGitAbsentState, fmt.Errorf(choreographyGitDecisionNamesNoSettledResultOrAcknowledgementError)
 		}
 		if proposal.PickupID != choreographyGitAbsentState {
+			if d.Retry && spec.MaxAttempts != choreographyAttemptPolicyLegacyUnspecified {
+				accepted := ChoreographyEvent{Kind: ChoreographyResultAccepted,
+					Task: d.Task, TaskOID: d.ResultOID, ResultReceiptOID: d.ResultOID,
+					OutputOID: proposal.ResultDigest, ClaimOID: proposal.ClaimOID,
+					PickupID: proposal.PickupID, Attempt: d.Attempt, Node: d.Node}
+				result, readErr := m.ReadChoreographyAcceptedResult(ctx, g.opts.Binding,
+					accepted, g.opts.MaxPackBytes)
+				if readErr != nil {
+					return choreographyGitAbsentState, readErr
+				}
+				if result.Status != StatusFailed {
+					return choreographyGitAbsentState, fmt.Errorf(choreographyGitInvalidTaskDecisionError)
+				}
+			}
 			return g.persistPickupDecision(ctx, choreographyPickupDecisionOptions{
 				Decision: d, Document: document, Identity: identity,
 				Spec: spec, OutputOID: outputOID, OutputEntries: outputEntries,
@@ -1322,7 +1344,7 @@ func (g *GitChoreographyPersist) LookupReceipt(ctx context.Context, q Choreograp
 	candidateOID := choreographyGitAbsentState
 	expectedFound := choreographyGitExpectedTipUnseen
 	var expectedKind MessageKind
-	for steps := choreographyGitHistoryStartStep; oid != choreographyGitAbsentState && steps < maxPlacementAttempts*choreographyGitHistoryStepsPerAttempt+choreographyGitHistoryFixedSteps; steps++ {
+	for steps := choreographyGitHistoryStartStep; oid != choreographyGitAbsentState && steps < spec.EffectiveMaxAttempts()*choreographyGitHistoryStepsPerAttempt+choreographyGitHistoryFixedSteps; steps++ {
 		if err := ctx.Err(); err != nil {
 			return ChoreographyReceipt{}, choreographyGitReceiptMissing, err
 		}
@@ -1333,7 +1355,7 @@ func (g *GitChoreographyPersist) LookupReceipt(ctx context.Context, q Choreograp
 			expected := Reservation{Header: Header{Protocol: ChoreographyProtocolVersion,
 				Kind: spec.Kind, Run: q.Run, Generation: q.Generation,
 				PlanDigest: q.PlanDigest, Task: q.Task, Attempt: choreographyGitFirstAttempt, Branch: q.Branch},
-				BootstrapOID: g.opts.BootstrapOID, MaxAttempts: maxPlacementAttempts}
+				BootstrapOID: g.opts.BootstrapOID, MaxAttempts: spec.EffectiveMaxAttempts()}
 			if err := m.VerifyChoreographyReservation(ctx, oid, expected, returnReplyLimit); err != nil {
 				return ChoreographyReceipt{}, choreographyGitReceiptMissing, err
 			}

@@ -179,6 +179,7 @@ type ChoreographyTaskSpec struct {
 	LocalAuthority             bool
 	ExecutorOwned              bool
 	RetryAfterUncertainAttempt bool `json:"retryAfterUncertainAttempt,omitempty"`
+	MaxAttempts                int  `json:"maxAttempts,omitempty"`
 	NeedsPreparedInput         bool
 	Budget                     string
 	Weight                     int
@@ -564,7 +565,7 @@ func (b *FirstNodeBroker) DecideUnclaimedOffer(ctx context.Context,
 			!d.Retry && (task.queueFence == choreographyBrokerAbsentState || d.ResultOID != task.queueFence ||
 				d.OfferedOID != task.queueOffered)) ||
 		!d.Unclaimed || d.Succeeded || d.Retry &&
-		(d.PackageOutcome != choreographyBrokerAbsentState || task.attempt >= maxPlacementAttempts) {
+		(d.PackageOutcome != choreographyBrokerAbsentState || task.attempt >= task.spec.EffectiveMaxAttempts()) {
 		return fmt.Errorf(choreographyBrokerQueueDecisionDoesNotNameAnUnclaimedOfferError)
 	}
 	if err := b.validatePackageOutcome(task.spec.Package, d.PackageOutcome); err != nil {
@@ -817,6 +818,9 @@ func (b *FirstNodeBroker) completeVirtual(first *indexedChoreographyTask) {
 // local work. The caller chooses a task; the broker only checks eligibility.
 func (b *FirstNodeBroker) AcceptClaim(ctx context.Context, p ChoreographyClaimProposal) (ChoreographyReceipt, error) {
 	if err := p.validate(); err != nil {
+		return ChoreographyReceipt{}, err
+	}
+	if err := validateChoreographySignedPickupID(b.joinPolicy, b.taskSpec(p.Task), p.PickupID); err != nil {
 		return ChoreographyReceipt{}, err
 	}
 	if p.ChoreographyRunBinding != b.binding || p.GraphRootOID != b.graphRootOID {
@@ -1325,6 +1329,9 @@ func (b *FirstNodeBroker) AcceptResult(ctx context.Context, p ChoreographyResult
 	if payload == nil || p.validate(p.PayloadBytes) != nil {
 		return ChoreographyReceipt{}, fmt.Errorf(choreographyBrokerResultPayloadIsMissingError)
 	}
+	if err := validateChoreographySignedPickupID(b.joinPolicy, b.taskSpec(p.Task), p.PickupID); err != nil {
+		return ChoreographyReceipt{}, err
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if p.ChoreographyRunBinding != b.binding {
@@ -1519,7 +1526,7 @@ func (b *FirstNodeBroker) DecideAttempt(ctx context.Context, d ChoreographyDecis
 	}
 	if d.ChoreographyRunBinding != b.binding || task == nil || d.Branch != task.spec.Branch || task.result == choreographyBrokerAbsentState ||
 		task.terminal || d.Attempt != task.attempt || d.ResultOID != task.result || d.Unclaimed ||
-		d.Retry && (d.Succeeded || task.attempt >= maxPlacementAttempts) {
+		d.Retry && (d.Succeeded || task.attempt >= task.spec.EffectiveMaxAttempts()) {
 		return fmt.Errorf(choreographyBrokerInvalidAttemptDecisionError)
 	}
 	d.Node = task.owner

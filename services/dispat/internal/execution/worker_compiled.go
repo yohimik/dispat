@@ -56,11 +56,13 @@ type workerCompiledRun struct {
 	joinProposal    *ChoreographyJoinProposal
 	joining         bool
 	retainedFeed    *RetainedChoreographyFeed
+	interpreted     *InterpretedRun
 }
 
 type workerCompiledClaim struct {
 	proposal ChoreographyClaimProposal
 	lease    NodeSlotLease
+	frame    *InterpretedReadyFrame
 }
 
 type compiledParkedCapacity struct {
@@ -156,7 +158,7 @@ func (w *Worker) drainCompiledRuns(ctx context.Context) error {
 }
 
 func (w *Worker) handleCompiledNotice(ctx context.Context,
-	head gitx.RemoteHead, notice SlotNotice) (bool, error) {
+	head gitx.RemoteHead, notice SlotNotice) (progress bool, err error) {
 	if notice.Protocol != ChoreographyProtocolVersion || notice.Node != w.Node ||
 		notice.Branch != head.Name || notice.Kind != KindSlot ||
 		notice.Sequence != choreographyActivatedSlotSequence ||
@@ -181,7 +183,8 @@ func (w *Worker) handleCompiledNotice(ctx context.Context,
 		return compiledNoSelectionProgress, err
 	}
 	binding := bootstrap.ChoreographyRunBinding
-	if bootstrap.Protocol != ChoreographyProtocolVersion || bootstrap.Mode != compiledBootstrapMode ||
+	if bootstrap.Protocol != ChoreographyProtocolVersion ||
+		!validChoreographyMode(bootstrap.Mode) ||
 		binding.Run != notice.Run || binding.Generation != notice.Generation ||
 		binding.PlanDigest != notice.PlanDigest || bootstrap.CoordinationEndpoint != w.Endpoint ||
 		bootstrap.AlgorithmVersion != ChoreographyGraphAlgorithmVersion {
@@ -221,6 +224,28 @@ func (w *Worker) handleCompiledNotice(ctx context.Context,
 	if err != nil {
 		return compiledNoSelectionProgress, err
 	}
+	var interpreted *InterpretedRun
+	isInstalled := false
+	defer func() {
+		if !isInstalled && interpreted != nil && interpreted.Close != nil {
+			err = errors.Join(err, interpreted.Close())
+		}
+	}()
+	if bootstrap.Mode == bootstrapInterpretationModeName {
+		if w.PrepareInterpretedRun == nil {
+			return compiledNoSelectionProgress, fmt.Errorf(interpretedRunMissingCallbackError)
+		}
+		interpreted, err = w.PrepareInterpretedRun(ctx, InterpretedRunOptions{
+			Bootstrap: bootstrap, BootstrapOID: notice.BootstrapOID,
+			GraphRootOID: rootOID, Roster: roster,
+			ObjectStoreDir: mailbox.ObjectStoreDir(), Carrier: carrier})
+		if err != nil {
+			return compiledNoSelectionProgress, err
+		}
+		if err := verifyInterpretedRun(bootstrap, carrier, interpreted); err != nil {
+			return compiledNoSelectionProgress, err
+		}
+	}
 	allowed, authorized := bootstrap.JoinPolicy.AuthorizedNode(w.Node)
 	if !authorized || allowed.CoordinationEndpoint != w.Endpoint ||
 		w.NodeSlots == nil || w.Report.AuthorityID == compiledMissingIdentity ||
@@ -238,12 +263,16 @@ func (w *Worker) handleCompiledNotice(ctx context.Context,
 	if err != nil {
 		return compiledNoSelectionProgress, err
 	}
-	channel.bootstrapOID, channel.bootstrap = notice.BootstrapOID, &bootstrap
-	w.rememberReturnChannel(channel)
+	defer func() {
+		if !isInstalled {
+			w.closeUnrememberedReturnChannel(channel)
+		}
+	}()
 	run := &workerCompiledRun{binding: binding, bootstrapOID: notice.BootstrapOID,
 		rootOID: rootOID, bootstrap: bootstrap, carrier: carrier, channel: channel,
-		templates: make(map[string]ChoreographyCompiledTemplate, len(carrier.Templates)),
-		pending:   make(map[string]*workerCompiledClaim), parked: make(map[string]compiledParkedCapacity)}
+		interpreted: interpreted,
+		templates:   make(map[string]ChoreographyCompiledTemplate, len(carrier.Templates)),
+		pending:     make(map[string]*workerCompiledClaim), parked: make(map[string]compiledParkedCapacity)}
 	for _, template := range carrier.Templates {
 		run.templates[template.Task] = template
 	}
@@ -263,21 +292,43 @@ func (w *Worker) handleCompiledNotice(ctx context.Context,
 	if w.compiledRuns == nil {
 		w.compiledRuns = make(map[string]*workerCompiledRun)
 	}
+	channel.bootstrapOID, channel.bootstrap = notice.BootstrapOID, &bootstrap
+	w.rememberReturnChannel(channel)
 	w.compiledRuns[notice.Run] = run
+	isInstalled = true
 	return compiledSelectionProgress, nil
 }
 
 func (r *workerCompiledRun) openFrontier(node string) error {
+	specs := r.carrier.Tasks
+	if r.interpreted != nil {
+		specs = slices.Clone(r.interpreted.Tasks)
+		signedByTask := make(map[string]ChoreographyTaskSpec, len(r.carrier.Tasks))
+		for _, signed := range r.carrier.Tasks {
+			signedByTask[signed.Task] = signed
+		}
+		for index := range specs {
+			signed := signedByTask[specs[index].Task]
+			specs[index].Branch = signed.Branch
+			specs[index].ReservationOID = signed.ReservationOID
+			specs[index].TemplateDigest = signed.TemplateDigest
+			specs[index].EligibleNodes = signed.EligibleNodes
+		}
+	}
 	frontier, err := NewCompiledChoreographyFrontier(CompiledChoreographyFrontierOptions{
 		Binding:      r.binding,
 		GraphRootOID: r.rootOID,
 		Node:         r.member,
-		Tasks:        r.carrier.Tasks,
+		Tasks:        specs,
 	})
 	if err != nil {
 		return err
 	}
-	if len(r.carrier.PackagePolicies) != compiledNoPackagePolicies {
+	if r.interpreted != nil && r.interpreted.OutcomePolicy != nil {
+		if err := frontier.AttachOutcomePolicy(r.interpreted.OutcomePolicy); err != nil {
+			return err
+		}
+	} else if len(r.carrier.PackagePolicies) != compiledNoPackagePolicies {
 		policy, policyErr := NewChoreographyPackageOutcomeEvaluator(r.carrier.PackagePolicies)
 		if policyErr != nil {
 			return policyErr
@@ -487,13 +538,18 @@ func (w *Worker) pickCompiledTasks(ctx context.Context, run *workerCompiledRun) 
 		}
 		identity := ChoreographyTaskBindings{PredecessorResultOIDs: predecessors,
 			PreparedInputOID: run.frontier.PreparedInputOID(selected.Spec.Task)}
+		frame, err := prepareInterpretedReadyFrame(ctx, interpretedReadyFrameOptions{
+			run: run, selected: selected, inputsDigest: inputsDigest, identity: identity})
+		if err != nil {
+			return progress, err
+		}
 		bindingsDigest, err := DigestChoreographyTaskBindings(identity)
 		if err != nil {
 			return progress, err
 		}
 		intent := NodeSlotIntent{Run: run.binding.Run, Task: selected.Spec.Task,
 			Attempt: selected.Attempt, Weight: selected.Spec.Weight,
-			PickupID: NewChoreographyPickupID()}
+			PickupID: newChoreographyPickupIDForMode(run.bootstrap.Mode)}
 		leaseID := nodeSlotLeaseID(intent)
 		proposal := ChoreographyClaimProposal{ChoreographyRunBinding: run.binding,
 			Task: selected.Spec.Task, Attempt: selected.Attempt, Node: w.Node,
@@ -541,7 +597,7 @@ func (w *Worker) pickCompiledTasks(ctx context.Context, run *workerCompiledRun) 
 		if lease.ID != proposal.LeaseIntentID {
 			return progress, fmt.Errorf(compiledNoticeIdentityError)
 		}
-		pending := &workerCompiledClaim{proposal: proposal, lease: lease}
+		pending := &workerCompiledClaim{proposal: proposal, lease: lease, frame: frame}
 		run.pending[selected.Spec.Task] = pending
 		settled, err := w.settleCompiledClaim(ctx, run, pending)
 		if err != nil {
@@ -587,6 +643,9 @@ func (w *Worker) settleCompiledClaim(ctx context.Context, run *workerCompiledRun
 	if !receipt.Accepted || receipt.AssignmentOID == compiledMissingIdentity {
 		return compiledNoSelectionProgress, fmt.Errorf(compiledNoticeIdentityError)
 	}
+	if run.interpreted != nil && pending.frame == nil {
+		return compiledNoSelectionProgress, fmt.Errorf(interpretedReadyFrameMissingError)
+	}
 	mailbox, ok := w.Mailbox.(*GitMailbox)
 	if !ok {
 		return compiledNoSelectionProgress, fmt.Errorf(compiledNoticeMailboxError)
@@ -620,6 +679,15 @@ func (w *Worker) settleCompiledClaim(ctx context.Context, run *workerCompiledRun
 	}
 	if digest != assignment.BindingsDigest {
 		return compiledNoSelectionProgress, fmt.Errorf(compiledNoticeIdentityError)
+	}
+	if pending.frame != nil {
+		interpretedDigest, digestErr := DigestChoreographyTaskBindings(pending.frame.Bindings)
+		if digestErr != nil {
+			return compiledNoSelectionProgress, digestErr
+		}
+		if interpretedDigest != assignment.BindingsDigest {
+			return compiledNoSelectionProgress, fmt.Errorf(interpretedReadyFrameMismatchError)
+		}
 	}
 	assignmentTip := ChainTip{OID: receipt.AssignmentOID, Branch: proposal.Branch,
 		Kind: MessageAssignment}

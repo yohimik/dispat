@@ -15,6 +15,7 @@ import remarkHistoricalLinks from './plugins/historical-links/remark';
 import {DESCRIPTION, TAGLINE, TITLE} from './src/site-metadata';
 
 const GITHUB = 'https://github.com/yohimik/dispat';
+const LICENSE_URL = `${GITHUB}/blob/main/LICENSE`;
 const DISCORD = 'https://discord.gg/83PwVSCCmk';
 const SITE = 'https://dispat.dev';
 
@@ -477,11 +478,11 @@ const config: Config = {
             {label: 'GitHub', href: GITHUB},
             {label: 'Discord', href: DISCORD},
             {label: 'Releases', href: `${GITHUB}/releases`},
-            {label: 'Licences', href: `${GITHUB}/blob/main/README.md#license`},
+            {label: 'Licences', href: LICENSE_URL},
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} yohimik. Official binaries: MIT. Source: MIT or GPL-3.0-or-later; see Licences.`,
+      copyright: `Copyright © ${new Date().getFullYear()} yohimik. Official binaries: MIT. Source: MIT or GPL-3.0-or-later; see <a href="${LICENSE_URL}">Licences</a>.`,
     },
     prism: {
       theme: prismThemes.github,

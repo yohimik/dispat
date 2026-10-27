@@ -210,7 +210,15 @@ body {
 }
 
 .theme-doc-sidebar-menu .menu__list-item-collapsible {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
   border-radius: 2px;
+}
+
+.theme-doc-sidebar-menu .menu__list-item-collapsible > .menu__link {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .theme-doc-sidebar-menu .menu__list-item-collapsible:hover > .menu__link,

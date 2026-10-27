@@ -5,12 +5,13 @@ executes eligible tasks, and it alone advances canonical task and ledger refs, p
 release records. Other **workers** execute eligible work, create their own pending and outcome Git branches,
 and return claim and result requests to the orchestrator over the authenticated non-Git channel.
 
-`--distribution-mode=compilation` is the only supported mode. The future `interpretation` and `hybrid`
-values are refused before task effects. The orchestrator computes the plan and graph,
+`--distribution-mode=compilation` is the default. The orchestrator computes the plan and graph,
 creates an inert branch for every executable logical task before work starts, and publishes a signed readiness feed.
-Workers select eligible ready tasks themselves. The orchestrator validates and persists each exact proposal;
-an accepted signed claim and confirmed remote pending ref permit the command to start. A missing input, different digest, or missing required
-attestation refuses execution before any claim.
+Workers select eligible ready tasks from that graph. In `interpretation`, every admitted node independently derives
+the same semantic plan and graph from the pinned input, verifies both digests, and chooses locally ready work.
+The orchestrator validates and persists each exact proposal in either mode. An accepted signed claim and a
+confirmed remote pending ref permit the command to start. A missing input, different digest, or missing required
+attestation refuses execution before any claim. `hybrid` remains unavailable and is refused before task effects.
 
 To try it, [configure the nodes](#configuring-the-nodes), [start a worker](#starting-a-worker), then choose
 [where stages run](#where-a-stage-runs) and [which build outputs travel](#build-outputs-as-inputs). Read the
@@ -38,7 +39,7 @@ sends outputs back. That setup can take longer than the build itself.
 | Where build commands run                 | the machine the release was started on          | a worker, or the orchestrator when eligible        |
 | Where publish commands run               | the machine the release was started on          | the orchestrator                                         |
 | Where release locks and records live      | one machine                                     | the orchestrator alone                                    |
-| Where the plan is derived                 | the first node                                  | the first node |
+| Where the plan is derived                 | the first node                                  | the first node in compilation; every admitted node in interpretation, from identical pinned input |
 | What a build product travels as          | a folder in the checkout                        | a verified manifest and bytes returned to the orchestrator |
 | What has to exist beforehand             | the checkout                                    | a shared signing secret and a fixed authorization policy; late workers may join while tasks run |
 | What a lost machine costs                | the run                                         | the packages that node was working on                     |
@@ -56,7 +57,7 @@ that can create their own pending and outcome branches, read access to exact pin
 signing secret, and access to the authenticated return channel; build commands may need separate credentials for
 private inputs.
 
-The orchestrator plans and compiles the graph, checks locks, validates and persists claims and results,
+The orchestrator plans the run, compiles the graph in compilation mode, checks locks, validates and persists claims and results,
 prepares native source state, authorizes publication, and writes native Git and release records. Run-level hooks
 and stages after the records run there. Coordination and preparation consume time; adding nodes helps only when the graph
 has ready work and transfer costs leave room for a gain.
@@ -745,9 +746,13 @@ Existing record and lock diagnostics keep their codes and use the `native-record
   `buildPlatforms`.
 - **A preempted or evicted worker retains its physical charge.** A run may retry after signed Cancel and its bounded
   reply grace only when `execution.retryAfterUncertainAttempt: true` asserts that its delegated commands are safe to
-  repeat after an uncertain external effect. The default is `false`. The old pickup remains charged until its
-  exact signed finality; a late old outcome cannot replace the accepted winner. No second pickup begins merely
-  because another worker is idle.
+  repeat after an uncertain external effect, and an allowed attempt remains. The default is `false`. The old pickup
+  remains charged until its exact signed finality; a late old outcome cannot replace the accepted winner. No second
+  pickup begins merely because another worker is idle.
+- **Interpretation counts total pickups.** `execution.maxAttempts` defaults to `1` and allows at most `64` accepted
+  pickups of one delegated logical task, including the first. A larger value permits sequential retry after a
+  settled failed Result and required hooks; it does not assert that an uncertain external effect is safe to repeat.
+  A first-node publication or native record is never repeated by this setting.
 - **`dispat status` is how a pool is sized.** More workers help only while more builds are ready at once than there
   are slots. No run is shorter than its longest chain, and one repository's publications happen one after another.
 - **A worker's task deadline is enforced by the node itself.** The orchestrator and worker use the same task bound.

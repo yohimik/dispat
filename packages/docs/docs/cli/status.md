@@ -59,5 +59,5 @@ exits `2`, and a link breaking a rule a configured link is held to exits `1` wit
 
 ### `--distribution-mode`
 
-Selects `compilation`, the only supported mode. `status` validates it alongside the plan and starts no
-return-channel listener or task. Other values are refused.
+Selects `compilation` (default) or `interpretation`. `status` validates the chosen mode alongside the plan and
+starts no return-channel listener or task. `hybrid` and unknown values are refused.

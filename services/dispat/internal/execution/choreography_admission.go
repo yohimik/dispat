@@ -40,6 +40,7 @@ const (
 	joinIdentitySignatureErrorMessage     = "execution: join identity signature does not authorize the node"
 	maxChoreographyAdmissionSeconds       = models.MaxExecutionAdmissionTimeoutSeconds
 	joinPolicyDurationErrorMessage        = "execution: choreography admission duration must be finite and at most seven days"
+	joinPolicyAttemptsErrorMessage        = "execution: signed total attempt limit exceeds the bounded execution policy"
 	joinPolicyMinimumDurationSeconds      = 1
 	joinPolicyMinimumCapacitySlots        = 1
 	joinPolicyNoAuthorizedNodes           = 0
@@ -64,11 +65,16 @@ type ChoreographyAuthorizedNode struct {
 // ledger event fixes its absolute deadline once command execution is legal.
 type ChoreographyJoinPolicy struct {
 	AdmissionDurationSeconds   int                          `json:"admissionDurationSeconds"`
+	MaxAttempts                int                          `json:"maxAttempts,omitempty"`
 	RetryAfterUncertainAttempt bool                         `json:"retryAfterUncertainAttempt,omitempty"`
 	Authorized                 []ChoreographyAuthorizedNode `json:"authorized"`
 }
 
 func (p ChoreographyJoinPolicy) Validate(canonicalEndpoint string) error {
+	if p.MaxAttempts < choreographyAttemptPolicyLegacyUnspecified ||
+		p.MaxAttempts > models.MaximumExecutionMaxAttempts {
+		return fmt.Errorf(joinPolicyAttemptsErrorMessage)
+	}
 	if p.AdmissionDurationSeconds < joinPolicyMinimumDurationSeconds || p.AdmissionDurationSeconds > maxChoreographyAdmissionSeconds {
 		return fmt.Errorf(joinPolicyDurationErrorMessage)
 	}

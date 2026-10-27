@@ -712,10 +712,11 @@ Distributed first-node and worker processes currently require Linux or macOS for
 node-slot journal. Windows distributed execution is refused before task effects. Windows local execution without
 worker links and without explicit shared node capacity remains available.
 
-`--distribution-mode=compilation` is the default and only supported mode. The future `interpretation` and `hybrid`
-values are refused before task effects. The orchestrator derives the plan and
+`--distribution-mode=compilation` is the default. In that mode the orchestrator derives the plan and
 graph and initializes one canonical ref for every executable logical task before work starts. Workers verify the
-signed compiled graph, select compatible ready tasks within their physical capacity, and propose exact claims. The
+signed compiled graph, select compatible ready tasks within their physical capacity, and propose exact claims.
+In `interpretation`, each admitted node independently derives and verifies the same plan and graph from pinned
+inputs before selecting ready tasks. `hybrid` remains unavailable and is refused before task effects. The
 orchestrator validates and persists those claims without substituting another task. A mismatch refuses claims. One authoritative claim state and a functioning
 orchestrator are required for publication.
 
@@ -738,13 +739,15 @@ Before a release:
    authorized tasks with the local machine's credentials.
    A node named in `execution.workers` with `lateJoin: true` may start after tasks are running; other named
    workers must pass preflight before effects. Set a finite `execution.timeouts.admission` for worker-only work.
-   `execution.retryAfterUncertainAttempt` defaults to `false`. Set it to `true` only when every delegated
-   command and its hooks can be repeated safely after a failed or contact-lost attempt without conflicting
-   external effects. The declaration is signed into the run; native first-node publication is never retried
-   through this policy. A contact-lost pickup retains its physical lease and capacity charge.
+   In interpretation, `execution.maxAttempts` defaults to one total accepted pickup per delegated task. State a
+   larger count, up to 64, only when a settled failed command and its hooks may run again safely. A contact-lost
+   successor additionally requires `execution.retryAfterUncertainAttempt: true`, which defaults to `false` and
+   asserts repeat safety for uncertain external effects. Both settings are signed into the run; neither retries
+   native first-node publication. A contact-lost pickup retains its physical lease and capacity charge.
 3. Supply the signing secret from a secret store without reading, printing or copying its value. Keep Git-push and
    publication credentials on the orchestrator.
-4. Run `dispat status --distribution-mode=compilation` to inspect the plan before release. Each worker must verify
+4. Run `dispat status --distribution-mode=compilation` or `--distribution-mode=interpretation` to inspect the plan
+   before release. Each worker must verify
    the signed input and graph identities before claims. A late worker needs a signed membership receipt before
    it becomes eligible; a missing reply does not prove its command stopped or free its capacity.
 5. Expect `E225` refusal for an unsafe endpoint, absent signing secret, unavailable node, invalid lock bypass or

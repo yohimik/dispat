@@ -135,6 +135,8 @@ type choreographyLedgerFixtureSettings struct {
 	AuthorityID                string
 	AdmissionSeconds           int
 	RetryAfterUncertainAttempt bool
+	Mode                       string
+	MaxAttempts                int
 	Tasks                      []ChoreographyTaskSpec
 	OutputRoots                []string
 	DeadlineSeconds            int
@@ -156,6 +158,12 @@ func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreograph
 	for index, requestedSpec := range requested {
 		spec := requestedSpec
 		spec.RetryAfterUncertainAttempt = settings.RetryAfterUncertainAttempt && !spec.Virtual && !spec.ExecutorOwned
+		if settings.Mode == bootstrapInterpretationModeName && !spec.Virtual {
+			spec.MaxAttempts = settings.MaxAttempts
+			if spec.ExecutorOwned {
+				spec.MaxAttempts = choreographyAttemptPolicyFirstAttempt
+			}
+		}
 		if spec.Virtual {
 			specs[index] = spec
 			continue
@@ -195,12 +203,17 @@ func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreograph
 	plannedOID := fixturePlumbing.CommitTree(t.Context(), sourceTree, nil, "fixture-planned-source")
 	sourceOID := fixturePlumbing.CommitTree(t.Context(), sourceTree, []string{plannedOID}, "fixture-source")
 	require.NoError(t, fixturePlumbing.Err())
+	mode := settings.Mode
+	if mode == "" {
+		mode = bootstrapCompilationModeName
+	}
 	policy := ChoreographyJoinPolicy{AdmissionDurationSeconds: settings.AdmissionSeconds,
+		MaxAttempts:                settings.MaxAttempts,
 		RetryAfterUncertainAttempt: settings.RetryAfterUncertainAttempt,
 		Authorized:                 []ChoreographyAuthorizedNode{{Name: "node-a", CoordinationEndpoint: fixture.endpoint}}}
 	bootstrapOID, err := fixture.mailbox.PrepareChoreographyBootstrap(t.Context(), ChoreographyBootstrapOptions{
 		Bootstrap: &RunBootstrap{Protocol: ChoreographyProtocolVersion, ChoreographyRunBinding: binding,
-			Mode: "compilation", AlgorithmVersion: ChoreographyGraphAlgorithmVersion,
+			Mode: mode, AlgorithmVersion: ChoreographyGraphAlgorithmVersion,
 			JoinPolicy: policy, CoordinationEndpoint: fixture.endpoint,
 			ReturnEndpoint: "https://localhost:8383", ReturnCertSHA256: strings.Repeat("0", 64),
 			PinnedInputs: PinnedRunInputs{Repositories: []AssignmentRepository{{Snapshot: sourceOID, PlannedHead: plannedOID}},
@@ -228,7 +241,7 @@ func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreograph
 			Kind: spec.Kind, Run: binding.Run, Generation: binding.Generation,
 			PlanDigest: binding.PlanDigest, Task: spec.Task, Attempt: 1,
 			Branch: spec.Branch, IssuedAt: time.Now().UTC().Format(time.RFC3339)},
-			BootstrapOID: bootstrapOID, MaxAttempts: maxPlacementAttempts}
+			BootstrapOID: bootstrapOID, MaxAttempts: spec.EffectiveMaxAttempts()}
 		spec.ReservationOID, err = fixture.mailbox.PrepareChoreographyReservation(t.Context(), reservation)
 		require.NoError(t, err)
 		refs = append(refs, gitx.CreateRef{Branch: spec.Branch, OID: spec.ReservationOID})

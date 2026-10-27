@@ -184,13 +184,38 @@ func (w *Worker) pickupClaim(ctx context.Context, task *claimedTask) (Choreograp
 	return claim, nil
 }
 
+func (w *Worker) pickupModeForTask(task *claimedTask, pickupID string) (string, error) {
+	w.returnMu.RLock()
+	channel := w.returnChannels[task.assignment.Run]
+	w.returnMu.RUnlock()
+	if channel == nil || channel.bootstrap == nil {
+		if err := ValidateChoreographyPickupID(bootstrapCompilationModeName, pickupID); err != nil {
+			return workerPickupNoIdentity, err
+		}
+		return bootstrapCompilationModeName, nil
+	}
+	verified, err := w.returnChannelFor(task.assignment)
+	if err != nil {
+		return workerPickupNoIdentity, err
+	}
+	mode := verified.bootstrap.Mode
+	if err := ValidateChoreographyPickupID(mode, pickupID); err != nil {
+		return workerPickupNoIdentity, err
+	}
+	return mode, nil
+}
+
 func (w *Worker) ensurePickupPending(ctx context.Context, task *claimedTask) (workerPickupState, error) {
 	claim, err := w.pickupClaim(ctx, task)
 	if err != nil {
 		return workerPickupState{}, err
 	}
+	mode, err := w.pickupModeForTask(task, claim.PickupID)
+	if err != nil {
+		return workerPickupState{}, err
+	}
 	identity := ChoreographyPickupIdentity{Run: claim.Run, Task: claim.Task,
-		Node: claim.Node, PickupID: claim.PickupID}
+		Node: claim.Node, PickupID: claim.PickupID, Mode: mode}
 	branch, err := FormatChoreographyPendingBranch(identity)
 	if err != nil {
 		return workerPickupState{}, err
@@ -208,10 +233,17 @@ func (w *Worker) ensurePickupPending(ctx context.Context, task *claimedTask) (wo
 			return workerPickupState{}, fmt.Errorf(workerPickupStateMismatchError)
 		}
 	} else {
+		issuedAt := time.Now().UTC()
+		if mode == bootstrapInterpretationModeName {
+			issuedAt, err = interpretedPickupTime(claim.PickupID)
+			if err != nil {
+				return workerPickupState{}, err
+			}
+		}
 		pending := Pending{Header: Header{Protocol: ChoreographyProtocolVersion,
 			Kind: task.assignment.Kind, Run: claim.Run, Generation: claim.Generation,
 			PlanDigest: claim.PlanDigest, Task: claim.Task, Attempt: claim.Attempt,
-			Node: claim.Node, Branch: branch, IssuedAt: time.Now().UTC().Format(time.RFC3339Nano)},
+			Node: claim.Node, Branch: branch, IssuedAt: issuedAt.Format(time.RFC3339Nano)},
 			TaskBranch: task.assignment.Branch, PickupID: claim.PickupID,
 			ClaimOID: task.claimed, AssignmentOID: task.tip.OID,
 			GraphDigest: claim.GraphDigest, GraphRootOID: claim.GraphRootOID,
@@ -265,8 +297,12 @@ func (w *Worker) publishPickupOutcome(ctx context.Context,
 		return Result{}, workerPickupNoIdentity, fmt.Errorf(workerPickupPendingMissingError)
 	}
 	result := request.Report
+	mode, err := w.pickupModeForTask(task, state.PickupID)
+	if err != nil {
+		return Result{}, workerPickupNoIdentity, err
+	}
 	identity := ChoreographyPickupIdentity{Run: state.Run, Task: state.Task,
-		Node: state.Node, PickupID: state.PickupID}
+		Node: state.Node, PickupID: state.PickupID, Mode: mode}
 	outcomeBranch, err := FormatChoreographyOutcomeBranch(identity, result.Status)
 	if err != nil {
 		return Result{}, workerPickupNoIdentity, err

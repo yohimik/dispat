@@ -91,6 +91,12 @@ func (w *Worker) retireSealedCompiledRun(ctx context.Context, run *workerCompile
 	w.returnMu.Unlock()
 	delete(w.compiledRuns, run.binding.Run)
 	run.channel.client.Close()
+	if run.interpreted != nil {
+		if err := run.interpreted.Close(); err != nil {
+			return compiledSelectionProgress, err
+		}
+		run.interpreted = nil
+	}
 	return compiledSelectionProgress, nil
 }
 

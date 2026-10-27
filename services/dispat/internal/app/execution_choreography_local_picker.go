@@ -56,7 +56,8 @@ func (a *App) startCompiledLocalPicker(ctx context.Context, c *execution.Coordin
 	worker := &execution.Worker{Node: c.Local.Name, Endpoint: c.CanonicalEndpoint,
 		StateDir: stateDir, Report: report, Mailbox: mailbox, Cache: a.git,
 		ReturnSigner: c.Signer, NodeSlots: a.localNodeSlots, Seen: seen, Log: a.log,
-		TransferTimeout: time.Duration(a.cfg.Execution.ResolveTransfer().Timeout) * time.Second}
+		PrepareInterpretedRun: a.interpretedRunPlanner(c.Local.Name, c.Signer),
+		TransferTimeout:       time.Duration(a.cfg.Execution.ResolveTransfer().Timeout) * time.Second}
 	pickerCtx, cancel := context.WithCancelCause(ctx)
 	done := make(chan error, compiledLocalPickerDoneBufferSize)
 	go func() {

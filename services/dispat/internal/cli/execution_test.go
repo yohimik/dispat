@@ -152,8 +152,16 @@ func TestWorkerFlagBelongsToTheDispatchingCommands(t *testing.T) {
 	}
 }
 
-func TestDistributionModeAcceptsCompilationOnly(t *testing.T) {
-	for _, value := range []string{"orchestration", "choreography", "interpretation", "hybrid", "mixed", "Interpretation", ""} {
+func TestDistributionModeAcceptsCompilationAndInterpretation(t *testing.T) {
+	for _, value := range []string{"compilation", "interpretation"} {
+		t.Run("accepted/"+value, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			Run([]string{"status", "--distribution-mode", value, "--root", t.TempDir()}, &stdout, &stderr)
+			assert.NotContains(t, stderr.String(), "this build supports compilation",
+				"the mode must pass flag validation before repository loading")
+		})
+	}
+	for _, value := range []string{"orchestration", "choreography", "hybrid", "mixed", "Interpretation", ""} {
 		t.Run(value, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := Run([]string{"status", "--distribution-mode", value, "--root", t.TempDir()}, &stdout, &stderr)

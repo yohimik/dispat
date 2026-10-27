@@ -81,8 +81,9 @@ delegated tasks wrote there into this checkout, keeping every file no task wrote
 different bytes fail the run with `E227` and neither file is merged. Without worker links every
 task runs in this checkout, as it always has.
 
-`--distribution-mode=compilation` is the only supported mode. The orchestrator derives the plan, publishes ready
-tasks, persists claims, and receives results. A sweep does not acquire a release lock or publish release artifacts.
+`--distribution-mode=compilation` is the default. In `interpretation`, each admitted node independently derives
+the same pinned plan and graph before proposing a ready task; the first node still validates exact claims and
+receives results. `hybrid` remains unavailable. A sweep does not acquire a release lock or publish release artifacts.
 
 ## Choosing the packages
 
@@ -229,11 +230,14 @@ can repeat it. The link is held to every rule a configured one is, and the file 
 
 ### `--distribution-mode`
 
-Selects `compilation`, the only supported mode. Other values are refused before task effects. See [Running on worker nodes](#running-on-worker-nodes).
+Selects `compilation` (default) or `interpretation`. The latter makes every admitted node independently derive and
+verify the pinned plan and graph before choosing ready work. `hybrid` and unknown values are refused before task
+effects. See [Running on worker nodes](#running-on-worker-nodes).
 
 ### `--return-endpoint`, `--return-listen`
 
 When remote workers participate, `--return-endpoint` names the first node's advertised authenticated HTTPS
 return channel, such as `https://runner.example:8443`. `--return-listen` optionally selects a different local
 `host:port` to bind; otherwise the listener address is derived from the advertised endpoint. Workers send
-claim and result requests there. They do not push Git refs. A local-only sweep needs no return listener.
+claim and result requests there. They create only their own signed pending and outcome Git refs; the first node
+alone advances canonical task, ledger and native refs. A local-only sweep needs no return listener.

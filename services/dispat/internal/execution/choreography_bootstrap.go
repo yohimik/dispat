@@ -96,6 +96,9 @@ func (m *GitMailbox) PrepareChoreographyBootstrap(ctx context.Context,
 	if err := bootstrap.JoinPolicy.Validate(bootstrap.CoordinationEndpoint); err != nil {
 		return bootstrapAbsentIdentityText, err
 	}
+	if !validChoreographyBootstrapAttemptPolicy(bootstrap) {
+		return bootstrapAbsentIdentityText, fmt.Errorf(choreographyRetryPolicyMismatchError)
+	}
 	endpoint, err := url.Parse(bootstrap.ReturnEndpoint)
 	if err != nil || endpoint.Scheme != bootstrapReturnSchemeName || endpoint.Host == bootstrapAbsentIdentityText || endpoint.User != nil ||
 		endpoint.RawQuery != bootstrapAbsentIdentityText || endpoint.Fragment != bootstrapAbsentIdentityText || endpoint.Path != bootstrapAbsentIdentityText && endpoint.Path != bootstrapReturnRootPath {
@@ -288,7 +291,8 @@ func (m *GitMailbox) ReadChoreographyBootstrap(ctx context.Context, oid string,
 	}
 	if gitx.RequireTransportEndpoint(bootstrap.CoordinationEndpoint) != nil ||
 		bootstrap.AlgorithmVersion == bootstrapAbsentIdentityText ||
-		bootstrap.JoinPolicy.Validate(bootstrap.CoordinationEndpoint) != nil {
+		bootstrap.JoinPolicy.Validate(bootstrap.CoordinationEndpoint) != nil ||
+		!validChoreographyBootstrapAttemptPolicy(bootstrap) {
 		return RunBootstrap{}, &Rejection{Reason: ReasonChain}
 	}
 	endpoint, err := url.Parse(bootstrap.ReturnEndpoint)
@@ -404,4 +408,11 @@ func (m *GitMailbox) ReadChoreographyBootstrap(ctx context.Context, oid string,
 
 func validChoreographyMode(mode string) bool {
 	return mode == bootstrapCompilationModeName || mode == bootstrapInterpretationModeName
+}
+
+func validChoreographyBootstrapAttemptPolicy(bootstrap RunBootstrap) bool {
+	if bootstrap.Mode == bootstrapInterpretationModeName {
+		return validChoreographyAttemptLimit(bootstrap.JoinPolicy.MaxAttempts)
+	}
+	return bootstrap.JoinPolicy.MaxAttempts == choreographyAttemptPolicyLegacyUnspecified
 }

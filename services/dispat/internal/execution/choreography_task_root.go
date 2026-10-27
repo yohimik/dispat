@@ -21,6 +21,7 @@ type ChoreographyTaskRootQuery struct {
 	Task         string
 	Kind         string
 	BootstrapOID string
+	MaxAttempts  int
 }
 
 // ReadChoreographyTaskRoot finds the one inert signed reservation below a
@@ -54,7 +55,10 @@ func (m *GitMailbox) ReadChoreographyTaskRoot(ctx context.Context,
 		Run: query.Binding.Run, Generation: query.Binding.Generation,
 		PlanDigest: query.Binding.PlanDigest, Task: query.Task,
 		Attempt: minimumCompiledAttempt, Branch: branch,
-	}, BootstrapOID: query.BootstrapOID, MaxAttempts: maxPlacementAttempts}
+	}, BootstrapOID: query.BootstrapOID, MaxAttempts: query.MaxAttempts}
+	if expected.MaxAttempts == choreographyAttemptPolicyLegacyUnspecified {
+		expected.MaxAttempts = maxPlacementAttempts
+	}
 	if err := m.VerifyChoreographyReservation(ctx, rootOID, expected, returnReplyLimit); err != nil {
 		return choreographyAbsentTaskRootIdentity, err
 	}

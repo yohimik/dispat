@@ -121,6 +121,9 @@ func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchReques
 	if err != nil {
 		return nil, a.reportSweepRefusal(err)
 	}
+	if err := setChoreographyCoordinatorMode(coordinator, request.mode, a.cfg.Execution); err != nil {
+		return coordinator, a.reportSweepRefusal(err)
+	}
 	_, _, _, completeGraphDigest, err := a.sweepChoreographyInventory(sweepChoreographyInventoryOptions{
 		Coordinator:         coordinator,
 		Work:                work,
@@ -133,7 +136,6 @@ func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchReques
 		return coordinator, a.reportSweepRefusal(err)
 	}
 	coordinator.GraphDigest = completeGraphDigest
-	coordinator.Mode = request.mode
 	if returnChannel == nil {
 		return coordinator, a.reportSweepRefusal(execution.NewDiagnostic(
 			execution.CodeConfiguration, execution.CategoryConfiguration,
@@ -167,6 +169,7 @@ func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchReques
 			return coordinator, a.reportSweepRefusal(err)
 		}
 		applyChoreographyRetrySafety(specs, coordinator.JoinPolicy.RetryAfterUncertainAttempt)
+		applyChoreographyAttemptLimit(specs, coordinator.JoinPolicy)
 		templates, err := compileSweepChoreographyTemplates(coordinator, work, specs)
 		if err != nil {
 			return coordinator, a.reportSweepRefusal(err)

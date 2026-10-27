@@ -156,8 +156,8 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 		return indexed != nil && claimOID != compiledStageAbsentIdentity &&
 			(indexed.terminal || indexed.claim != claimOID || indexed.attempt != claimedAttempt)
 	}
-	acceptedPickups := make(map[string]compiledAcceptedPickupResult, maxPlacementAttempts)
-	acceptedAcks := make(map[string]ChoreographyEvent, maxPlacementAttempts)
+	acceptedPickups := make(map[string]compiledAcceptedPickupResult)
+	acceptedAcks := make(map[string]ChoreographyEvent)
 	admissionClosed := compiledStageAdmissionWindowOpen
 	resumeAfterExpiryRefusal := func(expireErr error) bool {
 		var refused *choreographyNoClaimBrokerRefusal
@@ -521,7 +521,12 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 				c.choreographyBroker.mu.Lock()
 				stopping := c.choreographyBroker.stopping
 				indexed := c.choreographyBroker.tasks[taskID]
-				retryAllowed := indexed != nil && indexed.spec.RetryAfterUncertainAttempt
+				retryAllowed := indexed != nil && indexed.spec.IsSettledFailureRetryAllowed() &&
+					result.Status == StatusFailed
+				attemptLimit := choreographyAttemptPolicyFirstAttempt
+				if indexed != nil {
+					attemptLimit = indexed.spec.EffectiveMaxAttempts()
+				}
 				var pickup *indexedChoreographyPickup
 				if indexed != nil {
 					pickup = indexed.pickups[event.PickupID]
@@ -536,7 +541,7 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 					Task: taskID, Branch: FormatChoreographyTaskBranch(c.Run, taskID),
 					Attempt: event.Attempt, Node: event.Node, ResultOID: receiptOID,
 					Succeeded: succeeded,
-					Retry:     !succeeded && retryAllowed && !stopping && event.Attempt < maxPlacementAttempts}
+					Retry:     !succeeded && retryAllowed && !stopping && event.Attempt < attemptLimit}
 				if !alreadySettled {
 					if decisionErr := c.choreographyBroker.DecideAttempt(activeCtx, decision); decisionErr != nil {
 						return release.StageOutcome{Node: event.Node,
@@ -578,6 +583,10 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 				stopping := c.choreographyBroker.stopping
 				indexed := c.choreographyBroker.tasks[taskID]
 				retryAllowed := indexed != nil && indexed.spec.RetryAfterUncertainAttempt
+				attemptLimit := choreographyAttemptPolicyFirstAttempt
+				if indexed != nil {
+					attemptLimit = indexed.spec.EffectiveMaxAttempts()
+				}
 				var pickup *indexedChoreographyPickup
 				if indexed != nil {
 					pickup = indexed.pickups[event.PickupID]
@@ -591,7 +600,7 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 				decision := ChoreographyDecision{ChoreographyRunBinding: c.choreographyBroker.binding,
 					Task: taskID, Branch: FormatChoreographyTaskBranch(c.Run, taskID),
 					Attempt: event.Attempt, Node: event.Node, ResultOID: receiptOID,
-					Retry: retryAllowed && !stopping && event.Attempt < maxPlacementAttempts}
+					Retry: retryAllowed && !stopping && event.Attempt < attemptLimit}
 				if !alreadySettled {
 					if decisionErr := c.choreographyBroker.DecideAttempt(activeCtx, decision); decisionErr != nil {
 						return release.StageOutcome{Node: event.Node,

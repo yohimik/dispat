@@ -18,15 +18,16 @@ import (
 // masks that affect planning. Runtime node addresses, return routes and
 // resolved secrets are deliberately absent.
 type pinnedSemanticInvocation struct {
-	Concurrency    []int                        `json:"concurrency,omitempty"`
-	ConcurrencySet bool                         `json:"concurrencySet,omitempty"`
-	Polyrepo       bool                         `json:"polyrepo,omitempty"`
-	PolyrepoSet    bool                         `json:"polyrepoSet,omitempty"`
-	QuietParser    bool                         `json:"quietParser,omitempty"`
-	QuietParserSet bool                         `json:"quietParserSet,omitempty"`
-	Imports        []execution.PinnedConfigFile `json:"imports,omitempty"`
-	IgnoredTags    []string                     `json:"ignoredTags,omitempty"`
-	IgnoredByRepo  map[string][]string          `json:"ignoredTagsByRepository,omitempty"`
+	Concurrency          []int                        `json:"concurrency,omitempty"`
+	ConcurrencySet       bool                         `json:"concurrencySet,omitempty"`
+	EffectiveConcurrency []int                        `json:"effectiveConcurrency,omitempty"`
+	Polyrepo             bool                         `json:"polyrepo,omitempty"`
+	PolyrepoSet          bool                         `json:"polyrepoSet,omitempty"`
+	QuietParser          bool                         `json:"quietParser,omitempty"`
+	QuietParserSet       bool                         `json:"quietParserSet,omitempty"`
+	Imports              []execution.PinnedConfigFile `json:"imports,omitempty"`
+	IgnoredTags          []string                     `json:"ignoredTags,omitempty"`
+	IgnoredByRepo        map[string][]string          `json:"ignoredTagsByRepository,omitempty"`
 }
 
 func (a *App) pinnedInvocation() (json.RawMessage, error) {
@@ -39,6 +40,10 @@ func (a *App) pinnedInvocation() (json.RawMessage, error) {
 		QuietParserSet: a.planningInvocation.QuietParserSet,
 		IgnoredTags:    append([]string(nil), a.ignoreTags...),
 		IgnoredByRepo:  a.ignoreTagsByRepository,
+	}
+	if a.cfg != nil && a.cfg.BuildConcurrency > pinnedPlanningNoEffectiveConcurrency &&
+		a.cfg.PublishConcurrency > pinnedPlanningNoEffectiveConcurrency {
+		invocation.EffectiveConcurrency = []int{a.cfg.BuildConcurrency, a.cfg.PublishConcurrency}
 	}
 	for _, path := range a.planningInvocation.ImportedConfigs {
 		name, relative, err := a.pinnedRelativeConfigPath(path)

@@ -5,6 +5,7 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -70,7 +71,7 @@ func (w *Worker) RunCompiledLocal(ctx context.Context, broker *FirstNodeBroker,
 	if err != nil {
 		return err
 	}
-	if bootstrap.ChoreographyRunBinding != broker.binding ||
+	if !validChoreographyMode(bootstrap.Mode) || bootstrap.ChoreographyRunBinding != broker.binding ||
 		bootstrap.CoordinationEndpoint != w.Endpoint {
 		return fmt.Errorf(compiledLocalPickerIdentityError)
 	}
@@ -94,6 +95,28 @@ func (w *Worker) RunCompiledLocal(ctx context.Context, broker *FirstNodeBroker,
 		roster.Nodes[index].Capacity != w.Report.Capacity {
 		return fmt.Errorf(compiledLocalPickerIdentityError)
 	}
+	var interpreted *InterpretedRun
+	isInstalled := false
+	defer func() {
+		if !isInstalled && interpreted != nil && interpreted.Close != nil {
+			runErr = errors.Join(runErr, interpreted.Close())
+		}
+	}()
+	if bootstrap.Mode == bootstrapInterpretationModeName {
+		if w.PrepareInterpretedRun == nil {
+			return fmt.Errorf(interpretedRunMissingCallbackError)
+		}
+		interpreted, err = w.PrepareInterpretedRun(ctx, InterpretedRunOptions{
+			Bootstrap: bootstrap, BootstrapOID: bootstrapOID,
+			GraphRootOID: rootOID, Roster: roster,
+			ObjectStoreDir: mailbox.ObjectStoreDir(), Carrier: carrier})
+		if err != nil {
+			return err
+		}
+		if err := verifyInterpretedRun(bootstrap, carrier, interpreted); err != nil {
+			return err
+		}
+	}
 	client, err := DirectChoreographyReturn(broker)
 	if err != nil {
 		return err
@@ -101,10 +124,14 @@ func (w *Worker) RunCompiledLocal(ctx context.Context, broker *FirstNodeBroker,
 	channel := &workerReturnChannel{binding: broker.binding, endpoint: bootstrap.ReturnEndpoint,
 		certSHA256: bootstrap.ReturnCertSHA256, bootstrapOID: bootstrapOID,
 		bootstrap: &bootstrap, client: client}
-	w.rememberReturnChannel(channel)
+	defer func() {
+		if !isInstalled {
+			w.closeUnrememberedReturnChannel(channel)
+		}
+	}()
 	run := &workerCompiledRun{binding: broker.binding, bootstrapOID: bootstrapOID,
 		rootOID: rootOID, bootstrap: bootstrap, carrier: carrier, channel: channel,
-		member: roster.Nodes[index], templates: make(map[string]ChoreographyCompiledTemplate,
+		member: roster.Nodes[index], interpreted: interpreted, templates: make(map[string]ChoreographyCompiledTemplate,
 			len(carrier.Templates)), pending: make(map[string]*workerCompiledClaim, compiledLocalInitialPendingClaims),
 		parked: make(map[string]compiledParkedCapacity)}
 	for _, template := range carrier.Templates {
@@ -113,7 +140,9 @@ func (w *Worker) RunCompiledLocal(ctx context.Context, broker *FirstNodeBroker,
 	if err := run.openFrontier(w.Node); err != nil {
 		return err
 	}
+	w.rememberReturnChannel(channel)
 	w.compiledRuns = map[string]*workerCompiledRun{broker.binding.Run: run}
+	isInstalled = true
 	w.slots = make(chan struct{}, max(w.Report.Capacity, compiledLocalMinimumSlots))
 	defer func() {
 		settled := make(chan struct{})
@@ -122,12 +151,34 @@ func (w *Worker) RunCompiledLocal(ctx context.Context, broker *FirstNodeBroker,
 			w.closeReturnChannels()
 			close(settled)
 		}()
+		isFinished := false
 		select {
 		case <-settled:
+			isFinished = true
 		case <-time.After(max(taskReportTimeout, w.TransferTimeout)):
 			w.Log.Error().Msg(compiledLocalPickerSettlementTimeoutError)
 			if runErr == nil {
 				runErr = fmt.Errorf(compiledLocalPickerSettlementTimeoutError)
+			}
+		}
+		if isFinished && run.interpreted != nil {
+			queryCtx, stopQuery := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
+			held, heldErr := w.NodeSlots.Held(queryCtx)
+			stopQuery()
+			if heldErr != nil {
+				runErr = errors.Join(runErr, heldErr)
+			} else {
+				isCloseAllowed := true
+				for _, lease := range held {
+					if lease.Intent.Run == run.binding.Run {
+						isCloseAllowed = false
+						break
+					}
+				}
+				if isCloseAllowed {
+					runErr = errors.Join(runErr, run.interpreted.Close())
+					run.interpreted = nil
+				}
 			}
 		}
 	}()

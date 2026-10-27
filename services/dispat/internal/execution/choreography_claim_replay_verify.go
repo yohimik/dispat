@@ -48,6 +48,9 @@ func (g *GitChoreographyPersist) verifyAcceptedClaimEvent(ctx context.Context,
 		claim.LeaseIntentID != nodeSlotLeaseID(NodeSlotIntent{Run: claim.Run, Task: claim.Task, Attempt: claim.Attempt, PickupID: claim.PickupID}) {
 		return fmt.Errorf(choreographyClaimReplayIdentityError)
 	}
+	if err := validateChoreographySignedPickupID(g.opts.JoinPolicy, g.tasks[event.Task], claim.PickupID); err != nil {
+		return err
+	}
 	if err := VerifyChoreographyClaimIdentity(g.opts.JoinPolicy, claim); err != nil {
 		return err
 	}

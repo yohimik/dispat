@@ -1,5 +1,5 @@
-/* The landing page is a field manual: a fixed reading measure, margin notes,
-   rules, and a small dependency sketch. Shared palette lives in custom.css. */
+/* The landing page keeps a fixed reading measure and editorial rules.
+   Shared palette lives in custom.css. */
 .page { color: var(--site-ink); }
 .shell { width: min(100% - 5rem, 1100px); margin-inline: auto; }
 .hero { padding-top: 2.1rem; }
@@ -7,7 +7,7 @@
 .heroMasthead p { margin: 0; }
 .heroMasthead p span { color: var(--site-muted); padding-inline: .55rem; }
 .heroMasthead a { color: var(--site-muted); }
-.heroGrid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 3.5rem; align-items: center; padding-block: 4.3rem 4.7rem; }
+.heroGrid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 3.5rem; align-items: center; padding-block: 4.3rem 4.7rem; }
 .title { margin: 0 0 1.7rem; font: 400 clamp(3.5rem, 5.6vw, 5.3rem)/1.04 var(--site-serif); letter-spacing: -.055em; }
 .title em { font-weight: 400; color: var(--ifm-color-primary); }
 .lead { max-width: 37rem; margin: 0 0 1.75rem; font-size: 1rem; line-height: 1.8; color: var(--site-muted); }
@@ -20,22 +20,6 @@
 .textLink:hover { text-decoration-color: currentColor; }
 .heroNote { margin: 0; font: .68rem/1.7 var(--site-mono); color: var(--site-muted); }
 .heroFootnote { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; padding-block: 1rem; border-top: 1px solid var(--site-rule); font: .7rem/1.6 var(--site-mono); color: var(--site-muted); }
-.heroFootnote a { color: var(--site-ink); white-space: nowrap; }
-.sketch { margin: 1.1rem 0 0; min-width: 0; }
-.sketch figcaption { font: italic .9rem/1.5 var(--site-serif); color: var(--site-muted); }
-.sketch figcaption span { display: inline-block; margin-right: .5rem; font: .62rem/1.5 var(--site-mono); }
-.sketch svg { display: block; width: 100%; height: auto; overflow: visible; }
-.sketchLines { fill: none; stroke: var(--site-muted); stroke-width: 1; }
-.sketchText { fill: var(--site-ink); font: 14px var(--site-mono); }
-.sketchVersion { fill: var(--ifm-color-primary); font-size: 12px; }
-.sketchMuted { fill: var(--site-muted); }
-.sketchSmall { fill: var(--site-muted); font-size: 10px; }
-.sketchTicks { stroke: var(--ifm-color-primary); stroke-width: 1.5; fill: none; }
-.sketchCommand { display: flex; align-items: baseline; gap: .5rem; padding: .8rem 0; border-top: 1px solid var(--site-rule); border-bottom: 1px solid var(--site-rule); font: .67rem/1.6 var(--site-mono); }
-.sketchCommand > span:first-child { color: var(--ifm-color-primary); }
-.sketchCommand > span:last-child { margin-left: auto; color: var(--site-muted); font-size: .7rem; }
-.sketchCommand code { background: none; border: none; padding: 0; color: var(--site-ink); font-size: inherit; }
-.sketchNote { margin: .6rem 0 0; text-align: right; font: italic .86rem/1.6 var(--site-serif); color: var(--site-muted); }
 
 .section { padding-block: 3.5rem; border-top: 1px solid var(--site-rule); }
 .sectionHeading { display: grid; grid-template-columns: 180px minmax(0, 1fr); column-gap: 2rem; align-items: baseline; margin-bottom: 1.8rem; }
@@ -91,13 +75,11 @@
   .section:last-child .sectionBody > .buttons { margin-left: 212px; }
 }
 @media (max-width: 996px) {
-  .heroGrid { gap: 2rem; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); padding-block: 3.5rem; }
+  .heroGrid { gap: 2rem; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); padding-block: 3.5rem; }
   .title { font-size: clamp(3rem, 6.3vw, 4.8rem); }
   .sectionHeading, .recoveryNote { grid-template-columns: 140px minmax(0, 1fr); gap: 1.5rem; }
   .sectionBody > .sectionLead, .projectMeta, .reference { margin-left: 164px; }
   .libraries { gap: 1.5rem; }
-  .sketchCommand { flex-wrap: wrap; }
-  .sketchCommand > span:last-child { margin-left: 0; width: 100%; }
 }
 @media (max-width: 760px) {
   .shell { width: calc(100% - 2.5rem); }
@@ -106,11 +88,6 @@
   .heroGrid { grid-template-columns: 1fr; gap: 2.5rem; padding-block: 2.8rem 2rem; }
   .title { font-size: clamp(2.8rem, 8.9vw, 4.4rem); }
   .lead { max-width: 36rem; font-size: .94rem; }
-  .sketch { width: min(100%, 360px); justify-self: center; margin-top: 0; }
-  .sketchText { font-size: 16px; }
-  .sketchSmall, .sketchVersion { font-size: 14px; }
-  .sketchCommand { flex-wrap: nowrap; }
-  .sketchCommand > span:last-child { width: auto; margin-left: auto; }
   .heroFootnote { font-size: .62rem; align-items: center; }
   .heroFootnote > span { max-width: 28ch; }
   .section { padding-block: 2.5rem; }

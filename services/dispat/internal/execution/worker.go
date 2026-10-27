@@ -267,6 +267,31 @@ func (w *Worker) Serve(ctx context.Context) string {
 	// on: the commands are already dead when the stop reached them, and the
 	// run that dispatched them is waiting to hear so.
 	w.running.Wait()
+	if w.NodeSlots != nil {
+		queryCtx, stopQuery := context.WithTimeout(context.WithoutCancel(ctx), taskReportTimeout)
+		held, heldErr := w.NodeSlots.Held(queryCtx)
+		stopQuery()
+		if heldErr != nil {
+			w.refusal = errors.Join(w.refusal, heldErr)
+		} else {
+			for _, run := range w.compiledRuns {
+				if run.interpreted == nil {
+					continue
+				}
+				occupied := false
+				for _, lease := range held {
+					if lease.Intent.Run == run.binding.Run {
+						occupied = true
+						break
+					}
+				}
+				if !occupied {
+					w.refusal = errors.Join(w.refusal, run.interpreted.Close())
+					run.interpreted = nil
+				}
+			}
+		}
+	}
 	w.closeReturnChannels()
 	w.Log.Info().Str("reason", reason).Msg("worker stopped")
 	return reason
@@ -1355,7 +1380,7 @@ func (w *Worker) returnChannelForTask(ctx context.Context, tip ChainTip,
 	}
 	binding := ChoreographyRunBinding{Run: assignment.Run, Generation: assignment.Generation,
 		PlanDigest: assignment.PlanDigest, GraphDigest: assignment.GraphDigest}
-	if bootstrap.Mode != workerRuntimeCompilationMode || bootstrap.ChoreographyRunBinding != binding ||
+	if !validChoreographyMode(bootstrap.Mode) || bootstrap.ChoreographyRunBinding != binding ||
 		bootstrap.CoordinationEndpoint != w.Endpoint ||
 		bootstrap.ReturnEndpoint == workerRuntimeNoIdentity || bootstrap.ReturnCertSHA256 == workerRuntimeNoIdentity {
 		return nil, fmt.Errorf(workerRuntimeTaskReturnIdentity)
@@ -1377,7 +1402,7 @@ func (w *Worker) returnChannelFor(assignment Assignment) (*workerReturnChannel, 
 		channel.binding.PlanDigest != assignment.PlanDigest ||
 		assignment.Protocol == ChoreographyProtocolVersion &&
 			(channel.bootstrap == nil || channel.bootstrap.Protocol != ChoreographyProtocolVersion ||
-				channel.bootstrap.Mode != workerRuntimeCompilationMode ||
+				!validChoreographyMode(channel.bootstrap.Mode) ||
 				channel.bootstrapOID != assignment.BootstrapOID ||
 				assignment.GraphDigest != channel.binding.GraphDigest ||
 				channel.bootstrap.ChoreographyRunBinding != channel.binding ||

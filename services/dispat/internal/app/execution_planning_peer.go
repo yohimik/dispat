@@ -91,6 +91,9 @@ func openPeerPlanningEnvironment(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf(pinnedPlanningControlConfigLoadErrorFormat, err)
 	}
+	if err := pinPeerEffectiveConcurrency(configFile, invocation); err != nil {
+		return nil, err
+	}
 	if invocation.PolyrepoSet {
 		configFile.Polyrepo = invocation.Polyrepo
 	}

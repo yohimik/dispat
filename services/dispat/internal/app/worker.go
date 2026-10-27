@@ -135,15 +135,16 @@ func (a *App) ServeTasks(ctx context.Context, opts WorkerOptions) error {
 		IdleTimeout: opts.IdleTimeout,
 		// The transfer window bounds the push of a task's outputs, which is
 		// the one report a node makes whose size the node does not choose.
-		TransferTimeout: time.Duration(settings.ResolveTransfer().Timeout) * time.Second,
-		Mailbox:         execution.NewGitMailbox(endpoint, git, signer, a.log),
-		ReturnSigner:    signer,
-		JoinIdentityKey: joinIdentityKey,
-		NodeSlots:       nodeSlots,
-		Cache:           git,
-		Seen:            seen,
-		Log:             a.log,
-		Report:          report,
+		TransferTimeout:       time.Duration(settings.ResolveTransfer().Timeout) * time.Second,
+		Mailbox:               execution.NewGitMailbox(endpoint, git, signer, a.log),
+		ReturnSigner:          signer,
+		JoinIdentityKey:       joinIdentityKey,
+		NodeSlots:             nodeSlots,
+		Cache:                 git,
+		Seen:                  seen,
+		Log:                   a.log,
+		Report:                report,
+		PrepareInterpretedRun: a.interpretedRunPlanner(settings.Name, signer),
 		// The cache is dispensable by design, so opening it is the same
 		// operation as repairing it: a node whose folder was deleted under it
 		// makes one again and pays a fetch.

@@ -36,6 +36,33 @@ func TestLoadExecutionBoundsAdmissionAtSignedProtocolMaximum(t *testing.T) {
 	assert.Contains(t, err.Error(), "execution.timeouts.admission must be <=")
 }
 
+func TestLoadExecutionMaxAttemptsIsExplicitAndBounded(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		value    int
+		wantFail bool
+	}{
+		{name: "one total pickup", value: models.DefaultExecutionMaxAttempts},
+		{name: "two total pickups", value: 2},
+		{name: "protocol ceiling", value: models.MaximumExecutionMaxAttempts},
+		{name: "zero", value: 0, wantFail: true},
+		{name: "negative", value: -1, wantFail: true},
+		{name: "above ceiling", value: models.MaximumExecutionMaxAttempts + 1, wantFail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			loaded, err := loadModel(t, executionConfig(&ExecutionConfig{
+				MaxAttempts: models.Int(tc.value),
+			}), "pkgs/core")
+			if tc.wantFail {
+				require.ErrorContains(t, err, "execution.maxAttempts must be between")
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.value, loaded.Execution.ResolveMaxAttempts())
+		})
+	}
+}
+
 func TestLoadExecutionPackCeilingKeepsExactIntegerBoundary(t *testing.T) {
 	for _, test := range []struct {
 		name     string

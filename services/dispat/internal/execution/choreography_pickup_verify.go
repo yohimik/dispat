@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 const (
@@ -33,6 +34,7 @@ const (
 type ChoreographyPickupResultProof struct {
 	Proposal         ChoreographyResultProposal
 	Result           Result
+	Mode             string
 	MaxDocumentBytes int64
 }
 
@@ -42,7 +44,8 @@ type ChoreographyPickupResultProof struct {
 func (m *GitMailbox) VerifyChoreographyPickupResult(ctx context.Context,
 	proof ChoreographyPickupResultProof) error {
 	p, result := proof.Proposal, proof.Result
-	identity := ChoreographyPickupIdentity{Run: p.Run, Task: p.Task, Node: p.Node, PickupID: p.PickupID}
+	identity := ChoreographyPickupIdentity{Run: p.Run, Task: p.Task, Node: p.Node,
+		PickupID: p.PickupID, Mode: proof.Mode}
 	pendingBranch, err := FormatChoreographyPendingBranch(identity)
 	if err != nil {
 		return err
@@ -160,6 +163,12 @@ func (m *GitMailbox) VerifyChoreographyPickupResult(ctx context.Context,
 		pending.LeaseIntentID != claim.LeaseIntentID ||
 		pending.LeaseWeight != claim.LeaseWeight {
 		return fmt.Errorf(choreographyPickupProofPendingIdentityError)
+	}
+	if identity.effectiveMode() == bootstrapInterpretationModeName {
+		issuedAt, err := interpretedPickupTime(p.PickupID)
+		if err != nil || pending.IssuedAt != issuedAt.Format(time.RFC3339Nano) {
+			return fmt.Errorf(choreographyPickupProofPendingIdentityError)
+		}
 	}
 	return nil
 }

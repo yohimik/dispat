@@ -106,7 +106,7 @@ func (c *Coordinator) InitializeChoreographyTasks(ctx context.Context,
 			PlanDigest: c.PlanDigest, Task: task.Task, Attempt: choreographyInitFirstAttempt,
 			Generation: c.Generation, Branch: branch,
 			IssuedAt: time.Now().UTC().Format(time.RFC3339),
-		}, BootstrapOID: opts.BootstrapOID, MaxAttempts: maxPlacementAttempts}
+		}, BootstrapOID: opts.BootstrapOID, MaxAttempts: task.EffectiveMaxAttempts()}
 		oid, err := mailbox.PrepareChoreographyReservation(ctx, reservation)
 		if err != nil {
 			return InitializedChoreography{}, err

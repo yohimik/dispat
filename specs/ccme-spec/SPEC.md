@@ -8415,6 +8415,15 @@ positive cross-run command capacity, and `runOnly: choreographer` for a task eli
 policy cannot change node capacity or the first node's authority. Node names identify execution endpoints,
 not repository peers.
 
+For interpretation, `execution.maxAttempts` is the positive maximum number of accepted physical pickups
+of one delegated logical task, including its first pickup. Omission means one total attempt; the accepted range
+is 1 through 64, and values outside it are refused before effects. The resolved value is signed into
+the bootstrap and complete task graph, and every node verifies the same value. First-only native effects
+remain exclusive and are never made repeatable by this setting. This count is separate from
+`execution.retryAfterUncertainAttempt`: a larger count authorizes a bounded successor after a durably
+settled failed Result, whereas an uncertain contact-loss successor additionally needs the explicit
+repeat-safety assertion and the signed Cancel and reply-grace fence of §28.4.
+
 With no remote choreographer and no authorized late join, eligible work in every mode runs on the first node
 without a return listener. A task restricted to a choreographer then has no compatible node and is refused
 before effects. A run permitting late join starts the authenticated return listener even if its initial
@@ -8725,17 +8734,24 @@ replays these task refs and events before retiring its lock or allowing dependen
 tasks do not invite a peer claim, but they use the same exact branch identity and finality fence.
 
 The canonical task branch is the sole logical winner authority. A Claim atomically advances that branch and
-names one unique pickup ID. The worker creates its pending ref from the accepted Claim tip and an output or
-failed ref from that exact pending commit; each ref is create-only and unique to the run, task, node and
-pickup. A signed Result or Ack may be admitted as pickup evidence on the ledger without advancing the
+names one unique pickup ID. The worker creates its pending ref from the accepted Claim tip and an outcome
+ref from that exact pending commit; each ref is create-only and unique to the run, task, node and
+pickup. In interpretation the pickup ref name includes its creation time and a separately generated,
+persisted random pickup identity; equal timestamps cannot collide, and a timestamp is never claim authority,
+readiness evidence, or a reason to free capacity. An interpretation success uses a completed ref; a failure
+or cancellation uses a failed ref, both direct children of that pickup's pending commit. A successful task
+with no declared output still retains the signed completed commit and canonical terminal marker. A signed Result
+or Ack may be admitted as pickup evidence on the ledger without advancing the
 canonical task tip while a successor pickup is active. The first node selects at most one verified successful
-Result as the canonical terminal winner before installing its outputs. A failed Result can reopen the task
-for a bounded successor only when the signed `execution.retryAfterUncertainAttempt` policy declares that every
-delegated command and hook is safe to repeat without conflicting external effects. This operator declaration
-defaults to false and is bound into the bootstrap and complete graph; it never authorizes a native first-node
-effect retry. Without
-it, an accepted failed Result or Ack reaches a terminal failure, and uncertain contact loss retains its
-charge and exclusion without starting a successor. Failure alone does not discharge logical successors.
+Result as the canonical terminal winner before installing its outputs. In interpretation, a durably settled
+failed Result, including the required package-hook outcome, may reopen the task for a sequential successor
+only while its signed `execution.maxAttempts` total has not been exhausted. The default total of one gives
+an accepted failure terminal finality. A failed attempt alone discharges no logical successor edge.
+An uncertain contact loss may open a successor only if the same count leaves room and the separately signed
+`execution.retryAfterUncertainAttempt` policy declares every delegated command and hook safe to repeat
+without conflicting external effects. This operator declaration defaults to false and is bound into the
+bootstrap and complete graph; it never authorizes a native first-node effect retry. Without it, uncertain
+contact loss retains its charge and exclusion without starting a successor.
 The durable Claim contains
 its proposal ID, pickup ID and exact input digest. Claim,
 capacity-ledger and claim-event index refs are updated atomically in the same repository; preflight verifies

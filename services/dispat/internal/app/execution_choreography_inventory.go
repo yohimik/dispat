@@ -28,6 +28,7 @@ func (a *App) releaseChoreographyInventory(c *execution.Coordinator,
 		return nil, nil, nil, choreographyAbsentIdentityText, err
 	}
 	applyChoreographyRetrySafety(specs, c.JoinPolicy.RetryAfterUncertainAttempt)
+	applyChoreographyAttemptLimit(specs, c.JoinPolicy)
 	templates, err := compileReleaseChoreographyTemplatesWithInputs(releaseChoreographyTemplateOptions{
 		Compiled:    compiled,
 		Tasks:       specs,
@@ -79,6 +80,7 @@ func (a *App) sweepChoreographyInventory(options sweepChoreographyInventoryOptio
 		return nil, nil, nil, choreographyAbsentIdentityText, err
 	}
 	applyChoreographyRetrySafety(specs, c.JoinPolicy.RetryAfterUncertainAttempt)
+	applyChoreographyAttemptLimit(specs, c.JoinPolicy)
 	templates, err := compileSweepChoreographyTemplatesWithInputs(sweepChoreographyTemplateOptions{
 		Work:        work,
 		Tasks:       specs,

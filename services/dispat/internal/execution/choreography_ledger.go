@@ -921,6 +921,11 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 			return fmt.Errorf(choreographyLedgerEventParentErr)
 		}
 		if spec, known := g.tasks[record.Event.Task]; known {
+			if choreographyPickupAdmissionEvent(record.Event.Kind) {
+				if err := validateChoreographySignedPickupID(g.opts.JoinPolicy, spec, record.Event.PickupID); err != nil {
+					return err
+				}
+			}
 			signedTip := spec.ReservationOID
 			if events := g.taskEvents[record.Event.Task]; len(events) != choreographyLedgerNoItems {
 				signedTip = g.events[events[len(events)-choreographyLedgerLastTaskEventOffset]].TaskOID
@@ -1062,6 +1067,19 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 			if _, err := mailbox.ReadChoreographyAcceptedResult(ctx, g.opts.Binding,
 				*record.Event, g.opts.MaxPackBytes); err != nil {
 				return err
+			}
+		}
+		if record.Event.Kind == ChoreographyRetryReady &&
+			record.Event.PickupID != choreographyLedgerMissingIdentity &&
+			record.Event.OutputOID != choreographyLedgerMissingIdentity &&
+			g.tasks[record.Event.Task].MaxAttempts != choreographyAttemptPolicyLegacyUnspecified {
+			accepted := *record.Event
+			accepted.Kind = ChoreographyResultAccepted
+			accepted.TaskOID = record.Event.ResultReceiptOID
+			result, readErr := mailbox.ReadChoreographyAcceptedResult(ctx, g.opts.Binding,
+				accepted, g.opts.MaxPackBytes)
+			if readErr != nil || result.Status != StatusFailed {
+				return fmt.Errorf(choreographyGitInvalidTaskDecisionError)
 			}
 		}
 		if record.Event.Kind == ChoreographyTerminal &&

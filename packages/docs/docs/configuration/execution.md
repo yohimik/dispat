@@ -7,6 +7,7 @@ is the option reference.
 ```yaml
 execution:
   concurrency: 2
+  maxAttempts: 1
   retryAfterUncertainAttempt: false
   name: orchestrator
   endpoint: git@github.com:acme/project.git
@@ -36,12 +37,12 @@ Distributed nodes currently require Linux or macOS for the persistent shared nod
 distributed execution is refused before task effects. Local execution without worker links and without
 explicit shared node capacity remains available.
 
-`--distribution-mode=compilation` is the only supported mode for `release`, `run` and `status`. The
-orchestrator computes the plan and compiles one task ref per executable logical task before work starts. Workers
-select eligible ready tasks from that fixed graph; the orchestrator validates their exact claims and alone advances
-canonical task, ledger and release refs. Workers create their own pending and outcome branches. The mode is
-an invocation choice; there is no static node role field. The future `interpretation` and `hybrid` values are
-refused before task effects.
+`--distribution-mode=compilation` is the default for `release`, `run` and `status`. It compiles one task
+descriptor per executable logical task before work starts. With `interpretation`, each admitted node independently
+derives the same plan and graph from the pinned input, verifies their digests, then proposes locally ready work.
+The first node validates each exact proposal and alone advances canonical task, ledger and release refs. A worker
+must confirm its own signed pending branch before command effects. `hybrid` remains unavailable and is refused
+before task effects. The mode is an invocation choice; there is no static node role field.
 When remote workers participate, `release` and `run` require `--return-endpoint=https://host:port`.
 `--return-listen=host:port` can set a different local bind address. Status accepts the mode but starts no listener.
 
@@ -63,6 +64,7 @@ a transported checkout is never read for authority either.
 | Key           | Type                        | Default           | Description                                                                                          |
 |---------------|-----------------------------|-------------------|------------------------------------------------------------------------------------------------------|
 | `concurrency` | int                         | `1`               | How many claimed command tasks this node runs at once, across runs. Must be at least 1.              |
+| `maxAttempts` | int | `1` in interpretation | Maximum accepted pickups per delegated logical task, counting the first; interpretation only, from 1 through 64. |
 | `retryAfterUncertainAttempt` | boolean | `false` | Assert that delegated commands can safely repeat after an attempt whose external effects are uncertain. |
 | `name`        | string                      | none              | This node's identity when it serves tasks. Required by `dispat worker`.                               |
 | `endpoint`    | string                      | the release remote | The repository this node reads work from and writes its own pickup branches to when it serves tasks. Without it, `dispat worker` uses the release remote of the checkout it runs in. |
@@ -85,12 +87,25 @@ for that capacity. The value must be at least `1`; here, `0` does not mean the n
 ### `retryAfterUncertainAttempt`
 
 This is an explicit assertion by the first node that every delegated command in the run is safe to execute again
-after an earlier pickup whose external effects are uncertain. The default is `false`. When enabled, the signed
-bootstrap and logical task graph bind the choice; an admitted worker cannot change it. A task can move to another
-authorized worker only after the first node has signed its Cancel, waited the bounded reply grace and recorded
-contact loss. The old physical pickup remains charged until its exact signed finality. A late old result cannot
+after an earlier pickup whose external effects are uncertain. The default is `false`. In interpretation,
+`maxAttempts` independently bounds sequential pickups after a settled failed Result; a value greater than one
+does not imply this safety assertion. When enabled, the signed
+bootstrap and logical task graph bind the choice; an admitted worker cannot change it. After uncertain contact
+loss, a task can move to another authorized worker only after the first node has signed its Cancel, waited the
+bounded reply grace and recorded contact loss. The old physical pickup remains charged until its exact signed
+finality. A late old result cannot
 replace the first verified winner. Do not enable this for a publish or build script that can make an unverified,
 non-idempotent external change.
+
+### `maxAttempts`
+
+In interpretation, this is the total number of accepted physical pickups allowed for one delegated logical task.
+Omission means one, including the initial pickup; `2` permits at most one successor. The value must be from 1
+through 64. A settled failed Result, after its required package hooks have settled, can lead to a sequential
+successor while attempts remain. A timeout or lost contact also needs `retryAfterUncertainAttempt: true` and
+signed Cancel and reply-grace evidence. Neither setting repeats first-node publication or other native effects.
+The resolved count is signed into the run bootstrap and task graph. Compiled mode retains its existing bounded
+placement policy.
 
 ### `name`
 

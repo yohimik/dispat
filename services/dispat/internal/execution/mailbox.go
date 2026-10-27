@@ -32,6 +32,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/yohimik/dispat/pkg/models"
+
 	"github.com/rs/zerolog"
 
 	"github.com/yohimik/dispat/services/dispat/internal/gitx"
@@ -385,7 +387,7 @@ func (m *GitMailbox) OpenCarriedAssignment(ctx context.Context, assignmentOID st
 	if assignment.Protocol == ChoreographyProtocolVersion {
 		// A retry offer extends the same logical task branch after its signed
 		// decision. Follow only the bounded first-parent attempt history.
-		for steps := choreographyMailboxNoCarrierParents; steps < maxPlacementAttempts*choreographyMailboxHistoryPhasesPerAttempt; steps++ {
+		for steps := choreographyMailboxNoCarrierParents; steps < models.MaximumExecutionMaxAttempts*choreographyMailboxHistoryPhasesPerAttempt; steps++ {
 			prior, err := m.readTree(ctx, reservationOID)
 			if err != nil {
 				return nil, err
@@ -453,11 +455,7 @@ func (m *GitMailbox) OpenCarriedAssignment(ctx context.Context, assignmentOID st
 	}
 	if assignment.Protocol == ChoreographyProtocolVersion {
 		if reservation.BootstrapOID == choreographyMailboxMissingCarrierOID || reservationParents[choreographyMailboxFirstParentIndex] != reservation.BootstrapOID ||
-			reservation.MaxAttempts != maxPlacementAttempts || assignment.Attempt > reservation.MaxAttempts {
-			return nil, &Rejection{Reason: ReasonChain}
-		}
-		bootstrap, err := m.readTree(ctx, reservation.BootstrapOID)
-		if err != nil || bootstrap.kind != choreographyBootstrapKind {
+			!validChoreographyAttemptLimit(reservation.MaxAttempts) || assignment.Attempt > reservation.MaxAttempts {
 			return nil, &Rejection{Reason: ReasonChain}
 		}
 		if assignment.BootstrapOID != reservation.BootstrapOID || assignment.GraphDigest == choreographyMailboxMissingCarrierOID ||

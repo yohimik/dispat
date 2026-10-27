@@ -24,6 +24,9 @@ func TestExecutionDefaultsAnswerAnAbsentKey(t *testing.T) {
 	if got := absent.ResolveConcurrency(); got != DefaultExecutionConcurrency {
 		t.Errorf("ResolveConcurrency() = %d, want %d", got, DefaultExecutionConcurrency)
 	}
+	if got := absent.ResolveMaxAttempts(); got != DefaultExecutionMaxAttempts {
+		t.Errorf("ResolveMaxAttempts() = %d, want %d", got, DefaultExecutionMaxAttempts)
+	}
 	wantTimeouts := ExecutionTimeoutsConfig{
 		Preflight: DefaultExecutionPreflightTimeout,
 		Admission: DefaultExecutionAdmissionTimeoutSeconds,
@@ -48,6 +51,7 @@ func TestExecutionDefaultsAnswerAnAbsentKey(t *testing.T) {
 	// checks a written configuration with.
 	stated := &ExecutionConfig{}
 	if stated.ResolveConcurrency() != absent.ResolveConcurrency() ||
+		stated.ResolveMaxAttempts() != absent.ResolveMaxAttempts() ||
 		stated.ResolveTimeouts() != absent.ResolveTimeouts() ||
 		stated.ResolveTransfer() != absent.ResolveTransfer() {
 		t.Error("an empty execution object must resolve exactly as an absent one")
@@ -61,11 +65,15 @@ func TestExecutionResolvesStatedValues(t *testing.T) {
 	// repairing it.
 	c := &ExecutionConfig{
 		Concurrency: Int(0),
+		MaxAttempts: Int(2),
 		Timeouts:    &ExecutionTimeoutsConfig{Admission: 120, Task: 90},
 		Transfer:    &ExecutionTransferConfig{MaxBytes: 4096},
 	}
 	if got := c.ResolveConcurrency(); got != 0 {
 		t.Errorf("ResolveConcurrency() = %d, want the stated 0 back", got)
+	}
+	if got := c.ResolveMaxAttempts(); got != 2 {
+		t.Errorf("ResolveMaxAttempts() = %d, want the stated 2", got)
 	}
 	timeouts := c.ResolveTimeouts()
 	if timeouts.Task != 90 {
@@ -121,6 +129,7 @@ func TestExecutionModelRoundTrip(t *testing.T) {
 	f := File{
 		Execution: &ExecutionConfig{
 			Concurrency:                Int(2),
+			MaxAttempts:                Int(2),
 			Name:                       "Build-A",
 			Endpoint:                   "ssh://build.example.test/srv/mailbox.git",
 			SecretEnv:                  "DISPAT_EXECUTION_SECRET",

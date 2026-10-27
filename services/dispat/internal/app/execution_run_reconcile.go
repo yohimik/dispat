@@ -162,7 +162,7 @@ func (a *App) reconcilePriorSweep(ctx context.Context,
 		return fmt.Errorf(retainedSweepBootstrapUnauthenticErrorFormat, err)
 	}
 	binding := bootstrap.ChoreographyRunBinding
-	if bootstrap.Mode != retainedRunCompilationModeName || binding.Run != identity.Run ||
+	if (bootstrap.Mode != retainedRunCompilationModeName && bootstrap.Mode != interpretedModeName) || binding.Run != identity.Run ||
 		binding.Generation != identity.Generation ||
 		bootstrap.ReturnEndpoint != identity.Endpoint ||
 		bootstrap.ReturnCertSHA256 != identity.CertPin {
@@ -208,6 +208,7 @@ func (a *App) reconcilePriorSweep(ctx context.Context,
 		return fmt.Errorf(retainedSweepRosterPolicyReadErrorFormat, err)
 	}
 	applyChoreographyRetrySafety(recomputedSpecs, bootstrap.JoinPolicy.RetryAfterUncertainAttempt)
+	applyChoreographyAttemptLimit(recomputedSpecs, bootstrap.JoinPolicy)
 	if !slices.Equal(budgets, roster.Budgets) {
 		return fmt.Errorf(retainedSweepRosterPolicyMismatchError)
 	}
@@ -347,7 +348,8 @@ func (a *App) recoverPriorRunNodeSlots(ctx context.Context, options priorRunNode
 	worker := &execution.Worker{
 		Node: first.Name, Mailbox: mailbox, ReturnSigner: signer,
 		NodeSlots: slots, Cache: a.git, Log: a.log,
-		Report: execution.NodeReport{Limits: limits},
+		PrepareInterpretedRun: a.interpretedRunPlanner(first.Name, signer),
+		Report:                execution.NodeReport{Limits: limits},
 	}
 	if err := worker.RecoverHeldNodeSlotsForRun(ctx, identity.Run); err != nil {
 		return fmt.Errorf(retainedFirstCapacityAuthenticationErrorFormat, err)

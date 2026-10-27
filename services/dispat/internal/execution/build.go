@@ -500,7 +500,7 @@ func (c *Coordinator) carrySourceInputs(ctx context.Context,
 			return nil, fmt.Errorf("execution: importing the input state of %s: %w", source.Name, err)
 		}
 		repositories = append(repositories, AssignmentRepository{
-			Name: source.Name, Path: source.Path, Snapshot: commits[index],
+			Name: source.Name, Path: source.Path, Snapshot: commits[index], PlannedHead: source.Head,
 		})
 	}
 	return repositories, nil

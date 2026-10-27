@@ -80,9 +80,11 @@ var executionNodeName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 const invalidLateJoinIdentityPublicKeyErrorFormat = "%s.identityPublicKey must be a canonical base64url Ed25519 public key for lateJoin"
 const invalidExecutionIdentityKeyEnvErrorFormat = "execution.identityKeyEnv %q is not an environment variable name"
 const invalidExecutionAdmissionTimeoutErrorFormat = "execution.timeouts.admission must be <= %d seconds, got %d"
+const invalidExecutionMaxAttemptsErrorFormat = "execution.maxAttempts must be between 1 and %d total accepted pickups, got %d"
 
 const (
 	executionConcurrencyFieldKey    = "concurrency"
+	executionMaxAttemptsFieldKey    = "maxattempts"
 	executionNameFieldKey           = "name"
 	executionEndpointFieldKey       = "endpoint"
 	executionSecretEnvFieldKey      = "secretenv"
@@ -117,6 +119,7 @@ func isExecutionNodeName(name string) bool {
 func executionFields(dst *ExecutionConfig) fields {
 	return fields{
 		executionConcurrencyFieldKey:    numPtr(&dst.Concurrency),
+		executionMaxAttemptsFieldKey:    numPtr(&dst.MaxAttempts),
 		executionNameFieldKey:           str(&dst.Name),
 		executionEndpointFieldKey:       str(&dst.Endpoint),
 		executionSecretEnvFieldKey:      str(&dst.SecretEnv),
@@ -199,6 +202,11 @@ func validateExecution(c *File) error {
 
 // validateExecutionBounds checks how much this node takes on and moves.
 func validateExecutionBounds(x *ExecutionConfig) error {
+	if attempts := x.ResolveMaxAttempts(); attempts < public.DefaultExecutionMaxAttempts ||
+		attempts > public.MaximumExecutionMaxAttempts {
+		return fmt.Errorf(invalidExecutionMaxAttemptsErrorFormat,
+			public.MaximumExecutionMaxAttempts, attempts)
+	}
 	if capacity := x.ResolveConcurrency(); capacity < 1 {
 		return fmt.Errorf("execution.concurrency must be >= 1, got %d: a node that accepts no task is a node to remove rather than to configure", capacity)
 	}

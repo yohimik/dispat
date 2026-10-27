@@ -91,7 +91,8 @@ func validateChoreographyGraphCarrier(carrier ChoreographyGraphCarrier) error {
 		if task.Task == graphCarrierMissingIdentity || byTask[task.Task].Task != graphCarrierMissingIdentity {
 			return fmt.Errorf(graphCarrierRepeatedTaskErrorFormat, task.Task)
 		}
-		if !task.Virtual && (task.Branch != FormatChoreographyTaskBranch(carrier.Run, task.Task) ||
+		if !task.Virtual && (!validChoreographyAttemptLimit(task.EffectiveMaxAttempts()) ||
+			task.Branch != FormatChoreographyTaskBranch(carrier.Run, task.Task) ||
 			task.ReservationOID == graphCarrierMissingIdentity || task.TemplateDigest == graphCarrierMissingIdentity) {
 			return fmt.Errorf(graphCarrierTaskRootErrorFormat, task.Task)
 		}
@@ -282,7 +283,8 @@ func (m *GitMailbox) ReadChoreographyGraphCarrier(ctx context.Context,
 				return ChoreographyGraphCarrier{}, graphCarrierMissingIdentity, fmt.Errorf(graphRootAdditionalTaskRefErrorFormat, head.Name)
 			}
 			root, err := m.ReadChoreographyTaskRoot(ctx, ChoreographyTaskRootQuery{
-				Binding: binding, Task: task.Task, Kind: task.Kind, BootstrapOID: bootstrapOID})
+				Binding: binding, Task: task.Task, Kind: task.Kind, BootstrapOID: bootstrapOID,
+				MaxAttempts: task.EffectiveMaxAttempts()})
 			if err != nil {
 				return ChoreographyGraphCarrier{}, graphCarrierMissingIdentity, err
 			}

@@ -220,6 +220,11 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 	if task == nil || event.TaskOID == choreographyReplayMissingIdentity {
 		return fmt.Errorf(choreographyReplayUnknownTaskError)
 	}
+	if choreographyPickupAdmissionEvent(event.Kind) {
+		if err := validateChoreographySignedPickupID(b.joinPolicy, task.spec, event.PickupID); err != nil {
+			return err
+		}
+	}
 	switch event.Kind {
 	case ChoreographyPickupSettled:
 		pickup := task.pickups[event.PickupID]
@@ -247,7 +252,7 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 	case ChoreographyPickupContactLost:
 		pickup := task.pickups[event.PickupID]
 		if pickup == nil || pickup.settled || pickup.contactLost || task.terminal ||
-			task.attempt >= maxPlacementAttempts ||
+			task.attempt >= task.spec.EffectiveMaxAttempts() ||
 			task.spec.ExecutorOwned || !task.spec.RetryAfterUncertainAttempt || task.claim != event.ClaimOID ||
 			pickup.claimOID != event.ClaimOID || pickup.attempt != event.Attempt ||
 			pickup.node != event.Node || pickup.cancelOID == choreographyReplayMissingIdentity ||
@@ -431,7 +436,8 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 				event.PriorTaskOID != task.tip || event.Package != task.spec.Package ||
 				event.Budget != task.spec.Budget || event.Weight != task.spec.Weight ||
 				task.terminal || event.Kind == ChoreographyRetryReady &&
-				(event.Succeeded || !task.spec.RetryAfterUncertainAttempt || pickup.attempt >= maxPlacementAttempts ||
+				(event.Succeeded || !task.spec.IsPickupRetryAllowed(pickup.resultOutputOID != choreographyNoAcceptedResultOutputOID) ||
+					pickup.attempt >= task.spec.EffectiveMaxAttempts() ||
 					event.PackageOutcome != choreographyReplayMissingIdentity) {
 				return fmt.Errorf(choreographyReplayDecisionError)
 			}

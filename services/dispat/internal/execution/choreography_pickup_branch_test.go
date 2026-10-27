@@ -55,6 +55,36 @@ func TestChoreographyPickupBranchesBindUniquePhysicalIdentity(t *testing.T) {
 	require.Equal(t, pending, replayed)
 }
 
+func TestInterpretedPickupBranchesCarryDurableTimeAndFullRandomIdentity(t *testing.T) {
+	identity := ChoreographyPickupIdentity{Run: choreographyPickupTestRun,
+		Task: choreographyPickupTestTask, Node: choreographyPickupTestNode,
+		PickupID: NewInterpretedChoreographyPickupID(), Mode: bootstrapInterpretationModeName}
+	issuedAt, err := interpretedPickupTime(identity.PickupID)
+	require.NoError(t, err)
+	pending, err := FormatChoreographyPendingBranch(identity)
+	require.NoError(t, err)
+	completed, err := FormatChoreographyOutcomeBranch(identity, StatusSucceeded)
+	require.NoError(t, err)
+	failed, err := FormatChoreographyOutcomeBranch(identity, StatusFailed)
+	require.NoError(t, err)
+	stamp := issuedAt.Format(choreographyPickupTimeFormat) + choreographyPickupBranchSeparator
+	require.True(t, strings.HasPrefix(pending, choreographyPickupPendingBranchPrefix+stamp))
+	require.True(t, strings.HasPrefix(completed, choreographyPickupCompletedBranchPrefix+stamp))
+	require.True(t, strings.HasPrefix(failed, choreographyPickupFailedBranchPrefix+stamp))
+	require.Equal(t, strings.TrimPrefix(pending, choreographyPickupPendingBranchPrefix),
+		strings.TrimPrefix(completed, choreographyPickupCompletedBranchPrefix))
+	replayed, err := FormatChoreographyPendingBranch(identity)
+	require.NoError(t, err)
+	require.Equal(t, pending, replayed)
+	other := identity
+	other.PickupID = NewInterpretedChoreographyPickupID()
+	otherPending, err := FormatChoreographyPendingBranch(other)
+	require.NoError(t, err)
+	require.NotEqual(t, pending, otherPending)
+	require.Error(t, ValidateChoreographyPickupID(bootstrapCompilationModeName, identity.PickupID))
+	require.Error(t, ValidateChoreographyPickupID(bootstrapInterpretationModeName, NewChoreographyPickupID()))
+}
+
 func TestChoreographyPickupBranchRejectsUnboundIdentity(t *testing.T) {
 	identity := ChoreographyPickupIdentity{
 		Run: choreographyPickupTestRun, Task: choreographyPickupTestTask,
