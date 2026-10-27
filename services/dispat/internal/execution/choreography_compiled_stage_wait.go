@@ -143,6 +143,7 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 	if parseErr != nil || deadline.IsZero() {
 		return release.StageOutcome{}, fmt.Errorf(compiledStageWaitIdentityErrorFormat, taskID)
 	}
+	admissionDeadline := deadline
 	claimOID, assignmentOID, claimedNode, cancelOID :=
 		compiledStageAbsentIdentity, compiledStageAbsentIdentity,
 		compiledStageAbsentIdentity, compiledStageAbsentIdentity
@@ -158,6 +159,33 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 	acceptedPickups := make(map[string]compiledAcceptedPickupResult, maxPlacementAttempts)
 	acceptedAcks := make(map[string]ChoreographyEvent, maxPlacementAttempts)
 	admissionClosed := compiledStageAdmissionWindowOpen
+	resumeAfterExpiryRefusal := func(expireErr error) bool {
+		var refused *choreographyNoClaimBrokerRefusal
+		if !errors.As(expireErr, &refused) || refused.task != taskID {
+			return false
+		}
+		switch refused.disposition {
+		case choreographyNoClaimDispositionAdvanced,
+			choreographyNoClaimDispositionPreparedBlocked:
+			// The signed task feed must account for the transition. A prepared
+			// blocker is proven at the top of the next observer iteration.
+			deadline = time.Time{}
+			admissionClosed = compiledStageAdmissionWindowOpen
+		case choreographyNoClaimDispositionEligible:
+			// The member can claim after occupied capacity becomes free.
+			deadline = time.Time{}
+			admissionClosed = compiledStageAdmissionWindowClosed
+		case choreographyNoClaimDispositionDeadlineFuture:
+			deadline = admissionDeadline
+			admissionClosed = compiledStageAdmissionWindowOpen
+		case choreographyNoClaimDispositionStopping:
+			// The next iteration reads the signed stop and settles inert or
+			// claimed work through the ordinary StopClaims path.
+		default:
+			return false
+		}
+		return true
+	}
 	activeCtx := ctx
 	var stopSettlement context.CancelFunc
 	defer func() {
@@ -230,7 +258,10 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 			if !waitingForPredecessor && !c.choreographyBroker.IsEligibleNodeAdmitted(taskID) {
 				if expireErr := c.choreographyBroker.ExpireUnclaimed(activeCtx, taskID); expireErr != nil {
 					done()
-					return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, expireErr
+					if !resumeAfterExpiryRefusal(expireErr) {
+						return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, expireErr
+					}
+					continue
 				}
 				done()
 				admissionClosed = compiledStageAdmissionWindowOpen
@@ -342,7 +373,10 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 					continue
 				}
 				if expireErr := c.choreographyBroker.ExpireUnclaimed(activeCtx, taskID); expireErr != nil {
-					return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, expireErr
+					if !resumeAfterExpiryRefusal(expireErr) {
+						return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, expireErr
+					}
+					continue
 				}
 				deadline = time.Time{}
 				continue

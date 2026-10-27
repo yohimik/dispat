@@ -33,6 +33,7 @@ const (
 	choreographyNoClaimClaimedReason                              = "task has an accepted claim"
 	choreographyNoClaimOfferedReason                              = "task has an offered assignment"
 	choreographyNoClaimResultReason                               = "task has an accepted result"
+	choreographyNoClaimPreparedBlockerReason                      = "task has a prepared-provider blocker"
 	choreographyNoClaimQueueReason                                = "task has a queue fence"
 	choreographyNoClaimAttemptReason                              = "task is past its first attempt"
 	choreographyNoClaimTipReason                                  = "canonical tip differs from the inert reservation"
@@ -70,6 +71,35 @@ const (
 	choreographyNoClaimSettlementFound                            = true
 	choreographyNoClaimSettlementOutcomeMismatchError             = "execution: no-claim package settlement differs from exact signed record"
 )
+
+const (
+	choreographyNoClaimDispositionAdvanced        choreographyNoClaimDisposition = "signed-task-advanced"
+	choreographyNoClaimDispositionEligible        choreographyNoClaimDisposition = "eligible-member"
+	choreographyNoClaimDispositionDeadlineFuture  choreographyNoClaimDisposition = "deadline-future"
+	choreographyNoClaimDispositionStopping        choreographyNoClaimDisposition = "signed-stopping"
+	choreographyNoClaimDispositionPreparedBlocked choreographyNoClaimDisposition = "prepared-blocked"
+)
+
+type choreographyNoClaimDisposition string
+
+// Only a broker-locked state transition receives a disposition. Persistence,
+// authority and unexpected graph refusals keep their ordinary error path.
+type choreographyNoClaimBrokerRefusal struct {
+	disposition choreographyNoClaimDisposition
+	task        string
+	reason      string
+}
+
+func (r *choreographyNoClaimBrokerRefusal) Error() string {
+	return fmt.Sprintf(choreographyNoClaimRefusalFormat, choreographyNoClaimStateError,
+		choreographyNoClaimBrokerPhase, r.task, r.reason)
+}
+
+func refuseChoreographyNoClaimAfterTransition(task, reason string,
+	disposition choreographyNoClaimDisposition) error {
+	return &choreographyNoClaimBrokerRefusal{disposition: disposition,
+		task: task, reason: reason}
+}
 
 func formatChoreographyNoClaimRefusal(phase, task, reason string) error {
 	return fmt.Errorf(choreographyNoClaimRefusalFormat, choreographyNoClaimStateError, phase, task, reason)
@@ -120,10 +150,13 @@ func (b *FirstNodeBroker) ExpireUnclaimed(ctx context.Context, taskID string) er
 	}
 	task := b.tasks[taskID]
 	switch {
+	case b.fault != nil:
+		return b.fault
 	case !b.executionStarted:
 		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimNotStartedReason)
 	case b.stopping:
-		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimStoppingReason)
+		return refuseChoreographyNoClaimAfterTransition(taskID, choreographyNoClaimStoppingReason,
+			choreographyNoClaimDispositionStopping)
 	case b.sealed:
 		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimSealedReason)
 	case task == nil:
@@ -138,29 +171,42 @@ func (b *FirstNodeBroker) ExpireUnclaimed(ctx context.Context, taskID string) er
 		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID,
 			fmt.Sprintf(choreographyNoClaimPredecessorsReasonFormat, task.remaining))
 	case task.terminal:
-		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimTerminalReason)
+		return refuseChoreographyNoClaimAfterTransition(taskID, choreographyNoClaimTerminalReason,
+			choreographyNoClaimDispositionAdvanced)
 	case task.claim != choreographyNoClaimNoIdentity:
-		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimClaimedReason)
+		return refuseChoreographyNoClaimAfterTransition(taskID, choreographyNoClaimClaimedReason,
+			choreographyNoClaimDispositionAdvanced)
+	case task.result != choreographyNoClaimNoIdentity:
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID,
+			choreographyNoClaimResultReason)
 	case task.offeredNode != choreographyNoClaimNoIdentity:
 		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimOfferedReason)
-	case task.result != choreographyNoClaimNoIdentity:
-		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimResultReason)
 	case task.queueFence != choreographyNoClaimNoIdentity:
 		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimQueueReason)
 	case task.attempt != choreographyNoClaimFirstAttempt:
-		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimAttemptReason)
+		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID,
+			choreographyNoClaimAttemptReason)
 	case task.tip != task.spec.ReservationOID:
 		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID, choreographyNoClaimTipReason)
+	case task.preparedBlockedBy != choreographyNoClaimNoIdentity:
+		if task.spec.Package == choreographyNoClaimNoIdentity {
+			return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID,
+				choreographyNoClaimPreparedBlockerReason)
+		}
+		return refuseChoreographyNoClaimAfterTransition(taskID, choreographyNoClaimPreparedBlockerReason,
+			choreographyNoClaimDispositionPreparedBlocked)
 	}
 	now := time.Now()
 	if now.Before(deadline) {
-		return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID,
-			fmt.Sprintf(choreographyNoClaimDeadlineReasonFormat, deadline.Sub(now)))
+		return refuseChoreographyNoClaimAfterTransition(taskID,
+			fmt.Sprintf(choreographyNoClaimDeadlineReasonFormat, deadline.Sub(now)),
+			choreographyNoClaimDispositionDeadlineFuture)
 	}
 	for node := range b.members {
 		if b.nodeEligible(task.spec, node) {
-			return formatChoreographyNoClaimRefusal(choreographyNoClaimBrokerPhase, taskID,
-				fmt.Sprintf(choreographyNoClaimEligibleReasonFormat, node))
+			return refuseChoreographyNoClaimAfterTransition(taskID,
+				fmt.Sprintf(choreographyNoClaimEligibleReasonFormat, node),
+				choreographyNoClaimDispositionEligible)
 		}
 	}
 	policyDigest, err := digestChoreographyAdmissionPolicy(b.joinPolicy)
