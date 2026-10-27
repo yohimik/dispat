@@ -1,5 +1,120 @@
 # Changelog
 
+## specs/agent-guide/v1.11.0-rc.8 (2026-10-27)
+
+### Features
+
+- preserve worker pickups through failure and recovery ([4a2d83a](https://github.com/yohimik/dispat/commit/4a2d83a9e2df5bb5d9d1a1308ffb3c23792075f8)) (by yohimik, Codex)
+  Give every physical pickup a durable unique identity and immutable pending,
+  output or failed branch. Admit a replacement after failure or signed contact
+  loss only under the signed retry-safety policy. Keep unknown physical work
+  charged until its exact acknowledgement settles, and preserve the first
+  verified eligible success across replay and late returns.
+
+  Retain unresolved child processes and publication requests without inventing
+  completion. Record known earlier publications while their successor remains
+  uncertain. Correct worker restart cleanup and pinned HTTPS transport for the
+  release TinyGo compiler, with integration and recovery regressions.
+
+  Integrate the reviewed CCME theorem, stopping, capacity and asynchronous
+  cancellation corrections with their executable specification fixtures. Keep
+  the existing release holds until the complete RC.9 gates pass.
+
+- run compiled tasks through durable saga branches ([12b94ba](https://github.com/yohimik/dispat/commit/12b94ba4d1abb29517bfac1aa34006c6b2774a9e)) (by yohimik, Codex)
+  Compile the complete task graph before execution, admit authenticated
+  workers, and let eligible nodes claim ready work through the first node's
+  signed ledger. Keep Git writes, publication and release records on the
+  first node, with durable cross-run capacity and cold recovery checks.
+
+  Retain verified outputs directly on each completed task branch. Tasks
+  without files keep signed completion records, and task capacity settles
+  before package hooks without exposing unfinished package results.
+
+  Preserve the worker command surface and compilation-only RC.9 mode.
+  Include protocol, recovery, integration and documentation updates. This
+  checkpoints the current implementation while full release validation
+  continues; the existing release holds remain in effect.
+
+- initialize worker task branches before execution ([def8e7d](https://github.com/yohimik/dispat/commit/def8e7d41914e266d474b04c43de31e07be5d0a4)) (by yohimik, Codex)
+  Reserve every eligible task attempt and bounded worker notice slots before
+  starting package frames. Activate ready work with atomic leased updates,
+  carry exact input commits with assignments, and keep publication on the
+  orchestrator. Workers verify and execute assignments without replanning.
+
+  Cover cancellation, uncertain pushes, carrier integrity and large fan-in.
+  Document the node-player execution game and prove its scoped equilibrium
+  and span optimum without claiming a unique algorithm or equilibrium.
+
+- execute configured stages with explicit dependency ordering ([1bf38e3](https://github.com/yohimik/dispat/commit/1bf38e3ab10c7f3f8ba6204033fbde8f4749066b)) (by yohimik, Codex)
+  Compile configured stage placement and selected provider outcomes before
+  dispatch, rejecting task cycles before effects. Carry verified predecessor
+  outputs between local and worker stages from pinned source inputs, including
+  idempotent preparation and providers that do not release.
+
+  Preserve durable publication receipts and suppress stages after a failed
+  required record. Document configuration inheritance, concurrency premises
+  and the boundary between declared dependencies and arbitrary script reads.
+
+- let a record command exit 0 when its record fails ([0e1ce95](https://github.com/yohimik/dispat/commit/0e1ce95aed15a6d79b2376902eae869063a56f2b)) (by yohimik, Claude Opus 5.5)
+  `dispat changelog` and `dispat github` take --ignore-errors, on by default.
+  A changelog entry or GitHub release that cannot be written is still logged
+  at error level under E222, and the sweep now closes with a warning naming
+  every package left failed or skipped, but the command exits 0. A publish
+  stage that runs `dispat github` after `dispat commit --tag --push` therefore
+  no longer reports a published package as failed and skips its consumers, as
+  release run 40177824466 did. --ignore-errors=false restores exit 1.
+
+  Only package failures are forgiven: a refused flag, selection or plan and an
+  interrupted sweep still fail. `dispat commit` is unchanged and refuses the
+  flag, because a tag it cannot create or push must keep failing the leg.
+
+  The github and changelog pages, the recovery guide and the agent skill
+  describe the new exit, and the failure-path tests that pin exit 1 now pass
+  --ignore-errors=false.
+
+- preview a past release's notes with --version ([7742b0c](https://github.com/yohimik/dispat/commit/7742b0c42e0bcb0ea522566f889a9ed56a7cd291)) (by yohimik, Claude Opus 5.5)
+  dispat preview --version renders the changelog entry and GitHub release
+  body a released version wrote, planned again at its tag's commit with the
+  release, every later release of the package and the other release tags on
+  that commit left out of the inventory. The value is a version of the
+  selected package, its full tag or alias, or latest, which the bare flag
+  means. Elsewhere --version still prints the dispat version.
+
+### Fixes
+
+- keep publication on the orchestrator ([280d782](https://github.com/yohimik/dispat/commit/280d7823200c69be7a96a9b7c1b3ae02801f58ec)) (by yohimik, Codex)
+  Run publication and release recording on the orchestrator while workers
+  execute build, test and configured computation stages. Refuse worker
+  publication placement and signed publication permits, and remove the
+  worker publication executor and authorization handshake.
+
+  Keep local input and ownership validation, document the single entry
+  point and mailbox credentials, and replace obsolete worker-publication
+  tests with local publication and refusal coverage. Repair remaining
+  recovery and stage fixture assumptions without weakening their checks.
+
+- name the optional release stage test ([6a648af](https://github.com/yohimik/dispat/commit/6a648af70e9b8035d4dbc78d8e1991b76b536ecd)) (by yohimik, Codex)
+  Use the verb test in flow configuration, hooks, task identities and stage constraints. Refuse the former prerelease spellings with migration guidance while preserving scripts named tests. Align custom-stage docs, the agent guide and CCME, and keep skipped-consumer fixtures ordered before provider settlement.
+
+- recover published packages with durable receipts ([80ecde8](https://github.com/yohimik/dispat/commit/80ecde80937e618469fdd47b7e975a850fb9cf3e)) (by yohimik, Codex)
+  Persist per-package publication evidence before dependent publication and
+  optional recorders. Verify repeated artifact identity, preserve exported
+  source targets, and reject conflicting or unverifiable records.
+
+  Finalize release commits with atomic branch and immutable-tag pushes plus
+  leased receipt deletion. Bind local retries to prepared targets, reconcile
+  lost replies and remote advances, and keep optional aliases independent.
+
+  Cover rejected writes, interrupted finalization, same-checkout retries,
+  tag tampering, stale receipts and adoption mismatches with regressions.
+
+### Authors
+
+- yohimik
+- Codex
+- Claude Opus 5.5
+
+
 ## specs/agent-guide/v1.11.0-rc.7 (2026-10-24)
 
 ### Features
