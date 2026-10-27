@@ -1,5 +1,12 @@
 # Changelog
 
+## packages/cli/v1.11.0-rc.10 (2026-10-27)
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.11.0-rc.11): 1.11.0-rc.10 -> 1.11.0-rc.11
+
+
 ## packages/cli/v1.11.0-rc.9 (2026-10-27)
 
 ### Dependencies
