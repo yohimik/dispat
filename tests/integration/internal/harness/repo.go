@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -545,7 +546,27 @@ var LockEnabled = []string{"DISPAT_UNSAFE_DISABLE_LOCK=false"}
 type Proc struct {
 	repo           *Repo
 	cmd            *exec.Cmd
-	stdout, stderr *bytes.Buffer
+	stdout, stderr *synchronizedBuffer
+}
+
+// synchronizedBuffer lets a test snapshot a serving process's log while
+// os/exec is still writing it. One Write can append a partial line;
+// ParseEvents ignores it until a later snapshot includes the rest.
+type synchronizedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *synchronizedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *synchronizedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // StartRelease launches `dispat release` (with --root appended, coverage
@@ -566,7 +587,7 @@ func (r *Repo) StartReleaseEnv(env []string, flags ...string) *Proc {
 	if dir := coverDir(); dir != "" {
 		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)
 	}
-	var stdout, stderr bytes.Buffer
+	var stdout, stderr synchronizedBuffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	require.NoError(r.T, cmd.Start(), "launching dispat")
 	return &Proc{repo: r, cmd: cmd, stdout: &stdout, stderr: &stderr}
@@ -588,7 +609,7 @@ func (r *Repo) StartCommandEnv(env []string, args ...string) *Proc {
 	if dir := coverDir(); dir != "" {
 		cmd.Env = append(cmd.Env, "GOCOVERDIR="+dir)
 	}
-	var stdout, stderr bytes.Buffer
+	var stdout, stderr synchronizedBuffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	require.NoError(r.T, cmd.Start(), "launching dispat")
 	return &Proc{repo: r, cmd: cmd, stdout: &stdout, stderr: &stderr}
@@ -613,8 +634,7 @@ const processWaitLimitError = "process wait limit must be positive"
 const processDescendantOutputOpenError = "a descendant kept its output open"
 
 // Wait blocks until the process exits and returns the run's outcome. The
-// output buffers are only read here, after the process is gone, so the
-// harness needs no synchronisation around them.
+// output buffers also support safe live snapshots through CapturedOutput.
 //
 // A process that outlives waitLimit is killed and fails the test, with what it
 // had printed when the kill let its output be collected.
@@ -628,9 +648,8 @@ func (p *Proc) WaitFor(limit time.Duration) RunResult {
 	return p.WaitForDiagnostic(limit, nil)
 }
 
-// CapturedOutput reads a process's buffers after its wait has ended. It lets
-// bounded failure diagnostics include the first node's output before the test
-// aborts, without starting a second wait or reading a live writer.
+// CapturedOutput snapshots the streams, including while the child is running.
+// A live snapshot may end in a partial line; ParseEvents ignores that line.
 func (p *Proc) CapturedOutput() (string, string) {
 	return p.stdout.String(), p.stderr.String()
 }

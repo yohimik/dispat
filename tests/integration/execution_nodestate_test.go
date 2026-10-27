@@ -120,6 +120,8 @@ func TestExecutionWorkerKeepsItsStateUnderTheCacheDirectory(t *testing.T) {
 	assert.False(t, isServing, "and it never served")
 }
 
+const idleCacheCompactedMessage = "the idle node's cache was compacted"
+
 // TestExecutionWorkerCompactsItsCacheOnceWhenIdle: every message a node writes
 // and every branch it fetches leaves objects in its cache that nothing reaches
 // once the run closes its branches, and git's own maintenance is off there. So
@@ -149,11 +151,25 @@ func TestExecutionWorkerCompactsItsCacheOnceWhenIdle(t *testing.T) {
 		return ""
 	}
 	require.NotEqual(t, "0", loose(), "the release left loose objects in the cache")
-	// The node compacts after a minute of idleness, at its next poll.
-	require.Eventually(t, func() bool { return loose() == "0" }, 150*time.Second, time.Second,
-		"the idle node never compacted its cache")
-
+	// Git can pack the loose objects before gc exits. Wait for the worker's
+	// completed-compaction event before stopping it, so stop cannot cancel gc.
+	assert.Eventually(t, func() bool {
+		stdout, _ := worker.proc.CapturedOutput()
+		for _, event := range harness.ParseEvents(stdout) {
+			if event.Str("message") == idleCacheCompactedMessage {
+				return true
+			}
+		}
+		return false
+	}, 150*time.Second, time.Second, "the idle node never completed cache compaction")
 	served := worker.stop(t)
-	assert.Equal(t, 1, strings.Count(served.Stdout, `"message":"the idle node's cache was compacted"`),
+	assert.Equal(t, "0", loose(), "completed compaction removed the loose objects")
+	compactions := 0
+	for _, event := range executionEvents(served) {
+		if event.Str("message") == idleCacheCompactedMessage {
+			compactions++
+		}
+	}
+	assert.Equal(t, 1, compactions,
 		"once per idle stretch\nworker:\n%s", served.Stdout)
 }

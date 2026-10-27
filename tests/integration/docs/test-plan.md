@@ -2313,7 +2313,7 @@ until two commits are by two different people; the repository's own fixed identi
 | `TestAuthorsIdentityWithNoAddress` | Git accepts a commit whose author has a name and no address, and the attribution survives it in what it renders and in deciding that two such commits are by one person. |
 | `TestAuthorsFoldedSpellingsAreOnePerson`   | Two `Co-authored-by` trailers spelling one identity in two cases, differing by a final sigma that lowercasing keeps apart, credit one person on the line and in the section, under the fold every other name comparison uses. |
 
-### Goal 49: integration harness integrity (`internal/harness/race_test.go`, `internal/harness/binary_test.go`, `internal/harness/gitfault_test.go`, `internal/harness/go_install_test.go`)
+### Goal 49: integration harness integrity (`internal/harness/race_test.go`, `internal/harness/binary_test.go`, `internal/harness/gitfault_test.go`, `internal/harness/go_install_test.go`, `internal/harness/proc_test.go`)
 
 | Test | Claim proven |
 | --- | --- |
@@ -2322,6 +2322,7 @@ until two commits are by two different people; the repository's own fixed identi
 | `TestGitFaultReservesOrdinalsAfterALongPrefix` | A fault whose earlier match ordinals already exist reserves the next ordinal and applies its exact Nth rule after a long prefix. |
 | `TestGitFaultConcurrentMatchesReserveDistinctOrdinals` | Concurrent matching Git invocations reserve distinct ordinals, so exactly the configured Nth invocation receives the injected failure. |
 | `TestRunBinCommandUsesDebuggerOnlyForOptedInRelease` | Optional crash diagnostics trace synchronous release commands, while ordinary invocations, workers and commands without explicit debugger selection retain their original executable and arguments. |
+| `TestProcCapturedOutputCanSnapshotLiveWriter` | A running process's stdout and stderr can be snapshotted while their writer is active, and the final snapshot retains every complete event and error line without a data race. |
 | `TestExternalModuleRequirementsKeepsWorkspaceSelectionsOnly` | Offline install fixtures retain selected external dependency versions, deduplicate imports and exclude first-party or versionless modules. |
 | `TestFileProxyURLUsesGoProxyFileSemantics` | The offline installation fixture preserves Unix paths and encodes Windows drive and network paths as valid Go proxy file URLs. |
 | `tests/integration/internal/harness/binary_test.go::TestProductionCoverpkgIncludesEveryProductionModule` | The instrumented CLI build includes the CLI and all six public modules, so the integration percentage cannot improve by quietly dropping first-party code from its denominator. |
