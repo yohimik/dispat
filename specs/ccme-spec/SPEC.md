@@ -4813,6 +4813,27 @@ end-to-end account. Zero-overhead discovery in an ideal scheduling model is an a
 physical zero-time measurement. No positive universal latency constant or attained minimum over all
 possible machines follows without further model restrictions.
 
+**Two-phase task-time corollary.** Let a task's measured interval start before its required fresh
+acquisition, and require all that acquisition to finish before execution begins. Let the finite nonempty
+required acquisition activities finish at actual times `d_i` measured from that origin, with none started
+before it. Their join time is `D = max_i d_i`, including any dependencies and contention. Define `E` as the
+elapsed interval from that join to task completion, including dispatch wait and execution.
+Then completion time is exactly `T = D + E = max_i d_i + E`. This follows because
+the join occurs when the last required activity finishes and the second phase begins at that join.
+If at least one required acquisition has positive latency and execution includes positive-time work,
+then `D > 0`, `E > 0` and `T > 0`. These are premises for a nontrivial fresh two-phase task, not universal
+properties of cached lookups, skipped tasks or zero-duration virtual gates. Under resource contention,
+the `d_i` are completion times in the joint acquisition schedule, not isolated activity durations.
+The same definition covers dependent or staggered acquisition as the whole phase's makespan.
+If acquisition and execution overlap instead, model their precedence and resource constraints together;
+with unlimited compatible capacity and the earlier earliest-start premises, total time is the weighted
+critical path of that combined DAG. Charge shared acquisition once rather than duplicating it per
+consumer. Optimizing `T` can improve either phase, but the design minimizing their sum need not minimize
+each separately when both use a shared resource budget. A maximum over input cases also cannot generally
+be split: `max_x (D(x) + E(x)) <= max_x D(x) + max_x E(x)`, with equality requiring compatible maximizers
+when those maxima exist. Thus this corollary supplies a specific timing contract, not a universal
+two-positive-terms decomposition of every possible task.
+
 For a scoped input lower bound, use a fresh query model with `R` independently addressable records and no
 trusted summary. If, at a base input, each record can be changed alone to an admitted input requiring a
 different exact decision, every record must be queried on that base input: otherwise the unchanged

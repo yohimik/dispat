@@ -948,3 +948,13 @@ can minimize its cost within that model, while retained information can eliminat
 in a later invocation. The dispat example distinguishes CLI `compute` configuration repair from semantic planning
 and runtime task-graph compilation, and preserves every mode's pinned-input and authority obligations.
 This is an informative theorem clarification, with no new runtime behavior, experiment or publication.
+
+## 2026-10-28: Two-phase discovery and execution time
+
+Section 13.11 adds the explicit barrier case `T = max_i d_i + E`: required acquisition starts no earlier
+than the measured origin, `d_i` are actual completion times, and execution waits for their join.
+The post-join interval `E` includes dispatch wait. Positive acquisition and execution work imply positive
+phase times under the stated latency model. Actual acquisition completion times include contention;
+overlap instead requires the combined precedence/resource model. Shared costs, joint resource optimization
+and worst-case maxima retain their separate accounting. This does not turn skipped tasks, retained
+information or virtual gates into mandatory positive-time phases, and changes no runtime behavior.
