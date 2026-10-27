@@ -882,3 +882,21 @@ class and an attaining design, or an exact complete finite comparison. Experimen
 task and initial information, charge shared resources and preparation consistently, disclose configuration,
 and repeat measurements with uncertainty. They can identify the best tested designs or refute an optimality
 claim, but do not exclude every untested device. No new hardware experiment or implementation is claimed.
+
+## 2026-10-27: Physical-clock limits and observer event histories
+
+Section 13.11 separates exact physical-clock knowledge from causal order and deterministic replay. With
+unknown initial offsets and unconstrained message-delay asymmetry, shifting one node's finite execution
+and compensating its offset preserves all local transcripts while changing its relative physical time.
+Thus message observations alone cannot guarantee exact synchronization in that model. Approximate
+synchronization remains possible with stated timing bounds or external time information.
+
+One durable, fenced observer can order verified accepted transitions and pass their authenticated history
+to peers. Replay induction gives equal coordination state at equal prefixes without comparing physical
+clocks. Arrival order need not preserve remote occurrence or causal order; prerequisite evidence must gate
+the transitions that depend on it. Late reports do not rewrite the accepted history, and a signed report
+does not by itself prove an external effect. Retention, delivery, recovery and authority continuity remain
+explicit assumptions. Local elapsed measurements and remote runtime are distinct, and timeout alone proves
+neither quiescence nor exactly-once effects. Existing §28 signed-root replay, deadlines, wire fields and
+fencing rules are unchanged. This is a scoped theoretical clarification, not a new runtime implementation
+or clock-synchronization experiment.

@@ -3913,6 +3913,82 @@ not a wall-clock deadline or instantaneous cancellation guarantee for the §28 e
    release semantics, but the work-span proof neither makes a saga the unique executor nor proves a bound on
    recovery time or durable history size.
 
+**Distributed clocks and observer histories.** Physical time estimation, causal event order and agreement
+on accepted state transitions are different properties. The following informative results explain the
+existing §28 authority and replay rules; they do not replace its deadline or wire contracts.
+
+**Physical-clock limitation.** Consider nodes communicating only through messages, with unknown initial
+clock offsets, no trusted common-time reference or known simultaneous start, and positive unknown message
+delays whose directional asymmetry is unconstrained. There is no exact one-way-delay oracle.
+Even grant perfect clock rates, `C_i(t) = t + theta_i`.
+No algorithm can guarantee identification of every exact relative offset from a finite local transcript
+in this model. To see this, take a finite execution and shift every event at one node by a sufficiently
+small nonzero real-time amount `delta`, while replacing its offset by `theta_i - delta`. Its clock readings,
+local event order, payloads and computation remain identical. Incoming message delays increase by `delta`
+and outgoing delays decrease by `delta`; when crossing messages exist, choose its magnitude smaller than
+their minimum delay in the finite execution, so every send still precedes its receive. With no crossing
+messages there is no such restriction. Every other node has the same
+local transcript as before, yet the true relative offset differs. The algorithm must give the same answer
+in both executions and cannot be exactly right in both. Random choices fixed identically give the same
+indistinguishability argument for a claimed guarantee on every execution. This excludes a guarantee of
+exact physical synchronization inferred from those messages, not useful approximate synchronization or
+logical clocks. Bounded clock drift, bounded delay uncertainty or a trusted time service can support
+explicit error bounds. Such additional premises must be stated; freezing counters is not a physical
+clock that tracks elapsed time.
+
+Unknown offsets and delivery delays also prevent reconstructing an exact physical order for all remote
+events. For example, two independent nodes can each report local time 10. Their actual occurrence times
+can be 10 and 30 in one execution, and 30 and 10 in another, by changing their offsets. Delay the reports
+so the observer receives the same messages at its own times 100 and 101 in both executions. Its entire
+observation is identical while the source occurrence order is reversed. Authentication of the reports
+does not remove this timing ambiguity. Local program order and matching send-before-receive edges still
+define a causal partial order; causally unrelated events need not have an inferable physical ordering.
+
+**Observer-history sufficiency.** Fix the validated run inputs, an initial coordination state `S_0`, a
+deterministic replay transition `F`, and one durable, fenced append authority. Let it admit verified
+coordination events `e_1, ..., e_m`, assigning a strictly increasing durable sequence and binding each event
+to its exact accepted state and applicable run, epoch, task and attempt identities. For the §28 profile,
+the exact signed tips, companion ledger and event index supply these bindings and settlement rules.
+Assume a peer authenticates one contiguous prefix, rejects conflicting records at the same identity,
+and applies each accepted event once. Define `S_j = F(S_(j-1), e_j)`.
+Every peer replaying the same prefix obtains the same `S_j`: the initial states agree, and induction on
+`j` preserves agreement because the next event and transition are identical. No cross-node physical-clock
+comparison appears in this proof. A durable sequence is sufficient for this order; the observer may also
+attach readings of its own monotonic clock for elapsed-time measurements. A counter orders events but
+does not itself measure seconds. Exact recorded clock-dependent decisions and other external inputs
+must be included whenever replay depends on them; a partial log does not determine a full physical trace.
+
+This is the observer's acceptance order. A remote event can occur first and be reported last. Merely
+appending reports as they arrive does not even guarantee their source causal order: a report for a
+send can arrive after the report for its receive. To preserve specified causal prerequisites in the
+accepted transition order, admission requires their verified predecessor evidence first; an early report
+can wait or be recorded as pending evidence without prematurely admitting its claimed outcome. Concurrent
+eligible reports can receive either serialization order. A later report never retroactively changes an
+already accepted prefix. The log does not prove that every remote event was observed, that a signed
+statement is true, or that an external destination committed its claimed effect. Those facts retain their
+separate verification and recovery requirements. Logical or vector clocks can also carry causal information
+among peers; a single observer is a sufficient architecture here, not the only possible causal-history design.
+
+Passing a verified prefix, or a missing suffix after an authenticated checkpoint sufficient for the same
+replay state, lets another node recover that ordered view. Peers at different prefix lengths may have
+different current states. Eventual agreement on a given finite prefix additionally requires its retention,
+eventual delivery and successful replay; there is no instantaneous agreement during a partition. A
+checkpoint must preserve the evidence needed for subsequent authorization and recovery, not just a count.
+The §28 profile's required signed-root replay and unread-event retention remain unchanged; this observation
+does not introduce a checkpoint shortcut into that protocol. Observer restart or handoff needs durable
+continuity and fencing of the former authority. In §28, same-generation recovery also retains the signing
+authority and TLS key/certificate pin; loss requires aborting and fencing the old generation, settling
+outstanding effects and bootstrapping a new one. Copying a log to another node alone cannot authorize two
+independent writers or settle an external effect whose outcome is unknown.
+
+Elapsed time between two observations on one monotonic clock may include intervening execution, queueing and
+communication. It is not automatically the remote task's execution time. That measurement needs local
+start/end readings on the executing node, or an explicit cross-clock uncertainty model, with clock-rate
+accuracy stated for physical-time claims. A timeout records the observer's decision to suspect or stop
+admission; it does not prove a remote process stopped, a queued request cannot commit, or physical effects
+occurred exactly once (§28.3 through §28.7). These results concern information and ordering. They are not consequences
+of the work/span inequality and establish no fastest observer, minimum log size or bounded recovery time.
+
 The optional [WolframScript checks](./verify-math.wls) verify the displayed capacity and scaling algebra,
 enumerate one-pool DAG/list schedules with one to four vertices, and check the stated sharp and packing examples.
 They also compare the chain-window scan formulas with measured counts recorded on 2026-10-25. The finite cases
@@ -4240,6 +4316,10 @@ universal auxiliary-word minimum for the full executor or planner.
 idle-time proof stated above. [Lamport's happened-before relation](https://doi.org/10.1145/359545.359563)
 (1978) explains why distributed acceptance and result events need a verifiable causal order rather than a
 wall-clock guess; §28 uses one signed authority chain for that purpose, not Lamport clocks as its protocol.
+[Simons, Lundelius Welch and Lynch's clock-synchronization overview](https://groups.csail.mit.edu/tds/papers/Lynch/lncs90-asilomar.pdf)
+distinguishes asynchronous and partially synchronous timing models. The clock and observer-history argument
+above makes its own message-delay and authority assumptions explicit; it does not claim clock
+synchronization is impossible under every model.
 [Garcia-Molina and Salem's sagas](https://doi.org/10.1145/38713.38742) (1987) allow interleaved long-lived
 transactions and compensating actions. CCME's irreversible publication uses forward recovery with verified
 records and may have no compensation, so "saga class" here is an analogy with explicit assumptions, not a claim
