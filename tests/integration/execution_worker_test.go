@@ -636,12 +636,34 @@ func TestExecutionWorkerSurvivesALostStateDir(t *testing.T) {
 	firstLedger := executionProtocolRefs(t, rig.mailbox, "dispat-ledger-")
 	require.Len(t, firstLedger, 1, "the first release has one signed event feed")
 
-	require.NoError(t, os.RemoveAll(filepath.Join(worker.stateDir, executionNode, "cache")))
+	const (
+		activeCacheDirectory  = "cache"
+		retiredCacheDirectory = "cache-lost"
+	)
+	nodeState := filepath.Join(worker.stateDir, executionNode)
+	cache := filepath.Join(nodeState, activeCacheDirectory)
+	retired := filepath.Join(nodeState, retiredCacheDirectory)
+	// Move the live cache out of its expected path atomically. Removing its
+	// object files while the worker fetches into them can fail with ENOTEMPTY.
+	originalCache, err := os.Stat(cache)
+	require.NoError(t, err)
+	require.NoError(t, os.Rename(cache, retired))
+	retiredCache, err := os.Stat(retired)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(originalCache, retiredCache), "the live cache was moved")
+	if activeCache, err := os.Stat(cache); err == nil {
+		require.False(t, os.SameFile(originalCache, activeCache), "the worker recreated a distinct cache")
+	} else {
+		require.ErrorIs(t, err, os.ErrNotExist)
+	}
 	rig.repo.WriteFile("packages/core/after-loss.txt", "new input\n")
 	rig.repo.Commit("feat(core): build after cache loss")
 	second := rig.release()
 	require.Equal(t, 0, second.Code, "stdout:\n%s\nstderr:\n%s", second.Stdout, second.Stderr)
 	require.Contains(t, rig.repo.TagList(), "core@0.2.0")
+	activeCache, err := os.Stat(cache)
+	require.NoError(t, err, "the second release recreated the worker cache")
+	require.False(t, os.SameFile(originalCache, activeCache), "the new cache has its own filesystem identity")
 	secondLedgers := executionProtocolRefs(t, rig.mailbox, "dispat-ledger-")
 	require.Len(t, secondLedgers, 2, "the second release has its own signed event feed")
 	secondLedger := ""
@@ -676,7 +698,7 @@ func TestExecutionWorkerSurvivesALostStateDir(t *testing.T) {
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Equal(t, 2, strings.Count(res.Stdout, `"message":"task claimed"`),
-		"the same worker process claimed both runs across the cache deletion")
+		"the same worker process claimed both runs across the cache loss")
 }
 
 // Transient Git read errors on the v3 serving node cannot make it push or
