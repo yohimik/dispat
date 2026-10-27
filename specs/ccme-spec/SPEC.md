@@ -3518,6 +3518,94 @@ bumps, channels, intended versions and admitted causes before that order is requ
    CCME provides no such general cyclic publication primitive: `E200`, configured-stage `E233`, and the
    actual task graph's acyclicity requirement remain in force.
 
+**Undirected graph extension: an order attaining minimum completion time.** Let `G = (V, E)` be any finite
+loopless undirected graph. Its bidirectional representation replaces each edge `{i, j}` by the two labeled
+relation arcs `i -> j` and `j -> i`, using `|V|` vertices and `2|E|` arcs. This preserves adjacency and
+reachability; the strongly connected components are exactly the original connected components. The cyclic
+intent and input-closure results above therefore apply under their stated planning premises. It does not
+follow that both arcs are execution prerequisites: that interpretation makes even one positive-duration
+edge infeasible, by the preceding cycle proof. Self-loops require their own semantics and are excluded here.
+
+For the execution extension, give each undirected edge an explicit **either-order conflict** meaning:
+its endpoint tasks cannot overlap, but either may run first. This is the distinction between precedence and
+non-overlap constraints illustrated by
+[OR-Tools' job-shop model](https://developers.google.com/optimization/scheduling/job_shop).
+Writing `S_i` for a start time and `d_i` for its duration, an edge requires
+`S_i + d_i <= S_j OR S_j + d_j <= S_i`, not both inequalities. Store that symmetric relation as two arcs
+if useful, but select an allowed direction before using it as a prerequisite. A communication edge with no
+timing constraint imposes neither inequality. An edge requiring a particular fresh output remains a hard
+prerequisite in its required direction; this extension does not permit reversing it.
+
+*Minimum-completion theorem.* Fix `n = |V|` enabled, terminating tasks with positive finite rational
+durations `d_i` known exactly, a positive integer `s` of identical compatible slots, and an optional hard
+prerequisite DAG `H` on the same vertices. Every task runs nonpreemptively once on one slot, each slot runs
+at most one task at a time, and every conflict edge has the either-order meaning above. All necessary
+same-run input dependencies and fixed effect orders are included in `H`; all other required inputs are
+initialized and pinned. Each task becomes enabled when its predecessors complete. Assume a failure-free
+run, zero transfer and scheduling overhead, and no additional capacity, placement, release-time or deadline
+constraints. The objective is makespan, `T = max_i(S_i + d_i)` with starts `S_i >= 0`: when all tasks have
+finished, not the sum of their completion times. Then a feasible schedule executing each task once exists,
+and some such schedule attains the global minimum `T*`. A fixed tie rule can select one optimal execution
+order and slot assignment. The optimum value is determined; the optimal order need not be unique.
+
+*Construction.* For `n >= 1`, put `s0 = min(s, n)`. At most `n` slots can be occupied by a schedule of `n`
+tasks, so identical slots can be relabeled into `1..s0` without changing any start or finish. Enumerate every
+total order `pi` extending `H` and every assignment `a` of tasks to these `s0` labeled slots. Orient each
+undirected conflict edge from its earlier endpoint in `pi` to its later endpoint. For each slot, link
+consecutive tasks assigned to that slot in their `pi` order. Add the original
+edges of `H` and call the resulting graph `D(pi, a)`. Every edge points forward in `pi`, so this is a DAG.
+Its earliest start times are
+
+```
+S_i(pi, a) = max({0} union {S_j(pi, a) + d_j : j -> i in D(pi, a)})
+T(pi, a)   = max_i(S_i(pi, a) + d_i)
+T*         = min over pi extending H and a of T(pi, a)
+```
+
+The recurrence is evaluated in `pi` order. It respects every hard prerequisite, serializes each slot and
+every conflict pair, and runs each task once. Tasks on different slots may overlap when no constraint
+prevents it; `pi` is an order for choosing the constraints, not a requirement to serialize all tasks.
+A topological order of `H` with every task on one slot proves the candidate set is nonempty. For no tasks,
+define the empty schedule to have makespan zero.
+
+*Optimality proof.* Take any feasible schedule, relabeling its occupied slots into `1..s0`. Order its tasks by
+nondecreasing start time, breaking ties by a fixed task identifier. Positive durations ensure that tasks
+related by a hard prerequisite, a conflict or a shared slot cannot tie in start time. This order extends
+`H`, and the schedule satisfies every inequality of the corresponding `D(pi, a)`. Topological induction
+in the recurrence shows that each constructed earliest start is no later than that schedule's start.
+The constructed makespan is therefore no greater. Conversely, every constructed schedule is feasible.
+There are at most `n! s0^n <= n! s^n` candidates, so their minimum is attained and is no greater than the
+makespan of any feasible schedule. This proves the displayed `T*` is the exact global optimum for these inputs and
+constraints, not just an infimum or a work/span lower bound. For each candidate, `T(pi, a)` is the weighted
+longest-path length of its augmented DAG; the minimization chooses those ordering edges as well as the slots.
+
+*What is unique and what this costs.* Fix a total order on task identifiers and slot labels. Among the
+candidates attaining `T*`, choose the lexicographically first pair `(pi, a)`; the recurrence then gives
+one canonical optimal schedule. This is a specified selection rule, not intrinsic uniqueness. Two unit
+tasks joined by one conflict edge have minimum time 2, with either order optimal. Choosing an arbitrary
+orientation is not generally optimal: for the path `A -- B -- C` with unit durations, two slots and no
+hard edges, the orientation `A -> B -> C` takes 3, while running `A` and `C` together before `B` takes 2,
+which is minimal because either conflict edge requires two consecutive units of time.
+
+With `m = |E|` and `h` hard edges, streaming this enumeration takes at most
+`O(n! s0^n (n + m + h))` arithmetic operations for `n >= 1`. It retains `O(n + m + h)` graph/index entries
+and `O(n)` exact rational values, including a best candidate rather than every candidate; their bit storage
+is charged separately. Slot chains use an array of `s0 <= n` last-task entries, so indexing them does not
+require storage proportional to an arbitrarily large `s`. Exact rational arithmetic and identifier
+comparisons also have their bit-operation costs. This is a finite offline construction,
+not an efficient-optimality result or a lower bound on all algorithms. The optimizer computes candidate
+schedules without executing the tasks; only the selected schedule executes each task once. It does not
+obtain the optimal order by rerunning tasks to measure alternatives. Hidden durations admit an optimum
+after their values are fixed, but this construction does not identify it before execution without those
+values. Zero-duration terminal events require the separate readiness conventions above and are outside
+this positive-duration proof. Crashes and external publication still require the existing recovery rules.
+
+The undirected theorem optimizes under the explicitly declared conflict semantics. It does not make
+arbitrary mutually waiting tasks executable, provide atomic cyclic publication, or change `E200`, `E233`
+or the current executor's actual-DAG requirement. Once a candidate's ordering constraints have been chosen,
+the fixed-DAG bounds below apply under their corresponding resource premises. They do not by themselves
+perform the minimization over candidates.
+
 **The dispat theorem (bounds for a fixed task graph).** Here the task graph is the effective prerequisite
 graph, a finite directed acyclic graph; the cyclic extension above permits cycles in descriptive relations,
 not in these hard execution prerequisites.

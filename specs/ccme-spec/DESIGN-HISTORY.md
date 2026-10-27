@@ -825,3 +825,19 @@ even if durations are zero. Predetermined versions likewise do not make partiall
 references safe. An atomic component publication requires feasible preparation and a real destination
 visibility/finalization primitive; SCC contraction supplies neither. These theoretical extensions preserve
 the current E200/E233 checks, actual task-graph acyclicity and external-effect recovery rules.
+
+## 2026-10-27: Undirected conflicts and minimum completion time
+
+Section 13.11 now separates the bidirectional representation of an undirected relation from two mandatory
+execution prerequisites. Under explicit either-order conflict semantics, every finite loopless graph has
+a schedule running each enabled task once, with any fixed hard prerequisites retained in a separate DAG.
+For positive known rational durations and identical slots, a finite enumeration of task orders and slot
+assignments constructs an attained global minimum makespan. Each candidate is an augmented DAG whose
+earliest-start schedule respects both the conflicts and the slots. Any feasible schedule induces a candidate
+that finishes no later, proving completeness of the search. A fixed tie rule selects one canonical optimizer;
+the optimal order is not inherently unique. Planning alternatives does not execute the underlying tasks.
+
+The theorem charges the potentially factorial/exponential search and exact arithmetic separately from
+task execution. It does not establish an efficient optimizer, an optimal order with hidden durations, or
+execution of true bidirectional hard dependencies. Zero-duration event semantics, recovery and atomic
+publication retain their separate premises, and runtime cycle rejection is unchanged.
