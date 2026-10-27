@@ -3784,6 +3784,60 @@ not a wall-clock deadline or instantaneous cancellation guarantee for the §28 e
    Adding machines then slows that optimum exactly when
    `C(h + 1) - C(h) > T_task(h) - T_task(h + 1)`. Without those decomposition premises, this comparison is
    not an end-to-end formula and no universal best machine count follows.
+
+   *Word operations and useful capacity.* The same work/span bounds apply inside a task, after fixing its
+   algorithm, input and primitive-operation model. Word width, stored word count and simultaneous word
+   operations are different quantities. Fix a positive word width `b` and a specified set of operations on
+   `O(1)` words of `b` bits, with enough address bits for the modeled memory. Let `Q_b` be the nonempty finite
+   DAG of mandatory operations for that computation, including all data, memory-order and effect dependencies.
+   Let `p >= 1` be an integer. Each operation runs nonpreemptively in one of `p` identical compatible operation
+   slots for exactly one model tick and starts on an integer tick boundary. Sources are ready at tick zero,
+   and communication, dispatch and unmodeled memory access add no delay.
+   Required loads and stores are operations too. Let `W_b` count operations and `L_b` count operations on a
+   longest path. For optimal tick count `T_opt(b, p)` and any work-conserving list schedule `T_list(b, p)`,
+   `max(L_b, ceil(W_b / p)) <= T_opt(b, p) <= T_list(b, p) <= W_b / p + (1 - 1/p) L_b`.
+   The lower bounds count sequential operations and total operation slots per tick; clause 2 proves the upper
+   bound with unit durations. The empty computation takes zero model ticks and needs no saturation definition.
+   This is a bound for the chosen computation, not a lower bound against every algorithm for its output.
+
+   A chain of `k` such operations takes exactly `k` ticks for every `p`; `k` independent operations take
+   exactly `ceil(k / p)` ticks optimally. Thus more simultaneous word operations cannot shorten an unchanged
+   sequential chain. Wider words or different instructions can change `Q_b`, its work and its span: for example,
+   a packed bitset OR on `N` bits uses `ceil(N / b)` word ORs, with loads, stores and other work also charged.
+   Such a change can accelerate a task that previously used several words; it is not an exception to the bound
+   for the old, fixed graph. Merely allocating more stored words supplies no operation-rate increase in this
+   fixed model, although a different algorithm or memory behavior can change the applicable costs.
+
+   One word operation per model tick is a cost convention, not a universal physical processor limit or a
+   claim that every instruction completes in one hardware clock cycle. A real implementation must account
+   for instruction latency, issue capacity, clock rate, memory bandwidth, cache misses and communication.
+   Word width and the available primitive operations are explicit model parameters, not unlimited free work.
+   A longer dependency chain cannot be shortened by extra slots at unchanged operation latencies; faster
+   primitives or an equivalent computation with less work or span require a new cost account. If an inner
+   computation changes a task's duration `d_i`, recompute the outer task graph's work `Wk` and span `Lk`.
+   When word-level and task-level parallelism share processors or memory bandwidth, they share those
+   capacities; their ideal bounds cannot be composed by granting each level the whole resource independently.
+
+   Write `omega_b` for the width of the precedence poset of `Q_b`. Immediate dispatch with
+   `p >= omega_b` attains `L_b`, by the same antichain argument as the task-level saturation bound above.
+   Extra optional slots at zero cost preserve every old schedule, so `T_opt(b, p)` is nonincreasing in `p`.
+   Consequently the smallest saturating count
+   `p_sat(b) = min {p in {1, ..., omega_b} : T_opt(b, p) = L_b}` exists, and every `p >= p_sat(b)` has
+   the same ideal optimum `L_b`. This defines the least capacity attaining that best time, not a uniquely
+   fastest processor count or an efficient method to find it. `W_b / L_b` is only the work-bound threshold;
+   it need not equal `p_sat(b)`. Below saturation insufficient parallel capacity can constrain time; above it
+   extra free capacity gives a plateau, not an inherent slowdown.
+
+   To choose an actual resource amount, specify a nonempty finite set `K` of feasible configurations and a
+   finite modeled elapsed time `F(k)` for each, including the mandatory overheads and resource effects being
+   compared. Then some `k_star` attains `min_{k in K} F(k)`, since a finite nonempty set of finite values has a
+   minimum. Ties can be resolved by a declared resource-cost rule. Fixed measured values also have a minimum,
+   but their minimum alone does not establish future runtime or optimality outside the tested configurations.
+   Too much admitted capacity can be slower when mandatory overhead, contention or changed operation latency
+   outweighs its compute saving, as in the serialized-setup example above. Without such costs, the best-time
+   configurations can share a plateau. Performance improvements must be assessed within their stated
+   dependency and resource bounds; those bounds do not guarantee every intermediate time is attainable or
+   a universal best number of words, cores or machines.
 5. **Recovery is a separate property.** The failure-free inequalities do not bound a run across failures,
    retries, outages or reconciliation. §19.1 and §19.3 require durable publication records and failure blocking;
    §17.2 recomputes a later plan from the records. A publication and its record are separate writes, so there

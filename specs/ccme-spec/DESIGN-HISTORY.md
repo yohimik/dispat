@@ -851,3 +851,18 @@ slot-order edges. Only the conflict orientation is necessarily a subgraph of the
 the complete execution DAG can contain additional constraints. Task identities and determined release
 intent stay fixed, normal plan validation is still required, and shared path membership never means
 executing a task more than once.
+
+## 2026-10-27: Word operations and useful parallel capacity
+
+Section 13.11 applies the work/span bounds to a fixed finite DAG of unit-cost word operations inside a task.
+Word width, stored words and concurrent operation slots have distinct meanings. Extra operation slots cannot
+shorten an unchanged sequential chain, while wider words or different instructions can change the work and
+span of a multiword computation. The model tick is not a universal physical CPU cycle; real instruction,
+memory and communication costs remain explicit, and nested parallelism must share actual resources.
+
+The ideal optimum is nonincreasing in optional free capacity and reaches its span by the poset-width bound.
+A least saturating slot count therefore exists, but all larger counts tie for that ideal completion time.
+An actual best resource configuration is relative to a stated feasible set and elapsed-time cost model;
+mandatory overhead or changed resource behavior can make excess capacity slower. No unique hardware optimum,
+one-word-per-clock physical speed limit or lower bound across all algorithms is claimed. Runtime semantics,
+release behavior and the existing mathematical check script are unchanged.
