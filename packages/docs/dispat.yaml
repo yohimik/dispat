@@ -136,18 +136,19 @@ scripts:
   # depends on dispat-alpine and the docker space waits for its publish, so
   # by the time this runs the image the cells pull is on the Hub.
   #
-  # The version is the workspace's dispat, which is the release this run is
-  # making: the experiments run the bytes that were just shipped, and never a
-  # build of the checkout. The exit code is the cells' own, so a dispat cell
+  # Select the alpine package's exact image tag. Its patch version can differ
+  # from the dispat CLI version installed in that image; the experiments run
+  # the bytes that were just shipped, never a build of the checkout. The exit
+  # code is the cells' own, so a dispat cell
   # whose expectations did not hold fails the docs package and no site ships
   # for that run. The records are the artifact either way.
   #
-  # The cell count and the version go out as outputs, so the build after this
-  # can check the report carries every cell the run recorded.
+  # The cell list and selected image tag travel as outputs alongside the
+  # measurements. The report reads the CLI version from each cell's verdict.
   experiments: |
     set -eu
     ROOT=$(git rev-parse --show-toplevel)
-    EXPERIMENTS_DISPAT_VERSION=${DISPAT_WORKSPACE_DISPAT_VERSION}
+    EXPERIMENTS_DISPAT_VERSION=${DISPAT_WORKSPACE_DISPAT_ALPINE_VERSION:?DISPAT_WORKSPACE_DISPAT_ALPINE_VERSION is required}
     export EXPERIMENTS_DISPAT_VERSION
     echo "running the release experiments against yohimik/dispat-alpine:$EXPERIMENTS_DISPAT_VERSION"
     rc=0

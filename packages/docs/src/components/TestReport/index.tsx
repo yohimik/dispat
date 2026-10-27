@@ -506,14 +506,13 @@ function distinct(options: DistinctOptions): number {
 }
 
 /**
- * How many cells a campaign ran, against which image, and how many hold.
+ * How many cells a campaign ran, against which CLI, and how many hold.
  *
- * The image tag is the point of the sentence. Every cell copies its binary out
- * of a published `yohimik/dispat-alpine:<version>`, so the page is about bytes
- * somebody can pull rather than about a build of a checkout, and a reader who
- * wants to disbelieve it has the tag to run it against. The experiments and
- * tools are counted from the cells, so an archive of an older campaign reads
- * as the campaign it was.
+ * The report gets this version from the binary's own --version line. The
+ * alpine image that supplied it can have a different package version, so the
+ * CLI version cannot be presented as an image tag. The experiments and tools
+ * are counted from the cells, so an archive of an older campaign reads as the
+ * campaign it was.
  */
 export function ExperimentsSummary(): React.ReactElement | null {
   const {report, evidence} = useReportState();
@@ -530,7 +529,7 @@ export function ExperimentsSummary(): React.ReactElement | null {
   return (
     <p>
       This release ran <strong>{count(cells.length)} cells</strong> against{' '}
-      {version ? <code>yohimik/dispat-alpine:{version}</code> : <em>more than one published image</em>}:{' '}
+      {version ? <code>dispat {version}</code> : <em>more than one dispat version</em>}:{' '}
       {counted({total: distinct({cells, field: 'experiment'}), noun: 'experiment'})} and{' '}
       {counted({total: distinct({cells, field: 'tool'}), noun: 'release tool'})}, the same fixture each time. Of
       dispat&apos;s <strong>{count(own.length)} cells</strong>, <strong>{count(holding)}</strong> hold every
