@@ -958,3 +958,19 @@ phase times under the stated latency model. Actual acquisition completion times 
 overlap instead requires the combined precedence/resource model. Shared costs, joint resource optimization
 and worst-case maxima retain their separate accounting. This does not turn skipped tasks, retained
 information or virtual gates into mandatory positive-time phases, and changes no runtime behavior.
+
+## 2026-10-28: Reuse frequency and compilation break-even
+
+Section 13.11 states a conditional amortization result for interpretation and compilation of the same
+semantic workload. Preparation plus per-use costs yields an exact break-even inequality by subtraction;
+constant positive per-use savings give the least reuse count that repays extra preparation. Infrequent
+use can favor lower setup cost and frequent use can favor reusable compiled work, but neither follows
+from frequency alone. The objective minimizes total cost, not discovery time in isolation or its maximum.
+Loading, validity checks, cache invalidation, changed inputs and resource budgets remain charged.
+The text distinguishes a sequential average from overlapping wall-clock execution, and a compiled graph
+from an optimal finite-resource schedule. An illustrative numerical example is not a benchmark.
+Existing tiered compilation supplies context; no new adaptive runtime policy is claimed. CCME run
+identity, residual planning and irreversible-effect authority still prevent blindly replaying a prior plan.
+The practical rule measures and compares the full discovery-and-execution account on the same task and
+resources, with preparation, reuse, cache state and measurement variability disclosed. Such measurements
+establish improvements among tested candidates under the stated conditions rather than a global optimum.

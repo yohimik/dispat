@@ -4872,6 +4872,73 @@ This is a cost and information clarification, not an implementation claim for hy
 §28's complete-plan, preflight, task-reference and authority requirements. Discovery, transport and
 validation remain charged even when scheduling an already available graph is efficient.
 
+**Reuse frequency and interpretation/compilation amortization.** Upfront discovery and optimization can
+be an investment in repeated execution. The objective is to minimize the total cost for the intended
+uses and resource budget, not to maximize discovery time. Compare two correct strategies, interpreted
+`I` and compiled `C`, for the same sequence of `N >= 1` requested computations, with the same correctness,
+observable effects, allowed initial information and cost units. This is a general strategy comparison;
+the names alone do not imply particular costs or override CCME's mode requirements.
+
+In a sequential elapsed-time account with preparation preceding the measured uses and no uncharged
+overlap, let `C_I` and `C_C` be the initial preparation costs. Let `R_{I,j}` and `R_{C,j}` be the remaining
+cost of use `j`, including required acquisition, validity checks, binding, execution and other work in
+scope. Charge profiling, search, compilation, loading, transport, recovery, invalidation and recompilation
+where they occur, without omission or double counting. A reused immutable artifact must remain valid;
+any changed input or environment that defeats reuse adds its required fresh preparation cost.
+Then, by partitioning each strategy's work into preparation and its sequential uses,
+
+`T_I(N) = C_I + sum_j R_{I,j}` and `T_C(N) = C_C + sum_j R_{C,j}`.
+
+Subtracting proves that compilation has strictly lower total time exactly when
+`sum_j (R_{I,j} - R_{C,j}) > C_C - C_I`; equality gives a tie. For constant per-use costs `r_I > r_C`
+and extra preparation `DeltaC = C_C - C_I >= 0`, the condition is
+`N > DeltaC / (r_I - r_C)`. The least winning positive integer reuse count is
+`floor(DeltaC / (r_I - r_C)) + 1`. Counts with `N < DeltaC / (r_I - r_C)` favor interpretation;
+equality ties; counts above that threshold favor compilation. If `r_I <= r_C` with
+`DeltaC >= 0`, compilation never wins strictly. Even a single use can favor compilation when its
+execution saving exceeds its extra preparation. Thus rarity or frequency alone does not establish
+which strategy is best. For fixed valid preparation and constant per-use cost, the average is
+`C/N + r`, approaching `r` as `N` grows; repeated invalidation prevents amortizing one setup forever.
+
+For example, in illustrative time units let `C_I = 0`, `C_C = 12`, `r_I = 5` and `r_C = 2`.
+The strategies tie at four uses; compilation wins from five uses onward. Zero `C_I` means no separately
+charged initial phase, not zero discovery: its per-use discovery is included in `r_I`. These are model
+numbers, not measurements. For changing inputs use the actual per-use sum. A statistical average needs
+a specified workload and finite expectations; do not replace an expected variable-length sum by a
+product of averages without the assumptions that justify it. For overlapping preparation, concurrent
+requests or throughput objectives, compare the combined precedence/resource schedules rather than
+treating this sequential sum as their wall-clock makespan. Retained code/index storage and other resource
+costs remain part of feasibility even when time is the objective.
+
+The practical improvement rule is to measure and compare the complete discovery-and-execution account
+for the same task, correctness contract and resource budget. Report initial preparation, per-use costs,
+reuse count and cache state, including the acquisition and validation needed to make a retained result
+usable. In the barrier model this is discovery plus post-join execution time; with overlap, measure
+the actual combined interval. Charge measurement or optimization work to the deployment account when
+it is required to choose or prepare that deployment. Repeat measurements and disclose variability.
+A lower measured total identifies an improvement among the tested candidates under those conditions,
+not a proof of global optimality or of a benefit on every untested workload. Years of operational use
+are empirical evidence, not by themselves a mathematical proof: a proved claim still needs explicit
+premises and a valid derivation, and its application needs those premises to hold for the implementation.
+
+A practical adaptive policy may initially interpret or profile and compile repeatedly used portions
+when estimated future savings justify the additional preparation. Existing
+[HotSpot tiered compilation](https://docs.oracle.com/en/java/javase/24/vm/java-hotspot-virtual-machine-performance-enhancements.html)
+illustrates profiling and compilation together; it does not establish this comparison for every workload
+or implement an adaptive policy in dispat. More search need not find a better schedule. Finding a DAG or
+compiling descriptors does not by itself solve the minimum-critical-path optimization above: preserve all
+required tasks and constraints, and count any optimizer's cost. Exact finite-resource optimality still
+needs its separate premises; a fixed compiled schedule may cease to be optimal when durations or resources
+change. Compilation need not preserve the same low-level algorithm, only the required semantics.
+
+For CCME, interpreting peers still acquire pinned inputs and rederive the semantic plan and graph;
+compiled peers still acquire and verify their signed representation. Reusable code, templates or indexes
+can reduce repeated work, but a previous release's plan, claims or signed graph cannot simply authorize a
+new invocation. Revalidate the relevant inputs and run identity, derive the current residual plan from
+durable records, and obey the current authority and effect-recovery rules. A successful publication can
+change precisely the records and heads on which planning depends. This corollary neither allows replay
+of an irreversible effect nor claims a new runtime cache, optimizer or automatic mode-selection feature.
+
 **Unknown graph as a separate online model.** Suppose roots `A`, `B` and `C` are known at time zero, each
 takes one unit on either of two nonpreemptive slots, and one unit task `D` depends on exactly one root.
 The identity of `D` and its parent is revealed only when that parent finishes. These are three fixed
