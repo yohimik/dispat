@@ -1,5 +1,289 @@
 # Changelog
 
+## services/dispat/v1.11.0-rc.9 (2026-10-27)
+
+### Features
+
+- preserve worker pickups through failure and recovery ([4a2d83a](https://github.com/yohimik/dispat/commit/4a2d83a9e2df5bb5d9d1a1308ffb3c23792075f8)) (by yohimik, Codex)
+  Give every physical pickup a durable unique identity and immutable pending,
+  output or failed branch. Admit a replacement after failure or signed contact
+  loss only under the signed retry-safety policy. Keep unknown physical work
+  charged until its exact acknowledgement settles, and preserve the first
+  verified eligible success across replay and late returns.
+
+  Retain unresolved child processes and publication requests without inventing
+  completion. Record known earlier publications while their successor remains
+  uncertain. Correct worker restart cleanup and pinned HTTPS transport for the
+  release TinyGo compiler, with integration and recovery regressions.
+
+  Integrate the reviewed CCME theorem, stopping, capacity and asynchronous
+  cancellation corrections with their executable specification fixtures. Keep
+  the existing release holds until the complete RC.9 gates pass.
+
+- run compiled tasks through durable saga branches ([12b94ba](https://github.com/yohimik/dispat/commit/12b94ba4d1abb29517bfac1aa34006c6b2774a9e)) (by yohimik, Codex)
+  Compile the complete task graph before execution, admit authenticated
+  workers, and let eligible nodes claim ready work through the first node's
+  signed ledger. Keep Git writes, publication and release records on the
+  first node, with durable cross-run capacity and cold recovery checks.
+
+  Retain verified outputs directly on each completed task branch. Tasks
+  without files keep signed completion records, and task capacity settles
+  before package hooks without exposing unfinished package results.
+
+  Preserve the worker command surface and compilation-only RC.9 mode.
+  Include protocol, recovery, integration and documentation updates. This
+  checkpoints the current implementation while full release validation
+  continues; the existing release holds remain in effect.
+
+- initialize worker task branches before execution ([def8e7d](https://github.com/yohimik/dispat/commit/def8e7d41914e266d474b04c43de31e07be5d0a4)) (by yohimik, Codex)
+  Reserve every eligible task attempt and bounded worker notice slots before
+  starting package frames. Activate ready work with atomic leased updates,
+  carry exact input commits with assignments, and keep publication on the
+  orchestrator. Workers verify and execute assignments without replanning.
+
+  Cover cancellation, uncertain pushes, carrier integrity and large fan-in.
+  Document the node-player execution game and prove its scoped equilibrium
+  and span optimum without claiming a unique algorithm or equilibrium.
+
+- parse and build semantic versions from the CLI ([b6facab](https://github.com/yohimik/dispat/commit/b6facab8c1a14b180ab6255353fb5e448369a87a)) (by yohimik, Codex)
+  Add configuration-free semver parse and build commands with strict SemVer
+  validation, full metadata round trips and decimal string core components.
+  Expose lexical version parts without imposing the release engine integer
+  bound or changing the existing bounded parser.
+
+  Cover large components, invalid identifiers, JSON output and CLI errors,
+  and compare the scanner with the specification regex on scoped fixtures.
+
+- execute configured stages with explicit dependency ordering ([1bf38e3](https://github.com/yohimik/dispat/commit/1bf38e3ab10c7f3f8ba6204033fbde8f4749066b)) (by yohimik, Codex)
+  Compile configured stage placement and selected provider outcomes before
+  dispatch, rejecting task cycles before effects. Carry verified predecessor
+  outputs between local and worker stages from pinned source inputs, including
+  idempotent preparation and providers that do not release.
+
+  Preserve durable publication receipts and suppress stages after a failed
+  required record. Document configuration inheritance, concurrency premises
+  and the boundary between declared dependencies and arbitrary script reads.
+
+- let a record command exit 0 when its record fails ([0e1ce95](https://github.com/yohimik/dispat/commit/0e1ce95aed15a6d79b2376902eae869063a56f2b)) (by yohimik, Claude Opus 5.5)
+  `dispat changelog` and `dispat github` take --ignore-errors, on by default.
+  A changelog entry or GitHub release that cannot be written is still logged
+  at error level under E222, and the sweep now closes with a warning naming
+  every package left failed or skipped, but the command exits 0. A publish
+  stage that runs `dispat github` after `dispat commit --tag --push` therefore
+  no longer reports a published package as failed and skips its consumers, as
+  release run 40177824466 did. --ignore-errors=false restores exit 1.
+
+  Only package failures are forgiven: a refused flag, selection or plan and an
+  interrupted sweep still fail. `dispat commit` is unchanged and refuses the
+  flag, because a tag it cannot create or push must keep failing the leg.
+
+  The github and changelog pages, the recovery guide and the agent skill
+  describe the new exit, and the failure-path tests that pin exit 1 now pass
+  --ignore-errors=false.
+
+- preview a past release's notes with --version ([7742b0c](https://github.com/yohimik/dispat/commit/7742b0c42e0bcb0ea522566f889a9ed56a7cd291)) (by yohimik, Claude Opus 5.5)
+  dispat preview --version renders the changelog entry and GitHub release
+  body a released version wrote, planned again at its tag's commit with the
+  release, every later release of the package and the other release tags on
+  that commit left out of the inventory. The value is a version of the
+  selected package, its full tag or alias, or latest, which the bare flag
+  means. Elsewhere --version still prints the dispat version.
+
+### Fixes
+
+- size TinyGo stacks for hosted execution ([bebf7cb](https://github.com/yohimik/dispat/commit/bebf7cbd224aa3b2ee991350411de179bc5f9d7c)) (by yohimik, Codex)
+  Give the Linux TinyGo binaries one MiB per goroutine for the Git subprocess call path and native signal frames. Keep release binaries, TinyGo unit tests and self-update fixtures on the same stack policy, and remove temporary debugger activation from the acceptance gate.
+
+- reconcile signed progress at admission expiry ([2438606](https://github.com/yohimik/dispat/commit/2438606361581552c3d6cdfe272fe0a0c9d1ce72)) (by yohimik, Codex)
+  Consume a signed claim or terminal that arrives as an observer's admission timer fires. Preserve strict failures for ambiguous persistence and unexplained task state, rearm an early timer against the signed deadline, and resolve a prepared-provider blocker through its causal proof.
+
+- wake task observers after package settlement ([8d246c0](https://github.com/yohimik/dispat/commit/8d246c00b15ffbf2dd9f9cea059bc084a9ba42b0)) (by yohimik)
+  Notify waiting successors after signed package settlement releases their predecessor edges, so admission expiry can finish without another unrelated transition.
+
+- explain refused no-claim expiry ([c603d5d](https://github.com/yohimik/dispat/commit/c603d5d7f852e0ad73d74c5349f5fed2b33bb28b)) (by yohimik)
+  Name the rejected broker, persistence, or signed-event invariant while preserving every no-claim guard and the strict admission deadline.
+
+- await predecessor finality before admission expiry ([370cee0](https://github.com/yohimik/dispat/commit/370cee0cba6e702c408abc750655d237b9a7d403)) (by yohimik, Codex)
+  Keep dependent tasks waiting after the signed admission deadline until their
+  predecessors finish. Preserve broker expiry fences, compatible-node waits,
+  and the distinction between a failed provider and an unclaimed task.
+
+  Record signal names and raw child wait statuses in integration test logs so
+  native process failures retain their cause without changing captured output.
+
+- preserve recovery after socket and preparation failures ([7596360](https://github.com/yohimik/dispat/commit/7596360d874207d2391cb38283529444c709b71e)) (by yohimik, Codex)
+  Catch SIGPIPE in the TinyGo Linux CLI so a closed return connection cannot
+  kill a worker before it reconciles its receipt. Preserve the default signal
+  behavior of executed task commands and run native socket regressions in the
+  pinned compiler build gate.
+
+  Wake task observers when preparation-state publication is unresolved or
+  refused, retaining the exact transaction and ownership fences. Keep ordinary
+  prepublication read failures retryable. Make concurrent Git fault ordinals
+  efficient without changing which operation receives an injected failure.
+
+- fence task history and retain claims on state failures ([adab238](https://github.com/yohimik/dispat/commit/adab238af798b0b0d30e8b7a6ec32f6edf40f354)) (by yohimik)
+  Reject foreign canonical task tips before signing result, refusal or
+  terminal events, and apply the same transition checks during cold replay.
+  Check replay-state persistence before worker admission and new claims;
+  retain accepted connections, exact proposals and capacity if a later write
+  fails. Correct integration fixtures to assert signed node identities,
+  unsettled ownership and command-specific Git faults.
+
+- settle rejected outputs and bound recovery operations ([ce64251](https://github.com/yohimik/dispat/commit/ce6425153b95a4d731ff96dc208789a2814c2bb9)) (by yohimik)
+  Record output admission separately from a worker Result so rejected files
+  cannot release prepared dependencies or reappear during cold replay. Let
+  inert tasks with no eligible placement reach signed deadline finality.
+
+  Keep child commands from inheriting ownership locks, preserve exact pickup
+  identity during recovery, and bound return-channel persistence requests.
+  Treat disposable probe cleanup after a sealed release as a warning while
+  retaining locks for uncertain claims and effects.
+
+- preserve verified TLS state on worker return requests ([d52078b](https://github.com/yohimik/dispat/commit/d52078b6048817e4a2904a8a0c41975ffb1124a7)) (by yohimik, Codex)
+  Restore omitted request TLS metadata from the server-accepted connection only after its handshake completes. Keep plaintext, spoofed HTTPS headers, and incomplete handshakes rejected.
+
+  Supply the required return endpoint in the Linux cross-filesystem output fixture.
+
+- reconcile accepted pickups during recovery and shutdown ([426cd38](https://github.com/yohimik/dispat/commit/426cd38e860106dd73c5e8482a4ff94438efad1f)) (by yohimik, Codex)
+  Cold sweep recovery now decides the exact accepted Result or Ack receipt.
+  A stopping worker checks already signed finality with a bounded live context
+  before retaining its physical slot, while missing or mismatched evidence
+  still keeps that capacity charged. Preserve cancellation causes when reading
+  signed ledger objects instead of reporting them as corrupt records.
+
+  Keep rollback and catch-up fixtures at definitive beforePublish gates and
+  exercise uncertain publication separately, including source-owned locks and
+  files. Make retry opt-ins explicit. Update the release experiments for the
+  current worker configuration, version-pickup ordering and fenced retries;
+  report unresolved publication without claiming convergence.
+
+- coordinate changelog writes with input snapshots ([1c65a4a](https://github.com/yohimik/dispat/commit/1c65a4a4c8cded2e7b9961f368743a2c41f2016d)) (by yohimik, Codex)
+  Prevent a prepared input snapshot from capturing the temporary file used by an
+  atomic changelog replacement. Use a per-worktree cross-process lock around the
+  write and tree capture, including initial baselines and declared output roots.
+
+  Keep independent publication commands concurrent and retain ordinary user files
+  in input validation. Interrupted writes and failed temporary-file cleanup retain the lock for
+  explicit recovery instead of letting a later run adopt an orphaned file.
+
+- admit completed native records across repository owners ([ace697e](https://github.com/yohimik/dispat/commit/ace697ea9f2c249264501bbf1b08e321b5d72d27)) (by yohimik, Codex)
+  Preserve parallel publication when a relevant peer completes a nested native
+  commit or link settlement. Validate its exact completed effects before
+  advancing the snapshot, and wait for unfinished transitions without locks.
+
+- preserve repository guard scope across release copies ([913aec8](https://github.com/yohimik/dispat/commit/913aec886c61a83b678a02d95d83525948d0c466)) (by yohimik, Codex)
+  Select the planned repository input closure by package identity when the
+  executor supplies a stage-visible release copy. This avoids checking an
+  unrelated owner while its nested release commit is in progress, without
+  weakening relevant repository drift checks. Unknown identities fail closed.
+
+- keep mailbox cleanup from publishing tags ([6486c48](https://github.com/yohimik/dispat/commit/6486c48e88155d478cab7b0846d1bd89a9e0dae7)) (by yohimik, Codex)
+  Disable follow-tags on leased coordination-ref deletion. A real Git
+  regression confirms that create, update and cleanup preserve the
+  orchestrator-only publication boundary with push.followTags enabled.
+
+- keep publication on the orchestrator ([280d782](https://github.com/yohimik/dispat/commit/280d7823200c69be7a96a9b7c1b3ae02801f58ec)) (by yohimik, Codex)
+  Run publication and release recording on the orchestrator while workers
+  execute build, test and configured computation stages. Refuse worker
+  publication placement and signed publication permits, and remove the
+  worker publication executor and authorization handshake.
+
+  Keep local input and ownership validation, document the single entry
+  point and mailbox credentials, and replace obsolete worker-publication
+  tests with local publication and refusal coverage. Repair remaining
+  recovery and stage fixture assumptions without weakening their checks.
+
+- preserve recovery guarantees across release retries ([5bb70d5](https://github.com/yohimik/dispat/commit/5bb70d5b8260f893dc10d09a1f208c36be2560e8)) (by yohimik, Codex)
+  Complete receipt-backed releases when an immutable remote tag already names the prepared commit, and retry branch races from authoritative state. Report pinned-source capture errors and exercise recovery faults after the new dependency and output-preparation boundaries.
+
+- name the optional release stage test ([6a648af](https://github.com/yohimik/dispat/commit/6a648af70e9b8035d4dbc78d8e1991b76b536ecd)) (by yohimik, Codex)
+  Use the verb test in flow configuration, hooks, task identities and stage constraints. Refuse the former prerelease spellings with migration guidance while preserving scripts named tests. Align custom-stage docs, the agent guide and CCME, and keep skipped-consumer fixtures ordered before provider settlement.
+
+- keep the semver utility inside the published service module ([73d2d36](https://github.com/yohimik/dispat/commit/73d2d364ef5cc72a67756e05224ce15f63d78cbb)) (by yohimik, Codex)
+  Keep the full SemVer parser beside its CLI so published ccme v1.0.0 remains a valid dependency. Preserve the existing release parser and move the lexical tests and benchmarks with the utility.
+
+- build verification images from a published CLI release ([7aefa79](https://github.com/yohimik/dispat/commit/7aefa797ecab84ef74f2521182a746de6180d14d)) (by yohimik, Codex)
+  Resolve and verify a published stable binary through the installer before
+  pinning the verification image build. A Git tag without release assets
+  no longer breaks CI. Keep production build stages pinned to their provider
+  version and cover pending, unchanged and release-stage selection.
+
+- recover published packages with durable receipts ([80ecde8](https://github.com/yohimik/dispat/commit/80ecde80937e618469fdd47b7e975a850fb9cf3e)) (by yohimik, Codex)
+  Persist per-package publication evidence before dependent publication and
+  optional recorders. Verify repeated artifact identity, preserve exported
+  source targets, and reject conflicting or unverifiable records.
+
+  Finalize release commits with atomic branch and immutable-tag pushes plus
+  leased receipt deletion. Bind local retries to prepared targets, reconcile
+  lost replies and remote advances, and keep optional aliases independent.
+
+  Cover rejected writes, interrupted finalization, same-checkout retries,
+  tag tampering, stale receipts and adoption mismatches with regressions.
+
+- share chain windows and release author scans ([ccb6c9d](https://github.com/yohimik/dispat/commit/ccb6c9d15c717df1d077213b44213e0af399b43f)) (by yohimik, Codex)
+  Verify the pending union has single-parent rank order before storing
+  ancestry and windows as intervals. Scan the largest changed release prefix
+  once and copy per-release author outputs, retaining general DAG fallback.
+
+  Cover merged histories, prerelease freshness, invalid-message authors,
+  word boundaries and independent result ownership with differential tests.
+
+- apply the GitHub body limit to release previews ([e86a2b4](https://github.com/yohimik/dispat/commit/e86a2b4c86751d0258765a8a04d8bee6f579be43)) (by yohimik, Codex)
+  Render pending and historical GitHub previews through the publication body
+  renderer, preserving continuation links, release metadata and footers.
+  Report W245 for truncated previews and keep changelog previews complete.
+
+- render a past release's date and its run's providers in preview --version ([59701e4](https://github.com/yohimik/dispat/commit/59701e420e594b16920043197f4498a1a6bba03a)) (by yohimik, Claude Opus 5.5)
+  preview --version headed a past release with the pending form, the channel
+  in place of a date, and dropped the Dependencies section of a consumer whose
+  providers each made a release commit of their own in the same run: their
+  tags sit on the commits below the consumer's, so the replan read them as
+  older releases and planned nothing for them.
+
+  The header now carries the release tag's date (tagger date of an annotated
+  tag, commit date of a lightweight one, in UTC) through the changelog's own
+  entry header. The run's release commits are found by walking first parents
+  from the tag's commit while the message is commit.messageFormat rendered
+  with the release tags the commit carries; every other package's tag on them
+  is masked, so the providers plan again at the tag's commit as the run
+  planned them. A tag on an ordinary commit keeps the same-commit masking.
+
+  On this repository, services/dispat/v1.11.0-rc.8's previewed --changelog
+  entry now equals the entry the release wrote byte for byte; before, the
+  header and the four Dependencies lines differed.
+
+- cap a GitHub release body at the API limit instead of failing the release ([7ce87d5](https://github.com/yohimik/dispat/commit/7ce87d5fc82d6f902923d24282d0da0240cd69c3)) (by yohimik, Claude Opus 5.5)
+  Release run 40177824466 tagged services/dispat/v1.11.0-rc.8 and made its
+  release commit (908cbb9e), then failed at `dispat github`: GitHub refused
+  the body with a 422, "body is too long (maximum is 125000 characters)".
+  The package was marked failed after its tag was out, every consumer was
+  skipped, and the rc.8 release page does not exist.
+
+  `dispat preview -p dispat --github` at ef7c79c5, with GITHUB_REPOSITORY
+  set as in CI so commit references render as links, gives a body of
+  125,407 characters: 60 perf and fix entries with benchmark tables. The
+  ### Release block makes it 125,476. The changelog entry the run wrote is
+  125,269 bytes over 2,028 lines.
+
+  The recorder now keeps a body within 120,000 characters, counted as
+  runes. A longer one loses whole entries from the end of its sections,
+  and the sections close with a line linking the package's changelog file
+  at the tag. The header, authors, ### Release, note and footer are kept.
+  The cut is reported once as W245. A body within the limit is sent as
+  rendered, and any other refusal still fails the package.
+
+### Dependencies
+
+- [models](https://github.com/yohimik/dispat/releases/tag/pkg/models/v1.11.0-rc.7): 1.11.0-rc.6 -> 1.11.0-rc.7
+
+### Authors
+
+- yohimik
+- Codex
+- Claude Opus 5.5
+
+
 ## services/dispat/v1.11.0-rc.8 (2026-10-25)
 
 ### Fixes
