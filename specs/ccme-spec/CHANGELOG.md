@@ -1,5 +1,53 @@
 # Changelog
 
+## specs/ccme-spec/v3.1.0-rc.8 (2026-10-27)
+
+### Features
+
+- preserve worker pickups through failure and recovery ([4a2d83a](https://github.com/yohimik/dispat/commit/4a2d83a9e2df5bb5d9d1a1308ffb3c23792075f8)) (by yohimik, Codex)
+  Give every physical pickup a durable unique identity and immutable pending,
+  output or failed branch. Admit a replacement after failure or signed contact
+  loss only under the signed retry-safety policy. Keep unknown physical work
+  charged until its exact acknowledgement settles, and preserve the first
+  verified eligible success across replay and late returns.
+
+  Retain unresolved child processes and publication requests without inventing
+  completion. Record known earlier publications while their successor remains
+  uncertain. Correct worker restart cleanup and pinned HTTPS transport for the
+  release TinyGo compiler, with integration and recovery regressions.
+
+  Integrate the reviewed CCME theorem, stopping, capacity and asynchronous
+  cancellation corrections with their executable specification fixtures. Keep
+  the existing release holds until the complete RC.9 gates pass.
+
+### Fixes
+
+- scope graph complexity and verification bounds ([adab238](https://github.com/yohimik/dispat/commit/adab238af798b0b0d30e8b7a6ec32f6edf40f354)) (by yohimik, Codex)
+  Integrate the reviewed constructive computation, unknown-graph scheduling
+  and non-strict solve/check cost arguments without changing the pinned-run
+  or external-effect retry contracts.
+
+- clarify mode equivalence and execution settlement ([ce64251](https://github.com/yohimik/dispat/commit/ce6425153b95a4d731ff96dc208789a2814c2bb9)) (by yohimik, Codex)
+  Integrate the reviewed weighted-duration and interpretation/hybrid proofs.
+  Clarify output admission, missing placement and the signed repeat-safe
+  exception without treating lost contact as proof that an attempt stopped.
+
+- align pickup authority and failover conformance rules ([c6c9f57](https://github.com/yohimik/dispat/commit/c6c9f57cc4636b522c5bb477d6abacf9176eacd5)) (by yohimik, Codex)
+  Reserve canonical task, ledger and native release refs for the first node,
+  while workers create only their own immutable pending and outcome refs.
+  Require confirmation of the exact remote pending object before commands or
+  hooks start. Distinguish default retry refusal from explicitly repeat-safe
+  failover with spare capacity and the old attempt still charged.
+
+  Update the conformance vectors and worker documentation to agree with the
+  implemented pickup protocol. Preserve the reviewed mathematical statements.
+
+### Authors
+
+- yohimik
+- Codex
+
+
 ## specs/ccme-spec/v3.1.0-rc.7 (2026-10-26)
 
 ### Features
