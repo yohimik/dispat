@@ -829,6 +829,12 @@ func (c *LocalGitx) runStream(ctx context.Context, stream gitStream, args ...str
 	cmd.WaitDelay = 10 * time.Second
 	started := time.Now()
 	err := cmd.Run()
+	// Wait prefers a process failure over a stdout-copy failure. Git may
+	// receive SIGPIPE after a bounded writer refuses its output, so retain
+	// that causal error without discarding the process failure.
+	if written.err != nil && !errors.Is(err, written.err) {
+		err = errors.Join(err, written.err)
+	}
 	// Logged whether it worked or not, and with the same fields either way, so
 	// a trace can be read as the sequence of git calls the run actually made.
 	// The arguments are the command's own, never the repository path or the
@@ -851,17 +857,23 @@ func (c *LocalGitx) runStream(ctx context.Context, stream gitStream, args ...str
 	return out.String(), nil
 }
 
-// countingWriter forwards to a caller's writer and remembers how much went
-// through, so an invocation whose output never lands in a buffer still writes
-// the same trace line as every other one.
+// countingWriter remembers streamed bytes for tracing and the first output
+// error, which a simultaneous process failure must not hide.
 type countingWriter struct {
 	to    io.Writer
 	count int
+	err   error
 }
 
 func (w *countingWriter) Write(p []byte) (int, error) {
 	n, err := w.to.Write(p)
 	w.count += n
+	if err == nil && n < len(p) {
+		err = io.ErrShortWrite
+	}
+	if w.err == nil {
+		w.err = err
+	}
 	return n, err
 }
 
