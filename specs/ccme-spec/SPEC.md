@@ -3579,6 +3579,29 @@ makespan of any feasible schedule. This proves the displayed `T*` is the exact g
 constraints, not just an infimum or a work/span lower bound. For each candidate, `T(pi, a)` is the weighted
 longest-path length of its augmented DAG; the minimization chooses those ordering edges as well as the slots.
 
+*Equivalent minimum-critical-path formulation.* Let `Dset` contain the candidate DAGs `D(pi, a)` above.
+For `n = 0`, let it contain the empty DAG. Each candidate is a **spanning** DAG: every task remains,
+including tasks isolated in the conflict graph. Then
+
+```
+L(D) = max over directed paths p in D of sum_{i in p}(d_i)
+T*   = min over D in Dset of L(D)
+```
+
+Include single-vertex paths, and use zero for the empty graph. The inner maximum is the critical path of
+one fixed execution DAG; the outer minimum selects the admissible DAG with the smallest such value.
+Thus an optimal execution chooses the least critical-path weight across candidates, not a shortest route
+through one DAG. Paths describe timing constraints; they are not alternative routes that let execution
+skip tasks. A task shared by several paths still executes once.
+
+The selected conflict arcs form a DAG subgraph of the bidirectional relation graph. The complete candidate
+also retains every hard prerequisite and adds the slot-order edges, so it need not be a subgraph of the
+original relation graph alone. Only these admissible candidates participate in the minimum: deleting a
+required task, conflict constraint or hard edge to obtain a shorter path is not an allowed optimization.
+The time minimization holds task identities and any already determined release intent fixed; it does not
+choose versions or admitted causes. A conforming CCME release plan must separately pass its normal
+validation. The same known-duration and resource premises remain necessary.
+
 *What is unique and what this costs.* Fix a total order on task identifiers and slot labels. Among the
 candidates attaining `T*`, choose the lexicographically first pair `(pi, a)`; the recurrence then gives
 one canonical optimal schedule. This is a specified selection rule, not intrinsic uniqueness. Two unit

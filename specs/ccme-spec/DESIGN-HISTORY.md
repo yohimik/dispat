@@ -841,3 +841,13 @@ The theorem charges the potentially factorial/exponential search and exact arith
 task execution. It does not establish an efficient optimizer, an optimal order with hidden durations, or
 execution of true bidirectional hard dependencies. Zero-duration event semantics, recovery and atomic
 publication retain their separate premises, and runtime cycle rejection is unchanged.
+
+## 2026-10-27: Minimum critical path across execution DAGs
+
+The undirected scheduling theorem now states its equivalent min-max form: choose the admissible spanning
+execution DAG with the least longest weighted path. This is not shortest-path routing through one graph.
+Every candidate retains every task and hard prerequisite, selects a direction for each conflict and adds
+slot-order edges. Only the conflict orientation is necessarily a subgraph of the bidirectional relation;
+the complete execution DAG can contain additional constraints. Task identities and determined release
+intent stay fixed, normal plan validation is still required, and shared path membership never means
+executing a task more than once.
