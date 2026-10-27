@@ -1,6 +1,6 @@
 {
   "name": "@dispat/bin",
-  "version": "1.11.0-rc.8",
+  "version": "1.11.0-rc.9",
   "description": "Next generation CI/CD framework. Mathematical planning and saga recovery for releases in any language. The dispat CLI, as a native binary.",
   "keywords": ["cli", "release", "release-automation", "framework", "release-orchestration", "orchestrator", "orchestration", "saga", "workflow", "dependency-graph", "versioning", "monorepo", "polyrepo", "conventional-commits", "changelog", "ci-cd", "deterministic", "control-repository"],
   "license": "MIT",
