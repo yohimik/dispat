@@ -244,21 +244,42 @@ func executionProbeValue(t *testing.T, rig *executionRig, probe, name string) st
 // and in a checkout of its own, so one repository's work is never one node's
 // queue.
 func TestExecutionTasksSharingARepositoryUseSeparateBranches(t *testing.T) {
-	rig := newExecutionWorkspace(t, func(repo *harness.Repo) string {
-		return executionRecordingScript + " && " +
-			repo.TsmarkScript("timeline.log", "$DISPAT_PACKAGE", executionStageWindow)
+	const (
+		uiGateName   = "ui-build.gate"
+		docsGateName = "docs-build.gate"
+	)
+	gateDir := t.TempDir()
+	uiGate := filepath.Join(gateDir, uiGateName)
+	docsGate := filepath.Join(gateDir, docsGateName)
+	rig := newExecutionWorkspace(t, func(*harness.Repo) string {
+		// Each build waits for the other's marker. A completed release thus
+		// proves both commands were alive together; serial placement cannot
+		// satisfy either wait.
+		rendezvous := `case "$DISPAT_PACKAGE" in ` +
+			`ui) ` + stageRelationRendezvous(shellQuote(uiGate), shellQuote(docsGate)) + ` ;; ` +
+			`docs) ` + stageRelationRendezvous(shellQuote(docsGate), shellQuote(uiGate)) + ` ;; esac`
+		return executionRecordingScript + " && " + rendezvous
+	}, func(cfg *models.File) {
+		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker, Publish: models.RunOnlyBoth}
 	})
 	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 1)
+	defer func() {
+		for index, reply := range stopAll(t, workers) {
+			if t.Failed() {
+				t.Logf("worker %d stdout:\n%s\nstderr:\n%s", index, reply.Stdout, reply.Stderr)
+			}
+		}
+	}()
 	watch := newExecutionBranchWatch(t, rig)
 
 	res := rig.release()
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assigned := watch.seen()
-	timeline := rig.repo.Timeline("timeline.log")
-	harness.AssertOverlaps(t, harness.Find(t, timeline, "ui"), harness.Find(t, timeline, "docs"))
+	assert.FileExists(t, uiGate)
+	assert.FileExists(t, docsGate)
 	placed := rig.nodesByPackage()
-	assert.NotEqual(t, placed["ui"], placed["docs"], "the two overlapping builds ran on two nodes")
+	assert.NotEqual(t, placed["ui"], placed["docs"], "the rendezvoused builds ran on two nodes")
 
 	assert.Len(t, assigned, len(executionWorkspacePackages),
 		"one coordination branch per dispatched task, and no two tasks shared one: %v", assigned)
@@ -272,7 +293,6 @@ func TestExecutionTasksSharingARepositoryUseSeparateBranches(t *testing.T) {
 				"first-node work uses a private task checkout under Git state, not the source checkout: %s", run.Dir)
 		}
 	}
-	stopAll(t, workers)
 }
 
 // TestExecutionTransportCommitsStayOutsideReleaseHistory: what a run puts on a

@@ -14,28 +14,70 @@ import (
 	"time"
 )
 
+const (
+	tinyGoLinuxProbeListenError        = "listen for closed-socket probe: %v"
+	tinyGoLinuxProbeDialError          = "dial closed-socket probe: %v"
+	tinyGoLinuxProbeAcceptError        = "accept closed-socket probe: %v"
+	tinyGoLinuxProbeAcceptTimeoutError = "accept closed-socket probe timed out"
+	tinyGoLinuxProbeLingerError        = "set closed-socket probe linger: %v"
+	tinyGoLinuxProbeCloseError         = "close closed-socket probe peer: %v"
+)
+
 func TestTinyGoLinuxClosedSocketReturnsBrokenPipe(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf(tinyGoLinuxProbeListenError, err)
 	}
 	defer listener.Close()
-	closed := make(chan struct{})
+	type acceptedConnection struct {
+		conn net.Conn
+		err  error
+	}
+	accepted := make(chan acceptedConnection)
+	abort := make(chan struct{})
+	defer close(abort)
 	go func() {
 		conn, acceptErr := listener.Accept()
-		if acceptErr == nil {
-			tcp := conn.(*net.TCPConn)
-			_ = tcp.SetLinger(0)
-			_ = tcp.Close()
+		select {
+		case accepted <- acceptedConnection{conn: conn, err: acceptErr}:
+		case <-abort:
+			if conn != nil {
+				_ = conn.Close()
+			}
 		}
-		close(closed)
 	}()
 	conn, err := net.Dial("tcp", listener.Addr().String())
 	if err != nil {
-		t.Fatal(err)
+		_ = listener.Close()
+		select {
+		case result := <-accepted:
+			if result.conn != nil {
+				_ = result.conn.Close()
+			}
+		case <-time.After(time.Second):
+		}
+		t.Fatalf(tinyGoLinuxProbeDialError, err)
 	}
 	defer conn.Close()
-	<-closed
+	var server net.Conn
+	select {
+	case result := <-accepted:
+		if result.err != nil {
+			t.Fatalf(tinyGoLinuxProbeAcceptError, result.err)
+		}
+		server = result.conn
+	case <-time.After(time.Second):
+		t.Fatal(tinyGoLinuxProbeAcceptTimeoutError)
+	}
+	// The peer reset must wait for Dial; this test exercises the later write.
+	tcp := server.(*net.TCPConn)
+	if err := tcp.SetLinger(0); err != nil {
+		_ = server.Close()
+		t.Fatalf(tinyGoLinuxProbeLingerError, err)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatalf(tinyGoLinuxProbeCloseError, err)
+	}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		_, err = conn.Write([]byte("closed peer"))
