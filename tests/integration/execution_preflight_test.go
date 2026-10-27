@@ -13,6 +13,7 @@ package integration
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,19 +29,28 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
+const preflightReturnPortRetryLimit = 3
+const preflightReturnPortNetwork = "tcp"
+const preflightReturnPortListenAddress = "127.0.0.1:0"
+const preflightReturnEndpointPrefix = "https://"
+const preflightReturnBindErrorPrefix = "return channel could not listen: "
+
 // TestExecutionPreflightRefusesBeforeAnyStage: every way the pool can fail
 // the check, and the same five absences after each of them.
 func TestExecutionPreflightRefusesBeforeAnyStage(t *testing.T) {
 	for name, tc := range map[string]struct {
-		adjust       func(*models.File)
-		node         func(*models.ExecutionConfig)
-		prepareState func(*testing.T, *executionWorker)
-		secret       string
-		isAlive      bool
-		says         string
+		adjust               func(*models.File)
+		node                 func(*models.ExecutionConfig)
+		prepareState         func(*testing.T, *executionWorker)
+		secret               string
+		isAlive              bool
+		isReturnPortOccupied bool
+		says                 string
 	}{
 		"no node is listening at all": {
 			says: "did not pass preflight"},
+		"no node is listening after a return port collision": {
+			isReturnPortOccupied: true, says: "did not pass preflight"},
 		"a node signing with another secret": {
 			isAlive: true, secret: "another-secret", says: "did not pass preflight"},
 		"a node whose answered-work record cannot be persisted": {
@@ -74,6 +84,12 @@ func TestExecutionPreflightRefusesBeforeAnyStage(t *testing.T) {
 				}
 			}
 			rig := newExecutionRig(t, adjust)
+			if tc.isReturnPortOccupied {
+				listener, err := net.Listen(preflightReturnPortNetwork, preflightReturnPortListenAddress)
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, listener.Close()) })
+				rig.returnURL = preflightReturnEndpointPrefix + listener.Addr().String()
+			}
 			var worker *executionWorker
 			if tc.isAlive {
 				secret := executionSecret
@@ -88,6 +104,22 @@ func TestExecutionPreflightRefusesBeforeAnyStage(t *testing.T) {
 			}
 
 			res := rig.release()
+			if tc.isReturnPortOccupied {
+				require.True(t, isPreflightReturnPortCollision(res), "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			}
+			// Port discovery cannot reserve a listener across the CLI process boundary.
+			// A fresh rig also preserves the failed attempt's durable return identity.
+			for retry := 0; !tc.isAlive && retry < preflightReturnPortRetryLimit && isPreflightReturnPortCollision(res); retry++ {
+				require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+				requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
+				require.Zero(t, buildRuns(rig.repo), "no stage ran before the return listener bound")
+				require.Empty(t, rig.repo.TagList(), "nothing was tagged before the return listener bound")
+				require.False(t, remoteHoldsLock(t, rig.origin), "the bind refusal released its lock")
+				require.Empty(t, rig.branches(), "the bind refusal left no coordination branch")
+				t.Logf("return port collision on %s; retrying with a fresh disposable rig", rig.returnURL)
+				rig = newExecutionRig(t, adjust)
+				res = rig.release()
+			}
 
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
@@ -119,6 +151,17 @@ func TestExecutionPreflightRefusesBeforeAnyStage(t *testing.T) {
 			assert.Equal(t, []string{"core@0.1.0"}, rig.repo.TagList())
 		})
 	}
+}
+
+func isPreflightReturnPortCollision(result harness.RunResult) bool {
+	for _, event := range executionEvents(result) {
+		cause := event.Str("error")
+		if strings.HasPrefix(cause, preflightReturnBindErrorPrefix) &&
+			strings.HasSuffix(cause, syscall.EADDRINUSE.Error()) {
+			return true
+		}
+	}
+	return false
 }
 
 // orNothing turns an optional adjustment into the list of adjustments a
