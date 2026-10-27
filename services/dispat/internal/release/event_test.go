@@ -4,11 +4,23 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/services/dispat/internal/plan"
+)
+
+const (
+	observerBlockedProviderPackageName     = "a"
+	observerBlockedConsumerPackageName     = "b"
+	observerBlockedVersionStageName        = "version"
+	observerBlockedPublishCommand          = "publish"
+	observerBlockedPublishKey              = "publish a"
+	observerConcurrentTaskCapacity         = 4
+	observerBlockedGateTimeout             = 10 * time.Second
+	observerBlockedVersionGateErrorMessage = "consumer version did not complete before provider publication failed"
 )
 
 // The observer is the executor's one window for external progress reporting,
@@ -53,6 +65,20 @@ func (f *fakeObserver) find(pkg, name string) (Event, bool) {
 		}
 	}
 	return Event{}, false
+}
+
+type blockedSkipObserver struct {
+	*fakeObserver
+	versionSucceeded chan struct{}
+	once             sync.Once
+}
+
+func (o *blockedSkipObserver) Event(ev Event) {
+	o.fakeObserver.Event(ev)
+	if ev.Package == observerBlockedConsumerPackageName &&
+		ev.Name == EventStageSucceeded && ev.Stage == observerBlockedVersionStageName {
+		o.once.Do(func() { close(o.versionSucceeded) })
+	}
 }
 
 func runObserved(t *testing.T, p *plan.Plan, r *fakeRunner) (*fakeObserver, map[string]*Result) {
@@ -105,8 +131,35 @@ func TestObserverFailedBuild(t *testing.T) {
 func TestObserverBlockedSkip(t *testing.T) {
 	// a's publish fails; b consumes a and has no changes of its own, so it is
 	// skipped with the same W194 the log line carries.
-	p := mkPlan(planSpec{WaitPublish: true, Deps: map[string][]string{"b": {"a"}}, Names: []string{"a", "b"}})
-	obs, res := runObserved(t, p, &fakeRunner{fail: map[string]bool{"publish a": true}})
+	p := mkPlan(planSpec{
+		WaitPublish: true,
+		Deps: map[string][]string{
+			observerBlockedConsumerPackageName: {observerBlockedProviderPackageName},
+		},
+		Names: []string{observerBlockedProviderPackageName, observerBlockedConsumerPackageName},
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), observerBlockedGateTimeout)
+	defer cancel()
+	obs := &blockedSkipObserver{fakeObserver: &fakeObserver{}, versionSucceeded: make(chan struct{})}
+	runner := &fakeRunner{fail: map[string]bool{observerBlockedPublishKey: true}}
+	// Version can run before provider publication, but the scheduler does not
+	// promise that order. Hold the failure until the observer records it.
+	runner.guard = func(dir, command string) {
+		if dir != observerBlockedProviderPackageName || command != observerBlockedPublishCommand {
+			return
+		}
+		select {
+		case <-obs.versionSucceeded:
+		case <-ctx.Done():
+		}
+	}
+	e := newExecutor(execSpec{
+		Runner: runner, Tagger: &fakeTagger{}, Changelog: &fakeChangelog{},
+		Build: observerConcurrentTaskCapacity, Publish: observerConcurrentTaskCapacity,
+	})
+	e.Observer = obs
+	res := e.Run(ctx, p)
+	require.NoError(t, ctx.Err(), observerBlockedVersionGateErrorMessage)
 
 	require.Equal(t, StatusSkipped, res["b"].Status)
 	ev, ok := obs.find("b", EventPackageSkipped)
@@ -114,9 +167,8 @@ func TestObserverBlockedSkip(t *testing.T) {
 	assert.Equal(t, "skipped", ev.Status)
 	assert.Equal(t, plan.CodeBlocked, ev.Code)
 	assert.Equal(t, "a", ev.BlockedBy)
-	// b's version stage waits on no provider (§19.2a), so it ran; the skip
-	// came at the build, which waits for a's publish, and no stage after it
-	// started.
+	// The gate establishes b's version success before a's publication failure.
+	// The later build waits for a's publish and is skipped.
 	assert.Equal(t, []string{"stage.started:version", "stage.succeeded:version", "package.skipped:"}, obs.forPackage("b"))
 }
 
