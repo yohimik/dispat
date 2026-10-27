@@ -84,6 +84,7 @@ const choreographyLedgerUnfinishedTaskSealErr = "execution: unfinished task prev
 const choreographyLedgerUnfinishedEffectSealErr = "execution: unfinished local effect prevents normal run seal"
 const choreographyLedgerUnsettledTaskPackageSealErr = "execution: task package outcome must settle before normal run seal"
 const choreographyLedgerEventInvalidErr = "execution: invalid signed choreography event"
+const choreographyLedgerEventReadErrorFormat = "execution: signed choreography event %s is unreadable: %w"
 const choreographyLedgerInitFirstErr = "execution: first ledger transition is not exact complete graph initialization"
 const choreographyLedgerInitRepeatedErr = "execution: complete graph initialization appears twice"
 const choreographyLedgerEventParentErr = "execution: event carrier parents do not match signed state"
@@ -869,7 +870,10 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 	previous := g.ledgerTip
 	for _, oid := range oids {
 		record, err := g.readLedgerRecord(ctx, oid)
-		if err != nil || record.Sequence != g.sequence+choreographyLedgerFirstSequence || record.Event == nil ||
+		if err != nil {
+			return fmt.Errorf(choreographyLedgerEventReadErrorFormat, oid, err)
+		}
+		if record.Sequence != g.sequence+choreographyLedgerFirstSequence || record.Event == nil ||
 			record.Event.Sequence != record.Sequence || record.Event.Task == choreographyLedgerMissingIdentity || record.Event.TaskOID == choreographyLedgerMissingIdentity {
 			return fmt.Errorf(choreographyLedgerEventInvalidErr)
 		}
@@ -1152,6 +1156,15 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 				return err
 			}
 		}
+		if record.Event.Kind == ChoreographyExecutionStarted {
+			deadline, deadlineErr := choreographyExecutionDeadline(g.opts.JoinPolicy, record.Event.ExecutionStartedUTC)
+			if g.executionStarted || record.Event.Task != choreographyRunTaskID ||
+				record.Event.TaskOID != g.opts.GraphRootOID ||
+				record.Event.GraphRootOID != g.opts.GraphRootOID || g.stopping ||
+				deadlineErr != nil || record.Event.AdmissionDeadlineUTC != deadline {
+				return fmt.Errorf(choreographyInvalidExecutionStartError)
+			}
+		}
 		settledEvent := *record.Event
 		settledEvent.LedgerOID = oid
 		g.events = append(g.events, settledEvent)
@@ -1170,15 +1183,8 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 			g.stopping = choreographyLedgerStopping
 		}
 		if record.Event.Kind == ChoreographyExecutionStarted {
-			deadline, deadlineErr := choreographyExecutionDeadline(g.opts.JoinPolicy, record.Event.ExecutionStartedUTC)
-			if g.executionStarted || record.Event.Task != choreographyRunTaskID ||
-				record.Event.TaskOID != g.opts.GraphRootOID ||
-				record.Event.GraphRootOID != g.opts.GraphRootOID || g.stopping ||
-				deadlineErr != nil || record.Event.AdmissionDeadlineUTC != deadline {
-				return fmt.Errorf(choreographyInvalidExecutionStartError)
-			}
 			g.executionStarted = choreographyLedgerExecutionStarted
-			g.admissionDeadlineUTC = deadline
+			g.admissionDeadlineUTC = record.Event.AdmissionDeadlineUTC
 		}
 		if record.Event.Kind == ChoreographyInitializationComplete {
 			g.initialized = choreographyLedgerInitialized
@@ -1212,6 +1218,7 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 			g.joinRefused[record.Event.ProposalDigest] = ChoreographyEventCursor{OID: oid, Sequence: g.sequence}
 		}
 		previous = oid
+		g.ledgerTip = oid
 	}
 	if previous != tip {
 		return fmt.Errorf(choreographyLedgerHistoryErr)
@@ -1219,7 +1226,6 @@ func (g *GitChoreographyPersist) syncLedgerLocked(ctx context.Context) error {
 	if len(oids) > choreographyLedgerNoItems {
 		g.replayPasses++
 	}
-	g.ledgerTip = tip
 	return nil
 }
 
