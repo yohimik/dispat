@@ -156,6 +156,7 @@ func (b *FirstNodeBroker) completeTaskPackageSettlement(task *indexedChoreograph
 	}
 	task.pendingPackageSettlement = choreographyTaskPackageSettlementComplete
 	b.discharge(task)
+	b.wakeBudgetWaiters()
 	return nil
 }
 

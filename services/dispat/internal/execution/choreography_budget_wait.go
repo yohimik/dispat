@@ -54,8 +54,8 @@ func (b *FirstNodeBroker) WaitClaimBudget(ctx context.Context, taskID, node stri
 	}
 }
 
-// EligibilityWake closes after a signed membership, capacity, or stop
-// transition. The observer rereads HasEligibleAdmittedNode after waking.
+// EligibilityWake closes after a signed membership, capacity, readiness, or
+// stop transition. Observers reread task readiness and membership after waking.
 func (b *FirstNodeBroker) EligibilityWake() <-chan struct{} {
 	if b == nil {
 		return nil
