@@ -1,5 +1,18 @@
 # Changelog
 
+## services/dispat/v1.11.0-rc.10 (2026-10-27)
+
+### Fixes
+
+- keep Git output errors alongside process failures ([552c794](https://github.com/yohimik/dispat/commit/552c794861ee7cbf1a3cb5b3c1110eb2b3982f99)) (by yohimik, Codex)
+  Preserve bounded-writer and short-write errors when Git also exits unsuccessfully, so oversized result packs still report their transport limit. Keep the process failure in the error chain and cover both failures with a deterministic regression.
+
+### Authors
+
+- yohimik
+- Codex
+
+
 ## services/dispat/v1.11.0-rc.9 (2026-10-27)
 
 ### Features
