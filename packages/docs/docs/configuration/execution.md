@@ -276,7 +276,7 @@ object is. See [running scripts on workers](../distributed-execution.md#running-
 ## See also
 
 - [Distributed execution](../distributed-execution.md) for the arrangement, the transport and the recovery, and
-  [the mailbox repository](../distributed-execution.md#the-mailbox-repository) for what travels through the repository
+  [the coordination repository](../distributed-execution.md#the-coordination-repository) for what travels through the repository
   being released and how to protect its release refs.
 - [The worker command](../cli/worker.md) for the node that reads this object and serves tasks.
 - Annotated example files:
