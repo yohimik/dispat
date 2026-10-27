@@ -8547,6 +8547,34 @@ history, a `.gitmodules` that cannot be read, and a link path leaving the declar
 diagnostic for an unmaterialized link MUST name the command that initializes exactly that link, because a run started
 inside another repository's linked checkout is the ordinary way to meet it.
 
+**Classical minimum-edge theorem (informative).** A finite connected simple undirected graph with
+`n >= 1` vertices has at least `n - 1` edges. The minimum is attained, and equality holds exactly for trees.
+This is an established graph-theory result, not a new dispat theorem; see the connected-graph and tree
+results in [MIT's Mathematics for Computer Science](https://ocw.mit.edu/courses/6-042j-mathematics-for-computer-science-spring-2015/mit6_042js15_textbook.pdf).
+
+Here is a strong-induction proof of the lower bound. For `n = 1`, zero edges suffice and fewer are impossible.
+Assume the bound for every positive vertex count below `n`, and take any connected graph on `n > 1` vertices.
+Delete a vertex `v` and its incident edges. Let the remaining connected components have sizes
+`n_1, ..., n_k`, where `k >= 1` and `sum(n_i) = n - 1`. By the induction hypothesis their internal edges
+number at least `sum(n_i - 1) = n - 1 - k`. The original graph's connectivity requires at least one edge
+from `v` to each component, hence at least `k` incident edges. These edge sets are disjoint, so the original
+graph has at least `(n - 1 - k) + k = n - 1` edges. Deleting an arbitrary vertex need not leave a connected
+graph; accounting for all components is what makes this induction valid.
+
+Attainability also follows by induction: start with one vertex and zero edges, then attach each new vertex
+to one existing vertex by one edge. Each step preserves connectivity and acyclicity and adds one to both
+the vertex and edge counts. Conversely, if a connected graph with `n - 1` edges contained a cycle, removing
+one cycle edge would preserve connectivity and contradict the proved lower bound. Thus equality implies
+it is a tree. Every tree with more than one vertex has a leaf: an endpoint of a longest simple path has no
+additional neighbour, since that would either extend the path or create a cycle. Removing that leaf and
+its one edge leaves a tree. Induction from the one-vertex tree therefore gives exactly `n - 1` edges for
+every tree, completing the equality characterization.
+
+For this fleet, substitute `n = Q` and count each two-sided peer link once. Representing each undirected
+edge by two directed arcs gives `2(Q - 1)` arcs for a tree, not two independent links or two execution
+prerequisites. This proves the minimum link count used in §27.9; it does not select a unique tree or
+minimize hop distance, weighted latency or failure risk. Those require their own objectives and constraints.
+
 **The fixed fleet snapshot.** The snapshot of §27.2 is the head each composed peer holds when the walk reads it,
 together with the relevant release-tag refs. A recorded gitlink MUST NOT be required to equal that head: in this
 mode a pin is **advisory**. Two peers that link each other cannot both record the other's current revision, so exact

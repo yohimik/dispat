@@ -900,3 +900,13 @@ explicit assumptions. Local elapsed measurements and remote runtime are distinct
 neither quiescence nor exactly-once effects. Existing §28 signed-root replay, deadlines, wire fields and
 fencing rules are unchanged. This is a scoped theoretical clarification, not a new runtime implementation
 or clock-synchronization experiment.
+
+## 2026-10-28: Classical minimum-edge bound by induction
+
+Section 27.11 records the established theorem that a connected simple undirected graph on `n >= 1` vertices
+needs at least `n - 1` edges, with equality exactly for trees, and cites a standard textbook treatment.
+A strong-induction proof accounts for every component left after deleting a vertex; separate leaf-based
+inductions establish attainability and the edge count of every tree. The result explains the existing
+`Q - 1` fleet-link count. A two-sided link counts once even when represented by two directed arcs.
+Minimum link count does not establish a unique topology, least latency or resilience. No new mathematical
+priority, runtime behavior, implementation or experiment is claimed.
