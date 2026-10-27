@@ -393,9 +393,12 @@ marked keep: true is never suggested for removal, an initials entry already
 in the config is never rewritten, and --package/--space/--group scope the
 suggestions to those packages.
 
-For a linked fleet, --topology minimal preserves existing links and adds the
-fewest needed to connect the roster. --topology star links every peer to the
-entry repository and refuses existing links that conflict with that shape.
+For a linked fleet, --topology minimal extends existing paths into a chain,
+with at most two neighbors per repository; existing branches are refused.
+--topology star links every peer to the entry repository and refuses existing
+links that conflict with that shape. Neither mode removes existing links.
+Minimal previews the next joining edge. --write rereads each new checkout
+before extending the chain; --interactive applies only selected suggestions.
 Links are proposed without changes unless --write or --interactive is used.`,
 		flags: append([]string{"write", "interactive", "check", "topology"}, selectionFlags...),
 	},

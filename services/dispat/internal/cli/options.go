@@ -203,7 +203,7 @@ func (o *options) declareSetupFlags(fs *pflag.FlagSet) {
 		"preview the changelog entry body (the default when neither --changelog nor --github is given)")
 	o.pvGithub = fs.Bool("github", false,
 		"preview the GitHub release body, under the github entry format; beside --changelog, both are printed")
-	o.computeTopology = fs.String("topology", "minimal", "repository link topology for compute: minimal preserves links and adds the fewest needed; star links every repository to the entry")
+	o.computeTopology = fs.String("topology", "minimal", "repository link topology for compute: minimal extends existing paths into a chain and refuses branches; star links every repository to the entry")
 	o.computeWrite = fs.Bool("write", false,
 		"apply every suggestion to the config file")
 	o.computeInteractive = fs.BoolP("interactive", "i", false,

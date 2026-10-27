@@ -63,19 +63,16 @@ func requireLinkSuggestions(t *testing.T, a *App, topology string) []linkSuggest
 	return changes
 }
 
-// TestSuggestLinksConnectsTheRosterWithASpanningTree: a fleet that names
-// three peers and links none of them needs exactly two links, never three,
-// because a third would be a second path between two repositories and
-// composition refuses those.
+// A preview offers the first writable edge of a chain. A write recomposes
+// after that edge so its new checkout can own the next edge.
 func TestSuggestLinksConnectsTheRosterWithASpanningTree(t *testing.T) {
 	a := computeFleet(t, fleetPeer("api", []string{"sdk", "web"}, nil))
 	links := kinds(requireLinkSuggestions(t, a, ""), linkChangeLink)
-	require.Len(t, links, 2, "three repositories need two links")
+	require.Len(t, links, 1, "the preview offers one joining edge per round")
 	assert.Equal(t, "api", links[0].repository)
 	assert.Equal(t, "sdk", links[0].peer)
 	assert.Equal(t, ".links/sdk", links[0].path)
 	assert.Equal(t, "https://example.test/sdk.git", links[0].url)
-	assert.Equal(t, "web", links[1].peer)
 
 	// Seeded with a link that already exists, only the missing one is left:
 	// the same answer whatever order the fleet was assembled in.
@@ -151,10 +148,10 @@ func TestSuggestLinksStarUsesTheEntryAsHub(t *testing.T) {
 	assert.Equal(t, "zeta", links[1].repository)
 	assert.Equal(t, "middle", links[1].peer)
 
-	// The empty option is the existing minimal contract, and rerunning after
-	// those edges exist is idempotent.
+	// The default minimal option offers one edge of its chain per round.
 	minimal := kinds(requireLinkSuggestions(t, a, ""), linkChangeLink)
-	require.Len(t, minimal, 2)
+	require.Len(t, minimal, 1)
+	assert.Equal(t, "alpha", minimal[0].peer)
 	a.workspace.Repositories[0].Links = map[string]string{
 		"alpha": ".links/alpha", "middle": ".links/middle",
 	}
@@ -171,7 +168,7 @@ func TestSuggestLinksStarRefusesAnExistingNonHubLink(t *testing.T) {
 	assert.Nil(t, changes)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "incompatible with existing link alpha <-> middle")
-	assert.Contains(t, err.Error(), "existing links are retained")
+	assert.Contains(t, err.Error(), "retains existing links")
 }
 
 func TestSuggestLinksExcludesDisabledRosterPeers(t *testing.T) {
@@ -217,17 +214,14 @@ func TestSuggestLinksExcludesDisabledRosterPeers(t *testing.T) {
 	}
 }
 
-// Unavailable roster members must not be unioned before compute knows an
-// edge can be created. Otherwise an unreachable early pair can make a later
-// reachable edge look redundant and leave the fleet disconnected.
+// A roster-only member cannot own a link until a preceding repair has made
+// its checkout available. The first preview therefore offers one edge.
 func TestSuggestLinksMinimalDoesNotUnionUnavailablePeers(t *testing.T) {
 	a := computeFleet(t, fleetPeer("zeta", []string{"alpha", "middle"}, nil))
 	links := kinds(requireLinkSuggestions(t, a, "minimal"), linkChangeLink)
-	require.Len(t, links, 2)
-	assert.ElementsMatch(t, []string{"alpha", "middle"}, []string{links[0].peer, links[1].peer})
-	for _, link := range links {
-		assert.Equal(t, "zeta", link.repository)
-	}
+	require.Len(t, links, 1)
+	assert.Equal(t, "zeta", links[0].repository)
+	assert.Equal(t, "alpha", links[0].peer)
 }
 
 // TestSuggestLinksProposesTheCheckoutAndTheRosterEntry: the other two things
@@ -338,10 +332,21 @@ func TestApplyLinkChangesCreatesBothHalvesOfALink(t *testing.T) {
 	t.Setenv("GIT_CONFIG_VALUE_0", "always")
 	base := t.TempDir()
 	api, sdk := filepath.Join(base, "api"), filepath.Join(base, "sdk")
-	apiCfg := &config.File{Commit: &config.CommitConfig{}, Run: &config.RunConfig{}}
-	sdkCfg := &config.File{Commit: &config.CommitConfig{}, Run: &config.RunConfig{}}
+	apiCfg := &config.File{Repository: "api", Polyrepo: true, Commit: &config.CommitConfig{}, Run: &config.RunConfig{},
+		Packages:     map[string]config.PackageConfig{"api": {Path: "pkg"}},
+		Repositories: []config.RepositoryLinkConfig{{Name: "sdk", URL: sdk, Branch: "main"}}}
+	sdkCfg := &config.File{Repository: "sdk", Polyrepo: true, Commit: &config.CommitConfig{}, Run: &config.RunConfig{},
+		Packages:     map[string]config.PackageConfig{"sdk": {Path: "pkg"}},
+		Repositories: []config.RepositoryLinkConfig{{Name: "api", URL: api, Branch: "main"}}}
 	settleRepo(t, api, apiCfg)
 	settleRepo(t, sdk, sdkCfg)
+	for root, cfg := range map[string]*config.File{api: apiCfg, sdk: sdkCfg} {
+		data, err := json.Marshal(cfg)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), data, 0o644))
+		settleGit(t, root, "add", "dispat.json")
+		settleGit(t, root, "commit", "-qm", "chore: configure fleet")
+	}
 	origin := filepath.Join(base, "api.git")
 	settleGit(t, base, "init", "-q", "--bare", origin)
 	settleGit(t, api, "remote", "add", "origin", origin)
@@ -350,12 +355,12 @@ func TestApplyLinkChangesCreatesBothHalvesOfALink(t *testing.T) {
 	a := New(api, apiCfg, zerolog.Nop())
 	a.workspace = &config.Workspace{ControlRoot: api,
 		Repositories: []config.Repository{
-			{Name: "api", Root: api, Config: apiCfg, Commit: apiCfg.Commit, Imported: true, Entry: true},
+			{Name: "api", Root: api, ConfigPath: filepath.Join(api, "dispat.json"), Config: apiCfg, Commit: apiCfg.Commit, Imported: true, Entry: true},
 		}}
 	var out bytes.Buffer
 	require.NoError(t, a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
 		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk", url: sdk, branch: "main",
-	}}, "minimal", &out))
+	}}, "minimal", true, &out))
 
 	assert.FileExists(t, filepath.Join(api, ".links", "sdk", "pkg", "input"), "the forward half is a checkout")
 	assert.Contains(t, settleGit(t, api, "config", "--file", ".gitmodules", "submodule.sdk.url"), "sdk")
@@ -375,8 +380,41 @@ func TestApplyLinkChangesCreatesBothHalvesOfALink(t *testing.T) {
 	// Nothing was committed anywhere: the operator reads the diff and does
 	// that themselves.
 	assert.NotEmpty(t, settleGit(t, api, "status", "--porcelain=v1"))
-	assert.Equal(t, 1, len(settleGit(t, nested, "log", "--format=%H"))/40,
-		"the peer checkout carries only the revision it was cloned at")
+	assert.Equal(t, settleGit(t, sdk, "rev-parse", "HEAD"), settleGit(t, nested, "rev-parse", "HEAD"),
+		"the peer checkout remains at the revision it was cloned from")
+}
+
+// A link staged against an unconfigured peer is not proof that the repaired
+// fleet can be composed. The staged operation remains for review and the
+// write reports that completion could not be verified.
+func TestApplyLinkChangesRejectsUnverifiableRecomposition(t *testing.T) {
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
+	t.Setenv("GIT_CONFIG_VALUE_0", "always")
+	base := t.TempDir()
+	api, sdk := filepath.Join(base, "api"), filepath.Join(base, "sdk")
+	apiCfg := &config.File{Commit: &config.CommitConfig{}, Run: &config.RunConfig{}}
+	settleRepo(t, api, apiCfg)
+	settleRepo(t, sdk, &config.File{})
+	origin := filepath.Join(base, "api.git")
+	settleGit(t, base, "init", "-q", "--bare", origin)
+	settleGit(t, api, "remote", "add", "origin", origin)
+	settleGit(t, api, "push", "-q", "origin", "HEAD:refs/heads/main")
+
+	a := New(api, apiCfg, zerolog.Nop())
+	a.workspace = &config.Workspace{ControlRoot: api, Repositories: []config.Repository{{
+		Name: "api", Root: api, Config: apiCfg, Commit: apiCfg.Commit, Imported: true, Entry: true,
+	}}}
+	var out bytes.Buffer
+	err := a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
+		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk", url: sdk, branch: "main",
+	}}, "minimal", true, &out)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "repaired fleet produced no workspace")
+	assert.Contains(t, err.Error(), "completion cannot be verified")
+	assert.Contains(t, err.Error(), "review the staged changes before retrying")
+	assert.FileExists(t, filepath.Join(api, ".links", "sdk", "pkg", "input"))
+	assert.NotEmpty(t, settleGit(t, api, "status", "--porcelain=v1"))
 }
 
 func TestApplyLinkChangesReportsStarConflictRevealedByCheckout(t *testing.T) {
@@ -427,7 +465,7 @@ func TestApplyLinkChangesReportsStarConflictRevealedByCheckout(t *testing.T) {
 	var out bytes.Buffer
 	err := a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
 		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk", url: sdk, branch: "main",
-	}}, "star", &out)
+	}}, "star", true, &out)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "incompatible with star topology")
 	assert.Contains(t, err.Error(), "existing link sdk <-> web")
@@ -452,14 +490,14 @@ func TestApplyLinkChangesLeavesALinkItCannotCreate(t *testing.T) {
 			{Name: "api", Root: api, Config: apiCfg, Commit: apiCfg.Commit, Imported: true, Entry: true},
 		}}
 	var out bytes.Buffer
-	require.NoError(t, a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
-		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk"}}, "minimal", &out))
+	require.Error(t, a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
+		kind: linkChangeLink, repository: "api", peer: "sdk", path: ".links/sdk"}}, "minimal", true, &out))
 	assert.NoDirExists(t, filepath.Join(api, ".links", "sdk"))
 	assert.Empty(t, out.String())
 
 	// A repository this run did not compose is not one it can write into.
-	require.NoError(t, a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
-		kind: linkChangeLink, repository: "absent", peer: "sdk", path: ".links/sdk", url: "https://example.test/sdk.git"}}, "minimal", &out))
+	require.Error(t, a.applyLinkChanges(t.Context(), filepath.Join(api, "dispat.json"), []linkSuggestion{{
+		kind: linkChangeLink, repository: "absent", peer: "sdk", path: ".links/sdk", url: "https://example.test/sdk.git"}}, "minimal", true, &out))
 	assert.Empty(t, out.String())
 }
 

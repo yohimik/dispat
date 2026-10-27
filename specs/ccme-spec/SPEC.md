@@ -8397,12 +8397,10 @@ replace the ancestry walk of the repository the boundary lies in.
 Settlement cost is a property of the link tree and not of the package graph. The routes from one consumer to the
 repositories its plan read form a subtree, and an engine SHOULD settle that subtree once, with one commit in each
 repository that has a next hop in it, not once per route. A package therefore settles with at most `Q - 1` commits,
-and with at most `Y` when it reads one repository. Both topologies of §27.11 use `Q - 1` links, the fewest that join
-`Q` peers and the only count at which every route is unique. They differ in `Y`: a star bounds every route at two hops
-and every settlement at two commits, while another tree can reach `Q - 1` of each. A minimal proposal that joins group
-centres (§27.11) has the least `Y` any proposal keeping the existing links can have. For the groups an engine can see,
-one linked group and unlinked identities, that is the group's own longest route `d`, against `d + 1` when an identity
-is linked to an end of that route; between two linked groups the difference can reach the sum of their radii. A pin
+and with at most `Y` when it reads one repository. A completed `minimal` path and a compatible `star` each use
+`Q - 1` undirected links, the fewest that connect `Q` peers. They differ in `Y`: a path has `Y = Q - 1`, while a
+star has `Y = 2` for `Q >= 3` (and `Y = Q - 1` for `Q <= 2`). The path shape is a requested topology, not a
+minimum-hop or minimum-latency claim. A pin
 that already records the revision to settle costs no commit, so consecutive packages of one repository that read
 unchanged peers settle once.
 
@@ -8682,30 +8680,62 @@ per repository by following the same routes the boundary evidence uses, and eval
 repository that revision records no link for projects to its whole reachable history, exactly as an absent gitlink
 does under §27.8. `--since all` still selects every package.
 
-**Configuration computation.** `compute --topology minimal` is the default. It MUST preserve existing links and MAY
-propose the fewest additional links that connect every identity the rosters name, the half of a link only one of its
-two repositories declares, the checkouts a declared link lacks, and roster entries a participant has not heard of.
-Every such proposal adds the same number of links, one fewer than the number of groups the existing links leave the
-fleet in, so the count does not choose between them; the longest route `Y` does, and §27.9 charges link evidence and
-settlement by it. Among the proposals with the fewest links the computation SHOULD choose one with the least `Y`: take
-a centre of each group, a repository whose farthest group member is nearest, and link the centre of every other group
-to the centre of the group with the greatest radius. With radii `r1 >= r2 >= r3` and `d` the longest route inside any
-group, the result has `Y = max(d, r1 + r2 + 1, r2 + r3 + 2)`, no proposal has less, and the computation is `O(Q)`.
-Ties, between the two centres a group can have and between groups of equal radius, go to the identity that sorts first
-under case folding, so two computations over one fleet propose the same links. A fleet with no links yet has every
-radius zero and receives a star on its first identity.
+**Configuration computation.** `compute --topology minimal` is the default and requires a spanning path over
+the known enabled fleet. It MUST preserve existing links, reject an existing cycle (`E338`), and refuse a
+known vertex with more than two fleet-link neighbours: adding links cannot turn a branch into a path.
+Before adding a joining link, it MUST ensure the known links form a *linear forest*: each component is an
+isolated vertex or a simple path. It proposes missing links, missing reverse declarations, missing checkouts
+and roster entries under the availability rules below. This is one supported canonical shape, not a claim
+that stars and paths are the only trees or that the path minimizes measured latency, bandwidth, load or
+failure risk. `--topology star` remains the explicit alternative described below.
 
-An engine learns links only from the repositories it composed, and composition follows links from the entry. The groups
-it can see are therefore the entry's group and the identities no composed repository links, each a group of one, and
-the rule reduces to linking each such identity to a centre of the entry's group. That keeps `Y` at the group's own
-longest route, where linking the identity to an end of that route adds a hop. A link is written in a composed end.
-Where no centre of the group is composed, the computation uses the composed member nearest a centre, ties again to the
-identity that sorts first under case folding, and the least `Y` is then not guaranteed; where no end is composed, it
-proposes what it can write and reports the rest.
-`compute --topology star` MUST propose a direct link from every peer to the entry repository. It is valid only for an
+For a fixed known linear forest on `Q >= 1` identities with `k` components, each component is a path with
+one free endpoint if it is a singleton and two otherwise. A complete path needs exactly `k - 1` new
+undirected links, giving `(Q - k) + (k - 1) = Q - 1` total. Join a free endpoint of one component to a free
+endpoint of another, then repeat. Each join reduces the component count by one without making any degree
+greater than two; the result is a connected acyclic graph of maximum degree two, hence a path. This
+establishes both feasibility when the necessary endpoints and checkouts are available and minimum edge
+count. Missing reverse declarations change no graph edge. Every complete path with `Q` vertices has
+unweighted diameter `Y = Q - 1`, including `Y = 0` for one repository. In comparison, a compatible star
+has `Y = 2` for `Q >= 3`. Neither shape is intrinsically the fastest physical topology.
+
+The proposal order is deterministic: choose the composed entry component first, order other known
+components by their first folded identity, prefer an available composed endpoint, and break remaining
+endpoint ties by folded identity. A singleton's one
+vertex can accept two links, one at a time. A preview proposes at most one *new joining edge* in a repair
+round; missing reverse declarations, checkout initializations and roster repairs are separate suggestions.
+When a declared existing link lacks its checkout, preview proposes initialization before a new joining edge;
+the checkout is then materialized and the forest rechecked. In `minimal` mode, `--write` initializes
+missing checkouts before new joins, applies a writable endpoint join, recomposes the fleet and computes
+the next join. It MUST recheck for cycles, branches and newly discovered membership
+before each round; if newly discovered links conflict with the path, it fails and leaves earlier staged
+edits for review. A later checkout can expose roster entries needing configuration edits; the current
+invocation MUST NOT silently add them. After a completed repair pass, compute MUST list all remaining fleet suggestions from a fresh composition. `--write` MUST report incomplete repair as an error while any
+remain, leaving staged changes for review and the remaining configuration edits for another invocation.
+`--interactive` applies only suggestions the operator explicitly accepts, displays newly discovered
+suggestions for the next invocation, and never accepts them implicitly.
+
+A joining link must be written in an available composed checkout. If neither required endpoint is
+writable, a URL is absent, or a checkout cannot be initialized, compute MUST report the incomplete
+proposal or an error and MUST NOT claim to have produced a spanning path. Only identities exposed by
+composed repositories and their rosters are known: a later checkout can reveal further identities or
+incompatible links, so a proposal cannot certify the topology of unnamed external repositories. A
+complete bidirectionally declared, available path lets a walk from any member reach every member of that
+fixed fleet; missing declarations, checkouts or access can still prevent a run.
+
+For one fixed repair round, graph traversal and degree checks take `O(Q + E_link)` work for `Q` known
+identities and `E_link` known links; deterministic identity ordering may take `O(Q log Q)` comparisons.
+`--write` may recompose and repeat for multiple joining edges or newly discovered identities. These
+per-round bounds do not include configuration parsing, Git operations, or a linear end-to-end guarantee.
+`compute --topology star` MUST target a direct link from every peer to the entry repository, subject to the
+owner-roster guard below. It is valid only for an
 identity-linked fleet and MUST fail when existing links are incompatible with that shape. Both modes retain the same
-repository-local policy and record ownership. Their proposed set MUST be a tree over the fleet, so it never creates
-the second route `E338` refuses. A proposed missing half joins no pair the links do not already join, so it
+repository-local policy and record ownership. In either mode, a new forward link MUST be deferred until its
+chosen owning repository's own roster names the peer; otherwise composition would ignore the new gitlink.
+Compute proposes the missing owner-roster declaration first, then recomposes before proposing that link.
+Each proposed joining edge MUST preserve a forest; when repair is
+complete, `minimal` MUST form a path and `star` MUST form a compatible star over the known fleet, without the
+second route `E338` refuses. A proposed missing half joins no pair the links do not already join, so it
 adds no route. Applying it creates a checkout for one half of each link and declares the other half inside that
 checkout without fetching it, pinned at a revision the declaring repository's remote can serve; a declaring repository
 that states no remote has that half withheld and reported rather than pinned at a revision no peer can fetch. A
@@ -8715,13 +8745,17 @@ link in either mode, and MUST NOT recurse into a link's own links: a link is his
 and the back-link of a pair is deliberately left unmaterialized. A roster entry no participant states a `url` for is
 reported rather than written, and a link URL carrying user information MUST be refused, because `.gitmodules` is
 committed and pushed.
+An unresolved checkout initialization, missing link URL, or withheld reverse declaration leaves repair incomplete;
+`--write` MUST report a nonzero failure while any of these remains, even when a warning explained the cause.
+Already staged changes remain for operator review, and an existing reverse pin is not rewritten to hide the gap.
 
 The engine MUST reject a topology conflict visible in the composed snapshot before writing. Application MAY discover
 additional links only after it checks out a previously unavailable peer. If such a link conflicts with the selected
 topology, the computation MUST fail and leave already staged edits for operator review; it MUST NOT roll those edits
 back or delete any link.
 
-**Recoverable findings.** Two conditions are reported and do not stop a run. `W332` is a fleet link only one of its
+**Recoverable findings.** Two conditions are reported without stopping composition or release; an incomplete
+`compute --write` repair still fails as specified above. `W332` is a fleet link only one of its
 two repositories declares: the fleet still composes from the declaring end, and a release started at the other end
 would compose a smaller fleet. `W333` is a participant whose roster does not name every member of the composed fleet,
 because a repository that has not heard of a peer cannot plan a boundary across it. Both are what a configuration
@@ -8772,9 +8806,10 @@ computation repairs.
     name it in `W331`. Disabling another peer's lock is non-conforming.
 22. Incomparable revisions in two repositories require one winner for a package in a third. **`E334`.** No unit of any
     peer can resolve it, because every unit is repository-local.
-23. A roster names four repositories and one compatible link exists. With `--topology minimal`, **preserve that link
-    and propose exactly two more**. With `--topology star`, **propose direct links from every peer to the entry**, or
-    error if the existing link cannot fit that star. Neither mode removes or converts a link.
+23. A roster names four repositories and one compatible link exists. With `--topology minimal`, **preserve that link,
+    propose one joining link from a free endpoint in the first repair round, then recompose and propose the remaining
+    joining link**. The completed path has three links. With `--topology star`, **propose direct links from every peer
+    to the entry**, or error if the existing link cannot fit that star. Neither mode removes or converts a link.
 24. A proposed link's URL carries user information. **Refuse it.** A committed `.gitmodules` would publish it.
 25. A link is declared by one end only, and one peer's roster omits a fleet member. **`W332` and `W333`; the run
     continues.** A configuration computation proposes the missing half and the missing roster entry, and adds no
@@ -8790,9 +8825,20 @@ computation repairs.
     serve both.** A window is keyed by the repository it ranges over and the boundary revision, not by the owner of
     the package that reads it; two boundaries that differ remain two windows.
 30. Composed repositories `a`, `b`, `c`, `d`, `e` are linked in a chain in that order, and the roster also names `z`,
-    which nothing links. `--topology minimal` **proposes exactly one link, and SHOULD propose the one between `c` and
-    `z`**, which leaves the longest route at 4. Proposing the link between `a` and `z` is conforming and makes it 5;
-    proposing two links, or a link between two members of the chain, is not.
+    which nothing links. `--topology minimal` **proposes exactly one joining link from a free endpoint, `a` or `e`,
+    to `z`**; the completed path has diameter 5. Linking `c` to `z` would branch and MUST be refused. A second
+    joining link or a link between two members of the chain is non-conforming.
+31. A known fleet link graph is acyclic but a peer has three link neighbours. `--topology minimal` **refuses the
+    topology before writing**: preserving those links cannot produce a path. `--topology star` follows its own
+    entry-hub compatibility rule; this vector does not require rejecting a compatible star.
+32. Four roster identities have no links, only the entry is initially composed, and later checkouts reveal no
+    further members or incompatible links. `--topology minimal` **previews at most one joining edge**, then
+    `--write` materializes and recomposes after each join until the fixed known fleet is a path with three
+    links and diameter 3. `--interactive` **does not silently accept** the links
+    discovered after its accepted first-round suggestion.
+33. A newly linked checkout reveals a roster entry absent from the original composition. After the selected
+    link is staged, compute **lists the remaining roster suggestion**. `--write` reports incomplete repair and
+    requires another invocation for the new configuration edit; `--interactive` displays it without accepting it.
 
 ---
 

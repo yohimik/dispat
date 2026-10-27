@@ -2632,7 +2632,13 @@ cannot make the rest of the goal pass.
 | `TestLinkedConfigRejectsTwoIdentitiesAtOneGitlinkPath` | Two roster identities cannot share one initialized Git link path. |
 | `TestLinkedConfigRejectsDuplicatePackageOwnershipAcrossPeers` | Case-insensitive duplicate package identities across peers refuse fleet composition. |
 | `TestLinkedConfigCannotDeclareAPackageInsideItsPeer` | An entry configuration cannot claim a package inside another peer checkout. |
-| `TestComputeMinimalJoinsExistingComponentsWithoutReplacingTheirLinks` | Minimal computation connects a missing member at the existing component's centre, and not at the entry, while preserving the existing component links and pins. |
+| `TestComputeMinimalJoinsExistingComponentsWithoutReplacingTheirLinks` | Minimal computation preserves an existing api–sdk–web path and its pins, then attaches a missing member at the free endpoint api. Attaching it at interior sdk would create a forbidden branch. |
+| `TestComputeMinimalWritesFourMemberChainByRecomposition` | Preview offers one new link; write creates three links through successive recompositions, leaves a four-member path, and is clean and idempotent afterward. |
+| `TestComputeMinimalRefusesExistingBranchWithoutEdits` | Minimal refuses a known vertex with three link neighbours before mutating the checkout. |
+| `TestComputeMinimalKeepsStagedRepairWhenNewPeerRevealsBranch` | A branch hidden in a newly linked peer stops the next path round while retaining the first staged link for review. |
+| `TestComputeMinimalInteractiveAcceptsOnlyThePresentedLink` | Interactive acceptance applies only the first presented path link and displays the newly discovered next suggestion without applying it. |
+| `TestComputeMinimalReportsNewRosterWorkAfterLinkWrite` | A newly linked peer reveals another roster identity; write reports the fresh owner-roster suggestion and exits incomplete, then a second invocation safely writes the configuration and completes the repair. |
+| `TestComputeMinimalInteractiveShowsNewRosterWithoutAcceptingIt` | Interactive acceptance of a link displays a newly discovered roster suggestion but does not silently write it. |
 | `TestComputeStarAddsOnlyMissingHubEdges` | Star computation preserves an existing spoke and adds only the missing hub connection. |
 | `TestPlanningReleaseEdgesCrossesADependencyAndThenASharedGroup` | A provider change reaches its shared version group across repositories and then the dependent consumer without publishing during status. |
 | `TestChoreographyPlansAFirstReleaseWithoutEvidence` | A fleet that has never released has no boundary to prove and needs no tuple to say so. |
@@ -2726,7 +2732,7 @@ cannot make the rest of the goal pass.
 | `TestChoreographyComputeRefusesABackLinkURLCarryingASecret` | The remote written into the peer's `.gitmodules` is held to the same rule a roster URL is, and the secret never reaches the run's output. |
 | `TestChoreographyComputeDeclaresTheHalfOfAOneSidedLink` | A link one repository declares and its peer does not declare back is `+ link <peer> <repository>`: `--check` exits 1, `--write` writes the missing declaration into the checkout that already exists without cloning or adding a route, and the repaired fleet composes with no `W332` and no `E338`. |
 | `TestChoreographyComputeWithholdsAOneSidedHalfWithoutARemote` | The missing half pins the repository that holds the link at a revision its own remote can serve, so a repository with no remote has it withheld with a warning and `W332` stands. |
-| `TestComputeMinimalWritesTheJoiningLinkWhereACheckoutExists` | A component whose centre was never materialised has the joining link written by the member nearest that centre which this run does hold, and the missing checkout is reported as its own change. |
+| `TestComputeMinimalWritesTheJoiningLinkWhereACheckoutExists` | A declared link whose checkout is missing is proposed for initialization before any new path join; compute does not treat an unavailable endpoint as a writable owner. |
 | `TestChoreographyRefusesAmbiguousOrEscapingRoster` | Malformed own or peer identities, duplicate peer names and absolute or escaping link paths stop composition before any plan or repository mutation. |
 | `TestComputeStarKeepsStagedRepairsWhenACloneRevealsAConflictingEdge` | A hidden peer edge stops incompatible star repair while preserving staged changes and existing links. |
 | `TestComputeStarRequiresANamedFleetEntry` | Star topology refuses an ordinary repository before writing links or configuration. |

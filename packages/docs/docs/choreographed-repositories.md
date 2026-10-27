@@ -7,7 +7,7 @@ connect the peers, and a release can start from any of them.
 To set it up, [declare the peers](#the-identity-and-roster), [create their links](#linking-the-fleet-with-dispat-compute),
 then configure the [CI checkout](#ci-checkout). Read the link-recording and recovery sections before the first release.
 
-A non-empty repository identity enables this mode. The links can form a minimal tree or a star; either way, each peer
+A non-empty repository identity enables this mode. The supported computed shapes are a chain or an entry-hub star; either way, each peer
 still owns its policy. Choosing a star does not turn its centre into a control repository or change the behavior of
 existing [control-repository configurations](./control-repository.md).
 
@@ -105,9 +105,8 @@ After writing the rosters, run [`dispat compute`](./cli/compute.md) in any peer 
 ```console
 $ dispat compute
 + link api sdk  connects sdk to the fleet
-+ link api web  connects web to the fleet
 
-2 suggestion(s); apply all with --write, choose with --interactive
+1 suggestion(s); apply all with --write, choose with --interactive
 ```
 
 Alongside dependency edges and baselines, compute can propose three fleet changes:
@@ -119,14 +118,21 @@ Alongside dependency edges and baselines, compute can propose three fleet change
 | `+ repository <repository> <peer>` | Adds a missing roster entry to that peer's own configuration. |
 
 The default, `--topology minimal`, preserves existing links and adds the fewest needed to connect the roster without
-creating a second route between peers. Three repositories get two links; a third would create a second route and fail
-with `E338`.
+creating a second route between peers. It requires a chain: every repository has at most two link neighbours,
+and new links join free path endpoints. Three repositories get two links and a longest route of two hops. A
+third link would create a second route and fail with `E338`. An existing branch with three link neighbours
+cannot become a chain without deleting a link, so minimal refuses it. A chain is a supported shape, not a
+claim of shortest hop count or physical latency; other tree shapes exist.
 
-Several arrangements may add the same number of links. Minimal chooses between them by the longest route, because
-reading release evidence and recording links takes more work along longer routes. It joins existing connected groups
-at their centres: the repository whose farthest member in that group is nearest. Two chains of five joined at their
-centres have a longest route of five hops, compared with nine when joined end to end. Existing links are preserved,
-so they limit how short the route can be.
+Preview shows at most one new joining edge in a repair round. In `minimal` mode, `--write` initializes
+missing checkouts first, applies a writable endpoint link, recomposes the fleet, then continues. A peer
+reached later may reveal more identities, missing roster entries, or an incompatible link. After applying
+selected changes, dispat lists all remaining fleet suggestions. A newly discovered roster entry needs
+another invocation for a safe configuration edit; while suggestions remain, `--write` reports incomplete
+repair as an error and leaves staged edits for review. With `--interactive`, newly discovered suggestions
+are displayed for another invocation; only suggestions explicitly accepted by the operator are applied.
+For either topology, the chosen link owner's roster must name the peer before a new forward link is staged;
+dispat proposes that roster repair first and rereads the fleet afterward.
 
 A `+ link` can also repair a one-sided declaration reported by `W332`. The pair is already connected, so this adds no
 route and fetches nothing. It writes the missing declaration inside the checkout already held by the declaring
@@ -148,9 +154,9 @@ What `--write` does, in the part of its output that concerns the links:
 linked sdk from api at .links/sdk
 09:31:07 INF declared the other half of the fleet link peer=api repository=sdk revision=edc0c8a0188cb2e4d033d06a4b47e6062fe6763e
 declared api inside sdk at .links/api
-09:31:07 INF created fleet link path=.links/web peer=web repository=api
+09:31:08 INF created fleet link path=.links/web peer=web repository=api
 linked web from api at .links/web
-09:31:07 INF declared the other half of the fleet link peer=api repository=web revision=edc0c8a0188cb2e4d033d06a4b47e6062fe6763e
+09:31:08 INF declared the other half of the fleet link peer=api repository=web revision=edc0c8a0188cb2e4d033d06a4b47e6062fe6763e
 declared api inside web at .links/api
 created 2 fleet link operation(s); review and commit them in each repository
 ```
@@ -158,7 +164,9 @@ created 2 fleet link operation(s); review and commit them in each repository
 The forward link is a checkout created by `git submodule add`. For the reverse link, dispat writes `.gitmodules`,
 creates an empty folder and stages a gitlink without cloning again. The pin must name a revision already available
 from the linking repository's remote. If that repository has no remote, dispat warns and leaves out the reverse
-declaration because the peer would have no fetchable revision.
+declaration because the peer would have no fetchable revision. A missing URL, unresolved checkout initialization,
+or withheld reverse declaration leaves repair incomplete: `--write` exits nonzero after its warning and keeps
+staged changes for review. It does not rewrite an existing reverse pin to mask the problem.
 
 What `--write` does not do:
 

@@ -111,18 +111,16 @@ entries. These suggestions concern the whole fleet and are not narrowed by packa
 ```console
 $ dispat compute
 + link api sdk  connects sdk to the fleet
-+ link api web  connects web to the fleet
 
-2 suggestion(s); apply all with --write, choose with --interactive
+1 suggestion(s); apply all with --write, choose with --interactive
 ```
 
 - `+ link <repository> <peer>` creates a missing link. With `--topology minimal`, the default, dispat preserves every
-  existing link and proposes the fewest additions that connect everything the rosters name, chosen so that no two
-  repositories are ever joined twice. Every such proposal adds the same number of links, so dispat joins the groups
-  the existing links leave the fleet in at their centres, the repository in each group whose farthest group member is
-  nearest. That keeps the longest route between two repositories as short as the existing links allow, and the work
-  of reading link evidence and of settling a release across the fleet grows with that route. With `--topology star`,
-  it proposes a direct link from the entry repository to every peer. Star mode errors when existing links are
+  existing link and joins free path endpoints. It previews at most one new joining edge per repair round. With
+  `--write`, dispat applies that edge, recomposes the fleet, and continues toward a single chain; with
+  `--interactive`, it applies only explicitly accepted suggestions and shows newly discovered suggestions for
+  another invocation. A complete chain of `Q` repositories has `Q - 1` links and `Q - 1` hops along its longest
+  route. With `--topology star`, it proposes a direct link from the entry repository to every peer. Star mode errors when existing links are
   incompatible with that shape; it does not convert or remove them. The same line also proposes the half of a
   link only one of its two repositories declares, which is what `W332` reports: the pair is already joined, so nothing
   is fetched and only the missing declaration is written.
@@ -130,18 +128,29 @@ $ dispat compute
 - `+ repository <repository> <peer>` adds a roster entry a peer has not heard of, written into that peer's own file.
   An entry no roster states a `url` for is reported rather than written.
 
-Links are applied after the configuration edits, because a link is created against the roster the file now holds. The
+Links are applied after the configuration edits, because a link is created against the roster the file now holds.
+For either topology, dispat proposes a missing entry in the link owner's own roster before trying to stage a
+new forward link; a gitlink without that declaration would be ignored during fleet composition.
+In `minimal` mode, missing checkouts are initialized before new chain joins. A `--write` repair may take
+several recomposition rounds. Afterward, dispat lists remaining fleet suggestions from the fresh checkout
+view; a newly exposed roster entry needs a safe configuration edit on another invocation. If suggestions
+remain, `--write` reports incomplete repair as an error and leaves staged edits for review. `--interactive`
+also shows newly discovered suggestions but applies none without explicit acceptance. If a newly reached
+peer exposes an incompatible link, dispat stops and leaves staged edits for review. The
 forward half is a real checkout and the other half is declared inside it without cloning, pinned at a revision the
 declaring repository's own remote can serve. A declaring repository with no remote has that half withheld with a
-warning, and you add it by hand. Nothing is committed and no link is ever removed: each repository is left with
+warning, and you add it by hand. A missing URL, unresolved checkout initialization, or withheld reverse half
+leaves repair incomplete: `--write` exits nonzero even when it printed a warning, and keeps staged changes for
+review. Nothing is committed and no link is ever removed: each repository is left with
 staged changes for you to review and commit. A link URL carrying user information is refused, because `.gitmodules`
 is committed and pushed.
 
 The `--check` flag overrides both apply modes. It writes nothing and exits `1` when any suggestion exists across any
 source, fleet links included. Use this as the CI gate for a config lagging the manifests.
 
-`--topology` chooses the shape used for fleet-link suggestions. `minimal` is the default and adds the fewest links
-needed while preserving the links already present, attached at the centres of the groups those links join. New links
+`--topology` chooses the shape used for fleet-link suggestions. `minimal` is the default and requires a chain:
+it preserves existing links and joins path endpoints. An existing branch with degree greater than two cannot
+be repaired into a chain without removing links, so compute refuses it. New links
 use the path declared by their owning repository,
 or `.links/<peer>` when that owner states none. `star` links every peer directly to the entry repository and
 errors when existing links cannot fit that shape. Both choices preserve existing links.
@@ -191,9 +200,9 @@ lagging the manifests, and it overrides both apply modes.
 ### `--topology`
 
 Choose the fleet-link shape proposed by `compute`: `minimal` (the default) or `star`. Minimal preserves existing links
-and adds the fewest needed to connect the roster, joining the groups those links leave the fleet in at their centres so
-that the longest route between two repositories stays as short as the existing links allow. Star proposes a direct link
-from every peer to the entry repository and errors if the existing links are incompatible. `--write` and
-`--interactive` apply these suggestions in the same way as other compute suggestions; no topology mode removes a link.
+and joins free endpoints until the known fleet is one chain; it rejects an existing branch or cycle. Preview proposes
+at most one new joining edge, while `--write` recomposes between joins. Star proposes a direct link from every peer
+to the entry repository and errors if the existing links are incompatible. `--interactive` applies only explicitly
+accepted suggestions; newly discovered ones wait for another invocation. No topology mode removes a link.
 `star` requires a linked fleet with a repository identity. `minimal` also works with ordinary configurations, where
 compute still derives dependencies and baselines.

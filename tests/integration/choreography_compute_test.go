@@ -72,7 +72,8 @@ func TestChoreographyComputeConnectsWithoutASecondPath(t *testing.T) {
 
 	res := api.CommandEnv(fileProtocolEnv(), "compute", "--write")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	assert.Equal(t, 2, strings.Count(res.Stdout, "+ link "), "two links connect three repositories")
+	assert.Equal(t, 1, strings.Count(res.Stdout, "+ link "), "the preview offers one join per round")
+	assert.Equal(t, 2, strings.Count(res.Stdout, "linked "), "two links connect three repositories")
 	assert.DirExists(t, api.Path(".links", "sdk", "packages"))
 	assert.DirExists(t, api.Path(".links", "web", "packages"))
 
@@ -292,8 +293,8 @@ func TestChoreographyComputeUsesTheLinkPathTheRosterAsks(t *testing.T) {
 	assert.Equal(t, "vendor/sdk", api.Git("config", "--file", ".gitmodules", "submodule.sdk.path"))
 }
 
-// TestChoreographyComputeWithholdsALinkWithNoURL: a link is a checkout, and a
-// roster entry nothing can be fetched from is reported rather than attempted.
+// A required chain link with no fetch URL cannot be created, so the write
+// fails explicitly and leaves the absent checkout untouched.
 func TestChoreographyComputeWithholdsALinkWithNoURL(t *testing.T) {
 	fleet := newChoreographyFleet(t, "api", "sdk")
 	fleet.link("api", "sdk")
@@ -304,7 +305,7 @@ func TestChoreographyComputeWithholdsALinkWithNoURL(t *testing.T) {
 	api.Commit("chore: name a repository nobody can fetch")
 
 	res := api.CommandEnv(fileProtocolEnv(), "compute", "--write")
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Contains(t, res.Stdout+res.Stderr, "the roster states no url for this peer")
 	assert.NoDirExists(t, api.Path(".links", "web"))
 }
@@ -357,8 +358,9 @@ func TestChoreographyComputePinsTheBackLinkAtWhatTheRemoteHolds(t *testing.T) {
 		api.Git("remote", "remove", "origin")
 
 		res := api.CommandEnv(fileProtocolEnv(), "compute", "--write")
-		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+		require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		assert.Contains(t, res.Stdout+res.Stderr, "no remote to be fetched from")
+		assert.Contains(t, res.Stdout+res.Stderr, "fleet repair is incomplete")
 		assert.NoDirExists(t, api.Path(".links", "sdk", ".links", "api"))
 
 		api.Commit("chore: link the fleet halfway")
@@ -451,7 +453,8 @@ func TestChoreographyComputeDoesNotRepeatAnInitItAlreadyMade(t *testing.T) {
 	api := fleet.peer("api")
 
 	res := api.CommandEnv(fileProtocolEnv(), "compute", "--write")
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	assert.Contains(t, res.Stdout+res.Stderr, "fleet repair is incomplete")
 	assert.Equal(t, 1, strings.Count(res.Stdout, "linked sdk from api"))
 	assert.Equal(t, 1, strings.Count(res.Stdout, "initialized .links/sdk in api"),
 		"the same checkout is initialized once however often it is proposed")
@@ -528,8 +531,9 @@ func TestChoreographyComputeWithholdsAOneSidedHalfWithoutARemote(t *testing.T) {
 	api.Git("remote", "remove", "origin")
 
 	res := api.CommandEnv(fileProtocolEnv(), "compute", "--write")
-	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+	require.NotZero(t, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	assert.Contains(t, res.Stdout+res.Stderr, "no remote to be fetched from")
+	assert.Contains(t, res.Stdout+res.Stderr, "fleet repair is incomplete")
 	assert.NoDirExists(t, api.Path(".links", "sdk", ".links", "api"))
 	requireDiagnostic(t, api.StatusOK("--package", "*"), "W332")
 }

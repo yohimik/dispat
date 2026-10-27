@@ -20,9 +20,9 @@ import (
 // ComputeOptions selects what `dispat compute` does with its suggestions.
 type ComputeOptions struct {
 	// Topology selects the fleet-link shape proposed by compute. Empty and
-	// "minimal" preserve existing links and add the fewest links needed to
-	// connect the fleet. "star" links every peer directly to the entry
-	// repository.
+	// "minimal" preserve existing path links and extend them into a chain;
+	// existing branches are incompatible. "star" links every peer directly
+	// to the entry repository.
 	Topology string
 	// Write applies every suggestion to the config file.
 	Write bool
@@ -217,12 +217,35 @@ func (a *App) Compute(ctx context.Context, cfgPath string, opts ComputeOptions) 
 	if apply.len() == 0 {
 		return sugs.len(), nil
 	}
-	err = a.applySuggestions(ctx, cfgPath, apply, declared, topology, out)
+	err = a.applySuggestions(ctx, cfgPath, apply, declared, topology, !opts.Interactive, out)
 	a.forgetDiscovery()
 	if err != nil {
 		return sugs.len(), err
 	}
-	return sugs.len() - apply.len(), nil
+	remaining := sugs.len() - apply.len()
+	if len(apply.links) > 0 {
+		// Recomposition can expose more work than the initial preview knew.
+		// In particular, interactive acceptance of one edge does not accept
+		// the next edge discovered through its new checkout.
+		links, err := a.suggestLinks(topology)
+		if err != nil {
+			a.log.Error().Err(err).Msg("cannot verify the remaining fleet repairs")
+			return remaining, err
+		}
+		remaining += len(links) - (len(sugs.links) - len(apply.links))
+		if len(links) > 0 {
+			fmt.Fprintf(out, "%d fleet suggestion(s) remain after rereading the checkouts:\n", len(links))
+			for _, change := range links {
+				fmt.Fprintln(out, change.render())
+			}
+			if !opts.Interactive {
+				err := fmt.Errorf("fleet repair is incomplete: %d suggestion(s) remain; review the staged changes and run compute again", len(links))
+				a.log.Error().Err(err).Msg("the fleet still needs configuration repairs")
+				return remaining, err
+			}
+		}
+	}
+	return remaining, nil
 }
 
 // scannedPackage is one package beside the manifests one walk of its folder
@@ -339,7 +362,7 @@ func (f *fileEdits) add(path string, e config.Edit) error {
 // TOML file cannot be edited format-preservingly, so it gets a rendered block
 // to paste and an error.
 func (a *App) applySuggestions(ctx context.Context, cfgPath string, apply changeSet,
-	declared []config.DeclaredDependency, topology string, out io.Writer) error {
+	declared []config.DeclaredDependency, topology string, follow bool, out io.Writer) error {
 	var edits fileEdits
 	for _, collect := range []func() error{
 		func() error { return a.collectDepEdits(&edits, cfgPath, apply.deps, declared) },
@@ -418,7 +441,7 @@ func (a *App) applySuggestions(ctx context.Context, cfgPath string, apply change
 	}
 	// The fleet links come last: a link is created against the configuration
 	// that describes it, so the file has to hold the roster first.
-	return a.applyLinkChanges(ctx, cfgPath, apply.links, topology, out)
+	return a.applyLinkChanges(ctx, cfgPath, apply.links, topology, follow, out)
 }
 
 // configuredChanges counts the accepted changes that land in a configuration

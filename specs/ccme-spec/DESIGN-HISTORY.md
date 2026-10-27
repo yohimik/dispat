@@ -910,3 +910,26 @@ inductions establish attainability and the edge count of every tree. The result 
 `Q - 1` fleet-link count. A two-sided link counts once even when represented by two directed arcs.
 Minimum link count does not establish a unique topology, least latency or resilience. No new mathematical
 priority, runtime behavior, implementation or experiment is claimed.
+
+## 2026-10-28: Minimal topology requires a chain
+
+Section 27.11 now defines `compute --topology minimal` as a spanning path over the known enabled fleet,
+preserving all existing links. This replaces the previous centre-joining rule: joining component centres
+can reduce hop diameter, but it does not ensure a chain. `--topology star` remains the explicit entry-hub shape. These are supported canonical
+choices, not the only mathematical trees. The classical `Q - 1` minimum-edge theorem still applies to
+both; a complete path has maximum degree two and diameter `Q - 1`, while a star has diameter two for
+`Q >= 3`. Neither shape is asserted to minimize physical latency or failure risk.
+
+For a known linear forest, joining free endpoints reduces its component count one at a time and yields
+a path after `k - 1` joins. An existing cycle or degree-three branch cannot be repaired by adding links
+while preserving existing edges. A preview proposes at most one new join per round; in minimal mode,
+`--write` initializes missing checkouts, applies a writable join, recomposes, and checks the newly visible
+fleet before the next join. Further roster work is listed for another safe configuration edit; `--write`
+reports incomplete repair while suggestions remain. Interactive mode displays newly discovered work but
+requires fresh explicit acceptance. Missing access or an undiscovered branch limits what can be certified. Per-round graph work is linear in the
+known vertices and links, with identity ordering and repeated Git repair rounds charged separately.
+Both topology modes defer a new forward link until its owner roster names the peer, so composition can
+recognize it. Missing URLs, unresolved checkout initialization, and withheld reverse declarations leave
+`--write` incomplete with a nonzero result and staged edits retained for review.
+This entry describes the specification choice; it claims no new version, hold, publication or measured
+performance result.
