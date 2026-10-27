@@ -805,3 +805,23 @@ hidden unit child. Every deterministic online policy has one fixed instance taki
 offline schedule takes 2. A finite parent-revealed forest with unlimited slots instead attains its realized
 span by immediate dispatch, provided each completion discloses all children. Neither example changes the
 fixed-graph contract of a CCME run.
+
+## 2026-10-27: Cyclic release intent and once-per-task execution
+
+Section 13.11 extends intent determinacy to finite cyclic package relation graphs with frozen inputs and
+the default range policy. Unit-local breadth-first propagation terminates with its source-seeded visited
+set; it never creates new units from propagated changes. Channel resolution precedes bump aggregation and
+version computation, so the resulting intent is determined without a topological package order. Each final
+intent is emitted after all contributions, not on first discovery. Traversal work remains per unit and axis,
+with provenance and other planning costs charged separately. Same-run range feedback needs its own proof.
+The repository input-set equations have a unique least solution computed once per strongly connected
+component; this does not claim uniqueness for arbitrary fixed-point equations or execute package tasks.
+
+The execution extension distinguishes cyclic descriptive references from effective same-run prerequisites.
+Initialized pinned inputs can make the effective graph acyclic, allowing each terminating task to execute
+once in a failure-free run with the existing weighted bounds. Declared previous-epoch feedback permits
+once per epoch, not a same-run fixed point. A true completion-before-start cycle has no first enabled task,
+even if durations are zero. Predetermined versions likewise do not make partially published cyclic registry
+references safe. An atomic component publication requires feasible preparation and a real destination
+visibility/finalization primitive; SCC contraction supplies neither. These theoretical extensions preserve
+the current E200/E233 checks, actual task-graph acyclicity and external-effect recovery rules.

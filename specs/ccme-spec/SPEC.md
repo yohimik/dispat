@@ -1485,8 +1485,11 @@ Properties. Except where noted, each holds for **both** axes:
 
 * **Per unit.** Each unit propagates independently from its own package set with its own settings. Bumps merge by
   `max`, so units never conflict; channels merge by recency, so conflicts are resolved rather than rejected (`W160`).
-* **Single-visit.** The graph is acyclic (§13.1), so termination is not in question; `seen` additionally guarantees that
-  a package reachable by several paths (a diamond) is visited once, at its shortest depth.
+* **Single-visit.** For each unit and axis, `seen` guarantees that each package is discovered and expanded at most
+  once, at its shortest depth from the source set. This traversal terminates on any finite directed graph, even
+  with cycles; seeding `seen` with the sources prevents a cycle from returning the unit to its own packages.
+  Conforming workspaces still satisfy §13.1's acyclicity requirement. This traversal property does not execute
+  package tasks; §13.11 distinguishes cyclic release intent from executable prerequisites.
 * **Depth is shortest-path.** A package reachable at both depth 1 and depth 3 is treated as depth 1 and is therefore
   included by `+1` or `++1`.
 * **Depth is measured from the originating source set, always.** It is never recomputed from an intermediate package,
@@ -3414,7 +3417,110 @@ repeated independent planning, Git operations, bytes and effect settlement retai
 costs. In particular, interpreting
 the same plan on `Wn` nodes can repeat planning work; it is not an end-to-end minimum-work claim.
 
-**The dispat theorem (bounds for a fixed task graph).** A task graph is a finite directed acyclic graph.
+**Cyclic graph extension: determined intent and once-per-task execution.** A cyclic package relation graph
+can determine release intent without determining a feasible publication order. The following extension makes
+that distinction explicit. It evaluates the intent functions before execution-acyclicity validation, setting
+aside §13.1's `E200` gate and the corresponding configured-stage checks for this mathematical extension only.
+It does not permit a conforming implementation to accept a workspace those checks reject. A full
+CCME plan includes the publication order (§13.10, §19.2); the *intent projection* here contains the per-package
+bumps, channels, intended versions and admitted causes before that order is requested.
+
+1. **Intent determinacy on a finite cyclic graph.** Fix any finite directed package graph, the exact input
+   snapshots, configuration, version groups, baselines, release and withdrawal inventories, corrected commit
+   units, scopes, holds and directive precedence. Assume the other input checks pass and
+   `propagation.respectRanges: false`, the default. Then the §9.2, §13.8, §13.9 and §13.9a calculations yield a
+   unique intent projection even when the package graph has cycles. If a subsequent version guard rejects
+   that projection, determinacy does not turn it into an admissible release.
+
+   *Proof.* Each unit supplies its original source set once. For each axis, the §9.2 multi-source breadth-first
+   traversal seeds `seen` with that set, discovers each other reached package once at its shortest distance,
+   and terminates after finitely many vertices and edges. A cycle cannot create another unit, enlarge the
+   specified depth or return a contribution to its own source. The channel phase reads only fixed unit,
+   baseline and ledger inputs; the total precedence rule of §13.8 selects one channel vector. The bump phase
+   reads that completed vector and fixed delivery evidence; each admitted contribution is fixed, bumps fold
+   by `max`, and cause sets fold by union. The version and disjoint group calculations consume those fixed
+   aggregates and baselines. This is a composition of finite deterministic computations, not repeated
+   propagation of newly computed bumps around a cycle. Each package's final intent is emitted once, after
+   all of its contributions have been considered; discovery on the first walk does not finalize its intent.
+   A policy whose range admission depends on the same-run intended versions introduces an additional
+   dependency between these calculations. This proof does not cover that feedback merely by enabling
+   `respectRanges`; a separately specified effective resolution rule and determinacy proof are required.
+
+   A traversal costs `O(P + E)` in the worst case **per directive-bearing unit per axis**, not once for the
+   whole planner. With `U_chan` channel units and `U_bump` bump units, these traversals cost at most
+   `O((U_chan + U_bump)(P + E))`. Source-specific distances, admission and delivery queries, provenance,
+   history, sorting, version arithmetic and output retain their separately charged §13.11 costs. In
+   particular, one package can receive contributions from many units while still having one final intent.
+
+2. **Cyclic input closure without repeated task execution.** The repository-set closure used in §27.2 also
+   has a constructive extension to a finite cyclic relation graph. Orient an arc `p -> q` when `p` reads `q`;
+   add one node for each nonempty shared group, with bidirectional arcs joining it to its members. Package
+   nodes have their repository owner sets `O_p`, and each group node has the empty owner set. For every node,
+   the equations are `X_p = O_p union (union over p -> q of X_q)`. Their least solution is the owners reachable
+   from each node, including itself. It satisfies the equations, and any solution must contain every
+   reachable owner by induction on path length, so this **least** solution is unique. Other, larger fixed
+   points can exist; this is not a uniqueness theorem for arbitrary cyclic equations.
+
+   Compute strongly connected components once, take each component's owner union, and evaluate the
+   condensation DAG in reverse topological order. Members of a component reach one another, so they have
+   the same closure; each component's set is evaluated once after the sets it reads. With the indexed group
+   representation already specified, the bound remains
+   `O((P + E + V) ceil(Q / wordSize))`, including bitset unions, with the storage and name-expansion costs
+   above. These are computations of input sets, not executions of the package tasks represented by the
+   graph. Condensing a component does not by itself execute its members or solve arbitrary task equations.
+
+3. **Each task once when the effective prerequisites are acyclic.** Let a finite relation graph describe
+   tasks and their data references; this graph may be cyclic. Supply a fixed execution contract that
+   distinguishes inputs already initialized and pinned before this run from inputs produced by this run.
+   Construct an effective prerequisite graph `H` containing every required same-run output dependency and
+   every other ordering obligation. Assume `H` is acyclic, each listed task terminates and becomes enabled
+   with its required inputs when its predecessors complete, sufficient compatible execution capacity is
+   available for a serial execution, and the run is failure-free. Then there is an execution that
+   runs every task exactly once: use a topological order of `H`, dispatch each task once, and record its
+   completion. Induction along that order proves all inputs are available and all tasks complete. Vertices
+   whose outcome gates select a skip are outside this every-task-executes premise; a skipped task may be
+   logically terminal without having run. Under deterministic task functions and complete ordering of
+   conflicting effects, the same induction gives determined outputs from the pinned inputs. Any external
+   observations must also be fixed for that claim.
+
+   For example, in a cyclic pair `A <-> B`, intended version strings can be known before either package's
+   manifest is prepared. If preparing each manifest reads only those strings and its pinned source, both
+   preparation tasks can run once without waiting for the other's prepared output. Conversely, if building
+   each package requires the other's fresh build output, those are real same-run prerequisite edges and the
+   premise fails. A feedback edge may instead read a validated previous-epoch output if the declared
+   contract gives it that meaning. Every task then runs once **per epoch**, with initial values supplied
+   before the first epoch; it does not compute a same-run fixed point or run just once across all epochs.
+   No required input may be silently replaced by an old value or an ignored back edge.
+
+   The task-time theorem below applies to `H`, using its work, span and the same resource premises, regardless
+   of cycles in the descriptive relation graph. Charge input preparation, validation, transfer and any
+   additional tasks explicitly. The claim is one execution of each task in this failure-free model, not
+   exactly-once physical attempts or external effects across crashes. The existing §19 and §28 recovery,
+   readiness and output-admission rules still apply.
+
+4. **Limit for genuine prerequisite cycles.** If every edge of a directed cycle requires the predecessor's
+   terminal completion before the successor starts, no task on that cycle can be the first to start. In the
+   duration model, summing `S_next >= S_i + d_i` around the cycle also gives `0 >= sum(d_i)`, contradicting
+   any positive total duration. All-zero durations remove that algebraic contradiction but do not supply
+   the first terminal event required by readiness. A visited set avoids repeated traversal; it cannot supply
+   a missing input. Thus determined intent alone does not imply once-only execution of an arbitrary cyclic
+   prerequisite graph.
+
+   Publication adds a distinct obligation. Suppose the intended releases are `A@2` and `B@2`, each requires
+   the other's new version, and neither exists at the destination. The intent is determined, but publishing
+   either first exposes an unresolved reference if the run stops before publishing the second. A later
+   successful recovery may repair availability; determinacy does not guarantee it. Treating the strongly
+   connected component as one publication task is valid only under a separately supplied contract with
+   feasible internal preparation and an actual atomic visibility/finalization primitive for all required
+   artifacts and authoritative records. An atomic record update alone does not make registry artifacts
+   appear atomically. Component work, preparation and transaction costs must be charged, and any internal
+   solver must be specified and proved to terminate; contraction proves none of these properties. Current
+   CCME provides no such general cyclic publication primitive: `E200`, configured-stage `E233`, and the
+   actual task graph's acyclicity requirement remain in force.
+
+**The dispat theorem (bounds for a fixed task graph).** Here the task graph is the effective prerequisite
+graph, a finite directed acyclic graph; the cyclic extension above permits cycles in descriptive relations,
+not in these hard execution prerequisites.
 There is no fixed upper limit on its task, edge or node counts; `Tk`, `Dk` and `Wn` remain input parameters,
 and constants in asymptotic claims do not depend on them.
 Each vertex `i` has a nonnegative realized duration `d_i`, making this a vertex-weighted DAG; a unit-weight DAG
@@ -5407,9 +5513,10 @@ deployment order: infrastructure before the application that runs on it, a schem
   only `O(P)` package edges. A memoised index of the nearest building
   packages each package reaches without a `none` edge costs its visits plus the size of the sets it unions, the
   same bound only while those sets stay small; a search per pair is neither.
-* **Cycle checks.** A build constraint runs along a dependency path, and the base task graph is acyclic under condition
-  4 of §13.11. `E197` cannot arise from a relation, because the publication order does not depend on it. Configured
-  stages also need a plan-specific check of the task graph including required provider outcome waits. An implementation
+* **Cycle checks.** A build constraint runs along a dependency path, and the base task graph is acyclic by
+  condition 4 under *Realisability* in §13.11. `E197` cannot arise from a relation, because the publication order
+  does not depend on it. Configured stages also need a plan-specific check of the task graph including required
+  provider outcome waits. An implementation
   that offers them MUST refuse a cycle in that actual graph before dispatch, as `E233` under
   `execution-configuration` (§28.9). A build dependency whose kind is outside the edge kinds of §13.1 can make
   condition 4 fail even when the task graph would be acyclic.
