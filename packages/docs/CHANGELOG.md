@@ -1,5 +1,37 @@
 # Changelog
 
+## packages/docs/v1.11.0-rc.9 (2026-10-28)
+
+### Fixes
+
+- state overlap assumptions in the landing formula ([8d252da](https://github.com/yohimik/dispat/commit/8d252da4f9882f8399a9b45a6455322944c673bf)) (by yohimik, Codex)
+  Explain that each step represents sequential work and overlapping activities
+  use separate steps with their actual dependencies, matching the proof in
+  CCME section 13.11.
+
+- show discovery and execution time in the landing formula ([9989f95](https://github.com/yohimik/dispat/commit/9989f955233efb96caf4e848ee65dd16cb0f52d5)) (by yohimik)
+  Render t = max(D + E) in MathML with matching TeX and accessible text.
+  Define D and E on each complete dependency path and retain the conditions
+  under which the ideal finish-time identity holds.
+
+- bound concurrent docs report measurements ([0ed37f0](https://github.com/yohimik/dispat/commit/0ed37f02a570954b353a32a2916cfd7e146bd7ca)) (by yohimik)
+
+- require chains for minimal topology ([9863f25](https://github.com/yohimik/dispat/commit/9863f25bc9357f90f224611248f5962072a43c6d)) (by yohimik, Codex)
+  Join existing path components at free endpoints and reject branches while preserving links. Recompose between joins, require owner roster declarations before creating links, and report incomplete repairs. Keep star as the explicit entry-hub shape and require selection for newly discovered interactive suggestions.
+
+  Update the specification, CLI help, topology documentation and regression coverage.
+
+- present the dispat theorem and keep navigation readable ([5552fc8](https://github.com/yohimik/dispat/commit/5552fc8bdd38265f74e797605976809bcb9cc41b)) (by yohimik)
+  Show the ideal critical-path formula with its assumptions and one getting-started
+  path. Keep sidebar arrows beside labels, remove formula scrolling, and link the
+  footer licences directly to the repository license.
+
+### Authors
+
+- yohimik
+- Codex
+
+
 ## packages/docs/v1.11.0-rc.8 (2026-10-27)
 
 ### Features
