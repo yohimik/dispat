@@ -29,6 +29,15 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
+const (
+	executionReplayWorkerIdleSeconds  = 120
+	executionReplayStateFileName      = "seen.json"
+	executionReplayWriteErrorText     = "replacing the answered-work record "
+	executionReplayPreflightCode      = "E225"
+	executionReplayWorkerReadyMessage = "worker ready"
+	executionReplayWorkerField        = "worker"
+)
+
 // TestExecutionWorkerAnswersProbe: the whole exchange one probe produces, as
 // the mailbox records it, and the node's own description of itself.
 func TestExecutionWorkerAnswersProbe(t *testing.T) {
@@ -76,26 +85,42 @@ func TestExecutionWorkerRefusesWorkWhenItsReplayRecordCannotBeSaved(t *testing.T
 	}
 	rig := newExecutionSweepRig(t, executionRecordingScript, func(cfg *models.File) {
 		cfg.Execution.Workers = cfg.Execution.Workers[:1]
-		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 3}
 		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker,
 			Publish: models.RunOnlyOrchestrator}
 	})
-	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60)
+	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), executionReplayWorkerIdleSeconds)
 	defer worker.stop(t)
 	first := rig.sweep(nil)
 	require.Equal(t, 0, first.Code, "first v3 sweep:\n%s\n%s", first.Stdout, first.Stderr)
 	before := len(rig.runs())
-	seen := filepath.Join(worker.stateDir, executionNode, "seen.json")
+	seen := filepath.Join(worker.stateDir, executionNode, executionReplayStateFileName)
 	require.FileExists(t, seen)
 	require.NoError(t, os.Remove(seen))
 	require.NoError(t, os.Mkdir(seen, 0o755))
 	blocked := rig.sweep(nil)
 	require.NotEqual(t, 0, blocked.Code, "a worker unable to save replay state answered work")
+	assert.True(t, harness.IsCodePresent(executionEvents(blocked), executionReplayPreflightCode))
+	_, isBlockedReady := executionLine(blocked, executionReplayWorkerReadyMessage)
+	assert.False(t, isBlockedReady, "a worker cannot join the run before replay state is durable")
+	workerStdout, workerStderr := worker.proc.CapturedOutput()
+	require.Contains(t, workerStdout+workerStderr, executionReplayWriteErrorText+seen,
+		"the worker reached the injected replay-record failure")
 	assert.Equal(t, before, len(rig.runs()), "no command starts without durable replay state")
 	require.NoError(t, os.Remove(seen))
 	recovered := rig.sweep(nil)
 	require.Equal(t, 0, recovered.Code, "recovered v3 sweep:\n%s\n%s", recovered.Stdout, recovered.Stderr)
-	assert.Greater(t, len(rig.runs()), before, "the same worker served fresh work after repair")
+	ready, isReady := executionLine(recovered, executionReplayWorkerReadyMessage)
+	require.True(t, isReady, "the same worker accepted a fresh preflight after repair")
+	assert.Equal(t, executionNode, ready.Str(executionReplayWorkerField))
+	require.FileExists(t, seen, "recovery durably recreated the replay record")
+	runs := rig.runs()
+	require.Len(t, runs, before+len(executionSweepPackages), "every package ran once after repair")
+	var recoveredPackages []string
+	for _, run := range runs[before:] {
+		assert.Equal(t, executionNode, run.Node)
+		recoveredPackages = append(recoveredPackages, run.Package)
+	}
+	assert.ElementsMatch(t, executionSweepPackages, recoveredPackages)
 }
 
 // A correctly signed legacy publish assignment still grants no publication
