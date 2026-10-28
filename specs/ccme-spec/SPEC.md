@@ -5059,6 +5059,81 @@ task. Declaring completion needs every discovered task terminal with its full ch
 informative online-discovery model, not a mutable-graph promise for a CCME run; discovered work needs a
 new pinned plan before §13.11's fixed-graph bounds apply.
 
+**Dynamic worker creation and distributed termination (informative).** An authorized node can start
+additional processes or request provisioned machines, and those workers can in turn create workers or
+delegate work. Provisioning consumes resources and time; it does not create physical capacity without
+an available provider. A machine, a semantic task and one activation of a task are different objects.
+Reusing a machine or traversing a cyclic communication network need not repeat a completed semantic task.
+Conversely, creating more machines supplies neither a speedup nor a termination guarantee by itself.
+
+For nonempty work that requires an execution action, at least one compatible execution-capable node
+must perform work. A bootstrap that starts workers is itself work on an admitted node or an explicitly
+accounted external provisioner. One node suffices only when the task contract permits sequential execution
+and that node has the required capabilities and resources; this is not a universal minimum-time claim.
+There need not be an actively executing node at every instant before completion: all workers can be idle
+while a queued task, a message in transit or a provisioning request can cause later work. The invariant
+needed for termination reasoning is that such unfinished obligations remain accounted, not that the
+instantaneous number of busy processors stays positive.
+
+Consider a separate closed dynamic-work model, with a finite set of initial activation obligations and
+no later external submissions. An obligation includes any work, message, deferred callback, retry or
+provisioning action that can cause further computational activity. Its transfer between a sender,
+transport and receiver preserves the same obligation; a newly generated activation is a child of the
+activation that generated it. Account for every child before retiring its parent's responsibility for it,
+so transfer or creation cannot temporarily erase unfinished work. This is an abstract conservation
+requirement, not an assertion that a local counter or a non-atomic scan implements it.
+
+*A sufficient finiteness condition.* Assign each initial or generated activation a nonnegative integer
+rank. Each activation generates finitely many children, all of strictly smaller rank. Then the entire
+activation forest is finite. By induction on rank, a rank-zero activation has no children; a rank-`k`
+activation has finitely many child subtrees, each finite by the induction hypothesis, so its own subtree
+is finite. A finite union over the initial roots proves the claim. In particular, if there are `r` roots,
+all root ranks are at most `h` and each activation has at most `b` children, the number of activations is
+at most `r * sum_{j=0}^h b^j`, with the `j=0` term equal to one, including when `b=0`. Worker creations
+count among these activations; they are not an additional unbounded source of work. This is a sufficient
+condition, not a claim that every terminating computation must supply these ranks or this uniform bound.
+
+*Eventual termination and its detection.* Finiteness alone gives no progress guarantee. Additionally
+require fair service and adequate compatible capacity, deadlock-free waits, and eventual delivery or
+conclusive settlement of every outstanding message and provisioning request. Each activation's own
+protocol must perform only finitely many internal steps and transfers and reach settlement once its
+children have settled and each required communication or provisioning request has either completed or
+been conclusively resolved, with failure handled by the protocol. Finitely many steps per transfer is
+insufficient: one rank-zero obligation could otherwise circulate between two workers forever. Retries
+and failure recovery must obey these lifecycle and finite-generation conditions; an unresolved external
+effect cannot be discarded merely because its worker stopped. Parents waiting on children must not hold
+all capacity needed by those children. Induction on rank now proves settlement: rank-zero activations
+have no children, and each higher-rank activation has finitely many children that eventually settle,
+after which its own protocol settles. Since there are finitely many activations, eventually none remains.
+A terminal failure is settled work only when it cannot generate an unaccounted late effect or retry.
+Termination does not establish successful results.
+
+In this closed model, computational termination means every local work queue is empty, every worker is
+passive for this computation, and no in-flight message, callback, pending creation or unresolved operation
+can reactivate it or produce a late effect relevant to the declared outcome. This is a stable condition:
+a next work event or such an effect would require either an outstanding
+obligation or a forbidden new external submission. Independent observations of idle workers do not prove
+that condition. For example, a delayed work message can arrive after every worker was observed idle.
+Likewise, without a finiteness condition, each worker can create one successor and stop, producing an
+infinite chain although each individual worker finishes. Loss of a node or silence is not evidence that
+its outstanding work was settled; machines can remain powered on after the computation terminates.
+
+The classical foundation is Dijkstra and Scholten, *Termination detection for diffusing computations*,
+[Information Processing Letters 11(1), 1–4 (1980)](https://doi.org/10.1016/0020-0190(80)90021-6), with an
+[author manuscript and correctness proof](https://www.cs.utexas.edu/~EWD/transcriptions/EWD06xx/EWD687a.html).
+Their signalling scheme accounts for delegated work and detects the termination of a finite diffusing
+computation; it does not prove that arbitrary recursive spawning terminates. The ranked activation proof
+above supplies a separate sufficient finiteness premise for the dynamic-work model. A deployment with
+dynamic membership still needs a termination detector whose accounting and failure assumptions cover it.
+
+For CCME, admitted worker joins change placement capacity while preserving the pinned finite semantic
+graph and task IDs (§28). New semantic work requires a new pinned plan. The abstract extension does not
+implement recursive provisioning, change release authority, guarantee physical exactly-once effects or
+relax reconciliation of uncertain effects. To apply `T(H) = max_p(D_p + E_p)` to a finite realized activation
+graph, include provisioning, discovery, communication and resource-order constraints and retain the
+formula's feasible-earliest-start premises. Adding nodes alone does not establish those premises or
+remove the existing work/span and resource bounds.
+
 For a SAT formula of encoded length `m` with `k` variables, a supplied `k`-bit assignment can be checked
 in `poly(m)` bit time. One explicit brute-force DAG has `2^k` verifier leaves and `2^k - 1` binary OR gates,
 hence `2^(k+1) - 1` vertices and `2^(k+1) - 2` edges. Its assignment labels

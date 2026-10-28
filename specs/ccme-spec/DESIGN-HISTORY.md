@@ -1006,3 +1006,17 @@ A topological induction proves the equality. Required resource ordering and dela
 overlapping activities use separate vertices. Unmodeled constraints leave a lower bound, and selecting
 an optimal admissible plan retains the earlier outer minimum. The notation preserves every task and
 does not claim globally optimal scheduling or a new runtime behavior.
+
+## 2026-10-28: Worker generation and distributed termination
+
+Section 13.11 adds a separate dynamic-work model in which authorized workers can create workers or
+delegate work. A finite root set, finite branching and strictly decreasing natural ranks imply a finite
+activation forest by induction. Fair, deadlock-free progress and finite activation lifecycles after
+child settlement are separate premises; finite per-hop work alone permits endless forwarding.
+Completion requires empty local queues, passive workers and no pending
+messages, callbacks, provisioning or uncertain operations that can create more work; locally idle
+workers alone do not establish it. A nonempty execution needs at least one compatible node, but no
+processor must remain continuously busy while work is waiting or in transit. The cited Dijkstra–Scholten
+termination detector provides classical context, not a guarantee that arbitrary recursive spawning ends.
+Worker joins still preserve a CCME run's pinned task graph; new semantic tasks need a new plan. The
+extension changes no runtime behavior, publication authority, hardware capacity or exactly-once guarantee.
