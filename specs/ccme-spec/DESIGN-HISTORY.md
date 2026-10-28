@@ -987,3 +987,13 @@ The compiled average `C_C/N + L + E` approaches `L + E`; execution dominates onl
 and amortized preparation are small relative to execution. A stated epsilon
 bound makes the limit precise. The amendment adds no runtime feature or benchmark and preserves the
 existing invalidation, input identity, authority and effect-recovery obligations.
+
+## 2026-10-28: Strictly diminishing average cost from valid reuse
+
+Section 13.11 proves that, for one fixed positive preparation cost and constant recurring cost,
+each additional valid reuse decreases the sequential average by `C/[N(N+1)]`. Direct subtraction
+proves positivity; the ratio `N/(N+2)` and an epsilon bound prove strictly diminishing gains tending
+to zero. The original compilation cost and next-invocation latency remain unchanged. Zero setup
+cost, invalidation, additional optimization work and varying recurring costs retain their separate
+accounting. The exact average-cost gap need not be visible at finite measurement resolution.
+This is a mathematical clarification with no new runtime feature or release-authority behavior.

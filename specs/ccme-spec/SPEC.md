@@ -4900,6 +4900,27 @@ execution saving exceeds its extra preparation. Thus rarity or frequency alone d
 which strategy is best. For fixed valid preparation and constant per-use cost, the average is
 `C/N + r`, approaching `r` as `N` grows; repeated invalidation prevents amortizing one setup forever.
 
+**Corollary: diminishing gain from each additional reuse.** Let a fixed finite preparation cost
+`C > 0` be paid once for the same compiled artifact, which remains valid for every counted use.
+Let every use have the same finite recurring cost `r >= 0`, including all required acquisition,
+checks, binding and execution, in the sequential nonoverlapping account above. For integer `N >= 1`,
+the average cost of the first `N` uses is `A_N = (C + N r)/N = C/N + r`. Therefore
+
+`Delta_N = A_N - A_{N+1} = C(1/N - 1/(N+1)) = C/[N(N+1)] > 0`.
+
+This proves that each additional reuse strictly lowers the average. Moreover,
+`Delta_{N+1}/Delta_N = N/(N+2) < 1`, so these gains strictly decrease. They approach zero:
+for any `epsilon > 0`, an integer `N > sqrt(C/epsilon)` gives
+`0 < Delta_N < C/N^2 < epsilon`. Thus `Delta_N -> 0` and `A_N -> r`, while the gain stays
+positive for every finite `N` under these premises. If `C = 0`, all these gains are zero instead.
+The total preparation cost remains `C` and the next use still costs `r`; the decrease is in the
+historical average, not in the time already spent compiling or in the latency of the next invocation.
+This arithmetic does not guarantee improvement from a new optimization attempt: an unsuccessful
+attempt can yield zero execution-time saving while adding preparation cost. Fresh preparation,
+invalidation or varying recurring costs require the general cost sum above. The positive gap is an
+exact model quantity; a measurement with finite resolution need not distinguish it. This result
+neither permits replaying prior release authority nor introduces runtime caching or optimization.
+
 For the particular compiled strategy, split constant recurring cost into execution `E` and all remaining
 per-use cost `L`, including required loading/acquisition, validation, binding and dispatch, with sequential
 nonoverlapping accounting. Its average over `N`
