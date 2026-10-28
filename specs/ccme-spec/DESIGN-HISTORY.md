@@ -1144,3 +1144,18 @@ authority and failure/restoration transitions are preserved. Fairness and non-Ze
 for the existing infinite-stream conclusions. Process/thread composition, finite tasks and the two-node
 handoff policy retain their earlier conditions. This informative clarification does not implement a runtime
 or change the concrete execution profile, and makes no hardware or performance claim.
+
+## 2026-10-28: State recording, unresolved choices and capture time
+
+Section 13.11 distinguishes recording a task's finite description, state or history from the task itself.
+Closed deterministic execution, including a fixed-state pseudorandom generator, has a determined trace;
+unknown state and open entropy, external inputs or scheduling choices are separate sources of uncertainty.
+Two admissible histories with the same capture and different required results show why that capture alone
+cannot determine both. A deterministic transition induction specifies when a consistent checkpoint and
+complete ordered choice/input log determine a later modeled state. It does not promise the exact crash-time
+machine state, arbitrary process capture, or safe repetition of external effects. Recording newly produced
+values, including random outcomes, incurs the actual observation, persistence, transfer and checking work.
+A positive persistence bound requires newly transferred bytes and a finite bandwidth premise; overlap and
+already-available artifacts prevent a universal additive latency claim. The existing two-node continuation,
+candidate-checking, authority and recovery rules remain in force. This informative clarification adds no
+runtime feature, hardware measurement or claim that task/artifact distinctness proves universal unpredictability.

@@ -5388,11 +5388,12 @@ and §28.6's authority/recovery rules. No runtime replication, thread executor o
   consumed by provisioning or execution tasks. Describing a resource does not supply or authorize it.
 
 Tasks and artifacts are distinct entity kinds: write `T ∩ A = ∅` for the model's typed task and artifact
-sets. A task can be **captured as artifacts** containing its description, code, inputs, checkpoint or
-execution history. This is a representation relation, not entity equality: even a complete capture of
-the declared finite task state is an artifact representing that state, never the computation activation
-itself. Different activations or attempts may use the same immutable code or captured state; sharing
-those bytes does not identify the tasks. A manifest describing a group of threads is likewise distinct
+sets. A task's description, code, inputs, finite checkpoint or execution history can be **recorded as
+artifacts**; the task itself never becomes an artifact. This is a representation relation, not entity equality:
+even a complete capture of the declared finite task state is an artifact representing that state,
+never the computation activation itself. Different activations or attempts may use the same
+immutable code or captured state; sharing those bytes does not identify the tasks. A manifest
+describing a group of threads is likewise distinct
 from the composite task that performs their work. This distinction applies to these theory entities;
 it does not rename serialized task descriptions used by the concrete execution protocol.
 
@@ -5403,6 +5404,62 @@ and fencing. Artifact admission and two-node checking still apply, and a success
 does not establish that contract or physically exactly-once effects. Code that has never executed, a
 checkpoint awaiting restoration and a recorded completed execution are all artifacts without being an
 active task. The model does not claim that arbitrary live processes can be fully captured or resumed.
+
+*Recorded state, future choices and capture cost.* A captured state or history describes a declared
+execution boundary; it is not the live activity of executing the task or an automatic record of every
+future event. The task/artifact distinction holds even for a deterministic task. It does not imply that
+finite states cannot be encoded or that a deterministic program's future cannot be represented or computed.
+
+In a closed deterministic model with complete initial state and fixed transition rules, all future
+inputs and scheduling choices must also be fixed or determined by those rules. Induction over the
+transitions then gives one trace. A deterministic pseudorandom generator fits this case: its full state,
+algorithm, relevant implementation semantics and call order determine its output sequence. Unknown state
+or a seed omitted from a capture is missing information; it is not new nondeterminism in that complete
+model. Fresh entropy, future messages, clock/device observations or unfixed scheduling choices that affect
+the result are additional inputs or choices. If they remain open, the captured execution model is not
+fully determined. A fixed software configuration alone does not fix those inputs. The
+[Python random documentation](https://docs.python.org/3/library/random.html) distinguishes deterministic
+pseudorandom generators with state capture/restore from operating-system-provided randomness; the
+[Linux randomness interface documentation](https://man7.org/linux/man-pages/man7/random.7.html) describes
+environmental entropy used to seed its generator. These examples do not establish a physical randomness
+or cryptographic guarantee for the execution model.
+
+*Artifact-only determination limit.* Suppose two admissible execution histories have the same captured
+artifact `a`, but the next required result is `r_0` in one and `r_1 != r_0` in the other because a relevant
+choice is absent from `a`. Any single-valued reconstruction `f(a)` returns the same value for both and
+therefore cannot equal both results. Thus `a` alone does not uniquely determine that result. Guessing does
+not give a guarantee of exact reconstruction in every admissible history. This is an information limitation
+relative to the capture, not a theorem that every task is unpredictable, that every state capture is
+incomplete, or that prediction must execute the original computation at its original cost. Even if a
+future is determined, deriving and materializing its values may require computation; no universal lower
+bound on that computation follows from the task/artifact type distinction.
+
+For a replay claim, let the modeled transition be `s_(i+1) = F(s_i, u_i)`, deterministic once its complete
+state and relevant input/choice `u_i` are supplied. A consistent checkpoint of `s_k` and an ordered,
+complete, integrity-protected log of `u_k, ..., u_(m-1)`, together with matching transition semantics,
+determine `s_m` by induction. Record outcome-relevant external observations and ordering choices.
+Record random draws too, unless retained deterministic generator state, semantics and call order suffice
+to derive those draws. The replay still executes
+transitions as tasks; the checkpoint and log remain artifacts. Their availability, applicable two-node
+admission, retention, authority and correct recovery/fencing are separate premises. Agreement of modeled
+state is not by itself a guarantee of identical wall-clock behavior or safe repetition of external effects.
+An unrecorded choice that is not otherwise determined cannot be recovered uniquely from the earlier
+artifacts. Recovery establishes the state justified by the checkpoint and retained log, not automatically
+the exact machine state at the instant of an unexpected failure.
+
+Capturing a newly produced value is work. Account for any required observation, consistent snapshot,
+serialization, durable write, transfer, readback, checks and acknowledgment as stages with real dependencies
+and shared-resource demand. The new value must exist before its recorded bytes are committed; dependent
+continuation still waits for the artifact gate. Candidate readback and checking within that gate do not
+require the candidate's gate to have already opened and do not authorize downstream use. Their required
+execution environment and other inputs remain admitted. The same rule applies to captured random outcomes.
+If a required bottleneck must newly persist `b > 0` bytes and has service rate at most finite `R > 0` bytes per
+unit time, that persistence interval is at least `b/R > 0`; a causal path containing it inherits that bound.
+This lower bound assumes those bytes actually cross that bottleneck. It does not apply to merely naming
+an already available artifact or to a model that deliberately abstracts the operation to zero cost.
+Add stage times only where they are sequential; permitted overlap uses the expanded dependency graph and
+capacity constraints. Capture can overlap unrelated computation, so positive capture work need not cause
+an equal increase in total makespan. Neither a universal fixed capture delay nor cost-free capture follows.
 
 A **node** is a derived group of artifacts providing an execution environment for tasks; it is not a
 third primitive entity kind. Represent a node assembly by a finite versioned manifest `G` of identified
