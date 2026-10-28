@@ -4040,6 +4040,69 @@ observation is identical while the source occurrence order is reversed. Authenti
 does not remove this timing ambiguity. Local program order and matching send-before-receive edges still
 define a causal partial order; causally unrelated events need not have an inferable physical ordering.
 
+**Clock uncertainty and entropy.** The preceding indistinguishability result does not supply a
+probability law or guarantee random noise. Consider three concurrent nodes with clocks
+`C_i(t) = t + b_i`, where the distinct offsets `b_i` are fixed. Two nodes record events at fixed
+periodic local times and deliver their records with fixed positive delays; the third applies a
+deterministic synchronization procedure. Fix their initial states and all scheduling decisions.
+Every report, race outcome and computed discrepancy is then determined, even when the observer cannot
+infer the true offsets. A discrepancy may be nonzero or vary deterministically without containing fresh
+entropy. This is an admissible counterexample to the claim that three separate clocks always generate
+randomness. For any finite `n >= 3`, add nodes with fixed offsets, schedules and delivery rules: the joint
+trace remains deterministic by transition induction. Node count alone therefore supplies neither the
+three-node base case nor an induction step guaranteeing entropy. Unknown offsets, physical jitter,
+algorithmic nondeterminism and adversarial unpredictability are distinct properties.
+
+Timing fluctuations in a physical implementation or competing thread accesses may serve as an entropy
+source under a justified source and observation model. This is not limited to pseudorandom generators,
+but it requires evidence beyond inability to synchronize clocks exactly. The broad idea predates this
+project: Je Sen Teh, Moatsum Alawida and Azman Samsudin's 2020 paper,
+[Generating True Random Numbers Based on Multicore CPU Using Race Conditions and Chaotic Maps](https://doi.org/10.1007/s13369-020-04552-0),
+proposes collecting multicore thread-access race outcomes and postprocessing them with coupled chaotic
+maps, as described in its [author-repository abstract](https://repository.adu.ac.ae/items/c0f7784b-56ae-4a18-809b-7006d415bb3f).
+This repository does not reproduce that method or inherit its entropy or security claims. Neither that
+example nor the clock-offset argument establishes a random-number generator for this execution model.
+
+*Conditional entropy and an induction with explicit premises.* Let `X` be a finite-valued sample and
+`Z` discrete observer or adversary side information. For a fixed `z` with `P(Z=z) > 0`, define
+`H_inf(X | Z=z) = -log2 max_x P(X=x | Z=z)`. This is min-entropy for that fixed conditional distribution,
+not an average over side information. A result known given `z` has zero such entropy, irrespective of
+how difficult another observer finds synchronization. Deterministic unknown constants alone do not
+provide a stochastic source model or a positive bound against an observer who knows them.
+
+For finite-valued samples `X_1, ..., X_m`, suppose fixed bounds `h_i >= 0` satisfy
+`max_x P(X_i=x | Z=z, X_1=x_1, ..., X_(i-1)=x_(i-1)) <= 2^(-h_i)` for every
+positive-probability preceding sample prefix, at the fixed `z`. Then
+`H_inf((X_1, ..., X_m) | Z=z) >= sum_i h_i`. Proof: the empty prefix has probability one. The
+probability of a positive-probability prefix extended by one sample is the preceding prefix probability
+times the conditional probability of that sample, so induction bounds it by
+`2^(-sum_(i=1)^k h_i)` at length `k`. Zero-probability prefixes already satisfy the bound. Take the
+largest probability at length `m` and apply `-log2`. Samples can come from multiple nodes, but the
+conditional bounds are additional source premises; each new node need not supply one. Correlated or
+repeated observations cannot be credited with fresh entropy merely by counting nodes or summing marginal
+entropies. Later disclosures must also be included in the side information for any claim against them.
+This is a finite mathematical statement, not evidence that physical samples satisfy those premises.
+
+For a fixed deterministic conditioner `Y=f(X)`, where `X` includes all variable inputs and state used
+by the conditioner, each conditional output probability is the sum of its input preimage probabilities.
+The output containing a most probable input therefore has probability at least as large as that input:
+`H_inf(Y | Z=z) <= H_inf(X | Z=z)`. Deterministic chaotic processing does not evade this inequality.
+Compression can improve entropy per output bit without creating total entropy: for a fair bit `B`
+with no side information,
+`(0,B)` and its projection `B` both have one bit of total min-entropy. Additional random seeds or evolving
+state must be included in the joint input analysis. The induction's lower bound on the sample vector
+does not automatically become a lower bound on a processed output; even a constant output map is possible.
+[NIST SP 800-90B](https://csrc.nist.gov/pubs/sp/800/90/b/final) treats entropy-source design, assessment,
+health testing and conditioning as explicit requirements. Statistical appearance or clock mismatch alone
+does not establish source entropy, independence or cryptographic suitability.
+
+The resulting observations remain subject to the recorded-state and capture-cost conditions in §13.11.
+Recording a sample produces an artifact; it never turns the executing task into that artifact. Durable
+capture, applicable two-node admission and authorized recovery remain required before downstream use.
+Candidate readback/checks inside its own admission gate do not authorize such use; their other inputs
+and execution environment remain admitted. This informative result adds no runtime entropy mechanism,
+hardware experiment, cryptographic validation or change to the clock, authority or continuation contracts.
+
 **Observer-history sufficiency.** Fix the validated run inputs, an initial coordination state `S_0`, a
 deterministic replay transition `F`, and one durable, fenced append authority. Let it admit verified
 coordination events `e_1, ..., e_m`, assigning a strictly increasing durable sequence and binding each event

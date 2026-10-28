@@ -1159,3 +1159,18 @@ A positive persistence bound requires newly transferred bytes and a finite bandw
 already-available artifacts prevent a universal additive latency claim. The existing two-node continuation,
 candidate-checking, authority and recovery rules remain in force. This informative clarification adds no
 runtime feature, hardware measurement or claim that task/artifact distinctness proves universal unpredictability.
+
+## 2026-10-28: Clock uncertainty, race-source prior art and conditional entropy
+
+The distributed-clock discussion separates inability to infer exact offsets from generation of random
+noise. Three concurrent nodes with fixed clock offsets, event schedules, delivery rules and a deterministic
+observer provide a counterexample; adding more deterministic nodes preserves it. The proposed induction
+therefore needs source premises beyond node count. A finite conditional-probability induction gives a
+joint min-entropy lower bound when each sample has an explicit unpredictability bound given all earlier
+samples and declared side information. Correlated samples do not automatically add entropy. A preimage
+argument shows that fixed deterministic conditioning cannot increase total min-entropy; compression may
+increase the rate per output bit, and extra random inputs require joint analysis. Teh, Alawida and Samsudin's
+2020 race-condition and chaotic-map paper is attributed as prior art, without claiming reproduction or
+inheriting its security results. NIST entropy-source guidance is a separate assessment reference. Existing
+task/artifact separation, capture costs, two-node admission, authority and recovery conditions remain in
+force. This informative clarification makes no runtime, hardware or cryptographic validation claim.
