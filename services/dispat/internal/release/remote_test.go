@@ -27,7 +27,8 @@ import (
 // given, answers what a scenario told it to, and reports how the guard was
 // taken.
 type fakeRemote struct {
-	mu sync.Mutex
+	mu           sync.Mutex
+	snapshotGate sync.RWMutex
 	// builds are the requests Build was called with, in order.
 	builds []StageRequest
 	// guards are the stage names Guard was called for, in order.
@@ -49,6 +50,9 @@ type fakeRemote struct {
 	// beforeBuild runs inside Build, before it answers, which is how a
 	// scenario cancels a run from inside a dispatched frame.
 	beforeBuild func()
+	// beforeSnapshot lets a test observe a delegated build before it waits for
+	// the native frames that may still be writing its input repository.
+	beforeSnapshot func()
 	// placeHere is the package whose build this pool places on the
 	// orchestrator rather than on a node, which is what `runOnly:
 	// orchestrator` and a full pool both come to.
@@ -85,6 +89,19 @@ type fakeRemote struct {
 	failTestsPart string
 }
 
+const (
+	fakeRemoteSnapshotFirstGuardStageName     = "version"
+	fakeRemoteSnapshotSecondGuardStageName    = "sign"
+	fakeRemoteSnapshotPackageName             = "a"
+	fakeRemoteSnapshotGuardCount              = 2
+	fakeRemoteSnapshotBuildCount              = 1
+	fakeRemoteSnapshotObservationMilliseconds = 50
+	fakeRemoteSnapshotWaitSeconds             = 2
+	fakeRemoteSnapshotReadyTimeoutError       = "delegated build did not reach snapshot capture"
+	fakeRemoteSnapshotEarlyReturnError        = "delegated build returned before every native guard was released"
+	fakeRemoteSnapshotCompletionTimeoutError  = "delegated build did not finish after native guards were released"
+)
+
 // buildHere is the placement that keeps the frame: it runs the executor's own
 // sequence and answers a node nobody has to be told about.
 func (f *fakeRemote) buildHere(ctx context.Context, request StageRequest, here LocalFrame) (StageOutcome, error) {
@@ -99,9 +116,11 @@ func (f *fakeRemote) buildHere(ctx context.Context, request StageRequest, here L
 }
 
 func (f *fakeRemote) Guard(_ context.Context, stage, _ string) (func(), error) {
+	f.snapshotGate.RLock()
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.guardErr != nil {
+		f.mu.Unlock()
+		f.snapshotGate.RUnlock()
 		return nil, f.guardErr
 	}
 	f.guards = append(f.guards, stage)
@@ -109,10 +128,12 @@ func (f *fakeRemote) Guard(_ context.Context, stage, _ string) (func(), error) {
 	if f.held > f.peakHeld {
 		f.peakHeld = f.held
 	}
+	f.mu.Unlock()
 	return func() {
 		f.mu.Lock()
-		defer f.mu.Unlock()
 		f.held--
+		f.mu.Unlock()
+		f.snapshotGate.RUnlock()
 	}, nil
 }
 
@@ -123,11 +144,16 @@ func (f *fakeRemote) Build(ctx context.Context, request StageRequest, here Local
 	if isPlacedHere {
 		return f.buildHere(ctx, request, here)
 	}
+	if f.beforeSnapshot != nil {
+		f.beforeSnapshot()
+	}
+	f.snapshotGate.Lock()
 	f.mu.Lock()
 	f.builds = append(f.builds, request)
 	isHeld := f.held
 	shouldFail := f.failBuild == request.Release.Pkg.Name
 	f.mu.Unlock()
+	f.snapshotGate.Unlock()
 	if f.beforeBuild != nil {
 		f.beforeBuild()
 	}
@@ -151,6 +177,63 @@ func (f *fakeRemote) Build(ctx context.Context, request StageRequest, here Local
 		return outcome, errors.New("inputs failed before any assignment")
 	}
 	return outcome, nil
+}
+
+func TestFakeRemoteSnapshotWaitsForEveryNativeGuard(t *testing.T) {
+	started := make(chan struct{})
+	continueSnapshot := make(chan struct{})
+	releaseSnapshotStart := sync.OnceFunc(func() { close(continueSnapshot) })
+	defer releaseSnapshotStart()
+	remote := &fakeRemote{beforeSnapshot: func() {
+		close(started)
+		<-continueSnapshot
+	}}
+	firstGuard, err := remote.Guard(t.Context(), fakeRemoteSnapshotFirstGuardStageName,
+		fakeRemoteSnapshotPackageName)
+	require.NoError(t, err)
+	releaseFirstGuard := sync.OnceFunc(firstGuard)
+	defer releaseFirstGuard()
+	secondGuard, err := remote.Guard(t.Context(), fakeRemoteSnapshotSecondGuardStageName,
+		fakeRemoteSnapshotPackageName)
+	require.NoError(t, err)
+	releaseSecondGuard := sync.OnceFunc(secondGuard)
+	defer releaseSecondGuard()
+
+	request := StageRequest{Release: &plan.Release{Pkg: &model.Package{Name: fakeRemoteSnapshotPackageName}}}
+	finished := make(chan error, fakeRemoteSnapshotBuildCount)
+	go func() {
+		_, buildErr := remote.Build(t.Context(), request, nil)
+		finished <- buildErr
+	}()
+	select {
+	case <-started:
+	case <-time.After(fakeRemoteSnapshotWaitSeconds * time.Second):
+		t.Fatal(fakeRemoteSnapshotReadyTimeoutError)
+	}
+	releaseSnapshotStart()
+	assertBuildWaiting := func() {
+		t.Helper()
+		select {
+		case <-finished:
+			t.Fatal(fakeRemoteSnapshotEarlyReturnError)
+		case <-time.After(fakeRemoteSnapshotObservationMilliseconds * time.Millisecond):
+		}
+	}
+	assertBuildWaiting()
+	releaseFirstGuard()
+	assertBuildWaiting()
+	releaseSecondGuard()
+	select {
+	case buildErr := <-finished:
+		require.NoError(t, buildErr)
+	case <-time.After(fakeRemoteSnapshotWaitSeconds * time.Second):
+		t.Fatal(fakeRemoteSnapshotCompletionTimeoutError)
+	}
+	remote.mu.Lock()
+	defer remote.mu.Unlock()
+	assert.Equal(t, fakeRemoteSnapshotGuardCount, remote.peakHeld)
+	assert.Zero(t, remote.held)
+	assert.Len(t, remote.builds, fakeRemoteSnapshotBuildCount)
 }
 
 // Publish is the placement decision of a publish frame: the local path unless
