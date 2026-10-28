@@ -5126,6 +5126,64 @@ computation; it does not prove that arbitrary recursive spawning terminates. The
 above supplies a separate sufficient finiteness premise for the dynamic-work model. A deployment with
 dynamic membership still needs a termination detector whose accounting and failure assumptions cover it.
 
+**Planned shutdown, unexpected failure and loss of all executors (informative).** A node's lifecycle is
+distinct from a computation's outcome. A planned shutdown follows an intentional protocol; an unexpected
+crash may interrupt that protocol at any point. Neither label alone establishes global completion.
+A safe planned departure closes or transfers admission and settles its outstanding obligations or hands
+them to an authorized successor through recoverable records, preserving responsibility throughout the
+handoff. It also resolves or fences its outstanding effect authority. Such a departure can preserve a
+computation that continues elsewhere; the last worker may shut down after verified global settlement.
+An intentional shutdown without these conditions can still abandon unfinished work.
+
+After an unexpected failure, another authorized node may recover the unfinished computation from
+accessible durable state or a justified reconstruction of that state. Recovering work does not require
+recovering the same physical machine, and a surviving node alone does not guarantee recovery: it also
+needs the required inputs, capabilities, resources, coordination quorum where applicable, and authority.
+Lost irreplaceable state can make recovery impossible. Before reassignment, fence stale authority and
+reconcile uncertain effects under the existing protocol; a crash does not show that an issued operation
+failed or authorize repeating a publication. Recovery is an accounted obligation, not successful
+settlement of the interrupted work. Eventual completion additionally requires the preceding finite
+generation and lifecycle assumptions and sufficient periods of service; infinitely repeated crashes
+before useful progress need not terminate even when a replacement is always available.
+
+*A closed-system cessation lemma.* Model the computation by discrete transitions. Let `A(s)` be the
+set of available actors in state `s` that can execute its work or initiate recovery, including relevant
+supervisors and provisioners; an idle but available actor belongs to `A(s)`. Assume every work step and
+every creation or restoration of such an actor requires an actor already in `A(s)`. Exclude independent
+restart mechanisms, later external intervention, and pending autonomous operations that could create
+an actor or produce a computation-relevant effect without one. Then `A(s0) = empty` is absorbing with
+respect to execution and recovery: no subsequent work step, restoration or such effect can occur.
+Proof by induction on transitions: the base state has no actor; a work or restoration transition would
+require an actor and is therefore disabled. Any remaining transition preserves the empty actor set and
+cannot perform such work or effects by assumption. The induction proves the claim for every finite
+continuation. In particular, an actual crash of the last available actor causes permanent cessation
+under these premises. The conclusion concerns the modeled computation, not all activity in the world.
+
+This cessation is not a proof of the settled termination defined above or of successful completion.
+For example, the last actor can crash with a durable task still queued: no further step is possible in
+the closed model, but the obligation and missing result remain. If work was already settled, powering
+off its last actor does not undo that settlement. Planned versus unexpected describes the departure;
+settled, recoverable, or permanently stranded describes what remains of the computation.
+
+The premises explain why the last currently running *worker* is insufficient. A surviving supervisor
+can start a replacement; a reboot timer or a provisioning request already accepted by a provider can
+restore capacity after the worker count reaches zero. Durable state can support later operator recovery,
+and an issued remote operation can finish after its worker dies. These are excluded by the lemma or
+must be included as actors and outstanding obligations. Zero busy workers is weaker still. Conversely,
+one surviving actor is only a necessary resource for progress in this model, not a sufficient liveness
+condition for every task or coordination protocol.
+
+Actual failure must also be distinguished from suspicion. With unbounded message and scheduling delays,
+any finite silence interval can arise either from a crash or from a live node whose next step or message
+is delayed beyond that interval. An observer has the same received history in both cases, so silence
+alone cannot certify which occurred. Chandra and Toueg's *Unreliable Failure Detectors for Reliable
+Distributed Systems*, JACM 43(2), 225–267 (1996), formalizes failure-detector completeness and accuracy;
+Aguilera, Chen and Toueg's *Failure Detection and Consensus in the Crash-Recovery Model* explicitly
+studies recovery and storage assumptions (see the [authors' papers and abstracts](https://www.cs.cornell.edu/info/people/sam/FDpapers.html)).
+These are separate models and premises, not a crash-tolerance guarantee supplied by the earlier
+Dijkstra–Scholten citation. A detector for CCME must respect its actual failure, fencing and recovery
+contract; this informative lemma implements no failover mechanism and grants no new release authority.
+
 For CCME, admitted worker joins change placement capacity while preserving the pinned finite semantic
 graph and task IDs (§28). New semantic work requires a new pinned plan. The abstract extension does not
 implement recursive provisioning, change release authority, guarantee physical exactly-once effects or

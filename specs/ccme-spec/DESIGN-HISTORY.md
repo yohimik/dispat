@@ -1020,3 +1020,17 @@ processor must remain continuously busy while work is waiting or in transit. The
 termination detector provides classical context, not a guarantee that arbitrary recursive spawning ends.
 Worker joins still preserve a CCME run's pinned task graph; new semantic tasks need a new plan. The
 extension changes no runtime behavior, publication authority, hardware capacity or exactly-once guarantee.
+
+## 2026-10-28: Planned departures, crash recovery and permanent cessation
+
+Section 13.11 distinguishes a planned node shutdown from an unexpected crash and separates both from
+the outcome of the computation. A safe departure settles or durably hands off obligations; another
+authorized node may recover interrupted work only with adequate state, capabilities and safe effect
+handling. A transition induction proves that an empty set of available work/recovery actors is absorbing
+when every work or restoration step requires a surviving actor and no independent restart, external
+intervention or autonomous late effect is possible. Permanent cessation can leave unfinished work and
+therefore does not establish settled termination or success. Supervisors, reboot timers, pending
+provisioning and later operator recovery are explicit counterexamples to the unconditional last-worker
+claim. A finite silence interval cannot distinguish a crash from a delayed live node in an asynchronous
+model. Failure-detector and crash-recovery literature provides context; no failover implementation,
+universal liveness guarantee, replay permission or new release authority is claimed.
