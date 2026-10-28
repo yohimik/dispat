@@ -1,5 +1,30 @@
 # Changelog
 
+## specs/ccme-spec/v3.1.0-rc.12 (2026-10-28)
+
+### Fixes
+
+- qualify entropy from varying hardware timing ([01f0801](https://github.com/yohimik/dispat/commit/01f080134d25161abd8a99e55605b58be4903f49)) (by yohimik, Codex)
+  Explain why changing timing alone does not prove recorded randomness and
+  derive a conditional symbol bound from explicit density and quantization
+  premises. Preserve the distinction between mathematical and hardware evidence.
+
+- state the premises for clock-derived entropy ([36ec4aa](https://github.com/yohimik/dispat/commit/36ec4aac53fd1ed602da56ab548cfe33b46ef195)) (by yohimik, Codex)
+  Separate clock uncertainty from random noise and prove the finite conditional
+  min-entropy bound under explicit source assumptions. Preserve capture and
+  admission requirements and qualify the cited prior art.
+
+- qualify recorded state and replay costs ([76decb0](https://github.com/yohimik/dispat/commit/76decb0fa75c73ca9f8cbf30b5b6163debe96fbe)) (by yohimik, Codex)
+  Distinguish task activation from recorded state and state the information,
+  transition and persistence premises for reconstruction and capture costs.
+  Preserve artifact admission and authority requirements.
+
+### Authors
+
+- yohimik
+- Codex
+
+
 ## specs/ccme-spec/v3.1.0-rc.11 (2026-10-28)
 
 ### Fixes
