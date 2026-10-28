@@ -1092,3 +1092,17 @@ examples separate local capacity, remote capacity and mandatory setup, so neithe
 thread-vertical placement is universally best. Platform documentation supplies mechanism examples, not a
 benchmark or optimality theorem. The clarification adds no runtime executor or deployment behavior and does
 not substitute two execution containers for the distinct-node and authority premises of durable handoff.
+
+## 2026-10-28: Task and artifact definitions with per-artifact continuation gates
+
+The terminology and section 13.11 define a task activation represented by a process, thread or composite
+process grouping threads, and an artifact as identified task output with the content and metadata needed
+by consumers. Internal parallelism and resource demands remain explicit. The two-node policy covers every artifact used to continue computation, including intermediate outputs.
+Each immutable artifact version therefore requires durable writer commit and checks, independent readback
+and all checks on a distinct node, and an authorized durable acknowledgment before dependent continuation.
+Consumers wait for every required input and materialize exact admitted versions atomically. Topological
+induction establishes checked continuation under soundness, integrity, completeness, storage and authority
+premises; it does not assert global completion or arbitrary task correctness. Changed artifacts and scope
+require new gates; one surviving node can continue after handoff, but the next artifact synchronization
+again requires two nodes. Final completion separately accounts for all global obligations. The policy is
+informative and does not change the current single-node runtime contract or implement replication.

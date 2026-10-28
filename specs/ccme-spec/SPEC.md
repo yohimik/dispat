@@ -157,6 +157,8 @@ to be interpreted as described in RFC 2119.
 | **Orchestrator** | The first node of a run, owning its locks, canonical and native Git refs, publication and durable admission (§28). |
 | **Choreographer** | Another node running or proposing tasks without first-node authority (§28.1). |
 | **Execution link** | An authenticated choreographer endpoint, distinct from a repository or fleet link (§28.2). |
+| **Task (execution theory)** | A declared computation activation represented by a process or thread; a process may group multiple threads. Its boundary, dependencies and actual resource demand are fixed by the model, not by the count of OS identifiers (§13.11). |
+| **Artifact (execution theory)** | An identified output of a task, including the content and metadata required to use it. The informative two-node continuation policy in §13.11 gates every artifact used by a downstream task; it is distinct from an ordinary release record. |
 | **Task receipt** | Identity-bound execution evidence; never an ordinary release or rollback-completion record (§28.6). |
 
 `max(a, b)` over bumps returns the higher of the two in the ordering above.
@@ -3812,10 +3814,11 @@ not a wall-clock deadline or instantaneous cancellation guarantee for the §28 e
    `C(h + 1) - C(h) > T_task(h) - T_task(h + 1)`. Without those decomposition premises, this comparison is
    not an end-to-end formula and no universal best machine count follows.
 
-   *Processes, threads and the common task abstraction (informative).* A task here is a declared unit of
-   work with completion semantics, dependencies and a resource demand; it is not an operating-system
-   process identifier or thread identifier. Work executed by a process or by a thread can be represented
-   by the same kind of task vertex. A process may contain multiple threads, and either container may
+   *Processes, threads and the common task abstraction (informative).* A task here is a declared computation
+   activation with completion semantics, dependencies and a resource demand. It can be represented by a
+   process or a thread, including a process that groups several threads; the task is not merely its
+   operating-system identifier. Work executed by either can use the same kind of task vertex. A process may
+   contain multiple threads, and either container may
    execute many tasks over its lifetime. Thus the abstraction covers both without identifying their
    memory, isolation, scheduling or failure semantics. A process with internally parallel work must expose
    the corresponding subgraph or charge its actual simultaneous resource demand; it cannot be counted as
@@ -5276,7 +5279,95 @@ These are separate models and premises, not a crash-tolerance guarantee supplied
 Dijkstra–Scholten citation. A detector for CCME must respect its actual failure, fencing and recovery
 contract; this informative lemma implements no failover mechanism and grants no new release authority.
 
-**Two-node durable completion handoff (informative).** A deployment may require two distinct,
+**Tasks, artifacts and two-node continuation (informative).** Fix the task boundaries of a finite pinned
+semantic DAG. At that granularity a task activation may be a thread, a process, or a process grouping
+threads as described above. A composite process retains its internal dependencies and simultaneous
+resource demand; grouping does not make its parallel work free. A task's completion predicate states
+which required internal threads, operations and effects have settled before its output is final.
+
+An **artifact** is an identified task output, with the complete content and metadata needed by its
+declared consumers: for example a result value, file, output bundle or checkpoint. For synchronization,
+fix a finite immutable version with a manifest that binds the producing task and attempt, run and epoch,
+input identities, content identity, format, compatibility and verification policy. Include required
+transitively referenced objects. A reference alone is not the output bytes; an omitted required input
+or mutable alias cannot be hidden by declaring a smaller manifest. Not every task needs a nonempty
+output, and an artifact is not automatically a published package, release tag or completion record.
+An external effect needs its own authoritative outcome/reconciliation evidence; a copied artifact does
+not prove that an external destination committed that effect.
+
+The declared **two-node artifact-continuation policy** applies to every artifact used to continue
+computation across a task boundary, not just the final completion artifact. Every output another task
+actually needs is in scope. If threads are separate tasks in this model, their exchanged outputs are in
+scope too; temporary shared-memory operations wholly inside a composite task are not automatically new
+task-boundary artifacts. An unfinished changing stream is not one final immutable artifact: separately
+identify and gate each finite committed chunk if the consumer contract permits chunked continuation.
+This is an informative policy and conditional theorem, not a new conformance requirement or an assertion
+that current single-node execution in §28 already implements two-node verification for every output.
+
+For each artifact version `a`, use two distinct authorized compatible execution nodes, writer `W` and
+reader `R`, available throughout its synchronization through acknowledged handoff. They need not both be
+busy. Two thread/process identifiers or two aliases for the same node do not by themselves satisfy this
+condition; the deployment's node identity and failure model remain explicit. Use these ordered stages:
+
+1. After the producing activation meets its declared completion predicate, `W` commits the complete
+   immutable artifact and manifest to persistent storage under the required durability and retention
+   contract, waits for its durable acknowledgment, and runs every pinned required check on that exact
+   committed version. Join all accepting results and durably retain an identity-bound writer attestation.
+2. `R` independently reads the complete committed version and referenced contents, verifies identity,
+   completeness, compatibility and writer evidence, and reruns every required check. An in-memory copy,
+   a writer's success flag or a digest without the required bytes does not replace readback and checking.
+3. After both check families accept, the existing authorized path durably records an acceptance and
+   handoff acknowledgment bound to the artifact version, producer attempt, run/epoch and policy. `W`
+   observes it before planned departure. A downstream task becomes eligible only after every required
+   input artifact has such a valid acknowledged gate and all its other prerequisites hold. Its node
+   retrieves and verifies the same admitted bytes and atomically materializes its complete input set
+   before consuming it. Being a verifier confers no new publication, canonical-write or successor authority.
+
+Attestations and acknowledgments are separate records bound to the immutable payload; they are not
+recursive parts of their own verification input. Failed, missing, stale, interrupted or mismatched checks
+or receipts do not open the gate. Receipt authenticity, content integrity, complete declared inputs,
+sound checks, atomic input materialization, adequate retention and existing authority/fencing are premises.
+The receipt stays valid only for its pinned identity and scope. One acknowledged immutable artifact may
+serve several consumers within that scope without changing its content; each consumer still verifies its
+actual inputs. A new version or changed relevant policy/input requires a new gate. Cross-run reuse requires
+fresh admission under §28.5 and a gate bound to the current consuming run/epoch; an old receipt alone grants
+no current authority. Preserve the original producer provenance and bind separate gate/admission records
+to the current scope. No two independently
+fault-tolerant storage copies, consensus or independence of checker errors follows merely from two nodes.
+
+*Checked-continuation invariant.* Assume the initial inputs satisfy their declared admission contract,
+including this gate when an initial input is itself a task-produced artifact.
+Induct over a topological order of the finite semantic task DAG. For a source, initial-input admission and
+its other prerequisites establish its permitted inputs. For each later task, the gate for each incoming
+artifact follows its producer's completion, durable commit and both accepting check families. Matching
+identity and atomic materialization make the consumer read exactly those admitted checked versions;
+sound acceptance supplies their declared artifact predicates. The induction gives this invariant for
+every task that starts; the same rule gates its output before successors use it. It does not prove an
+arbitrary task implementation correct, that every task starts, or that all global obligations have settled.
+An artifact can be ready while unrelated work, provisioning, messages or external effects remain pending.
+The final-completion policy below separately requires the complete global settlement record.
+
+If there are finitely many required artifact versions, their producers finish with valid outputs, both
+nodes are available for each gate, all required storage/communication/receipt operations succeed in finite
+time, every check accepts in finite time and enabled stages receive fair service without deadlocked
+resource reservations, each gate eventually opens. These are conditional progress premises, not a
+universal two-node minimum or a guarantee under crashes, unsound checks or endless new artifacts. A missing
+second node makes this policy wait or refuse dependent continuation; it is not proof that the computation
+itself is impossible on one node. After a gate completes, one node can continue using the admitted artifact
+or provision another node under its authority and resources. The next artifact handoff again needs two
+available nodes; no perpetual two-node condition follows between completed handoffs. Planned departure
+still respects any other handoffs or obligations involving that node and the storage-retention contract.
+
+Charge persistence, readback, transfer, both check families, receipt operations and shared capacity in the
+expanded execution graph. Each artifact gate is a prerequisite of its consumers; an independent artifact
+gate or task may overlap it only when resources and dependencies permit. Parallel check maxima apply within
+eligible check phases, not to the whole pipeline. Modeling these gates does not bypass the task DAG rule,
+create new semantic work in a completed epoch, or replace §28.5's existing authenticated output transfer
+and §28.6's authority/recovery rules. No runtime replication, thread executor or new hardware result is claimed.
+
+**Two-node durable completion handoff (informative).** The per-artifact policy above includes intermediate
+outputs; the following stronger finalization policy additionally establishes global settlement. A deployment
+may require two distinct,
 authorized, compatible verifying nodes for a planned completion handoff: a writer `W` and a reader `R`.
 Both remain available from the start of finalization until the completion record has been safely handed
 off and acknowledged. Available does not mean continuously busy. This is a requirement of this declared
@@ -5340,8 +5431,9 @@ authority, state, compatible capacity and provisioner access. One does not guara
 or unlimited resources. That later provisioning is a separately accounted operation; a completed epoch
 is not silently reopened. New semantic work requires a new admitted/pinned plan under CCME. A creation
 request already pending and capable of reactivating the supposedly completed epoch would instead be an
-outstanding obligation, preventing its completion claim. No requirement for two nodes continues after
-the handoff, and no automatic replication or recursive-provisioning feature is implemented here.
+outstanding obligation, preventing its completion claim. No requirement for two nodes continues merely
+because of this completed handoff; a later artifact handoff under the policy above again requires its two
+verifiers. No automatic replication or recursive-provisioning feature is implemented here.
 
 All persistence, acquisition, transfer, checking and acknowledgment costs remain charged. The parallel
 verification maximum below applies separately to each eligible check phase; the full ordered handoff
