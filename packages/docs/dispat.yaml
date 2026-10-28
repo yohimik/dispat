@@ -118,7 +118,11 @@ scripts:
   test-report: |
     set -eu
     commit=${GITHUB_SHA:-$(git rev-parse HEAD)}
-    docker buildx build --file ../../Dockerfile.gotest --target measured-export \
+    set --
+    if [ -n "${DISPAT_DOCS_BUILDER:-}" ]; then
+      set -- --builder "$DISPAT_DOCS_BUILDER"
+    fi
+    docker buildx build "$@" --file ../../Dockerfile.gotest --target measured-export \
       --build-arg COMMIT="$commit" \
       --build-arg COVERAGE_MINIMUM="${DISPAT_COVERAGE_MINIMUM:-95}" \
       $(sh ../../scripts/buildx-cache.sh measured \
