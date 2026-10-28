@@ -4900,6 +4900,55 @@ execution saving exceeds its extra preparation. Thus rarity or frequency alone d
 which strategy is best. For fixed valid preparation and constant per-use cost, the average is
 `C/N + r`, approaching `r` as `N` grows; repeated invalidation prevents amortizing one setup forever.
 
+For the particular compiled strategy, split constant recurring cost into execution `E` and all remaining
+per-use cost `L`, including required loading/acquisition, validation, binding and dispatch, with sequential
+nonoverlapping accounting. Its average over `N`
+uses is `A_C(N) = C_C/N + L + E`. With fixed finite preparation, valid reuse and `E > 0`,
+`A_C(N)/E = 1 + L/E + C_C/(N E)` tends to `1 + L/E`. Thus execution dominates the recurring total
+when both `L/E` and `C_C/(N E)` are small. For any `epsilon > 0`, the conditions
+`L <= epsilon E/2` and `N >= 2 C_C/(epsilon E)` imply `A_C(N) <= (1 + epsilon) E`.
+This is a conditional approximation to execution time, not a universal maximum-execution-time law.
+Fixed nonnegligible `L` remains in the limit. Compilation can move work dependent on static inputs
+into preparation, while dynamic inputs, required checks and residual commands remain at runtime.
+Loading need not read the entire binary into RAM, and compilation alone proves neither minimal loading
+cost nor minimal residual execution time. The cost of an ahead-of-time binary belongs to its producer
+even if a consumer's timing interval starts afterward.
+
+**Established mathematical references for this trade-off.** The accounting and specialization principles
+above have established foundations; their application here is conditional on the stated cost and reuse
+model, not a new universal law that either phase must be maximized.
+
+1. **Amortized analysis.** R. E. Tarjan, *Amortized Computational Complexity* (1985),
+   [§§1-2, pp. 306-308](https://www.math.u-szeged.hu/~hajnal/courses/MSc_AlgoBony/2021/Tarjan.pdf)
+   ([DOI](https://doi.org/10.1137/0606031)), analyzes complete operation sequences without requiring
+   a probability distribution. Its potential-method identity is
+   `sum_i t_i = sum_i a_i + Phi_0 - Phi_N`, where
+   `a_i = t_i + Phi_i - Phi_{i-1}`; it follows by telescoping. This supports the general accounting
+   method. The setup-versus-reuse threshold above follows directly by subtraction, without needing
+   a potential function or implying that compiled execution is always cheaper.
+2. **Staging and partial evaluation.** N. D. Jones, C. K. Gomard and P. Sestoft,
+   [*Partial Evaluation and Automatic Program Generation* (1993)](https://raspi.itu.dk/people/sestoft/pebook/pebook.html),
+   §§1.1-1.4 and 4.3, formalize specialization: if a correct specializer terminates with
+   `p_s = mix(p,s)`, then `p_s(d)` has the semantics of `p(s,d)` for admitted dynamic inputs `d`.
+   Specializing an interpreter to a fixed source program gives the first Futamura projection, originating
+   in Y. Futamura's [1971 paper](https://fi.ftmr.info/PE-Museum/PE-Original-English1971.pdf).
+   This explains moving static-input work to preparation. The book's Chapter 6 separately studies
+   speedup under particular language and specializer models: semantic preservation alone is no
+   universal speedup bound or optimal-DAG theorem, and preparation remains charged here. Section 1.2.1
+   (p. 5) explicitly compares specialization plus residual execution with unspecialized execution, and
+   motivates reuse when static inputs change less often than dynamic ones.
+3. **Rent-or-buy with a lower recurring rate.** Z. Lotker, B. Patt-Shamir and D. Rawitz,
+   [*Ski rental with two general options* (2008)](https://doi.org/10.1016/j.ipl.2008.07.009),
+   [§1 and Theorem 1.1](https://www.eng.biu.ac.il/~rawitzd/Papers/2slopes.pdf), study an upfront switching
+   cost that reduces subsequent usage cost, including unknown usage duration. In its fixed-cost,
+   one-way-switch model, let interpretation cost `r_I` per use, the cheaper mode cost `r_C < r_I`,
+   and the incremental switch cost be `B > 0`. After removing the common `N r_C`, the two offline
+   choices cost `N(r_I-r_C)` and `B`; their minimum gives the familiar break-even comparison.
+   `B` need not equal `C_C-C_I` once interpretation has started: sunk setup, profiling and migration
+   may differ. The paper's optimal randomized online result has its own premises; this specification
+   does not import its competitive guarantee for varying costs, invalidation, overlapping work or CCME
+   release authority.
+
 For example, in illustrative time units let `C_I = 0`, `C_C = 12`, `r_I = 5` and `r_C = 2`.
 The strategies tie at four uses; compilation wins from five uses onward. Zero `C_I` means no separately
 charged initial phase, not zero discovery: its per-use discovery is included in `r_I`. These are model

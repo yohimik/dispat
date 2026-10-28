@@ -974,3 +974,16 @@ identity, residual planning and irreversible-effect authority still prevent blin
 The practical rule measures and compares the full discovery-and-execution account on the same task and
 resources, with preparation, reuse, cache state and measurement variability disclosed. Such measurements
 establish improvements among tested candidates under the stated conditions rather than a global optimum.
+
+## 2026-10-28: Classical foundations for staging and amortization
+
+Section 13.11 now cites Tarjan's amortized-analysis framework, Jones, Gomard and Sestoft's specialization
+semantics and Futamura's first projection, and Lotker, Patt-Shamir and Rawitz's two-option ski-rental
+model. The references support different claims: cost accounting, semantic preservation across stages,
+and paying an upfront switching cost for a smaller recurring rate. They do not imply that either
+discovery or execution time should be maximized, or that compilation finds a universally optimal DAG.
+The adaptive switch cost is distinguished from the difference between two upfront setup costs.
+The compiled average `C_C/N + L + E` approaches `L + E`; execution dominates only when recurring overhead
+and amortized preparation are small relative to execution. A stated epsilon
+bound makes the limit precise. The amendment adds no runtime feature or benchmark and preserves the
+existing invalidation, input identity, authority and effect-recovery obligations.
