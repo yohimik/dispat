@@ -1174,3 +1174,18 @@ increase the rate per output bit, and extra random inputs require joint analysis
 inheriting its security results. NIST entropy-source guidance is a separate assessment reference. Existing
 task/artifact separation, capture costs, two-node admission, authority and recovery conditions remain in
 force. This informative clarification makes no runtime, hardware or cryptographic validation claim.
+
+## 2026-10-29: Varying hardware timing and recorded entropy premises
+
+The clock discussion now addresses nonconstant drift, execution duration and message delay explicitly.
+A deterministic model with changing positive clock rates and changing positive delays shows why those
+qualitative conditions alone still do not imply entropy; it is not asserted as a physical hardware model.
+An explicit quantization example shows that even nondegenerate analog noise can produce a constant
+recorded symbol. A sufficient measurement lemma bounds each symbol's conditional probability, including
+its observation rule and prior history. A bounded conditional density and bounded support-intersection
+length of each quantizer bin provide one derivation; saturation, tails and postselection need their own
+valid bounds. The existing conditional induction then bounds joint recorded entropy, without inferring
+independence from node count or guaranteeing entropy after arbitrary processing. NIST source assessment
+guidance supports keeping the physical source justification separate from the mathematical implication.
+This informative clarification establishes no hardware noise law or measured entropy rate and preserves
+all capture, continuation, authority and recovery requirements.

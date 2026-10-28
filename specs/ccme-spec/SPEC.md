@@ -4053,6 +4053,24 @@ trace remains deterministic by transition induction. Node count alone therefore 
 three-node base case nor an induction step guaranteeing entropy. Unknown offsets, physical jitter,
 algorithmic nondeterminism and adversarial unpredictability are distinct properties.
 
+*Varying clock rates and delays.* Requiring those quantities to change does not supply the missing
+probabilistic premise. In normalized time units, let
+`C_i(t) = t + b_i + 0.01 sin(t+i)`, so its nonconstant rate lies in `[0.99, 1.01]`.
+Let a message sent at time `t` have delay `d_ij(t) = 2 + 0.1 sin(t+i+j)` and a task starting then have
+execution duration `e_i(t) = 1 + 0.1 cos(t+i)`. These positive, nonconstant delays lie in `[1.9, 2.1]`
+and `[0.9, 1.1]`, respectively. With fixed initial state, deterministic event rules and tie-breaking,
+the clocks, task completions, message arrivals and observer outputs are still determined. This is a
+logical countermodel to the qualitative changing-rate/delay premises, not an assertion that physical
+hardware follows these functions. Actual hardware may include stochastic timing effects; their existence,
+conditional distribution and visibility in the recorded output require separate justification.
+
+Even a stochastic physical quantity need not yield a random recorded value. In normalized measurement
+units, a sample uniformly distributed in `[-0.01, 0.01]` rounds to zero with probability one when recorded
+to the nearest integer. Shared variations can also be correlated across nodes or cancel in differences;
+an observer can discard variation when computing its synchronization result. Thus nonzero analog noise,
+different physical nodes and changing timings alone do not ensure positive entropy in the captured
+artifact. Clock resolution, measurement rules and which outputs are retained belong to the source model.
+
 Timing fluctuations in a physical implementation or competing thread accesses may serve as an entropy
 source under a justified source and observation model. This is not limited to pseudorandom generators,
 but it requires evidence beyond inability to synchronize clocks exactly. The broad idea predates this
@@ -4082,6 +4100,38 @@ conditional bounds are additional source premises; each new node need not supply
 repeated observations cannot be credited with fresh entropy merely by counting nodes or summing marginal
 entropies. Later disclosures must also be included in the side information for any claim against them.
 This is a finite mathematical statement, not evidence that physical samples satisfy those premises.
+
+*A sufficient measurement model.* Let `V_k` be the real-valued timing quantity actually measured at
+step `k`, and let `X_k = Q_k(V_k)` be its finite recorded symbol. The measurement rule may depend on
+the fixed side information `z` and preceding recorded history; fix it for each such conditional case.
+If every recorded symbol has conditional probability at most `p_k < 1` for every positive-probability
+preceding history, the previous induction applies with `h_k = -log2 p_k > 0`. These are bounds on
+recorded symbols, not on unmeasured physical fluctuations, and they must hold relative to the information
+and control available to the observer or adversary in the claim.
+
+One way to derive such a bound is a conditional density model. Suppose, for every such history, `V_k`
+has a probability density bounded by `M_k > 0` on its conditional support `S_k`. Suppose each recorded
+symbol's preimage under `Q_k`, intersected with `S_k`, has total length at most `Delta_k > 0`, with
+`M_k Delta_k < 1`. Integrating the density over that preimage gives
+`P(X_k=x | Z=z, X_<k) <= M_k Delta_k`; take `p_k = M_k Delta_k`. The product is dimensionless and
+min-entropy is assigned to the discrete symbol, not to a dimensional density. The support and density
+may depend on history, but the stated bounds must hold uniformly over the relevant histories. No
+independence between nodes is needed once these conditional bounds are established.
+
+This sufficient density model must include every possible output: a finite quantizer cannot cover the
+whole real line with only finite-length preimages. Saturation or tail bins need separate probability
+bounds if the support-intersection condition does not apply. Discarding or selecting samples changes
+the conditional distribution, so a bound for the original samples is not automatically a bound for
+the retained sequence. Correlation, sampling rate, environmental drift and available side information
+must be reflected in whichever model justifies the bounds. Proving this implication does not establish
+that a particular machine satisfies its premises, nor that a further processing step preserves them.
+
+[NIST SP 800-90B, sections 3 and 4](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-90B.pdf)
+requires an account of the noise mechanism, a technical entropy argument, operating conditions and
+assessment of digitized output, together with health tests. A finite observed trace or successful
+statistical test alone cannot prove the uniform conditional bounds for every future history. The
+mathematical implication and evidence supporting a physical source model remain separate obligations.
+No particular hardware source, stochastic law or entropy bound is established by this specification.
 
 For a fixed deterministic conditioner `Y=f(X)`, where `X` includes all variable inputs and state used
 by the conditioner, each conditional output probability is the sum of its input preimage probabilities.
