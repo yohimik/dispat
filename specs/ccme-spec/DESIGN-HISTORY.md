@@ -1106,3 +1106,22 @@ premises; it does not assert global completion or arbitrary task correctness. Ch
 require new gates; one surviving node can continue after handoff, but the next artifact synchronization
 again requires two nodes. Final completion separately accounts for all global obligations. The policy is
 informative and does not change the current single-node runtime contract or implement replication.
+
+## 2026-10-28: Distributed-system entities and productive finite-task streams
+
+Tasks represent process/thread work, artifacts carry input/output data, and nodes run tasks and pipeline
+artifacts. Section 13.11 makes node identity, capacity, authority and failure
+boundaries explicit, including the distinction between an OS environment and hardware capacity. External
+input artifacts receive the same two-node gate with actual source/import provenance, rather than an
+invented producing task. A finite-task contract is separate from arbitrary process termination.
+A productive ongoing service can complete every finite prefix of finite task batches under successful
+finite stages, fair adequate capacity, admitted inputs, two-node gates and sustainable state/resources.
+Induction proves prefix progress; a separate execution-level non-Zeno condition rules out infinitely many
+modeled task, gate, admission or batch start/completion events in bounded time. Restricting only batch
+completions could hide infinitely many earlier events inside unfinished batches. This does not finish an
+infinite object or change the finite pinned-run contract.
+The proposed only-all-node-loss stopping claim requires a restricted policy that maintains every progress
+premise while any actor survives and excludes planned stops and independent restoration after total loss.
+Finite workload completion, planned shutdown, blocked inputs, deadlock, resource exhaustion and loss of the
+second verifier refute the unrestricted claim. Permanent cessation remains distinct from completed work.
+The clarification is informative; it adds no runtime feature, authority or empirical performance result.

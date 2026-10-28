@@ -158,7 +158,8 @@ to be interpreted as described in RFC 2119.
 | **Choreographer** | Another node running or proposing tasks without first-node authority (§28.1). |
 | **Execution link** | An authenticated choreographer endpoint, distinct from a repository or fleet link (§28.2). |
 | **Task (execution theory)** | A declared computation activation represented by a process or thread; a process may group multiple threads. Its boundary, dependencies and actual resource demand are fixed by the model, not by the count of OS identifiers (§13.11). |
-| **Artifact (execution theory)** | An identified output of a task, including the content and metadata required to use it. The informative two-node continuation policy in §13.11 gates every artifact used by a downstream task; it is distinct from an ordinary release record. |
+| **Artifact (execution theory)** | Identified input or output data for a task, including required content, metadata and provenance. An output may become another task's input. The informative two-node continuation policy in §13.11 gates every consumed artifact version, including admitted external inputs; an artifact is distinct from an ordinary release record. |
+| **Node (execution theory)** | A declared execution resource running tasks and transferring artifacts, realized by a machine, processor, OS-managed execution environment or device. Identity, usable capacity, compatibility, authority and failure boundaries remain explicit; these labels are not interchangeable runtime identities (§13.11). |
 | **Task receipt** | Identity-bound execution evidence; never an ordinary release or rollback-completion record (§28.6). |
 
 `max(a, b)` over bumps returns the higher of the two in the ordering above.
@@ -5285,22 +5286,29 @@ threads as described above. A composite process retains its internal dependencie
 resource demand; grouping does not make its parallel work free. A task's completion predicate states
 which required internal threads, operations and effects have settled before its output is final.
 
-An **artifact** is an identified task output, with the complete content and metadata needed by its
-declared consumers: for example a result value, file, output bundle or checkpoint. For synchronization,
-fix a finite immutable version with a manifest that binds the producing task and attempt, run and epoch,
+An **artifact** is identified input or output data for a task, with the complete content and metadata
+needed by its declared consumers: for example an input dataset, result value, file, output bundle or
+checkpoint. An output may be the input of another task. For synchronization, fix a finite immutable
+version with a manifest that binds the producing task and attempt, run and epoch,
 input identities, content identity, format, compatibility and verification policy. Include required
 transitively referenced objects. A reference alone is not the output bytes; an omitted required input
 or mutable alias cannot be hidden by declaring a smaller manifest. Not every task needs a nonempty
 output, and an artifact is not automatically a published package, release tag or completion record.
 An external effect needs its own authoritative outcome/reconciliation evidence; a copied artifact does
-not prove that an external destination committed that effect.
+not prove that an external destination committed that effect. An externally supplied initial input has
+its actual source provenance and an authorized import/admission attempt, rather than a fictional producing
+task. Before consuming it, the same policy uses an admission writer to persist the full immutable version
+and run all checks, a distinct reader to read and recheck it, and the bound durable acknowledgment below.
+For this case, source/import identity replaces producer/attempt identity; all other gate premises remain.
+Identifying an input for import does not authorize consumption before this gate completes.
 
 The declared **two-node artifact-continuation policy** applies to every artifact used to continue
-computation across a task boundary, not just the final completion artifact. Every output another task
-actually needs is in scope. If threads are separate tasks in this model, their exchanged outputs are in
-scope too; temporary shared-memory operations wholly inside a composite task are not automatically new
-task-boundary artifacts. An unfinished changing stream is not one final immutable artifact: separately
-identify and gate each finite committed chunk if the consumer contract permits chunked continuation.
+computation, including external initial inputs and outputs crossing task boundaries, not just the final
+completion artifact. Every artifact a task actually needs is in scope. If threads are separate tasks in
+this model, their exchanged outputs are in scope too; temporary shared-memory operations wholly inside a
+composite task are not automatically new task-boundary artifacts. An unfinished changing stream is not
+one final immutable artifact: separately identify and gate each finite committed chunk if the consumer
+contract permits chunked continuation.
 This is an informative policy and conditional theorem, not a new conformance requirement or an assertion
 that current single-node execution in §28 already implements two-node verification for every output.
 
@@ -5309,8 +5317,10 @@ reader `R`, available throughout its synchronization through acknowledged handof
 busy. Two thread/process identifiers or two aliases for the same node do not by themselves satisfy this
 condition; the deployment's node identity and failure model remain explicit. Use these ordered stages:
 
-1. After the producing activation meets its declared completion predicate, `W` commits the complete
-   immutable artifact and manifest to persistent storage under the required durability and retention
+1. After the producing activation meets its declared completion predicate, or the external input is
+   fully acquired and identified for admission as a fixed version with its source/import identity,
+   `W` commits the complete immutable artifact and manifest to persistent storage under the required
+   durability and retention
    contract, waits for its durable acknowledgment, and runs every pinned required check on that exact
    committed version. Join all accepting results and durably retain an identity-bound writer attestation.
 2. `R` independently reads the complete committed version and referenced contents, verifies identity,
@@ -5335,11 +5345,12 @@ no current authority. Preserve the original producer provenance and bind separat
 to the current scope. No two independently
 fault-tolerant storage copies, consensus or independence of checker errors follows merely from two nodes.
 
-*Checked-continuation invariant.* Assume the initial inputs satisfy their declared admission contract,
-including this gate when an initial input is itself a task-produced artifact.
+*Checked-continuation invariant.* Assume the initial inputs satisfy their declared admission contract
+and the same gate, using source/import provenance for external inputs.
 Induct over a topological order of the finite semantic task DAG. For a source, initial-input admission and
-its other prerequisites establish its permitted inputs. For each later task, the gate for each incoming
-artifact follows its producer's completion, durable commit and both accepting check families. Matching
+its other prerequisites establish its permitted inputs. For each later task, each incoming artifact gate
+follows producer completion or identification for an authorized source/import attempt, then durable commit
+and both accepting check families; all other prerequisites must also hold. Matching
 identity and atomic materialization make the consumer read exactly those admitted checked versions;
 sound acceptance supplies their declared artifact predicates. The induction gives this invariant for
 every task that starts; the same rule gates its output before successors use it. It does not prove an
@@ -5364,6 +5375,114 @@ gate or task may overlap it only when resources and dependencies permit. Paralle
 eligible check phases, not to the whole pipeline. Modeling these gates does not bypass the task DAG rule,
 create new semantic work in a completed epoch, or replace §28.5's existing authenticated output transfer
 and §28.6's authority/recovery rules. No runtime replication, thread executor or new hardware result is claimed.
+
+**Distributed systems and indefinite finite-task streams (informative).** In this execution-theory
+model, a distributed system consists of tasks, their input/output artifacts, and nodes that execute tasks
+and pass admitted artifacts to dependent tasks. A task activation can be a thread, a process with one or
+more threads, or a composite represented by its internal task subgraph and actual resource demand.
+Sequential, parallel and mixed execution all fit this model; process/thread representation does not
+remove dependencies or decide whether horizontal or vertical scaling is best. A node is a declared
+execution resource realized by a machine, processor, OS-managed execution environment or device. The OS
+is an execution environment, not extra hardware capacity. A processor within a machine and its containing
+machine cannot be counted as independent resources for the same capacity. Mapping these abstractions to
+§28's authenticated execution nodes must preserve identity, compatibility, capacity, authority and the
+stated failure model. Two labels for one underlying node do not satisfy a distinct-node artifact gate.
+
+A pipeline can overlap tasks and artifact gates only where their actual dependencies and shared resources
+allow it. A task consumes complete admitted inputs, performs its declared computation, and produces its
+identified outputs; task completion and admission of those outputs are separate stages. Every consumed
+artifact uses the preceding two-node policy, including source/import admission for an external input.
+The final global completion record has the additional closed-admission and obligation-accounting premises
+below. These theory definitions add no runtime backend, replication mechanism or new release authority.
+
+*Finite task premise.* In the following model each admitted task has finite input/state and a finite
+computation to its declared completion once its prerequisites and sufficient service are supplied.
+Composite completion includes its required internal work and accounted effects; finitely many instructions
+alone do not make an unbounded wait, retry or handoff finite. Successful finite storage, communication,
+verification and settlement are separate premises. Finiteness is a contract to establish for this model,
+not a theorem that arbitrary processes or threads halt. A long-running computation may instead expose
+finite bounded-step activations with explicit continuation-state artifacts if pausing, resuming and all
+relevant effects preserve its semantics. Completing such a slice does not mean its enclosing computation
+has completed or produced a final answer; a nonterminating algorithm is not made terminating by slicing it.
+
+*A productive stream theorem.* Consider a separate ongoing service, rather than one finite CCME run.
+Let `B_1, B_2, ...` be an effective sequence of nonempty finite task batches. Each batch has a finite DAG
+including its actual required operations and artifact gates. Its inputs come from finitely many earlier
+batches or explicitly admitted external sources, with no dependency on a future batch; external inputs
+needed by each batch become available after finite time. Finite batch size and preceding indices give
+finite dependency ancestry for every fixed batch. Required task boundaries, inputs, effects and completion
+predicates are fixed before that batch executes. A generator must produce and admit each next batch in
+finite time when its preceding requirements have settled; merely naming an infinite set of tasks does
+not supply an effective generator or usable input data.
+
+Assume throughout the actual execution that each task finishes successfully with valid outputs after
+finite service, each required artifact gate has two distinct authorized compatible nodes available through
+handoff, and required storage, communication and receipt operations succeed in finite time. All pinned
+checks accept in finite time. Tasks, gates, admission and any necessary replacement/provisioning receive
+fair service with eventual compatible capacity, no deadlock and no unbounded retry or wait. These are
+wall-clock progress premises as well as finite-work premises. They include enough state, storage, energy,
+retention and authority for every finite prefix, and exclude planned cancellation or a terminal input
+failure. Storage may be reused only after every consumer and recovery obligation permits reclamation;
+an ever-growing archive requires correspondingly growing capacity. Two nodes need not remain continuously
+available between completed gates, but a survivor must actually be able to obtain the second verifier for
+each later gate. A surviving actor alone does not establish any of these conditions.
+
+Then every finite prefix `B_1, ..., B_n` completes and admits its required outputs at some finite time
+`t_n`. Proof: the first batch has finitely many admitted inputs and a finite acyclic expanded graph.
+Topological induction, finite successful stages and the service premises complete its tasks and gates.
+Suppose the first `n` batches have completed. The generator/admission for the next batch and its finite
+external inputs become ready in finite time. Its earlier-batch inputs are available with the required
+retention and current-scope admission; the same finite-graph argument completes batch `n + 1` and its gates.
+Induction proves the claim for each natural `n` along the actual execution. Later batches may overlap
+where allowed, but cannot starve a fixed earlier batch. The proof claims neither a uniform latency bound
+nor a finite time at which the entire infinite service is completed.
+
+For continuation over unbounded physical time, additionally exclude Zeno behavior throughout the execution:
+only finitely many modeled task, artifact-gate, admission and batch start or completion events may occur
+in any bounded wall-clock interval. In particular, batch completions are locally finite. This implies
+that the first times `t_n` at which the first `n` batches are all complete are unbounded. The converse is
+insufficient when batches can complete out of order: slowly finishing odd batches could hide infinitely
+many even-batch completions in a bounded interval. Restricting only batch completions is also insufficient
+for the whole execution: infinitely many early task or gate completions could be hidden in unfinished
+batches whose last tasks finish later. Sequential batches with a common positive lower bound on elapsed
+duration and finitely many modeled events per batch supply one sufficient non-Zeno model, but that
+restriction is not required in general. Merely
+positive finite durations are insufficient: sequential durations `2^-n`, for `n >= 1`, have prefix totals
+`1 - 2^-n < 1`. That idealized summable-time construction is excluded, not a method of finishing infinite
+work on a physical machine. With the execution-level non-Zeno premise, the theorem describes unboundedly
+many completed finite batches and tasks over unbounded time. It does not compute a noncomputable sequence
+or an arbitrary infinite object to completion. Fair progress can also coexist with an unbounded queue and
+no uniform response bound.
+
+*When does continuation cease?* Finite tasks alone do not prove that only loss of all nodes can stop a
+system. A finite workload can complete with every node alive; an ongoing service can be intentionally
+stopped; available nodes can wait forever on missing inputs, deadlock, lose storage or authority, or be
+unable to supply the second verifier at the next artifact gate. Each example violates a specific
+productive-stream premise. If a process never finishes its declared task, the finite-task premise itself
+fails. Turning an unseeded prerequisite cycle into a pipeline does not resolve it.
+
+A restricted only-total-loss corollary can be stated for a separately justified deployment policy.
+Let `A(s)` include every available actor capable of work or restoration, as in the closed-system cessation
+lemma above. Suppose the policy admits endlessly productive work, permits no planned stop, and preserves
+all the progress and non-Zeno premises for every continuation in which `A(s)` never becomes empty. In
+particular, any survivor must retain the authority, state and resources to restore the two-node gates;
+this restoration property is an additional assumption, not supplied by node count. Exclude independent
+restart and autonomous late effects after `A` becomes empty. If progress permanently ceases, `A` must
+become empty at some finite time: otherwise the productive-stream theorem gives arbitrarily late completed
+prefixes, contradicting cessation. Once empty, the earlier induction makes it absorbing. Only if the allowed
+transitions make crashes the sole way to empty `A` can this be called cessation by unexpected total-node
+loss. Planned total shutdown has the same absorbing result when allowed. This is a conditional model
+corollary, not a universal distributed-systems theorem, and cessation with stranded work is not completion.
+
+The distinction between safety and eventual progress is developed in Owicki and Lamport,
+[*Proving Liveness Properties of Concurrent Programs*](https://lamport.org/pubs/liveness.pdf), especially
+its introduction and fairness discussion. That reference supplies a framework for liveness reasoning,
+not a guarantee that this deployment meets its premises. The stream theorem above is an induction over
+finite prefixes. It does not contradict the earlier finite ranked-activation termination theorem, whose
+closed finite-generation premise excludes this productive infinite stream. In CCME, new semantic work
+still requires a new pinned plan and admission epoch; composing finite runs into a service never silently
+widens a completed run, reuses an old receipt as current authority, or makes a cyclic hard-prerequisite
+graph executable. No infinite runtime execution, hardware measurement or new scheduler is claimed.
 
 **Two-node durable completion handoff (informative).** The per-artifact policy above includes intermediate
 outputs; the following stronger finalization policy additionally establishes global settlement. A deployment
