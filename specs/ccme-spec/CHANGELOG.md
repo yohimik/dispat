@@ -1,5 +1,66 @@
 # Changelog
 
+## specs/ccme-spec/v3.1.0-rc.9 (2026-10-28)
+
+### Fixes
+
+- cite compilation trade-off foundations ([22b07b2](https://github.com/yohimik/dispat/commit/22b07b2c5883d756a1be8c7417cc82ec8630fa6f)) (by yohimik, Codex)
+  Connect reuse cost accounting to amortized analysis, partial evaluation and ski-rental models. State the conditions under which compiled runs approach execution-dominated cost, with all recurring overhead charged.
+
+  Validate the references and algebra independently, run CCME checks and release fixtures, and verify the symbolic identities and exact rational examples.
+
+- prove compilation reuse break-even ([357d096](https://github.com/yohimik/dispat/commit/357d096f7ca665f2593b52c537c2cbe06a091e4e)) (by yohimik, Codex)
+  Account for setup and per-use discovery, validation and execution costs.
+  State conditional reuse thresholds and measure complete same-task costs
+  without claiming a universally fastest mode or optimal compiled graph.
+
+- state two-phase task completion bound ([15b9dbe](https://github.com/yohimik/dispat/commit/15b9dbe48925f1026456dd9b3922487428bdc135)) (by yohimik, Codex)
+  Define discovery join time from actual acquisition completion times and
+  charge post-join execution and dispatch wait. Preserve positive-latency,
+  overlap, shared-resource and worst-case accounting premises.
+
+- account for discovery and compiled-plan acquisition ([bc06423](https://github.com/yohimik/dispat/commit/bc06423e66225a1ad8d9c9eef4cbc0ce51567a39)) (by yohimik, Codex)
+  Prove the sufficient-information requirement and scope positive discovery
+  latency and representation-access bounds. Distinguish semantic discovery,
+  compiled acquisition, incremental loading and retained-state reuse.
+
+- require chains for minimal topology ([9863f25](https://github.com/yohimik/dispat/commit/9863f25bc9357f90f224611248f5962072a43c6d)) (by yohimik, Codex)
+  Join existing path components at free endpoints and reject branches while preserving links. Recompose between joins, require owner roster declarations before creating links, and report incomplete repairs. Keep star as the explicit entry-hub shape and require selection for newly discovered interactive suggestions.
+
+  Update the specification, CLI help, topology documentation and regression coverage.
+
+- document classical minimum-edge induction proof ([6724d7e](https://github.com/yohimik/dispat/commit/6724d7e72982adedbfe4a98e9c864c00aba2f865)) (by yohimik, Codex)
+  Prove the n-1 lower bound for connected undirected graphs by strong induction
+  and characterize equality by trees. Relate the established result to fleet links.
+
+- clarify distributed clock limits and event histories ([c663b41](https://github.com/yohimik/dispat/commit/c663b41cb111008e1e07ef46acb760e9f9687c15)) (by yohimik, Codex)
+  State the finite-transcript limitation for exact physical clock offsets under
+  unknown delays, and prove deterministic replay from a fenced observer history.
+  Separate acceptance order, source causality, timing uncertainty and effect evidence.
+
+- define same-task device and compiler optimality ([92d369f](https://github.com/yohimik/dispat/commit/92d369f05021a974473a96724c45fc0e15605a31)) (by yohimik, Codex)
+  Formalize joint designs under a resource budget, prove finite minimum-time attainment and Pareto selection, and state the evidence required for same-task experiments and broader optimality claims.
+
+- clarify word-operation scaling and useful capacity ([7fe4b40](https://github.com/yohimik/dispat/commit/7fe4b40a54706094534ecac73a23d69130eec3aa)) (by yohimik, Codex)
+  Apply work and span bounds to fixed word-operation DAGs. Distinguish sequential dependencies, word width and operation slots, and define ideal saturation separately from physical resource costs.
+
+- clarify minimum critical path across execution DAGs ([f1bc701](https://github.com/yohimik/dispat/commit/f1bc701ee3d27ade6d16f7c6aaf27151959fd788)) (by yohimik, Codex)
+  State the minimum-over-DAGs, maximum-over-paths formulation while retaining every task, hard prerequisite and slot constraint. Keep release intent fixed and preserve normal plan validation.
+
+- prove optimal scheduling for undirected conflicts ([6123812](https://github.com/yohimik/dispat/commit/6123812d7c0828931148f16a5b1bb87e6dd002be)) (by yohimik, Codex)
+  Distinguish bidirectional relations from hard prerequisites. Prove an attained minimum makespan by finite order and slot enumeration, with a canonical tie rule, explicit input assumptions and separately charged planning costs.
+
+- extend theorem to cyclic release intent ([8f5a6e3](https://github.com/yohimik/dispat/commit/8f5a6e3689913ee4d5d93c95690652b6dcc2faad)) (by yohimik, Codex)
+  Prove finite cyclic intent determinacy and least repository closure, then state the enabledness, input and capacity premises for executing every task once. Preserve hard-cycle refusal and publication recovery guarantees.
+
+- define timestamped interpretation pickups and bounded attempts ([5552fc8](https://github.com/yohimik/dispat/commit/5552fc8bdd38265f74e797605976809bcb9cc41b)) (by yohimik, Codex)
+
+### Authors
+
+- yohimik
+- Codex
+
+
 ## specs/ccme-spec/v3.1.0-rc.8 (2026-10-27)
 
 ### Features
