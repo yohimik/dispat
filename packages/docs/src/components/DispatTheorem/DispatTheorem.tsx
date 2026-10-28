@@ -51,6 +51,7 @@ export const DispatTheorem: FC<DispatTheoremProps> = (props) => {
         <span className={styles.conditionsTitle}>Exact under these ideal conditions</span>
         <ul>
           <li>One fixed, finite dependency graph with no cycles includes all required work and delays.</li>
+          <li>Each step represents sequential work; overlapping activities are separate steps linked by their actual dependencies.</li>
           <li>Enough compatible capacity to start every ready step immediately.</li>
           <li>No failures or unmodeled waits.</li>
         </ul>
