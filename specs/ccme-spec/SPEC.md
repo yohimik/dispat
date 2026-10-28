@@ -5184,6 +5184,74 @@ These are separate models and premises, not a crash-tolerance guarantee supplied
 Dijkstra–Scholten citation. A detector for CCME must respect its actual failure, fencing and recovery
 contract; this informative lemma implements no failover mechanism and grants no new release authority.
 
+**Integer rewards, ticks and a stopped equilibrium (informative).** A node may be modeled as a player
+and one local action as a tick. Its integer points are rewards assigned by declared game rules, not
+automatically elapsed-time savings, remaining work or evidence that a compiler improved. This is a
+separate model from the hidden-duration execution-policy game above.
+
+*A bounded-progress tick lemma.* Fix a closed transition system with initial state `s0`. Suppose there
+is a global integer potential `Phi(s)` with `Phi(s) <= B` for a fixed finite integer `B`. Every tick
+leaves the potential unchanged or increases it; call a strictly increasing tick a progress tick.
+Suppose at most `Z` non-progress ticks occur over any admitted play, for a fixed finite integer `Z >= 0`.
+Then every play has at most
+
+`B - Phi(s0) + Z`
+
+ticks. After `q` progress ticks, induction gives `Phi >= Phi(s0) + q`, since a positive integer
+increment is at least one. The upper bound gives `q <= B - Phi(s0)`; adding the other ticks proves
+the claim. A finite number of non-progress ticks per play suffices for finiteness without a uniform
+`Z` or this uniform numerical bound. All state-changing events must be included or preserve these
+conditions: resets, new players, retries or newly admitted work cannot silently replenish the budget.
+This bounds ticks, not wall-clock time. Eventual stopping in finite time additionally needs finite
+tick durations and finite waits or conclusive settlement. Successful completion additionally needs
+the obligation-settlement conditions above; a deadlocked or crashed system can stop with work pending.
+
+*A potential-game specialization.* Fix a finite nonempty set of players and finite nonempty strategy
+sets `X_i`, a joint profile `x`, and integer payoffs `u_i(x)`. Assume a global integer potential bounded
+above by `B` such that every strictly profitable unilateral deviation satisfies
+
+`u_i(x_i', x_-i) > u_i(x)  =>  Phi(x_i', x_-i) > Phi(x)`.
+
+This is a generalized ordinal potential condition; it does not require payoff differences to equal
+potential differences.
+Commit only such improving deviations, one at a time, or in an order whose committed states each
+satisfy that condition. Independently improving concurrent proposals evaluated against stale profiles
+do not suffice. There are at most `B - Phi(x0)` committed improvements, by the tick lemma. If a
+profitable deviation exists, require the policy to find and commit one after finitely many auxiliary
+ticks; otherwise require it to establish that none exists and stop after finitely many auxiliary ticks.
+For example, finite strategy sets and terminating payoff evaluations permit a complete finite search;
+its time and work must still be charged. There are finitely many improvement phases and a final
+search, so there are finitely many total ticks under this policy. At its final profile `x*`,
+
+`u_i(x_i', x*_-i) <= u_i(x*)` for every player `i` and every `x_i' in X_i`.
+
+This is exactly the definition of a pure Nash equilibrium. The proof establishes no global payoff
+maximum, optimal compilation, polynomial search bound or unique equilibrium. The classical foundation
+is Monderer and Shapley, [*Potential Games*, Games and Economic Behavior 14(1), 124–143 (1996)](https://doi.org/10.1006/game.1996.0044),
+whose finite improvement property for finite ordinal potential games is proved in Lemma 2.3 and whose
+Lemma 2.5 covers generalized ordinal potentials
+([paper](https://people.csail.mit.edu/jrennie/trg/papers/monderer-potential-96.pdf)).
+
+A profile in which all players choose to stop is a Nash equilibrium only when no player's unilateral
+admissible strategy deviation can increase its payoff. For a simple closed example, give each player
+one independent, finitely executable obligation and a completion bit `x_i in {0,1}`. Give every player
+the common payoff `sum_i x_i`; a `0 -> 1` move requires actual settlement of that player's obligation.
+Strict improvement permits at most one such move per player, and the all-completed profile has no
+profitable deviation. After finite settlement and shutdown of auxiliary ticks, no player needs to
+tick. This example assigns rewards to completion; it does not derive completion from arbitrary rewards.
+Game equilibrium alone does not stop a background clock, polling loop or pending message. Global
+quiescence still requires the closed-system accounting and no pending reactivation or late effects.
+
+Integer rewards alone are insufficient: paying one point for each unrestricted tick permits an infinite
+reward sequence, while zero-reward self-loops permit infinite ticking even at a weak equilibrium.
+An individual player's payoff gain need not increase a bounded global potential. Failed optimization
+attempts may have zero improvement and must be covered by the auxiliary-tick stopping rule. Positive
+real improvements can also continue forever with finite total gain: the earlier reuse decrement
+`C/[N(N+1)]` is positive for every finite `N` when `C > 0` and sums to `C`. It reduces a historical
+average, not the original compilation time. Converting measured gains into integer points requires
+an explicit scoring rule and does not itself establish strict bounded progress. This model adds no
+runtime reward mechanism, optimizer, scheduler, failure detector or release authority.
+
 For CCME, admitted worker joins change placement capacity while preserving the pinned finite semantic
 graph and task IDs (§28). New semantic work requires a new pinned plan. The abstract extension does not
 implement recursive provisioning, change release authority, guarantee physical exactly-once effects or
@@ -5191,6 +5259,43 @@ relax reconciliation of uncertain effects. To apply `T(H) = max_p(D_p + E_p)` to
 graph, include provisioning, discovery, communication and resource-order constraints and retain the
 formula's feasible-earliest-start premises. Adding nodes alone does not establish those premises or
 remove the existing work/span and resource bounds.
+
+**One candidate, parallel verification (informative).** Fix one immutable input `x` and one finite
+candidate `y` for a declared correctness relation. A solver produces `y` once, taking time `S`, with
+any required shared acquisition and preparation included before the verification phase. Let `k >= 1`
+independent terminating verifiers receive that same identified input and candidate. Suppose their
+branches begin together, have enough compatible capacity and no shared bottleneck or inter-verifier
+dependency. Let `v_i >= 0` be branch `i`'s duration, including its required transfer, dispatch and checks.
+If the policy waits for all results, the verification phase takes
+
+`T_verify = max_{1 <= i <= k} v_i`.
+
+Each branch finishes at its start plus `v_i`, so all results are available exactly when the last branch
+finishes. With a final decision/aggregation stage of duration `a >= 0`, the end-to-end barrier model is
+`T = S + max_i v_i + a`. If branch starts have offsets `r_i >= 0` from the verification-phase origin,
+replace the maximum by `max_i(r_i + v_i)`. These are fork-join instances of `T(H) = max_p(D_p + E_p)`
+under its feasible-earliest-start premises. Limited slots, shared transfer capacity, dependent checks
+or overlapping solve/check stages require their actual combined graph and resource constraints.
+Early rejection or another decision policy can finish before all checks; that is a different stopping
+condition. Work includes the sum of all branch costs even when their elapsed time is a maximum.
+
+Concurrency supplies no correctness guarantee. The joint acceptance predicate must be sound for the
+declared relation: acceptance must imply that `y` is a correct candidate for `x`; require completeness
+as well when the contract promises acceptance of every valid candidate. Different algorithms can
+check different obligations, but their names or parallel execution do not prove soundness or independent
+errors. A supplied SAT assignment can be verified without each checker searching for it again; an
+invalid assignment does not establish unsatisfiability, and checking feasibility need not certify
+optimality. The polynomial-certificate definition of `NP` concerns checking a supplied witness for a
+yes-instance, not a polynomial bound on finding it or on checking every kind of claimed answer
+([Cook, §1](https://www.claymath.org/wp-content/uploads/2022/06/pvsnp.pdf)).
+
+Thus one successful solver result can serve many checks without repeating that solver as a logical
+prerequisite. This is a permitted reuse pattern, not a universal requirement to solve only once, a
+physical exactly-once guarantee or a claim that every checker is cheaper than solving. Reuse requires
+the same inputs, result identity and validity contract; retries, lost results, changed inputs and
+uncertain external effects retain their existing recovery and authority rules. An unbounded verifier
+population or exponential parallel work is not free in standard polynomial bit-cost accounting.
+Neither this maximum-time identity nor solve-once reuse settles `P = NP` or `P != NP`.
 
 For a SAT formula of encoded length `m` with `k` variables, a supplied `k`-bit assignment can be checked
 in `poly(m)` bit time. One explicit brute-force DAG has `2^k` verifier leaves and `2^k - 1` binary OR gates,

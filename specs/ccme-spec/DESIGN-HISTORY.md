@@ -1034,3 +1034,18 @@ provisioning and later operator recovery are explicit counterexamples to the unc
 claim. A finite silence interval cannot distinguish a crash from a delayed live node in an asynchronous
 model. Failure-detector and crash-recovery literature provides context; no failover implementation,
 universal liveness guarantee, replay permission or new release authority is claimed.
+
+## 2026-10-28: Shared candidates, parallel checks and bounded reward games
+
+Section 13.11 proves the fork-join verification identity: after producing one identified candidate,
+independent checks on adequate compatible resources finish in the maximum of their branch times.
+Preparation, distribution, aggregation and constrained resources remain charged. Acceptance requires
+a sound correctness contract; the result neither resolves P versus NP nor promises physical exactly-once
+execution or a universal solve-versus-check gap.
+The section also distinguishes integer game rewards from elapsed-time improvements. A bounded global
+integer potential and finitely bounded non-progress ticks imply finite ticking; strict unilateral
+improvement with a complete finite stopping search ends at a pure Nash equilibrium. Actual completion
+still requires settled obligations, and a no-tick profile is an equilibrium only when no unilateral
+deviation pays. Arbitrary positive rewards, zero-reward loops and diminishing positive real gains do
+not establish termination. Monderer and Shapley's potential-game result supplies classical context.
+This is an informative proof extension, with no reward system, optimizer or runtime behavior change.
