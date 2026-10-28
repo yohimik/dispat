@@ -12,7 +12,11 @@ package integration
 // their logs.
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -26,28 +30,68 @@ import (
 	"github.com/yohimik/dispat/tests/integration/internal/harness"
 )
 
+const (
+	executionQueueFirstTaskTimeoutSeconds  = 180
+	executionQueueSecondTaskTimeoutSeconds = 30
+	executionQueueGateMaximumPolls         = 150
+	executionQueueGatePollSeconds          = 1
+	executionQueueGateExitCode             = 7
+	executionQueueGoBuildSeconds           = 3
+	executionQueueTinyGoBuildSeconds       = 15
+	executionQueueFirstLabel               = "first"
+	executionQueueSecondLabel              = "second"
+	executionQueueReadyWait                = 45 * time.Second
+	executionQueueReadyPoll                = 100 * time.Millisecond
+	executionQueueBeyondDeadline           = time.Second
+	executionQueueGateNoSleep              = time.Duration(0)
+	executionQueueGateScriptFormat         = `i=0; while [ ! -f "$DISPAT_IT_EXECUTION_GATE" ] && [ "$i" -lt %d ]; do sleep %d; i=$((i+1)); done; test -f "$DISPAT_IT_EXECUTION_GATE" || exit %d`
+	executionQueueWorkerReadyMessage       = "worker ready"
+	executionQueueTaskID                   = "second:1:"
+	executionQueueTaskRefPrefix            = "dispat-task-"
+	executionQueueLedgerRefPrefix          = "dispat-ledger-"
+	executionQueueReservationDocument      = "dispat/reservation.json"
+	executionQueueReservationSignature     = "dispat/reservation.sig"
+	executionQueueReservationKind          = "reservation"
+	executionQueueLedgerDocument           = "dispat/choreography-ledger.json"
+	executionQueueLedgerSignature          = "dispat/choreography-ledger.sig"
+	executionQueueLedgerKind               = "choreography-ledger"
+	executionQueueStartedKind              = "execution-started"
+	executionQueueClaimKind                = "claim-accepted"
+	executionQueueTerminalKind             = "terminal"
+	executionQueueCancelKind               = "cancel-issued"
+	executionQueueRetryKind                = "retry-ready"
+	executionQueueNoClaimKind              = "no-claim-expired"
+	executionQueueLedgerScanLimit          = 128
+	executionQueueExpectedClaims           = 1
+)
+
 // TestExecutionQueuedWorkIsNotATimeout (spec vector 21): a node's capacity is
 // the node's, so two runs sharing one node of capacity one make the second
-// run's assignment wait in the mailbox. Queue time is not run time: the task
-// deadline measures the work, so a wait that is longer than one build and
-// shorter than two still completes both runs, and neither takes a healthy node
-// out of its pool.
+// run's assignment wait in the mailbox. Queue time is not run time: the second
+// run can remain queued longer than its active-task deadline, then complete
+// when the first task releases the slot without marking the node unhealthy.
 //
 // Before this gate the deadline started when the orchestrator began waiting,
 // so the queued assignment timed out without ever having run: it leaked the
 // node's slot, marked a node that was working perfectly well as unhealthy, and
 // failed a package for the sin of being second.
 func TestExecutionQueuedWorkIsNotATimeout(t *testing.T) {
-	build, wait := executionQueueTimings()
+	gate := filepath.Join(t.TempDir(), "release-first-build")
+	defer func() { _ = os.WriteFile(gate, nil, 0o600) }()
 	mailbox := executionMailbox(t)
-	first := newExecutionQueuedRepository(t, mailbox, "first", build, wait)
-	second := newExecutionQueuedRepository(t, mailbox, "second", build, wait)
+	first := newExecutionQueuedRepository(t, executionQueuedRepositoryOptions{
+		Mailbox: mailbox, Label: executionQueueFirstLabel, TaskTimeoutSeconds: executionQueueFirstTaskTimeoutSeconds,
+		IsGatedBuild: true})
+	second := newExecutionQueuedRepository(t, executionQueuedRepositoryOptions{
+		Mailbox: mailbox, Label: executionQueueSecondLabel, TaskTimeoutSeconds: executionQueueSecondTaskTimeoutSeconds,
+		Build: executionQueueSecondBuildDuration()})
 	worker := startWorker(t, first.repo, executionWorkerConfig(mailbox,
 		func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(1) }), 0,
-		executionBuildLogEnv+"="+first.builds)
+		executionBuildLogEnv+"="+first.builds, executionGateEnv+"="+gate)
 	workerStopped := false
 	defer func() {
 		if t.Failed() && !workerStopped {
+			_ = os.WriteFile(gate, nil, 0o600)
 			worker.proc.Signal(syscall.SIGINT)
 			reply := worker.proc.Wait()
 			t.Logf("shared peer stdout:\n%s\nstderr:\n%s", reply.Stdout, reply.Stderr)
@@ -56,12 +100,47 @@ func TestExecutionQueuedWorkIsNotATimeout(t *testing.T) {
 
 	started := first.repo.StartReleaseEnv(first.env(), "release", "--return-endpoint", first.returnURL)
 	executionAwaitProbe(t, first, executionNode)
-	other := second.release()
+	queued := second.repo.StartReleaseEnv(second.env(), "release", "--return-endpoint", second.returnURL)
+	var secondRun string
+	isSecondReady := assert.Eventually(t, func() bool {
+		stdout, _ := queued.CapturedOutput()
+		for _, event := range harness.ParseEvents(stdout) {
+			if event.Str("message") != executionQueueWorkerReadyMessage || event.Str("worker") != executionNode {
+				continue
+			}
+			run := executionQueueSignedReservation(t, mailbox)
+			if run == "" || run != event.Str("run") || !executionQueueLedgerExists(t, mailbox, run) {
+				continue
+			}
+			for _, signed := range executionQueueSignedLedgerEvents(t, mailbox, run) {
+				if signed.Kind == executionQueueStartedKind {
+					secondRun = run
+					return true
+				}
+			}
+		}
+		return false
+	}, executionQueueReadyWait, executionQueueReadyPoll,
+		"the second run must have a signed reservation and execution-started event before its queue-time proof")
+	if isSecondReady {
+		assert.Never(t, func() bool { return executionHasQueuedBuild(first, second) },
+			time.Duration(executionQueueSecondTaskTimeoutSeconds)*time.Second+executionQueueBeyondDeadline,
+			executionQueueReadyPoll, "the second task must remain queued past its active-task deadline")
+		for _, event := range executionQueueSignedLedgerEvents(t, mailbox, secondRun) {
+			require.NotEqual(t, executionQueueTaskID, event.Task,
+				"the second signed task has no claim, cancellation or timeout before its queued wait ends")
+		}
+	}
+	gateErr := os.WriteFile(gate, nil, 0o600)
+	other := queued.Wait()
 	res := started.Wait()
 
+	require.NoError(t, gateErr)
+	require.True(t, isSecondReady, "the second run had an admitted worker while it waited in the queue")
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	require.Equal(t, 0, other.Code, "stdout:\n%s\nstderr:\n%s", other.Stdout, other.Stderr)
-	for name, run := range map[string]harness.RunResult{"first": res, "second": other} {
+	executionQueueAssertSingleSignedAttempt(t, mailbox, secondRun)
+	for name, run := range map[string]harness.RunResult{executionQueueFirstLabel: res, executionQueueSecondLabel: other} {
 		t.Run(name, func(t *testing.T) {
 			_, isUnhealthy := executionLine(run, "worker marked unhealthy")
 			assert.False(t, isUnhealthy,
@@ -77,39 +156,144 @@ func TestExecutionQueuedWorkIsNotATimeout(t *testing.T) {
 	require.Equal(t, 0, workerReply.Code)
 }
 
-// executionQueueTimings are a build long enough to make the second run queue
-// behind the first, and a task deadline that is longer than one of them and
-// shorter than two. The pair is what makes the claim testable at all: with a
-// deadline longer than both, nothing is being asserted.
-func executionQueueTimings() (build time.Duration, wait int) {
-	if harness.IsTinyGo() {
-		return 15 * time.Second, 25
+func executionQueueAssertSingleSignedAttempt(t *testing.T, mailbox, run string) {
+	t.Helper()
+	var claims, terminals int
+	for _, event := range executionQueueSignedLedgerEvents(t, mailbox, run) {
+		if event.Task != executionQueueTaskID {
+			continue
+		}
+		switch event.Kind {
+		case executionQueueClaimKind:
+			claims++
+		case executionQueueTerminalKind:
+			terminals++
+		case executionQueueCancelKind, executionQueueRetryKind, executionQueueNoClaimKind:
+			t.Errorf("the queued task had an unexpected signed %s event", event.Kind)
+		}
 	}
-	return 3 * time.Second, 5
+	require.Equal(t, executionQueueExpectedClaims, claims,
+		"the queued task had one accepted signed claim after the first task released the node")
+	require.Equal(t, executionQueueExpectedClaims, terminals,
+		"the queued task had one signed terminal after its accepted claim")
 }
 
-// newExecutionQueuedRepository is one independent single-package repository
-// delegating to a shared mailbox, with a build that takes long enough to make
-// the other run wait and a task deadline that would have expired during that
-// wait.
-func newExecutionQueuedRepository(t *testing.T, mailbox, label string,
-	build time.Duration, wait int) *executionRig {
+// A signed task root is required here because preflight can finish before the
+// second run has a graph whose task could actually wait for a node slot.
+func executionQueueSignedReservation(t *testing.T, mailbox string) string {
+	t.Helper()
+	for _, branch := range executionProtocolRefs(t, mailbox, executionQueueTaskRefPrefix) {
+		ref := "refs/heads/" + branch
+		document, err := exec.Command("git", "-C", mailbox, "show", ref+":"+executionQueueReservationDocument).Output()
+		if err != nil {
+			continue
+		}
+		var reservation struct {
+			Run    string `json:"run"`
+			Task   string `json:"task"`
+			Branch string `json:"branch"`
+		}
+		if json.Unmarshal(document, &reservation) != nil || reservation.Task != executionQueueTaskID ||
+			reservation.Branch != branch || reservation.Run == "" {
+			continue
+		}
+		signature, err := exec.Command("git", "-C", mailbox, "show", ref+":"+executionQueueReservationSignature).Output()
+		if err != nil || strings.TrimSpace(string(signature)) != executionSign(executionQueueReservationKind, executionSecret, document) {
+			continue
+		}
+		return reservation.Run
+	}
+	return ""
+}
+
+func executionQueueLedgerExists(t *testing.T, mailbox, run string) bool {
+	t.Helper()
+	for _, branch := range executionProtocolRefs(t, mailbox, executionQueueLedgerRefPrefix) {
+		if branch == executionQueueLedgerRefPrefix+run {
+			return true
+		}
+	}
+	return false
+}
+
+func executionQueueSignedLedgerEvents(t *testing.T, mailbox, run string) []executionLateJoinLedgerEvent {
+	t.Helper()
+	ref := "refs/heads/" + executionQueueLedgerRefPrefix + run
+	commits := strings.Fields(bareGit(t, mailbox, "rev-list", "--first-parent", "-n",
+		fmt.Sprint(executionQueueLedgerScanLimit), ref))
+	events := make([]executionLateJoinLedgerEvent, 0, len(commits))
+	for _, commit := range commits {
+		document := bareGit(t, mailbox, "show", commit+":"+executionQueueLedgerDocument)
+		signature := strings.TrimSpace(bareGit(t, mailbox, "show", commit+":"+executionQueueLedgerSignature))
+		require.Equal(t, executionSign(executionQueueLedgerKind, executionSecret, []byte(document)), signature,
+			"the observed queue event has the second run's exact signature")
+		var record struct {
+			Event *executionLateJoinLedgerEvent `json:"event"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(document), &record))
+		if record.Event == nil {
+			break
+		}
+		events = append(events, *record.Event)
+	}
+	return events
+}
+
+// executionQueueSecondBuildDuration leaves room for reporting the completed
+// result inside the second task's signed deadline even on the slower TinyGo
+// path. The first task's gate supplies the queue wait independently.
+func executionQueueSecondBuildDuration() time.Duration {
+	if harness.IsTinyGo() {
+		return executionQueueTinyGoBuildSeconds * time.Second
+	}
+	return executionQueueGoBuildSeconds * time.Second
+}
+
+func executionHasQueuedBuild(first, second *executionRig) bool {
+	for _, rig := range []*executionRig{first, second} {
+		for _, run := range rig.runs() {
+			if run.Package == executionQueueSecondLabel {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+type executionQueuedRepositoryOptions struct {
+	Mailbox            string
+	Label              string
+	TaskTimeoutSeconds int
+	Build              time.Duration
+	IsGatedBuild       bool
+}
+
+// newExecutionQueuedRepository gives each release an independent signed task
+// deadline while both runs share one worker and mailbox.
+func newExecutionQueuedRepository(t *testing.T, options executionQueuedRepositoryOptions) *executionRig {
 	t.Helper()
 	repo := harness.New(t)
-	repo.SeedPackage("packages", label)
-	cfg := libsConfig(executionRecordingScript+" && "+
-		repo.TsmarkScript("timeline.log", label, build), 1)
+	repo.SeedPackage("packages", options.Label)
+	buildScript := executionRecordingScript + " && " + repo.TsmarkScript("timeline.log", options.Label, options.Build)
+	if options.IsGatedBuild {
+		buildScript = executionRecordingScript + " && " + repo.TsmarkCommandScript(harness.TsmarkCommandOptions{
+			LogFile: "timeline.log", Label: options.Label, Sleep: executionQueueGateNoSleep,
+			Command: fmt.Sprintf(executionQueueGateScriptFormat, executionQueueGateMaximumPolls,
+				executionQueueGatePollSeconds, executionQueueGateExitCode),
+		})
+	}
+	cfg := libsConfig(buildScript, 1)
 	pinPackages(map[string]*models.RunOnly{
-		label: placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
+		options.Label: placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator),
 	})(&cfg)
 	cfg.Execution = &models.ExecutionConfig{
 		SecretEnv: executionSecretEnv,
-		Workers:   []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + mailbox}},
-		Timeouts:  &models.ExecutionTimeoutsConfig{Preflight: 30, Task: wait, Cancel: 10},
+		Workers:   []models.ExecutionWorkerConfig{{Name: executionNode, Endpoint: "file://" + options.Mailbox}},
+		Timeouts:  &models.ExecutionTimeoutsConfig{Preflight: 30, Task: options.TaskTimeoutSeconds, Cancel: 10},
 	}
 	repo.WriteConfigModel(cfg)
-	repo.Commit("feat(" + label + "): bootstrap")
-	return newExecutionRigOver(t, repo, mailbox)
+	repo.Commit("feat(" + options.Label + "): bootstrap")
+	return newExecutionRigOver(t, repo, options.Mailbox)
 }
 
 // TestExecutionTransportBranchesAreNotRejectedAssignments: a prepared input
