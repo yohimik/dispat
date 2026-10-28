@@ -1,5 +1,16 @@
 # Changelog
 
+## specs/agent-guide/v1.11.0-rc.9 (2026-10-28)
+
+### Fixes
+
+- explain independent task planning and safe retry limits ([5552fc8](https://github.com/yohimik/dispat/commit/5552fc8bdd38265f74e797605976809bcb9cc41b)) (by yohimik)
+
+### Authors
+
+- yohimik
+
+
 ## specs/agent-guide/v1.11.0-rc.8 (2026-10-27)
 
 ### Features
