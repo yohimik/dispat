@@ -997,3 +997,12 @@ to zero. The original compilation cost and next-invocation latency remain unchan
 cost, invalidation, additional optimization work and varying recurring costs retain their separate
 accounting. The exact average-cost gap need not be visible at finite measurement resolution.
 This is a mathematical clarification with no new runtime feature or release-authority behavior.
+
+## 2026-10-28: Discovery-plus-execution critical-path notation
+
+Section 13.11 gives `T = max(D + E)` an explicit path domain: the longest path sum of discovery/acquisition
+and remaining execution/overhead costs in a fixed finite timed DAG with feasible earliest starts.
+A topological induction proves the equality. Required resource ordering and delays stay in the model;
+overlapping activities use separate vertices. Unmodeled constraints leave a lower bound, and selecting
+an optimal admissible plan retains the earlier outer minimum. The notation preserves every task and
+does not claim globally optimal scheduling or a new runtime behavior.

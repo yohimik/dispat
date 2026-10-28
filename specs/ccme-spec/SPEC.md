@@ -4834,6 +4834,35 @@ be split: `max_x (D(x) + E(x)) <= max_x D(x) + max_x E(x)`, with equality requir
 when those maxima exist. Thus this corollary supplies a specific timing contract, not a universal
 two-positive-terms decomposition of every possible task.
 
+**Combined discovery-and-execution critical-path formula.** The shorthand `T = max(D + E)` has an
+exact meaning when its maximum ranges over complete dependency paths in a fixed finite timed DAG `H`.
+For this notation, give each vertex `v` finite nonnegative duration `w_v = d_v + e_v`, where `d_v`
+accounts for discovery/acquisition and `e_v` for the remaining modeled work, including execution and
+explicitly charged overhead or wait. Each vertex is one nonpreemptive sequential stage; represent overlapping
+activities by separate vertices with their actual dependencies, and represent nonzero edge delays by
+explicit delay vertices. Retain every required task and shared
+acquisition activity. Assume the fixed resource choices and ordering constraints are encoded so that
+earliest starts are feasible, with no omitted capacity or compatibility restriction, initial release delay or other wait.
+For a directed path `p`, write `D_p = sum_{v in p} d_v` and `E_p = sum_{v in p} e_v`. Then
+
+`T(H) = max_{p in Paths(H)} (D_p + E_p)`.
+
+Include single-vertex paths and define the value for the empty graph as zero. The proof is topological
+induction: earliest completion satisfies `F_v = w_v + max({0} union {F_u : u -> v})`, so `F_v` equals
+the longest weighted path ending at `v`. Maximizing over all endpoints gives the displayed formula.
+Sequential work adds along a path; parallel branches combine by maximum at their join. Shared work
+can occur in several path expressions without executing more than once or being charged twice on a
+single path. Omitting resource constraints or delays generally leaves only a critical-path lower bound.
+An unnecessarily idle schedule need not attain the earliest-start value.
+
+The maximum is not over individual task durations: two dependent unit tasks take two units, although
+their largest individual duration is one. Nor may the expression generally be replaced by
+`max_p D_p + max_p E_p`, since the maximizing paths can differ. Under the earlier finite admissible
+candidate and minimum-completion premises, the optimal-plan formulation remains
+`T* = min_{H in H_adm} max_{p in Paths(H)} (D_p + E_p)`, where each candidate preserves all required
+work and constraints. This notation does not prove that dispat's chosen plan attains that optimum,
+make unknown durations available in advance, or change any execution-mode or release-authority rule.
+
 For a scoped input lower bound, use a fresh query model with `R` independently addressable records and no
 trusted summary. If, at a base input, each record can be changed alone to an admitted input requiring a
 different exact decision, every record must be queried on that base input: otherwise the unchanged
