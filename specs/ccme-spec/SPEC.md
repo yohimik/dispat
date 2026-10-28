@@ -3526,6 +3526,33 @@ intent and input-closure results above therefore apply under their stated planni
 follow that both arcs are execution prerequisites: that interpretation makes even one positive-duration
 edge infeasible, by the preceding cycle proof. Self-loops require their own semantics and are excluded here.
 
+**Canonical bidirectional encoding and property transfer (informative).** Restrict here to finite simple
+loopless graphs on a fixed labeled vertex set `V`. Define
+
+`B(G) = (V, A)`, where `A = {(u,v), (v,u) : {u,v} in E}`.
+
+There is exactly one such symmetric adjacency digraph: membership of every possible ordered pair is
+fixed by membership of its unordered edge, with no orientation choice. Conversely, for any simple
+loopless digraph `D` whose arcs satisfy `(u,v) in A iff (v,u) in A`, let `U(D)` contain one undirected
+edge `{u,v}` for each reciprocal pair. Then `U(B(G)) = G` and `B(U(D)) = D`, directly from the edge
+definitions. These identities prove a bijection between the two graph classes. They do not assert
+a unique drawing, vertex labeling, serialization or choice among other directed encodings. Parallel
+edges, self-loops and extra attributes need explicitly specified identity and preservation conventions.
+
+For any property `P` of undirected graphs, define its translated property on symmetric digraphs by
+`P_bid(D) := P(U(D))`. The inverse identity proves `P(G) iff P_bid(B(G))`; it is this translation that
+allows a theorem to transfer. In particular, each undirected path can be traversed in either direction
+in `B(G)`, and every directed path projects to an undirected path. Thus connectivity corresponds to
+mutual directed reachability, unweighted shortest-path distances agree, and
+`indegree_B(v) = outdegree_B(v) = degree_G(v)`. Edge count instead becomes `|A| = 2|E|`.
+These are structural correspondences, not equalities of physical work or communication cost.
+
+Using the same word for a different directed property is not this translation. An undirected tree
+with an edge is acyclic, yet `B(G)` has the directed cycle `u -> v -> u` for that edge. The transferred
+tree property says that `U(D)` is a tree, not that `D` is a directed acyclic graph. Similarly, symmetric
+adjacency does not confer directional effect authority or make both arcs hard runtime prerequisites.
+The declared relation/conflict semantics and the execution acyclicity rules remain unchanged.
+
 For the execution extension, give each undirected edge an explicit **either-order conflict** meaning:
 its endpoint tasks cannot overlap, but either may run first. This is the distinction between precedence and
 non-overlap constraints illustrated by
@@ -9062,6 +9089,45 @@ it is a tree. Every tree with more than one vertex has a leaf: an endpoint of a 
 additional neighbour, since that would either extend the path or create a cycle. Removing that leaf and
 its one edge leaves a tree. Induction from the one-vertex tree therefore gives exactly `n - 1` edges for
 every tree, completing the equality characterization.
+
+**Trees assembled from stars and chains (informative).** A star `K_(1,k)` consists of a center and
+`k >= 0` leaves; `K_(1,0)` is the singleton. A chain is a simple path. These are useful tree shapes,
+but not the only trees. Every finite nonempty tree can nevertheless be assembled from such pieces:
+choose a root and, for each vertex with children, take the star containing that vertex and its children.
+Each edge has exactly one parent endpoint, so these child-stars partition the edges. They may share
+vertices; this is not a partition into disjoint vertex sets. Starting with the root, attach each
+child-star at its already present center and introduce its children as fresh vertices, processing
+parents before children. Connectivity and acyclicity are preserved at every step, and all vertices
+and edges are eventually present. The singleton case needs no edge attachment.
+
+Equivalently, attach one fresh leaf by one edge at a time. The leaf-removal proof above shows that
+every finite tree has such a construction, and each attached `K2` is both a path and a star. Longer
+chains can group maximal runs with degree-two internal vertices; their endpoints are leaves or
+branching vertices when the tree has more than one vertex. Neither a choice of root nor this description
+claims a unique star decomposition or reduces every tree to one star or one chain.
+
+*A valid transfer theorem needs closure.* Let `P` be a graph property invariant under relabeling.
+If `P(K1)` holds and attaching a fresh leaf to any vertex of any finite tree satisfying `P` preserves
+`P`, then `P` holds for every finite tree. Induct on the vertex count: remove a leaf from a tree with
+more than one vertex, apply the induction hypothesis to the smaller tree, then reattach that leaf
+using the closure premise. A stronger sufficient premise is that `P(K1)` and `P(K2)` hold and `P` is
+preserved by identifying one vertex of each of two otherwise disjoint trees satisfying `P`.
+That one-vertex gluing preserves the tree class and includes each leaf attachment. Forests additionally
+need closure under disjoint union; adding edges that close cycles is outside this tree induction.
+
+Truth on all stars and all chains alone is insufficient. For example, the property "at most one
+vertex has degree at least three" holds for every star and every path. Identify one leaf of each of
+two otherwise disjoint three-leaf stars `K_(1,3)`. The resulting seven-vertex tree has two degree-three
+centers, so the property fails after a one-vertex gluing even though it holds on both pieces.
+The missing hypothesis is precisely closure under composition. Shared vertices can change degree,
+distance, load, resource contention and failure behavior; local proofs must account for these effects.
+
+For an example that does compose, the identity `|E| = |V| - 1` is preserved by one-vertex gluing:
+edge counts add and vertex counts add minus one. Its singleton and `K2` bases therefore give the
+tree edge-count result by induction. This does not transfer star hop bounds, chain scheduling bounds
+or runtime correctness to other trees without their own closure proofs. In particular, the requested
+`minimal` topology remains a path with endpoint-only joins and branch/cycle refusal; a mathematical
+decomposition grants no permission to flatten an existing branching topology or change its semantics.
 
 For this fleet, substitute `n = Q` and count each two-sided peer link once. Representing each undirected
 edge by two directed arcs gives `2(Q - 1)` arcs for a tree, not two independent links or two execution

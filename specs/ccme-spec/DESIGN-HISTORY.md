@@ -1049,3 +1049,16 @@ still requires settled obligations, and a no-tick profile is an equilibrium only
 deviation pays. Arbitrary positive rewards, zero-reward loops and diminishing positive real gains do
 not establish termination. Monderer and Shapley's potential-game result supplies classical context.
 This is an informative proof extension, with no reward system, optimizer or runtime behavior change.
+
+## 2026-10-28: Symmetric graph encoding and tree composition
+
+Sections 13.11 and 27.11 prove the canonical correspondence between a fixed labeled simple loopless
+undirected graph and the symmetric digraph obtained by replacing every edge with its two opposite arcs.
+Properties transfer through the explicit inverse map; directed acyclicity does not transfer, since
+each represented edge forms a directed two-cycle. The text distinguishes this structural encoding
+from runtime prerequisites, effect authority, drawings and storage conventions.
+Every finite tree can be assembled from child-stars or successive leaf attachments, but a property
+known for stars and chains extends to all trees only with a suitable composition proof. Leaf-attachment
+closure supplies the induction; two three-leaf stars glued at one leaf give a counterexample to
+unrestricted transfer. The edge-count identity composes, whereas arbitrary degree, timing or runtime
+claims need separate premises. No topology algorithm, minimal-chain requirement or runtime behavior changes.
