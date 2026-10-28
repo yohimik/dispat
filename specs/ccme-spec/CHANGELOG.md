@@ -1,5 +1,42 @@
 # Changelog
 
+## specs/ccme-spec/v3.1.0-rc.11 (2026-10-28)
+
+### Fixes
+
+- distinguish tasks from artifact assemblies ([9bc1612](https://github.com/yohimik/dispat/commit/9bc16129b981ed26ac95f5d962988977ce03e810)) (by yohimik, Codex)
+  Define tasks and artifacts as distinct theory entities, including captured task
+  state, and derive node assemblies with explicit resource and authority premises.
+  Permit a candidate gate to perform its own checks before admission without
+  authorizing downstream use. Preserve all runtime contracts and prior premises.
+
+- define productive finite-task streams ([9c644bb](https://github.com/yohimik/dispat/commit/9c644bb6490073fd85fffe770dcad70b8d2217f7)) (by yohimik, Codex)
+  Define task, artifact and node boundaries and conditional finite-prefix
+  progress with checked external inputs, finite service and explicit cessation
+  premises. Exclude Zeno activity across modeled execution events and keep
+  consumer admission after the complete two-node artifact gate.
+
+- define task artifacts and checked continuation ([5ee9072](https://github.com/yohimik/dispat/commit/5ee907236bb74d58b819d2beaec7b3718bd74e0c)) (by yohimik, Codex)
+  Define process and thread activations, and gate each consumed artifact on
+  durable two-node verification while preserving final completion obligations.
+
+- unify process and thread task scaling ([8c91be8](https://github.com/yohimik/dispat/commit/8c91be82afb3f83fb70e1f7c4d2ab8b7ede4d1a5)) (by yohimik, Codex)
+  State schedule equivalence under preserved costs and resources, distinguish
+  hardware scaling from execution containers, and scope optimality claims.
+
+- clarify two-node durable completion handoff ([2ef3865](https://github.com/yohimik/dispat/commit/2ef3865a177d6d50da89a7e6db09ea1b25dc055b)) (by yohimik, Codex)
+  Require writer persistence and reader readback with all checks before the
+  acknowledged handoff. Bound the two-node availability policy to that interval
+  and account for subsequent provisioning by one surviving node. Preserve
+  settlement, storage, verification and release-authority premises.
+
+### Authors
+
+- yohimik
+- Codex
+- Codex
+
+
 ## specs/ccme-spec/v3.1.0-rc.10 (2026-10-28)
 
 ### Fixes
