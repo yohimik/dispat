@@ -1,5 +1,28 @@
 # Changelog
 
+## services/dispat/v1.11.0-rc.12 (2026-10-28)
+
+### Features
+
+- interpret distributed tasks independently on each node ([5552fc8](https://github.com/yohimik/dispat/commit/5552fc8bdd38265f74e797605976809bcb9cc41b)) (by yohimik)
+  Derive plans and ready frames from signed pinned inputs before claiming work.
+  Record unique timestamped pending and completed or failed branches, including
+  successful tasks with no outputs. Bound total accepted attempts and require
+  explicit retry safety after contact loss. Preserve held capacity until settlement.
+
+### Fixes
+
+- require chains for minimal topology ([9863f25](https://github.com/yohimik/dispat/commit/9863f25bc9357f90f224611248f5962072a43c6d)) (by yohimik, Codex)
+  Join existing path components at free endpoints and reject branches while preserving links. Recompose between joins, require owner roster declarations before creating links, and report incomplete repairs. Keep star as the explicit entry-hub shape and require selection for newly discovered interactive suggestions.
+
+  Update the specification, CLI help, topology documentation and regression coverage.
+
+### Authors
+
+- yohimik
+- Codex
+
+
 ## services/dispat/v1.11.0-rc.11 (2026-10-27)
 
 ### Fixes
