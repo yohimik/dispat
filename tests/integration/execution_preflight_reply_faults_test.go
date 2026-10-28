@@ -16,6 +16,14 @@ import (
 	"github.com/yohimik/dispat/pkg/models"
 )
 
+const (
+	executionPreflightRejectedMessageText         = "result rejected"
+	executionPreflightMessageFieldName            = "message"
+	executionPreflightCommitFieldName             = "commit"
+	executionPreflightReasonFieldName             = "reason"
+	executionPreflightMissingRejectionErrorFormat = "the forged message must be rejected\nstdout:\n%s\nstderr:\n%s"
+)
+
 func TestExecutionPreflightRejectsMalformedAndOutOfSequenceReplies(t *testing.T) {
 	for _, scenario := range []struct {
 		name         string
@@ -72,9 +80,20 @@ func TestExecutionPreflightRejectsMalformedAndOutOfSequenceReplies(t *testing.T)
 			res := started.Wait()
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
-			rejected, isRejected := executionLine(res, "result rejected")
-			require.True(t, isRejected, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.Equal(t, scenario.reason, rejected.Str("reason"))
+			// The first node may observe and reject an earlier forged Claim
+			// before this tip. Check the exact message this scenario wrote.
+			var rejectedForgedMessageCount int
+			for _, event := range executionEvents(res) {
+				if event.Str(executionPreflightMessageFieldName) != executionPreflightRejectedMessageText ||
+					event.Str(executionPreflightCommitFieldName) != tip {
+					continue
+				}
+				assert.Equal(t, scenario.reason, event.Str(executionPreflightReasonFieldName))
+				rejectedForgedMessageCount++
+			}
+			require.Positive(t, rejectedForgedMessageCount,
+				executionPreflightMissingRejectionErrorFormat,
+				res.Stdout, res.Stderr)
 			assert.Equal(t, []string{"refs/heads/" + branch}, rig.branches(),
 				"a rejected message cannot become cleanup ownership\nstdout:\n%s", res.Stdout)
 			assert.Equal(t, tip, strings.TrimSpace(bareGit(t, rig.mailbox, "rev-parse", "refs/heads/"+branch)))

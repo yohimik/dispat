@@ -344,7 +344,10 @@ esac`
 			LogFile: "timeline.log", Label: "$DISPAT_PACKAGE", Sleep: executionStageWindow,
 			Command: meeting,
 		})
-	}, func(cfg *models.File) { cfg.Concurrency = []int{2, 1} })
+	}, func(cfg *models.File) {
+		cfg.Concurrency = []int{2, 1}
+		cfg.RunOnly = &models.RunOnly{Build: models.RunOnlyWorker, Publish: models.RunOnlyBoth}
+	})
 	workers := rig.startWorkersHolding([]string{executionNode, executionSecondNode}, 2,
 		executionGateEnv+"="+gate)
 	defer stopAll(t, workers)
