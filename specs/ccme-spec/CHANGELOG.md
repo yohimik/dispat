@@ -1,5 +1,40 @@
 # Changelog
 
+## specs/ccme-spec/v3.1.0-rc.10 (2026-10-28)
+
+### Fixes
+
+- prove symmetric graph encoding and tree composition ([583d938](https://github.com/yohimik/dispat/commit/583d93819f476f6a49093d098d50c4baaed34388)) (by yohimik, Codex)
+  Specify the canonical bidirectional encoding and translate properties through its inverse. Prove tree construction from stars or leaf attachments and require closure before transferring a property from pieces to every tree.
+
+- prove parallel verification and bounded reward termination ([5175c23](https://github.com/yohimik/dispat/commit/5175c234fab7a4d77a379437bed97188e4778d90)) (by yohimik, Codex)
+  Scope solve-once verification to a shared candidate and a charged fork-join schedule. Prove bounded integer-potential tick termination and distinguish a stopped state from a Nash equilibrium and completed work.
+
+- distinguish crash cessation from settled termination ([a11bba0](https://github.com/yohimik/dispat/commit/a11bba079fb8334fdb12fc7d94ae9e3b335ccc19)) (by yohimik, Codex)
+  Separate planned departure and unexpected failure from computation outcomes.
+  Prove the closed-system empty-actor condition by transition induction and
+  preserve recoverable obligations, effect fencing and authority. Explain
+  restart and silence counterexamples with failure-detector references.
+
+- prove bounded worker generation and termination ([11ad3e5](https://github.com/yohimik/dispat/commit/11ad3e5fe170a659151d2661f4b349dc6aa6448d)) (by yohimik, Codex)
+  Separate worker creation from semantic tasks and prove finiteness by rank
+  induction. Require finite activation lifecycles, settled communication and
+  closed admission for completion; distinguish one required executor from
+  continuous processor activity. Cite Dijkstra and Scholten and preserve
+  pinned CCME graphs and effect-recovery authority.
+
+- define discovery execution path maximum ([4808cb6](https://github.com/yohimik/dispat/commit/4808cb65862e98b3172c36096ba57446b0881a37)) (by yohimik, Codex)
+  Define T=max(D+E) over complete dependency paths in an admissible timed DAG. Prove the equality by topological induction, charge resource orders and delays, and retain the outer minimum when selecting an optimal candidate plan.
+
+- prove diminishing average cost of reuse ([14af6c2](https://github.com/yohimik/dispat/commit/14af6c27b57247b13a14d2a67eb540b708d225de)) (by yohimik, Codex)
+  Show that fixed valid preparation and constant recurring cost make each additional reuse lower the average by C/[N(N+1)]. Prove positivity, decreasing gains and the zero limit while preserving invalidation, cost accounting and release authority premises.
+
+### Authors
+
+- yohimik
+- Codex
+
+
 ## specs/ccme-spec/v3.1.0-rc.9 (2026-10-28)
 
 ### Fixes
