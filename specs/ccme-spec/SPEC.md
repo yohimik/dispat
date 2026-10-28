@@ -157,9 +157,9 @@ to be interpreted as described in RFC 2119.
 | **Orchestrator** | The first node of a run, owning its locks, canonical and native Git refs, publication and durable admission (§28). |
 | **Choreographer** | Another node running or proposing tasks without first-node authority (§28.1). |
 | **Execution link** | An authenticated choreographer endpoint, distinct from a repository or fleet link (§28.2). |
-| **Task (execution theory)** | A declared computation activation represented by a process or thread; a process may group multiple threads. Its boundary, dependencies and actual resource demand are fixed by the model, not by the count of OS identifiers (§13.11). |
+| **Task (execution theory)** | A declared computation activation represented by a process or thread; a process may group multiple threads. Its boundary, dependencies and actual resource demand are fixed by the model, not by the count of OS identifiers. Artifacts may describe or capture its state, but the task remains a separate entity (§13.11). |
 | **Artifact (execution theory)** | Identified input or output data for a task, including required content, metadata and provenance. An output may become another task's input. The informative two-node continuation policy in §13.11 gates every consumed artifact version, including admitted external inputs; an artifact is distinct from an ordinary release record. |
-| **Node (execution theory)** | A declared execution resource running tasks and transferring artifacts, realized by a machine, processor, OS-managed execution environment or device. Identity, usable capacity, compatibility, authority and failure boundaries remain explicit; these labels are not interchangeable runtime identities (§13.11). |
+| **Node (execution theory)** | A derived group of identified artifacts that provides a task execution environment when realized on its declared resources. Tasks and artifacts are the two primitive entity kinds in this model; a node is an artifact assembly, with explicit operational identity, usable capacity, compatibility, authority and failure boundaries (§13.11). |
 | **Task receipt** | Identity-bound execution evidence; never an ordinary release or rollback-completion record (§28.6). |
 
 `max(a, b)` over bumps returns the higher of the two in the ordering above.
@@ -5376,17 +5376,96 @@ eligible check phases, not to the whole pipeline. Modeling these gates does not 
 create new semantic work in a completed epoch, or replace §28.5's existing authenticated output transfer
 and §28.6's authority/recovery rules. No runtime replication, thread executor or new hardware result is claimed.
 
+**Nodes as artifact groups (informative).** This execution-theory model has two primitive entity kinds:
+
+- A **task** is a declared computation activation represented by a thread or process. A process may group
+  threads, with sequential, parallel or mixed internal work. Its internal dependencies and simultaneous
+  resource demand remain part of the model. Horizontal and vertical scaling describe changes to the
+  realized resources and placement; neither is determined or universally optimized by the process/thread label.
+- An **artifact** is identified input or output for a task, including the content, metadata and provenance
+  required by its declared use. An output can become another task's input. Runtime images, executable code,
+  configuration, checkpoints and descriptions or authorized handles of resources can also be artifacts
+  consumed by provisioning or execution tasks. Describing a resource does not supply or authorize it.
+
+Tasks and artifacts are distinct entity kinds: write `T ∩ A = ∅` for the model's typed task and artifact
+sets. A task can be **captured as artifacts** containing its description, code, inputs, checkpoint or
+execution history. This is a representation relation, not entity equality: even a complete capture of
+the declared finite task state is an artifact representing that state, never the computation activation
+itself. Different activations or attempts may use the same immutable code or captured state; sharing
+those bytes does not identify the tasks. A manifest describing a group of threads is likewise distinct
+from the composite task that performs their work. This distinction applies to these theory entities;
+it does not rename serialized task descriptions used by the concrete execution protocol.
+
+Restoring captured state creates or resumes a task activation under an explicit identity and recovery
+contract. Any claim of equivalent continuation requires a consistent capture containing all required
+state and inputs, compatible execution, and correct treatment of pending effects, dependencies, authority
+and fencing. Artifact admission and two-node checking still apply, and a successful checkpoint alone
+does not establish that contract or physically exactly-once effects. Code that has never executed, a
+checkpoint awaiting restoration and a recorded completed execution are all artifacts without being an
+active task. The model does not claim that arbitrary live processes can be fully captured or resumed.
+
+A **node** is a derived group of artifacts providing an execution environment for tasks; it is not a
+third primitive entity kind. Represent a node assembly by a finite versioned manifest `G` of identified
+artifact versions and required references. The manifest and its binding records are themselves artifacts.
+They specify the runtime/code, configuration, required state and the resource bindings needed by the
+declared task class, including the operational node identity, compatible capacity, authority and failure
+model. The group is usable only when its required artifacts are present and admitted, its bindings resolve
+to actual available resources, and its execution and authority premises hold. A bag of inert files is
+not, merely by being grouped, an available executor. A manifest's claim of capacity or authority must be
+validated against the deployment; it does not create capacity, credentials or permission.
+
+This is a representation of execution resources within the model, not a claim that physical hardware is
+created by a data description. A machine, processor, OS-managed environment or device may realize the
+assembly's declared bindings. The OS is not additional hardware capacity. A processor and its containing
+machine, or overlapping assemblies, must charge shared physical capacity to the same resource pool.
+Provisioning, mounting, loading, transfer, checking and teardown are actual tasks or accounted operations
+with their own inputs, dependencies, costs and effects; grouping artifacts does not make them free.
+
+Artifact membership does not define node distinctness. Two different manifests, versions, paths or
+process/thread identifiers may describe the same operational node. Two active nodes may share immutable
+runtime artifacts while having distinct authorized instance bindings. Disjoint artifact sets are neither
+necessary nor sufficient for the two-node policy's distinct writer and reader. That policy still requires
+two distinct available authorized compatible execution instances under the declared identity model;
+independent failure domains or independent storage copies require additional premises. Updating an
+assembly does not automatically create a new operational identity or a second unit of capacity. Preserve
+§28's authenticated identities, authority, fencing, receipt scope and recovery rules when realizing a group.
+
+Every artifact used by a provisioning or execution task to continue downstream computation remains
+subject to the preceding continuation policy. Within a candidate artifact's own admission gate, the
+writer and reader can perform the declared readback and checks on that candidate before its gate opens;
+otherwise no gate could complete. Those bounded verification operations do not authorize downstream
+use of the candidate. The verifiers' runtime, configuration and other required input artifacts are
+already admitted under the applicable policy. A changed consumed version requires a new applicable gate;
+a grouping label cannot hide an input or turn an old receipt into current authority.
+The initial availability of admitted runtime assemblies and two authorized compatible verifiers is an
+explicit initial-state premise. It is not derived
+by making those same first verifiers check the artifacts needed for their own creation. Any construction
+of that initial state needs a separately justified bootstrap contract and resources; this definition adds
+no admission exemption or self-authorizing bootstrap. Subsequent provisioning and restoration must satisfy
+the existing artifact gates and authority rules. A surviving node can provide another only when it can
+actually obtain the admitted artifacts, authorized distinct instance bindings and adequate capacity.
+
+*Representation lemma.* Fix a task/artifact execution model with declared operational nodes. Replace
+each node reference by a manifest and binding records identifying exactly that node's realization. Assume
+these records preserve all task semantics, artifact identities, readiness/gates, dependencies, durations,
+resource-pool constraints, compatibility, availability, authority and allowed failure/restoration transitions.
+If construction or transfer adds work, it must already be charged in both models. Decoding the records
+recovers the original operational node and constraints; aliases decode to that same node, not an extra one.
+Then the two presentations have the same feasible execution traces and makespans after encoding/decoding
+references. Proof: corresponding initial states satisfy the same premises. For each step the enabling
+conditions, resource use, duration and resulting task/artifact state agree by assumption. Induction maps
+each finite trace forward; the inverse decoding gives the reverse map. Hence the finite-prefix safety
+and scheduling statements transfer. Infinite progress transfers only when the correspondence also preserves
+the stream theorem's fairness and non-Zeno premises. This is conditional representation equivalence, not
+a speedup theorem or a proof that arbitrary artifact groups can run tasks. Missing runtime, stale authority,
+unavailable capacity or counting two aliases as distinct nodes or independent capacity violate its premises.
+
 **Distributed systems and indefinite finite-task streams (informative).** In this execution-theory
-model, a distributed system consists of tasks, their input/output artifacts, and nodes that execute tasks
-and pass admitted artifacts to dependent tasks. A task activation can be a thread, a process with one or
-more threads, or a composite represented by its internal task subgraph and actual resource demand.
-Sequential, parallel and mixed execution all fit this model; process/thread representation does not
-remove dependencies or decide whether horizontal or vertical scaling is best. A node is a declared
-execution resource realized by a machine, processor, OS-managed execution environment or device. The OS
-is an execution environment, not extra hardware capacity. A processor within a machine and its containing
-machine cannot be counted as independent resources for the same capacity. Mapping these abstractions to
-§28's authenticated execution nodes must preserve identity, compatibility, capacity, authority and the
-stated failure model. Two labels for one underlying node do not satisfy a distinct-node artifact gate.
+model, a distributed system consists of tasks and their input/output artifacts. Artifact groups provide
+the nodes that execute tasks and pass admitted artifacts to dependent tasks, under the realization
+premises above. A task activation can be a thread, a process with one or more threads, or a composite
+represented by its internal task subgraph and actual resource demand. Sequential, parallel and mixed
+execution all fit this model; grouping does not remove dependencies or multiply available capacity.
 
 A pipeline can overlap tasks and artifact gates only where their actual dependencies and shared resources
 allow it. A task consumes complete admitted inputs, performs its declared computation, and produces its

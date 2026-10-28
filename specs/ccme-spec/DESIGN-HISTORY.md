@@ -1125,3 +1125,22 @@ premise while any actor survives and excludes planned stops and independent rest
 Finite workload completion, planned shutdown, blocked inputs, deadlock, resource exhaustion and loss of the
 second verifier refute the unrestricted claim. Permanent cessation remains distinct from completed work.
 The clarification is informative; it adds no runtime feature, authority or empirical performance result.
+
+## 2026-10-28: Two entity kinds and nodes composed of artifacts
+
+The execution theory now has two distinct primitive entity kinds: tasks and artifacts. A task can be
+captured in code, descriptions, checkpoints or other artifacts without becoming equal to its representation.
+Restoration creates or resumes an activation under explicit state, identity, effect and recovery conditions.
+A node is a derived artifact group providing a task execution environment under explicit realization
+premises. Its versioned manifest and binding records are artifacts that identify runtime, configuration,
+state, operational identity and actual authorized resources. A group cannot create capacity or authority merely by describing
+them. Shared or different artifact sets do not determine whether two verifying nodes are distinct, and
+overlapping assemblies charge the same underlying resource pools. Consumed environment artifacts retain
+their continuation gates. A candidate's own bounded verification reads precede its admission and grant
+no downstream-use authority; the verifiers' other inputs remain admitted. An established initial
+configuration is a premise, not a self-verifying bootstrap.
+A representation lemma maps execution traces in both directions when semantics, gates, costs, capacities,
+authority and failure/restoration transitions are preserved. Fairness and non-Zeno premises remain necessary
+for the existing infinite-stream conclusions. Process/thread composition, finite tasks and the two-node
+handoff policy retain their earlier conditions. This informative clarification does not implement a runtime
+or change the concrete execution profile, and makes no hardware or performance claim.
