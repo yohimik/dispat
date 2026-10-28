@@ -1078,3 +1078,17 @@ more nodes under its authority and resource contract, as separately accounted ac
 reopen the completed epoch. Parallel checking does not remove persistence/read barriers or guarantee
 independent errors. Chandy–Lamport snapshot and Pillai et al. crash-consistency references distinguish
 global-state and storage obligations. This adds no runtime replication, provisioning or release authority.
+
+## 2026-10-28: Processes, threads and scaling of a common task model
+
+Section 13.11 treats process-executed and thread-executed work as the same kind of abstract task, while
+preserving their different memory, resource and failure semantics. A task/slot correspondence that preserves
+all dependencies, costs and resource constraints maps feasible schedules in both directions without changing
+makespan. Sequential paths and parallel work therefore obey the same conditional bounds in either model.
+Internally parallel processes require an explicit subgraph or their actual resource demand; process,
+thread and core counts cannot be multiplied as independent capacity. Hardware scaling is orthogonal:
+processes can use vertical multicore capacity, and multiple hosts can each run threaded processes. Explicit
+examples separate local capacity, remote capacity and mandatory setup, so neither process-horizontal nor
+thread-vertical placement is universally best. Platform documentation supplies mechanism examples, not a
+benchmark or optimality theorem. The clarification adds no runtime executor or deployment behavior and does
+not substitute two execution containers for the distinct-node and authority premises of durable handoff.

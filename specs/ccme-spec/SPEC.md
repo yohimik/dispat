@@ -3812,6 +3812,71 @@ not a wall-clock deadline or instantaneous cancellation guarantee for the §28 e
    `C(h + 1) - C(h) > T_task(h) - T_task(h + 1)`. Without those decomposition premises, this comparison is
    not an end-to-end formula and no universal best machine count follows.
 
+   *Processes, threads and the common task abstraction (informative).* A task here is a declared unit of
+   work with completion semantics, dependencies and a resource demand; it is not an operating-system
+   process identifier or thread identifier. Work executed by a process or by a thread can be represented
+   by the same kind of task vertex. A process may contain multiple threads, and either container may
+   execute many tasks over its lifetime. Thus the abstraction covers both without identifying their
+   memory, isolation, scheduling or failure semantics. A process with internally parallel work must expose
+   the corresponding subgraph or charge its actual simultaneous resource demand; it cannot be counted as
+   one one-slot sequential task while also counting its threads as free additional capacity. A coarse
+   elapsed duration for such a composite is not its total processor work.
+
+   Fix two implementations of the same task semantics, with a bijection of task vertices and usable slots
+   preserving every dependency, duration, compatibility rule, capacity reservation and mandatory delay.
+   Include setup, communication, synchronization, memory constraints and any other binding resource in
+   this account, and assume the same admissible dispatch rules. Renaming corresponding tasks and slots
+   in a feasible schedule preserves every start/finish constraint and resource occupancy interval, so
+   gives a feasible schedule of exactly the same makespan in the other implementation. The inverse
+   renaming gives the converse. Consequently their feasible makespan sets, and their optimal makespans
+   whenever a minimum exists, are equal. This is a conditional schedule-equivalence proof, not a proof
+   that replacing real threads with processes preserves these premises. In particular, data races,
+   changed memory visibility, locks, serialization or extra transfers can invalidate the correspondence.
+
+   Both implementations therefore inherit the sequential-path and parallel-work results when their
+   respective premises hold. In the ideal one-pool case, `T >= max(Lk, Wk / s)` and clause 2's list bound
+   use effective compatible execution slots, not the number of created process or thread objects.
+   With unchanged durations, a chain remains sequential under either representation; independent work
+   can run simultaneously under either when sufficient slots exist. Concurrency by interleaving on one
+   slot is not simultaneous execution on several slots. Neither creating more threads nor creating more
+   processes removes a dependency or a serialized shared resource. Preemption, dynamic blocking and
+   hidden dependencies do not automatically satisfy the fixed nonpreemptive DAG premises. A finite
+   execution may be refined into sequential stages with its actual order and resource constraints,
+   but this does not supply an automatic static graph or a bound for arbitrary program behavior.
+
+   Horizontal and vertical scaling describe the hardware deployment, rather than two exclusive kinds
+   of task. Processes with explicit communication can be placed on different hosts; ordinary shared-memory
+   threads within one process use that process's host resources. This makes processes a natural deployment
+   boundary for horizontal expansion and threads a natural way to use local parallel capacity, but proves
+   no universal "best" choice. Multiple processes can also use additional cores on one host. A hybrid
+   deployment can add hosts containing threaded processes. If `h` identical hosts each supply `c` effective
+   interchangeable slots, clause 4's `s = h c` applies to either arrangement only when its one-pool and
+   transfer premises hold. Do not multiply process counts, thread counts and core counts as independent
+   capacities for the same hardware. Local locks, interpreter restrictions, memory bandwidth, oversubscription,
+   host placement and network transport remain charged or restrict the applicable capacity model.
+
+   For example, two independent unit-duration tasks on one host with two compatible slots finish in
+   one unit with either two single-threaded processes or two threads of one process, in the zero-overhead
+   model. This is a process-based use of vertical capacity as well as a thread-based one. Two hosts with
+   one slot each give the same ideal time; if that placement instead requires a unit of serialized setup
+   before either task starts, it takes two units. Conversely, when one host is limited to one slot, two
+   such tasks take two units locally, while two one-slot hosts with setup `a` satisfying `0 <= a < 1`
+   take `1 + a < 2`, assuming no other costs. These are exact model examples, not measured performance.
+   They show that locality, capacity and overhead, rather than the process/thread name, decide the result.
+   A claim that one implementation is fastest must fix the workload, semantics, admissible alternatives,
+   hardware/resource budget and full cost model, then establish the corresponding comparison. If setup
+   overlaps computation, use the combined dependency/resource model rather than adding overlapping times.
+
+   The Linux man-pages project's [pthreads(7)](https://www.man7.org/linux/man-pages/man7/pthreads.7.html)
+   documents shared process memory and distinct thread stacks; its
+   [sched(7)](https://www.man7.org/linux/man-pages/man7/sched.7.html) describes scheduling runnable threads.
+   Python's [multiprocessing documentation](https://docs.python.org/3/library/multiprocessing.html)
+   gives a concrete process-based mechanism for using multiple processors on one machine. These references
+   illustrate execution mechanisms, not a universal performance ordering. This abstraction adds no new
+   CCME thread executor, migration, provisioning or runtime scheduling policy. Task equivalence also does
+   not establish distinct authorized nodes or independent failure domains: two threads or processes do
+   not by themselves discharge the two-node durable-handoff premises below or any existing authority rule.
+
    *Word operations and useful capacity.* The same work/span bounds apply inside a task, after fixing its
    algorithm, input and primitive-operation model. Word width, stored word count and simultaneous word
    operations are different quantities. Fix a positive word width `b` and a specified set of operations on
