@@ -1,5 +1,12 @@
 # Changelog
 
+## docker/dispat-debian/v1.11.0-rc.11 (2026-10-28)
+
+### Dependencies
+
+- [dispat](https://github.com/yohimik/dispat/releases/tag/services/dispat/v1.11.0-rc.12): 1.11.0-rc.11 -> 1.11.0-rc.12
+
+
 ## docker/dispat-debian/v1.11.0-rc.10 (2026-10-27)
 
 ### Dependencies
