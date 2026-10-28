@@ -5211,6 +5211,84 @@ These are separate models and premises, not a crash-tolerance guarantee supplied
 Dijkstra–Scholten citation. A detector for CCME must respect its actual failure, fencing and recovery
 contract; this informative lemma implements no failover mechanism and grants no new release authority.
 
+**Two-node durable completion handoff (informative).** A deployment may require two distinct,
+authorized, compatible verifying nodes for a planned completion handoff: a writer `W` and a reader `R`.
+Both remain available from the start of finalization until the completion record has been safely handed
+off and acknowledged. Available does not mean continuously busy. This is a requirement of this declared
+handoff policy, not a universal lower bound for computational termination. The two-node requirement ends
+at that handoff; one node or no nodes may remain afterward, subject to the declared storage-retention
+contract. Here “planned” or “expected” termination names this intended protocol outcome, not a claim
+about a stochastic expected stopping time.
+
+Fix a finite, immutable completion payload and manifest `S` for one identified run and admission epoch.
+Verification attestations and handoff receipts are separate durable records bound to `S` and the epoch;
+they do not mutate `S` or become recursively required contents of their own verification input. “All data”
+means every datum required by the declared completion, verification and recovery contract: inputs and
+outputs, the task and result identities, terminal outcomes, the accepted event frontier, and evidence
+accounting for messages, callbacks, provisioning, retries, leases and external effects. Include the
+complete transitive contents of any referenced objects, with an unambiguous manifest and identity.
+Unrelated machine memory need not be copied, but an omitted required object is not a complete record.
+A digest identifies content under the stated integrity assumptions; it does not prove completeness or
+the truth of the recorded claims. Close admission for this epoch and establish a consistent global
+settlement record using the preceding obligation accounting and effect reconciliation/fencing rules.
+A snapshot of local idle states, or of a changing set of files, cannot substitute for that evidence.
+
+The storage contract must make an acknowledged committed record survive the writer's planned shutdown
+and remain independently readable for the required retention period. Persist the content, manifest and
+commit/finality metadata with the required ordering and atomicity before treating the record as durable.
+A write-call return, a volatile cache or two machines alone does not establish that contract. Pin one
+finite nonempty family of terminating checks and its versions and inputs. Their joint acceptance must
+be sound for the declared completion predicate, including the required settlement evidence; require
+completeness as well if the contract promises acceptance of every valid record.
+
+Use the following ordered protocol:
+
+1. `W` writes all of `S` to persistent storage and waits for the storage contract's durable commit
+   acknowledgment. It runs every required check on that exact committed record, joining all check
+   results, and durably records its successful verification bound to `S` and the epoch. A failed,
+   missing, interrupted or mismatched check does not authorize a successful handoff.
+2. `R` reads all of `S` and its referenced contents from the committed persistent representation,
+   verifies the manifest, identity and writer evidence, and independently reruns every required check
+   on that same record. It does not accept the writer's in-memory state or a claim that checks ran as a
+   substitute for its own reads and checks. Both nodes may run their check branches in parallel when
+   compatible capacity and the checks' dependencies permit; both joins are required.
+3. After all reader checks accept, record the reader's acceptance and handoff acknowledgment durably,
+   binding the same record, epoch and verification policy. The writer observes that exact acknowledged
+   handoff before its planned departure. Recording uses the existing authorized writer/receipt path;
+   being the second verifier does not confer canonical-write, publication or successor authority.
+
+*Conditional safety and progress.* At each stage, retain the immutable record identity, complete
+settlement evidence, closed admission and accessible durable contents. Induction over the ordered
+stages shows that a successful handoff has the writer's complete durable record and both complete
+accepting check families on that same record. Sound acceptance establishes the declared predicate;
+the closed-epoch and fencing premises prevent a hidden obligation from invalidating it afterward.
+The storage premise preserves the record through the writer's planned departure. This proves a safe
+completion handoff under these premises; counting two nodes or duplicating unsound checks proves none
+of them. If both nodes stay available, every required storage/communication/receipt operation succeeds
+in finite time, every check accepts after finite time, and enabled stages receive fair service, the
+finite protocol reaches its handoff for a valid record. Otherwise successful handoff is not guaranteed:
+a crash, failed check or unavailable storage requires refusal or separately authorized recovery. Safety does not
+imply termination under perpetual faults, and this is not a two-node consensus or crash-tolerance proof.
+
+After handoff, one surviving node may start processes or request additional nodes if it has the required
+authority, state, compatible capacity and provisioner access. One does not guarantee successful creation
+or unlimited resources. That later provisioning is a separately accounted operation; a completed epoch
+is not silently reopened. New semantic work requires a new admitted/pinned plan under CCME. A creation
+request already pending and capable of reactivating the supposedly completed epoch would instead be an
+outstanding obligation, preventing its completion claim. No requirement for two nodes continues after
+the handoff, and no automatic replication or recursive-provisioning feature is implemented here.
+
+All persistence, acquisition, transfer, checking and acknowledgment costs remain charged. The parallel
+verification maximum below applies separately to each eligible check phase; the full ordered handoff
+also includes its intervening persistence/read barriers and final acknowledgment. Overlapping phases or
+contended capacity require their actual combined graph. The distinction between consistent global state
+and local observations is developed by Chandy and Lamport, [*Distributed Snapshots: Determining Global
+States of Distributed Systems*, TOCS 3(1), 63–75 (1985)](https://www.microsoft.com/en-us/research/publication/distributed-snapshots-determining-global-states-distributed-system/).
+Persistence properties are a separate storage obligation; see Pillai et al., [*All File Systems Are Not
+Created Equal: On the Complexity of Crafting Crash-Consistent Applications*, OSDI 2014](https://www.usenix.org/conference/osdi14/technical-sessions/presentation/pillai).
+These references do not turn this informative policy into a new runtime implementation, hardware result,
+physical exactly-once guarantee or transfer of release authority.
+
 **Integer rewards, ticks and a stopped equilibrium (informative).** A node may be modeled as a player
 and one local action as a tick. Its integer points are rewards assigned by declared game rules, not
 automatically elapsed-time savings, remaining work or evidence that a compiler improved. This is a

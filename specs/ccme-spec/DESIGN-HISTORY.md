@@ -1062,3 +1062,19 @@ known for stars and chains extends to all trees only with a suitable composition
 closure supplies the induction; two three-leaf stars glued at one leaf give a counterexample to
 unrestricted transfer. The edge-count identity composes, whereas arbitrary degree, timing or runtime
 claims need separate premises. No topology algorithm, minimal-chain requirement or runtime behavior changes.
+
+## 2026-10-28: Two-node durable completion handoff
+
+Section 13.11 specifies an informative planned-completion policy with two distinct verifying nodes
+available until a complete persistent completion record is safely handed off and acknowledged. The
+writer persists the record and runs every required check; the reader loads that exact committed record
+and independently reruns every check. Ordered-stage induction proves the conditional handoff safety
+claim, with storage durability, complete obligation accounting, sound checks and existing authority as
+explicit premises. Successful finite storage/communication, accepting finite checks and fair service give
+successful progress. Verification attestations and the handoff receipt separately bind the immutable payload.
+The two-node condition ends at handoff, as explicitly clarified; it is neither a universal minimum for
+termination nor a crash-tolerance or expected-time theorem. One surviving node may subsequently provision
+more nodes under its authority and resource contract, as separately accounted activity that does not
+reopen the completed epoch. Parallel checking does not remove persistence/read barriers or guarantee
+independent errors. Chandy–Lamport snapshot and Pillai et al. crash-consistency references distinguish
+global-state and storage obligations. This adds no runtime replication, provisioning or release authority.
