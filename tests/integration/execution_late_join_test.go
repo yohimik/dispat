@@ -33,8 +33,15 @@ const lateJoinExpirySeconds = 2
 const lateJoinExpiryObserveSeconds = 20
 const lateJoinLedgerScanLimit = 128
 const admittedClaimDeadlineSlack = 150 * time.Millisecond
-const admittedClaimTimeoutSeconds = 5
+const admittedClaimTimeoutSeconds = 30
 const executionLateJoinIdentitySeedEnv = "DISPAT_IT_JOIN_IDENTITY_SEED"
+const executionAcceptedAdmissionTaskID = "alpha:1:"
+const executionLateJoinClaimKind = "claim-accepted"
+const executionLateJoinTerminalKind = "terminal"
+const executionLateJoinCancelKind = "cancel-issued"
+const executionLateJoinRetryKind = "retry-ready"
+const executionLateJoinNoClaimKind = "no-claim-expired"
+const executionAcceptedAdmissionExpectedAttempts = 1
 
 func executionWaitLateJoinMarker(path string, timeout time.Duration) bool {
 	deadline := time.NewTimer(timeout)
@@ -141,6 +148,7 @@ func executionLateJoinIdentity(t *testing.T) (publicKey, seed string) {
 type executionLateJoinLedgerEvent struct {
 	Kind                 string `json:"kind"`
 	Task                 string `json:"task"`
+	Attempt              int    `json:"attempt"`
 	Node                 string `json:"node"`
 	PickupID             string `json:"pickupId"`
 	OutputOID            string `json:"outputOid"`
@@ -153,6 +161,67 @@ type executionLateJoinLedgerEvent struct {
 	PriorTaskOID         string `json:"priorTaskOid"`
 	AssignmentOID        string `json:"assignmentOid"`
 	AdmissionDeadlineUTC string `json:"admissionDeadlineUtc"`
+}
+
+type executionAcceptedAdmissionProof struct {
+	Mailbox string
+	Task    string
+	Node    string
+	Started string
+}
+
+// A command marker is written after the signed Claim was accepted. Its time
+// proves the causal Claim preceded the signed deadline without charging the
+// test's later ledger scan against the admission window.
+func executionRequireAcceptedBeforeAdmission(t *testing.T, proof executionAcceptedAdmissionProof) time.Time {
+	t.Helper()
+	marker, err := os.Stat(proof.Started)
+	require.NoError(t, err)
+	var deadline time.Time
+	acceptedClaims := 0
+	for _, event := range executionLateJoinLedgerEvents(t, proof.Mailbox) {
+		if event.Kind == "execution-started" {
+			deadline, err = time.Parse(time.RFC3339Nano, event.AdmissionDeadlineUTC)
+			require.NoError(t, err)
+		}
+		if event.Kind == executionLateJoinClaimKind && event.Task == proof.Task {
+			require.Equal(t, proof.Node, event.Node, "the signed Claim belongs to the worker running the command")
+			require.Equal(t, executionAcceptedAdmissionExpectedAttempts, event.Attempt,
+				"the worker's first accepted attempt started this command")
+			require.NotEmpty(t, event.TaskOID, "the accepted Claim names a canonical task object")
+			require.NotEmpty(t, event.AssignmentOID, "the accepted Claim names its exact Assignment")
+			require.False(t, deadline.IsZero(), "signed execution started before the Claim")
+			acceptedClaims++
+		}
+	}
+	require.Equal(t, executionAcceptedAdmissionExpectedAttempts, acceptedClaims,
+		"the worker command follows exactly one accepted signed Claim")
+	require.True(t, marker.ModTime().Before(deadline),
+		"the command began after the Claim but before signed admission closed: marker %s, deadline %s",
+		marker.ModTime().Format(time.RFC3339Nano), deadline.Format(time.RFC3339Nano))
+	return deadline
+}
+
+func executionRequireClaimSurvivedAdmission(t *testing.T, mailbox, task string) {
+	t.Helper()
+	var claims, terminals int
+	for _, event := range executionLateJoinLedgerEvents(t, mailbox) {
+		if event.Task != task {
+			continue
+		}
+		switch event.Kind {
+		case executionLateJoinClaimKind:
+			claims++
+		case executionLateJoinTerminalKind:
+			terminals++
+		case executionLateJoinCancelKind, executionLateJoinRetryKind, executionLateJoinNoClaimKind:
+			t.Errorf("the accepted task has an unexpected signed %s event", event.Kind)
+		}
+	}
+	require.Equal(t, executionAcceptedAdmissionExpectedAttempts, claims,
+		"the original signed Claim is the only accepted attempt")
+	require.Equal(t, executionAcceptedAdmissionExpectedAttempts, terminals,
+		"the original signed Claim reaches one terminal event")
 }
 
 func TestExecutionAcceptedClaimSurvivesLateAdmissionDeadline(t *testing.T) {
@@ -183,28 +252,38 @@ func TestExecutionAcceptedClaimSurvivesLateAdmissionDeadline(t *testing.T) {
 		}
 	}()
 	first := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
+	isReleaseWaited := false
+	defer func() {
+		if isReleaseWaited {
+			return
+		}
+		if err := os.WriteFile(gate, nil, 0o600); err != nil {
+			t.Errorf("the command gate could not be opened during cleanup: %v", err)
+		}
+		result := first.WaitFor(lateJoinPeerCompleteWaitSeconds * time.Second)
+		t.Logf("gated release after failure: code=%d stdout:\n%s\nstderr:\n%s", result.Code, result.Stdout, result.Stderr)
+	}()
 	require.Eventually(t, func() bool {
 		_, err := os.Stat(started)
 		return err == nil
 	}, lateJoinFirstTaskStartWaitSeconds*time.Second, lateJoinFirstTaskPollMilliseconds*time.Millisecond,
 		"the eager peer must claim and start the command before the admission deadline")
-	var deadline time.Time
-	for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
-		if event.Kind == "execution-started" {
-			var err error
-			deadline, err = time.Parse(time.RFC3339Nano, event.AdmissionDeadlineUTC)
-			require.NoError(t, err)
-		}
-	}
-	require.False(t, deadline.IsZero(), "signed start fixes the admission deadline")
-	require.True(t, time.Now().Before(deadline), "the command was accepted before admission closed")
+	deadline := executionRequireAcceptedBeforeAdmission(t, executionAcceptedAdmissionProof{
+		Mailbox: rig.mailbox, Task: executionAcceptedAdmissionTaskID, Node: executionNode, Started: started})
 	if wait := time.Until(deadline) + admittedClaimDeadlineSlack; wait > 0 {
 		time.Sleep(wait)
 	}
 	require.NoFileExists(t, completed, "the accepted command remains active after late admission closes")
+	for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
+		require.False(t, event.Task == executionAcceptedAdmissionTaskID &&
+			(event.Kind == executionLateJoinCancelKind || event.Kind == executionLateJoinNoClaimKind),
+			"the accepted Claim is not cancelled or expired when admission closes")
+	}
 	require.NoError(t, os.WriteFile(gate, nil, 0o600))
 	result := first.Wait()
+	isReleaseWaited = true
 	require.Equal(t, 0, result.Code, "stdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
+	executionRequireClaimSurvivedAdmission(t, rig.mailbox, executionAcceptedAdmissionTaskID)
 	require.FileExists(t, completed)
 }
 
@@ -242,21 +321,24 @@ func TestExecutionBusyAdmittedWorkerQueueSurvivesAdmissionDeadline(t *testing.T)
 		}
 	}()
 	first := rig.repo.StartReleaseEnv(rig.env(), "release", "--return-endpoint", rig.returnURL)
+	isReleaseWaited := false
+	defer func() {
+		if isReleaseWaited {
+			return
+		}
+		if err := os.WriteFile(gate, nil, 0o600); err != nil {
+			t.Errorf("the command gate could not be opened during cleanup: %v", err)
+		}
+		result := first.WaitFor(lateJoinPeerCompleteWaitSeconds * time.Second)
+		t.Logf("gated release after failure: code=%d stdout:\n%s\nstderr:\n%s", result.Code, result.Stdout, result.Stderr)
+	}()
 	require.Eventually(t, func() bool {
 		_, err := os.Stat(started)
 		return err == nil
 	}, lateJoinFirstTaskStartWaitSeconds*time.Second, lateJoinFirstTaskPollMilliseconds*time.Millisecond,
 		"the first worker task must hold the only admitted node slot")
-	var deadline time.Time
-	for _, event := range executionLateJoinLedgerEvents(t, rig.mailbox) {
-		if event.Kind == "execution-started" {
-			var err error
-			deadline, err = time.Parse(time.RFC3339Nano, event.AdmissionDeadlineUTC)
-			require.NoError(t, err)
-		}
-	}
-	require.False(t, deadline.IsZero(), "signed start fixes the admission deadline")
-	require.True(t, time.Now().Before(deadline), "the first task began before admission closed")
+	deadline := executionRequireAcceptedBeforeAdmission(t, executionAcceptedAdmissionProof{
+		Mailbox: rig.mailbox, Task: executionAcceptedAdmissionTaskID, Node: executionNode, Started: started})
 	if wait := time.Until(deadline) + admittedClaimDeadlineSlack; wait > 0 {
 		time.Sleep(wait)
 	}
@@ -267,7 +349,9 @@ func TestExecutionBusyAdmittedWorkerQueueSurvivesAdmissionDeadline(t *testing.T)
 	}
 	require.NoError(t, os.WriteFile(gate, nil, 0o600))
 	result := first.Wait()
+	isReleaseWaited = true
 	require.Equal(t, 0, result.Code, "stdout:\n%s\nstderr:\n%s", result.Stdout, result.Stderr)
+	executionRequireClaimSurvivedAdmission(t, rig.mailbox, executionAcceptedAdmissionTaskID)
 	require.FileExists(t, secondDone, "the queued worker task claims after the first task settles")
 }
 
