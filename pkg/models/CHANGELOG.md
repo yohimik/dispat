@@ -1,5 +1,17 @@
 # Changelog
 
+## pkg/models/v1.11.0-rc.8 (2026-10-28)
+
+### Features
+
+- configure total accepted task pickup attempts ([5552fc8](https://github.com/yohimik/dispat/commit/5552fc8bdd38265f74e797605976809bcb9cc41b)) (by yohimik)
+  Default interpretation to one attempt and validate explicit limits from 1 to 64.
+
+### Authors
+
+- yohimik
+
+
 ## pkg/models/v1.11.0-rc.7 (2026-10-27)
 
 ### Features
