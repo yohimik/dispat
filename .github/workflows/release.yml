@@ -478,11 +478,23 @@ jobs:
   tests:
     name: Full suite
     needs: [plan, test-unit, test-lane]
-    if: needs.plan.outputs.releasing == 'true'
+    if: ${{ always() && needs.plan.outputs.releasing == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write     # publish the verified coverage badge
     steps:
+      - name: Require the release test lanes to succeed
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          UNIT_RESULT: ${{ needs['test-unit'].result }}
+          TEST_LANE_RESULT: ${{ needs['test-lane'].result }}
+        run: |
+          if [ "$PLAN_RESULT" != success ] || [ "$UNIT_RESULT" != success ] || [ "$TEST_LANE_RESULT" != success ]; then
+            printf 'Release test prerequisites ended plan=%s unit=%s lanes=%s; Full suite requires success.\n' \
+              "$PLAN_RESULT" "$UNIT_RESULT" "$TEST_LANE_RESULT" >&2
+            exit 1
+          fi
+
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
