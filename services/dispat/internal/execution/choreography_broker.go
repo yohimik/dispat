@@ -178,8 +178,10 @@ type ChoreographyTaskSpec struct {
 	Virtual                    bool
 	LocalAuthority             bool
 	ExecutorOwned              bool
-	RetryAfterUncertainAttempt bool `json:"retryAfterUncertainAttempt,omitempty"`
-	MaxAttempts                int  `json:"maxAttempts,omitempty"`
+	HybridSegment              string `json:"hybridSegment,omitempty"`
+	OperationPolicyDigest      string `json:"operationPolicyDigest,omitempty"`
+	RetryAfterUncertainAttempt bool   `json:"retryAfterUncertainAttempt,omitempty"`
+	MaxAttempts                int    `json:"maxAttempts,omitempty"`
 	NeedsPreparedInput         bool
 	Budget                     string
 	Weight                     int

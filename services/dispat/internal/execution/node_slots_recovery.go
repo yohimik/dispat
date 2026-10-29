@@ -258,6 +258,7 @@ func (w *Worker) recoverHeldNodeSlots(ctx context.Context, onlyRun string) error
 			if _, err := runMailbox.ReadChoreographyTaskRoot(ctx, ChoreographyTaskRootQuery{
 				Binding: r.Binding, Task: state.lease.Intent.Task,
 				Kind: r.Kind, BootstrapOID: r.BootstrapOID,
+				MaxAttempts: feed.reader.tasks[state.lease.Intent.Task].EffectiveMaxAttempts(),
 			}); err != nil {
 				return err
 			}
@@ -313,7 +314,8 @@ func (w *Worker) recoverHeldNodeSlots(ctx context.Context, onlyRun string) error
 			}
 			rootOID, err := runMailbox.ReadChoreographyTaskRoot(ctx, ChoreographyTaskRootQuery{
 				Binding: n.Binding, Task: state.lease.Intent.Task,
-				Kind: n.Kind, BootstrapOID: n.BootstrapOID})
+				Kind: n.Kind, BootstrapOID: n.BootstrapOID,
+				MaxAttempts: feed.reader.tasks[state.lease.Intent.Task].EffectiveMaxAttempts()})
 			if err != nil {
 				return fmt.Errorf(nodeSlotNativeTaskRootUnavailableErrorFormat, err)
 			}

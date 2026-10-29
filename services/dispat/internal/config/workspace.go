@@ -943,8 +943,14 @@ func ResolvedWorkspaceSpaceConfigs(workspace *Workspace) ([]SpaceConfig, error) 
 // ResolvedRepositorySpaceConfigs settles one owner's spaces while refusing
 // folder configuration belonging to another participating repository.
 func ResolvedRepositorySpaceConfigs(c *File, root string, workspace *Workspace) (map[string]SpaceConfig, error) {
+	return ResolvedRepositorySpaceConfigsWithin(c, root, workspace, "")
+}
+
+// ResolvedRepositorySpaceConfigsWithin also refuses folder configuration
+// references outside the selected immutable materialization.
+func ResolvedRepositorySpaceConfigsWithin(c *File, root string, workspace *Workspace, sourceRoot string) (map[string]SpaceConfig, error) {
 	if workspace == nil {
-		return ResolvedSpaceConfigs(c, root)
+		return resolvedSpaceConfigsWithin(c, root, allowAllFolderInputs, sourceRoot)
 	}
 	for i := range workspace.Repositories {
 		repository := &workspace.Repositories[i]
@@ -953,7 +959,7 @@ func ResolvedRepositorySpaceConfigs(c *File, root string, workspace *Workspace) 
 		}
 		gitRoots := &gitRootMemo{byDir: make(map[string]string)}
 		folderInputs := newWorkspaceFolderPolicy(workspace, repository, gitRoots)
-		return resolvedSpaceConfigsMode(c, root, folderInputs.allow)
+		return resolvedSpaceConfigsWithin(c, root, folderInputs.allow, sourceRoot)
 	}
 	return nil, fmt.Errorf("space configuration has no owner for %s", root)
 }
@@ -984,8 +990,17 @@ func ValidatePlanDependencies(pkgs []*model.Package, declared []DeclaredDependen
 // DiscoverWorkspacePackages is the composed equivalent of DiscoverPackages:
 // it retains invalid or stale dependency declarations for compute to repair.
 func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
+	return DiscoverWorkspacePackagesWithin(c, controlRoot, workspace, "")
+}
+
+// DiscoverWorkspacePackagesWithin also requires every root, imported, space
+// and package configuration source to belong to one captured source tree.
+func DiscoverWorkspacePackagesWithin(c *File, controlRoot string, workspace *Workspace, sourceRoot string) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
+	if err := ValidateCapturedSources(sourceRoot, c.SourceFiles); err != nil {
+		return nil, nil, nil, err
+	}
 	if workspace == nil {
-		return DiscoverPackages(c, controlRoot)
+		return discoverPackagesWithin(c, controlRoot, sourceRoot)
 	}
 	var pkgs []*model.Package
 	var declared []DeclaredDependency
@@ -995,12 +1010,15 @@ func DiscoverWorkspacePackages(c *File, controlRoot string, workspace *Workspace
 		if !repo.Control && !repo.Imported {
 			continue
 		}
+		if err := ValidateCapturedSources(sourceRoot, repo.Config.SourceFiles); err != nil {
+			return nil, nil, nil, err
+		}
 		var local []*model.Package
 		var deps []DeclaredDependency
 		var ex []ExcludedDir
 		var err error
 		folderInputs := newWorkspaceFolderPolicy(workspace, &repo, gitRoots)
-		local, deps, ex, err = discoverPackagesMode(repo.Config, repo.Root, folderInputs.allow)
+		local, deps, ex, err = discoverPackagesFromSources(repo.Config, repo.Root, folderInputs.allow, sourceRoot)
 		if err != nil {
 			return nil, nil, nil, err
 		}

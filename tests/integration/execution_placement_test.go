@@ -370,7 +370,7 @@ func TestExecutionWorkerOnlyWithoutWorkersRefusesTheRelease(t *testing.T) {
 			text := diagnosticText(res)
 			assert.Contains(t, text, "core")
 			assert.Contains(t, text, row.stage)
-			assert.Contains(t, text, "execution.workers")
+			assert.Contains(t, text, "execution.choreographers")
 			assert.Equal(t, 0, buildRuns(r), "no stage of the run started")
 			assert.Empty(t, r.TagList(), "and nothing was released")
 			assert.False(t, harness.IsCodePresent(executionEvents(status), executionRefusalCode),
@@ -392,8 +392,8 @@ func TestExecutionRunOnlyRefusals(t *testing.T) {
 		"a list of one":                {stated: []any{"worker"}, want: "states both stages"},
 		"a list of three":              {stated: []any{"worker", "worker", "worker"}, want: "states both stages"},
 		"a misspelled stage value":     {stated: []any{"worker", "nowhere"}, want: "is not a placement"},
-		"a scalar worker placement":    {stated: "worker", want: "[worker, orchestrator]"},
-		"worker publication in a pair": {stated: []any{"both", "worker"}, want: "[worker, orchestrator]"},
+		"a scalar worker placement":    {stated: "worker", want: "[choreographer, orchestrator]"},
+		"worker publication in a pair": {stated: []any{"both", "worker"}, want: "[choreographer, orchestrator]"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := harness.New(t)
@@ -438,7 +438,7 @@ func TestExecutionRunOnlyLadder(t *testing.T) {
 	// The space folder's own file, the layer between the root file's entry
 	// and anything said about one package.
 	r.WriteFile(filepath.Join("packages", "dispat.json"),
-		executionRawJSON(r, map[string]any{"runOnly": []any{"worker", "orchestrator"}}))
+		executionRawJSON(r, map[string]any{"runOnly": []any{"choreographer", "orchestrator"}}))
 	r.WriteFile(filepath.Join("packages", "core", "dispat.json"),
 		executionRawJSON(r, map[string]any{"runOnly": "both"}))
 	r.Commit("feat(core,utils,tool): bootstrap")

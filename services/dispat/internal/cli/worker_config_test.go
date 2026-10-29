@@ -28,10 +28,10 @@ func TestWorkerReadsItsConfigurationOnce(t *testing.T) {
 		[]byte(`{"packages":{"core":{"path":"pkgs/core"}}}`), 0o600))
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"worker", "--root", root, "--log-level", "trace", "--log-format", "json"}, &stdout, &stderr)
+	code := Run([]string{"choreographer", "--root", root, "--log-level", "trace", "--log-format", "json"}, &stdout, &stderr)
 
 	assert.Equal(t, 1, code, "stderr:\n%s", stderr.String())
 	assert.Contains(t, stderr.String()+stdout.String(), `"code":"`+execution.CodeAuthority+`"`)
 	reads := strings.Count(stderr.String(), configlib.EventFileRead)
-	assert.Equal(t, 1, reads, "dispat worker read its configuration %d times; stderr:\n%s", reads, stderr.String())
+	assert.Equal(t, 1, reads, "dispat choreographer read its configuration %d times; stderr:\n%s", reads, stderr.String())
 }

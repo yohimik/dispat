@@ -80,6 +80,12 @@ func (w *Worker) RunCompiledLocal(ctx context.Context, broker *FirstNodeBroker,
 	if err != nil {
 		return err
 	}
+	if err := validateChoreographyHybridPolicy(bootstrap.Mode, &bootstrap.PinnedInputs, carrier); err != nil {
+		return err
+	}
+	if err := validateChoreographyRetryPolicy(bootstrap.JoinPolicy, carrier.Tasks); err != nil {
+		return err
+	}
 	if rootOID != graphRootOID {
 		return fmt.Errorf(compiledLocalPickerIdentityError)
 	}

@@ -360,7 +360,7 @@ jobs:
       - name: Run every package's unit tests
         run: |
           if [ -n "$CI_WORKER" ]; then
-            dispat run test:unit --distribution-mode=interpretation --since all --worker "$DISPAT_CI_WORKER_NODE=$DISPAT_CI_WORKER_REPOSITORY" \
+            dispat run test:unit --distribution-mode=interpretation --since all --choreographer "$DISPAT_CI_WORKER_NODE=$DISPAT_CI_WORKER_REPOSITORY" \
               --return-endpoint "https://127.0.0.1:$DISPAT_CI_RETURN_PORT" \
               --return-listen "127.0.0.1:$DISPAT_CI_RETURN_PORT"
           else

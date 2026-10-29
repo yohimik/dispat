@@ -91,6 +91,9 @@ func openPeerPlanningEnvironment(ctx context.Context,
 	if err != nil {
 		return nil, fmt.Errorf(pinnedPlanningControlConfigLoadErrorFormat, err)
 	}
+	if err := config.ValidateCapturedSources(materialized.root, configFile.SourceFiles); err != nil {
+		return nil, err
+	}
 	if err := pinPeerEffectiveConcurrency(configFile, invocation); err != nil {
 		return nil, err
 	}
@@ -119,7 +122,17 @@ func openPeerPlanningEnvironment(ctx context.Context,
 	if err := comparePeerRepositoryRoster(materialized, inputs.Repositories, workspace); err != nil {
 		return nil, err
 	}
+	if workspace != nil {
+		for _, repository := range workspace.Repositories {
+			if repository.Config != nil {
+				if err := config.ValidateCapturedSources(materialized.root, repository.Config.SourceFiles); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	private := NewWorkspace(root, configFile, workspace, options.Log)
+	private.configSourceRoot = materialized.root
 	private.planningRemotes = make(map[string]planningRemoteCoordinate, len(inputs.RepositoryCoordinates))
 	for _, coordinate := range inputs.RepositoryCoordinates {
 		if materialized.repositories[coordinate.Repository] == pinnedPlanningAbsentText {

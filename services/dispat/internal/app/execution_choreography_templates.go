@@ -52,10 +52,15 @@ func compileReleaseChoreographyTemplatesWithInputs(options releaseChoreographyTe
 			continue
 		}
 		var template execution.ChoreographyCompiledTemplate
-		request, requestErr := compiled.CompileFrameTemplate(spec.Task)
-		if requestErr != nil && (spec.LocalAuthority || firstOnly[spec.Task]) {
+		var request release.StageRequest
+		var requestErr error
+		if spec.HybridSegment != execution.HybridInterpretedSegmentName {
+			request, requestErr = compiled.CompileFrameTemplate(spec.Task)
+		}
+		if spec.HybridSegment == execution.HybridInterpretedSegmentName ||
+			requestErr != nil && (spec.LocalAuthority || firstOnly[spec.Task]) {
 			template = execution.ChoreographyCompiledTemplate{
-				Task: spec.Task, Kind: spec.Kind, Weight: spec.Weight, Limits: limits}
+				Task: spec.Task, Kind: spec.Kind, Stage: spec.Stage, Weight: spec.Weight, Limits: limits}
 		} else {
 			if requestErr != nil {
 				return nil, fmt.Errorf(missingCompiledTaskTemplateErrorFormat, spec.Task, requestErr)

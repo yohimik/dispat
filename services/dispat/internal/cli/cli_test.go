@@ -378,15 +378,15 @@ func TestEveryDocumentedFlagIsAccepted(t *testing.T) {
 		cmdCompute:      {"compute"},
 		// The serving command stops at the missing config file of this empty
 		// folder, well before it would poll anything.
-		cmdWorker:     {"worker"},
-		cmdIf:         {"if", "CI", "--then", "true"},
-		cmdFor:        {"for", "--do", "true"},
-		cmdExec:       {"exec", "build"},
-		cmdSelfUpdate: {"self-update", "--api-url", srv.URL},
-		cmdInstall:    {"install", "acme/tool", "--api-url", srv.URL},
-		cmdScanner:    {"scanner"},
-		cmdWriter:     {"writer", absent, "--set-version", "1.0.0"},
-		cmdReplacer:   {"replacer", absent, "--replace", "a=>b"},
+		cmdChoreographer: {"choreographer"},
+		cmdIf:            {"if", "CI", "--then", "true"},
+		cmdFor:           {"for", "--do", "true"},
+		cmdExec:          {"exec", "build"},
+		cmdSelfUpdate:    {"self-update", "--api-url", srv.URL},
+		cmdInstall:       {"install", "acme/tool", "--api-url", srv.URL},
+		cmdScanner:       {"scanner"},
+		cmdWriter:        {"writer", absent, "--set-version", "1.0.0"},
+		cmdReplacer:      {"replacer", absent, "--replace", "a=>b"},
 	}
 	// The values a flag has to be given to parse, or to be validated rather
 	// than refused for its own reasons. Everything else takes a placeholder.

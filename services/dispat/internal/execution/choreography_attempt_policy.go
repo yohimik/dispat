@@ -14,6 +14,9 @@ const choreographyAttemptPolicyFirstAttempt = models.DefaultExecutionMaxAttempts
 const choreographyAttemptPickupIdentityError = "execution: pickup identity differs from signed execution mode"
 
 func (policy ChoreographyJoinPolicy) pickupMode() string {
+	if policy.DistributionMode != choreographyPickupMissingIdentity {
+		return policy.DistributionMode
+	}
 	if policy.MaxAttempts != choreographyAttemptPolicyLegacyUnspecified {
 		return bootstrapInterpretationModeName
 	}
@@ -53,8 +56,8 @@ func choreographyPickupAdmissionEvent(kind ChoreographyEventKind) bool {
 }
 
 // EffectiveMaxAttempts returns the signed total accepted-pickup limit. An
-// omitted value is the established compilation policy; interpretation writes
-// an explicit value, including its one-attempt default, into every task.
+// omitted value retains historical runs; every new mode writes an explicit
+// value, including its one-attempt default, into every executable task.
 func (spec ChoreographyTaskSpec) EffectiveMaxAttempts() int {
 	if spec.MaxAttempts == choreographyAttemptPolicyLegacyUnspecified {
 		return maxPlacementAttempts
@@ -67,7 +70,7 @@ func validChoreographyAttemptLimit(attempts int) bool {
 		attempts <= models.MaximumExecutionMaxAttempts
 }
 
-// A verified failed Result can be retried when the interpretation policy
+// A verified failed Result can be retried when the signed attempt policy
 // explicitly permits multiple pickups. Legacy compilation keeps its existing
 // retry-safety declaration. A cancelled/unknown pickup still needs that
 // separate declaration and a signed cancellation fence.

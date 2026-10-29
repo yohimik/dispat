@@ -256,7 +256,7 @@ func TestExecutionRunWorkerFlagNamesAMachineTheFileDoesNot(t *testing.T) {
 	rig := newExecutionSweepRig(t, executionSweepScript, secretOnly)
 	worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0)
 
-	res := rig.sweep(nil, "--worker", executionNode+"=file://"+rig.mailbox)
+	res := rig.sweep(nil, "--choreographer", executionNode+"=file://"+rig.mailbox)
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	for _, name := range executionSweepPackages {
@@ -266,18 +266,18 @@ func TestExecutionRunWorkerFlagNamesAMachineTheFileDoesNot(t *testing.T) {
 	stopAll(t, []*executionWorker{worker})
 
 	untouched, other := executionMailbox(t), executionMailbox(t)
-	named := rig.repo.CommandEnv(rig.env(), "status", "--worker", "fresh=file://"+untouched)
+	named := rig.repo.CommandEnv(rig.env(), "status", "--choreographer", "fresh=file://"+untouched)
 	require.Equal(t, 0, named.Code, "stdout:\n%s\nstderr:\n%s", named.Stdout, named.Stderr)
 	fixed, isFixed := executionLine(named, "plan fixed")
 	require.True(t, isFixed, "status with a link names the plan\nstdout:\n%s", named.Stdout)
-	renamed := rig.repo.CommandEnv(rig.env(), "status", "--worker", "another=file://"+other)
+	renamed := rig.repo.CommandEnv(rig.env(), "status", "--choreographer", "another=file://"+other)
 	again, _ := executionLine(renamed, "plan fixed")
 	assert.Equal(t, fixed.Str("planDigest"), again.Str("planDigest"), "the links are no part of the digest")
 	assert.Empty(t, executionMailboxBranches(t, untouched), "status probes and assigns nothing")
 	assert.Empty(t, executionMailboxBranches(t, other))
 	rig.repo.Git("remote", "set-url", "--push", "origin",
 		"https://x-access-token:ghs_itFAKE@example.invalid/acme/project.git")
-	alone := rig.repo.CommandEnv(rig.env(), "status", "--worker", "fresh")
+	alone := rig.repo.CommandEnv(rig.env(), "status", "--choreographer", "fresh")
 	require.Equal(t, 0, alone.Code, "a name alone resolves no remote under status, not even one a run refuses"+
 		"\nstdout:\n%s\nstderr:\n%s", alone.Stdout, alone.Stderr)
 	aloneFixed, isAloneFixed := executionLine(alone, "plan fixed")
@@ -332,7 +332,7 @@ func TestExecutionRunWorkerFlagRefusals(t *testing.T) {
 					executionBuildLogEnv + "=" + rig.builds}, tc.env...)
 			}
 
-			res := rig.repo.CommandEnv(env, "run", "tests", "--since", "all", "--worker", tc.flag,
+			res := rig.repo.CommandEnv(env, "run", "tests", "--since", "all", "--choreographer", tc.flag,
 				"--return-endpoint", rig.returnURL, "--log-format", "json")
 
 			require.Equal(t, tc.code, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)

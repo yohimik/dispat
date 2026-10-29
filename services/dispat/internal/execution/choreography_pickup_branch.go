@@ -83,7 +83,7 @@ func ValidateChoreographyPickupID(mode, pickupID string) error {
 	want := choreographyPickupIDHexChars
 	if mode == bootstrapInterpretationModeName {
 		want = choreographyInterpretedIDHexChars
-	} else if mode != bootstrapCompilationModeName {
+	} else if mode != bootstrapCompilationModeName && mode != bootstrapHybridModeName {
 		return fmt.Errorf(choreographyPickupIdentityError)
 	}
 	if len(pickupID) != want {

@@ -50,8 +50,15 @@ func TestProbeReplyReturnsOverTLSAndOnlyFirstPushesBothSteps(t *testing.T) {
 	reply := ChoreographyProbeReply{ChoreographyRunBinding: binding, Node: "build-a", Branch: branch,
 		AssignmentOID: oid, Report: NodeReport{Protocol: ProtocolVersion, Dispat: "1.11.0", OS: "linux",
 			Arch: "amd64", Capacity: 2, Limits: limits}}
+	wake, stopWaiting := coordinator.watchProbeReply(reply.Node, branch)
+	defer stopWaiting()
 	receipt, err := client.SubmitProbe(t.Context(), reply)
 	require.NoError(t, err)
+	select {
+	case <-wake:
+	default:
+		t.Fatal("persisting the authenticated probe reply did not wake its waiter")
+	}
 	require.Equal(t, MessageResult, receipt.Kind)
 	head, err := fixture.mailbox.Reread(t.Context(), branch)
 	require.NoError(t, err)
@@ -62,7 +69,17 @@ func TestProbeReplyReturnsOverTLSAndOnlyFirstPushesBothSteps(t *testing.T) {
 	again, err := client.SubmitProbe(t.Context(), reply)
 	require.NoError(t, err)
 	require.Equal(t, receipt.OID, again.OID, "repeated HTTP answer does not push another result")
+	select {
+	case <-wake:
+	default:
+		t.Fatal("an authenticated repeated reply did not wake its waiter")
+	}
 	reply.Node = "foreign"
 	_, err = client.SubmitProbe(t.Context(), reply)
 	require.Error(t, err)
+	select {
+	case <-wake:
+		t.Fatal("a rejected reply woke the accepted probe's waiter")
+	default:
+	}
 }

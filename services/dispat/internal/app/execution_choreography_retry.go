@@ -15,9 +15,9 @@ func applyChoreographyRetrySafety(specs []execution.ChoreographyTaskSpec, enable
 	}
 }
 
-// The interpretation count is signed into every nonvirtual descriptor. A
+// The attempt count is signed into every nonvirtual descriptor. A
 // first-node native effect stays single-attempt even when delegated commands
-// may be safely repeated. Compilation leaves the historical limit omitted.
+// may be safely repeated. An omitted historical limit is retained on replay.
 func applyChoreographyAttemptLimit(specs []execution.ChoreographyTaskSpec, policy execution.ChoreographyJoinPolicy) {
 	if policy.MaxAttempts == 0 {
 		return

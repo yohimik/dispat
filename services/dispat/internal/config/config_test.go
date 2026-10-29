@@ -961,7 +961,7 @@ func TestModeExampleConfigsAreValid(t *testing.T) {
 					"%s reaches the repository being released, as the example says", worker.Name)
 			}
 		}},
-		"a worker node": {"dispat.example.worker.yaml", loadNode, func(t *testing.T, cfg *File) {
+		"a worker node": {"dispat.example.choreographer.yaml", loadNode, func(t *testing.T, cfg *File) {
 			assert.False(t, cfg.Execution.IsDistributed(), "a worker delegates nothing")
 			assert.Empty(t, cfg.Spaces, "a worker states no release policy of its own")
 		}},

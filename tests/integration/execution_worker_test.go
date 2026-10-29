@@ -239,7 +239,7 @@ func TestExecutionWorkerPrunesAnsweredWorkWhileServing(t *testing.T) {
 	require.NoError(t, os.WriteFile(seenPath, seed, 0o644))
 	proc := rig.repo.StartCommandEnv(append(executionNodeHomeEnv(t, state),
 		executionSecretEnv+"="+executionSecret, executionBuildLogEnv+"="+rig.builds),
-		"worker", "--root", root, "--state-dir", state, "--idle-timeout", "60")
+		"choreographer", "--root", root, "--state-dir", state, "--idle-timeout", "60")
 	worker := &executionWorker{t: t, proc: proc, stateDir: state, root: root}
 	defer worker.stop(t)
 	result := rig.sweep(nil)
@@ -281,7 +281,7 @@ func TestExecutionWorkerKeepsFutureIssuedReplayKnowledge(t *testing.T) {
 		}))
 	proc := rig.repo.StartCommandEnv(append(executionNodeHomeEnv(t, state),
 		executionSecretEnv+"="+executionSecret),
-		"worker", "--root", root, "--state-dir", state, "--idle-timeout", "10")
+		"choreographer", "--root", root, "--state-dir", state, "--idle-timeout", "10")
 	worker := &executionWorker{t: t, proc: proc, stateDir: state, root: root}
 	control := rig.release()
 	require.Equal(t, 0, control.Code, "stdout:\n%s\nstderr:\n%s", control.Stdout, control.Stderr)
@@ -322,7 +322,7 @@ func TestExecutionWorkerReadsAnAnsweredWorkRecordACrashCut(t *testing.T) {
 	orchestrator.offer(replay, orchestrator.probe(replay, "cut-live"))
 	proc := rig.repo.StartCommandEnv(append(executionNodeHomeEnv(t, state),
 		executionSecretEnv+"="+executionSecret),
-		"worker", "--root", root, "--state-dir", state, "--idle-timeout", "10")
+		"choreographer", "--root", root, "--state-dir", state, "--idle-timeout", "10")
 	worker := &executionWorker{t: t, proc: proc, stateDir: state, root: root}
 	control := rig.release()
 	require.Equal(t, 0, control.Code, "stdout:\n%s\nstderr:\n%s", control.Stdout, control.Stderr)
@@ -420,7 +420,7 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 			root := writeNodeConfig(t, cfg)
 
 			res := runWorker(t, rig, append([]string{executionSecretEnv + "=" + executionSecret}, tc.env...),
-				"worker", "--root", root, "--state-dir", t.TempDir(), "--idle-timeout", "1")
+				"choreographer", "--root", root, "--state-dir", t.TempDir(), "--idle-timeout", "1")
 
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
@@ -431,7 +431,7 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 	}
 
 	t.Run("a node without a configuration file at all", func(t *testing.T) {
-		res := runWorker(t, rig, nil, "worker", "--root", t.TempDir(), "--idle-timeout", "1")
+		res := runWorker(t, rig, nil, "choreographer", "--root", t.TempDir(), "--idle-timeout", "1")
 
 		require.Equal(t, 1, res.Code)
 		assert.Contains(t, res.Stdout+res.Stderr, "config file not found")
@@ -441,7 +441,7 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 		root := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), []byte(`{"execution":`), 0o644))
 
-		res := runWorker(t, rig, nil, "worker", "--root", root, "--idle-timeout", "1")
+		res := runWorker(t, rig, nil, "choreographer", "--root", root, "--idle-timeout", "1")
 
 		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		assert.Contains(t, res.Stdout+res.Stderr, "invalid configuration")
@@ -453,7 +453,7 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 		root := writeNodeConfig(t, executionWorkerConfig(rig.mailbox))
 
 		res := runWorker(t, rig, append(executionWorkerMarker, executionSecretEnv+"="+executionSecret),
-			"worker", "--root", root, "--state-dir", t.TempDir(), "--idle-timeout", "1")
+			"choreographer", "--root", root, "--state-dir", t.TempDir(), "--idle-timeout", "1")
 
 		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		requireExecutionRefusal(t, res, executionAuthorityCode, executionAuthorityCategory)
@@ -471,7 +471,7 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 		}, 30*time.Second, 25*time.Millisecond, "the first node takes the state folder")
 
 		res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
-			"worker", "--root", first.root, "--state-dir", first.stateDir, "--idle-timeout", "1")
+			"choreographer", "--root", first.root, "--state-dir", first.stateDir, "--idle-timeout", "1")
 
 		require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		requireExecutionRefusal(t, res, executionRefusalCode, executionConfigurationCategory)
@@ -489,7 +489,7 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 			[]byte("4194304"), 0o644))
 
 		res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
-			"worker", "--root", root, "--state-dir", state, "--idle-timeout", "1")
+			"choreographer", "--root", root, "--state-dir", state, "--idle-timeout", "1")
 
 		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		_, isStarted := executionLine(res, "worker started")
@@ -506,7 +506,7 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(state, executionNode, "worker.lock"), nil, 0o644))
 
 		res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
-			"worker", "--root", root, "--state-dir", state, "--idle-timeout", "1")
+			"choreographer", "--root", root, "--state-dir", state, "--idle-timeout", "1")
 
 		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		_, isStarted := executionLine(res, "worker started")
@@ -521,7 +521,7 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 			[]byte("not-a-pid"), 0o644))
 
 		res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
-			"worker", "--root", root, "--state-dir", state, "--idle-timeout", "1")
+			"choreographer", "--root", root, "--state-dir", state, "--idle-timeout", "1")
 
 		require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	})
@@ -543,7 +543,7 @@ func TestExecutionWorkerStartRefusals(t *testing.T) {
 			[]byte(`{"old-run old-task 1":"2020-01-01T00:00:00Z"}`), 0o644))
 		env := append([]string{executionSecretEnv + "=" + executionSecret,
 			executionBuildLogEnv + "=" + sweepRig.builds}, executionNodeHomeEnv(t, state)...)
-		proc := sweepRig.repo.StartCommandEnv(env, "worker", "--root", root,
+		proc := sweepRig.repo.StartCommandEnv(env, "choreographer", "--root", root,
 			"--state-dir", state, "--idle-timeout", "20")
 		defer func() { proc.Signal(syscall.SIGINT); _ = proc.Wait() }()
 		res := sweepRig.sweep(nil)
@@ -574,7 +574,7 @@ func TestExecutionWorkerConcurrentStaleStateClaimHasOneOwner(t *testing.T) {
 	for i := range workers {
 		workers[i] = rig.repo.StartCommandEnv(
 			append(executionNodeHomeEnv(t, state), executionSecretEnv+"="+executionSecret),
-			"worker", "--root", root, "--state-dir", state, "--idle-timeout", "3")
+			"choreographer", "--root", root, "--state-dir", state, "--idle-timeout", "3")
 	}
 	started := 0
 	for _, worker := range workers {

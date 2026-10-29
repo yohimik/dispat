@@ -25,6 +25,9 @@ import (
 type discovery struct {
 	c    *File
 	root string
+	// sourceRoot is the immutable materialization boundary for configuration
+	// references. Empty permits the ordinary host filesystem.
+	sourceRoot string
 
 	declared []DeclaredDependency
 	pkgs     []*model.Package
@@ -124,6 +127,10 @@ func allowAllFolderInputs(string) bool { return true }
 // own dependency declarations and its ignore layer. folderInputs decides
 // which implicit files belong to that repository.
 func newDiscoveryMode(c *File, root string, folderInputs folderInputPolicy) (*discovery, error) {
+	return newDiscoveryWithin(c, root, folderInputs, "")
+}
+
+func newDiscoveryWithin(c *File, root string, folderInputs folderInputPolicy, sourceRoot string) (*discovery, error) {
 	if folderInputs == nil {
 		folderInputs = allowAllFolderInputs
 	}
@@ -132,8 +139,9 @@ func newDiscoveryMode(c *File, root string, folderInputs folderInputPolicy) (*di
 		return nil, fmt.Errorf("config: %s: %w", DispatignoreName, err)
 	}
 	return &discovery{
-		c:    c,
-		root: root,
+		c:          c,
+		root:       root,
+		sourceRoot: sourceRoot,
 		// The merged declaration list: the root config's own `dependencies`
 		// first, in file order, then each space's object and each package's
 		// list in discovery order.
@@ -172,7 +180,7 @@ func (d *discovery) resolveSpaceConfig(sn string) (SpaceConfig, []string, []Spac
 		if sameDir(dir, d.root) {
 			continue
 		}
-		spaceFile, spaceSrc, err := loadSpaceFile(dir)
+		spaceFile, spaceSrc, err := loadSpaceFileWithin(dir, d.sourceRoot)
 		if err != nil {
 			return SpaceConfig{}, nil, nil, nil, fmt.Errorf("config: space %q: %w", sn, err)
 		}
@@ -205,7 +213,11 @@ func ResolvedSpaceConfigs(c *File, root string) (map[string]SpaceConfig, error) 
 }
 
 func resolvedSpaceConfigsMode(c *File, root string, folderInputs folderInputPolicy) (map[string]SpaceConfig, error) {
-	d, err := newDiscoveryMode(c, root, folderInputs)
+	return resolvedSpaceConfigsWithin(c, root, folderInputs, "")
+}
+
+func resolvedSpaceConfigsWithin(c *File, root string, folderInputs folderInputPolicy, sourceRoot string) (map[string]SpaceConfig, error) {
+	d, err := newDiscoveryWithin(c, root, folderInputs, sourceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -486,7 +498,7 @@ func (d *discovery) packageLayers(s *spaceScan, name, dir, label string) ([]over
 	}
 	allowed := d.folderInputs(dir)
 	if allowed {
-		folderPO, folderSrc, err := loadPackageFile(dir)
+		folderPO, folderSrc, err := loadPackageFileWithin(dir, d.sourceRoot)
 		if err != nil {
 			return nil, fmt.Errorf("config: space %q: package %q: %w", s.name, name, err)
 		}
@@ -633,7 +645,7 @@ func (d *discovery) standalonePackage(key string) (*model.Package, error) {
 	// are not keys a package level may hold.
 	isRootPackage := sameDir(dir, d.root)
 	if allowed && !isRootPackage {
-		filePO, fileSrc, err := loadPackageFile(dir)
+		filePO, fileSrc, err := loadPackageFileWithin(dir, d.sourceRoot)
 		if err != nil {
 			return nil, fmt.Errorf("config: %s: %w", label, err)
 		}

@@ -292,7 +292,7 @@ func TestExecutionRefusesUnsafeLockBypass(t *testing.T) {
 		require.NoError(t, json.Unmarshal(data, &raw))
 		raw["execution"] = map[string]any{
 			"secretEnv": executionSecretEnv,
-			"workers":   []any{},
+			"choreographers":   []any{},
 			"name":      "build-a",
 			"endpoint":  "file://" + mailbox,
 		}

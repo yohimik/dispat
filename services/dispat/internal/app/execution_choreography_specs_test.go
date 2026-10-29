@@ -20,7 +20,7 @@ func TestReleaseChoreographySpecsKeepBuildPlacementAndFirstOnlyPublication(t *te
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "packages", "core"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "dispat.json"), []byte(`{
   "scripts":{"build":"true","publish":"true","announce":"true"},
-  "spaces":{"libs":{"path":["packages"],"runOnly":["worker","orchestrator"],
+  "spaces":{"libs":{"path":["packages"],"runOnly":["choreographer","orchestrator"],
     "flow":{"build":["build"],"publish":["publish"],"announce":["announce"]}}}
 }`), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "packages", "core", "package.json"),

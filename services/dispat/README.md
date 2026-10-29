@@ -121,7 +121,7 @@ needed:
 | [dispat if](https://dispat.dev/cli/if/)                                                 | Branching on a variable, a file or the changed packages inside a configured script.                                                                                                        |
 | [dispat for](https://dispat.dev/cli/for/)                                               | Running one shell command per item of a list, under whichever shell the repository configured.                                                                                             |
 | [dispat exec](https://dispat.dev/cli/exec/)                                             | Running one declared script on its own.                                                                                                                                                    |
-| [dispat worker](https://dispat.dev/cli/worker/)                                         | Serving the build and publish tasks another machine's release assigns to this one: the flags, the state folder, and the exit behaviour.                                                      |
+| [dispat choreographer](https://dispat.dev/cli/choreographer/)                                         | Serving the build and publish tasks another machine's release assigns to this one: the flags, the state folder, and the exit behaviour.                                                      |
 | [Naming a place](https://dispat.dev/cli/locations/)                                     | The `pkg:`, `space:`, `root` and `cwd` values `--for`, `--script-from` and `--in` share.                                                                                                    |
 | [Configuration file](https://dispat.dev/configuration/)                                 | Top-level options, script sequences, run-level hooks; links the pages below.                                                                                                               |
 | [Spaces](https://dispat.dev/configuration/spaces/)                                      | Space options, stages and hooks in execution order, versioning modes and groups, `scripts`, the space's `packages` map, the space configuration file, `.dispatexclude`. |
@@ -168,7 +168,7 @@ configuration option in a single annotated file. Four smaller files annotate one
 [`dispat.example.control.yaml`](./dispat.example.control.yaml) for a control repository,
 [`dispat.example.peer.yaml`](./dispat.example.peer.yaml) for a peer of a choreographed fleet, and
 [`dispat.example.orchestrator.yaml`](./dispat.example.orchestrator.yaml) with
-[`dispat.example.worker.yaml`](./dispat.example.worker.yaml) for a release whose builds run on several machines.
+[`dispat.example.choreographer.yaml`](./dispat.example.choreographer.yaml) for a release whose builds run on several machines.
 
 ## Testing
 

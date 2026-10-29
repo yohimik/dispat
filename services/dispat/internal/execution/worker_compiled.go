@@ -217,6 +217,9 @@ func (w *Worker) handleCompiledNotice(ctx context.Context,
 		carrier.LogicalDescriptorDigest != binding.GraphDigest {
 		return compiledNoSelectionProgress, fmt.Errorf(compiledNoticeIdentityError)
 	}
+	if err := validateChoreographyHybridPolicy(bootstrap.Mode, &bootstrap.PinnedInputs, carrier); err != nil {
+		return compiledNoSelectionProgress, err
+	}
 	if err := validateChoreographyRetryPolicy(bootstrap.JoinPolicy, carrier.Tasks); err != nil {
 		return compiledNoSelectionProgress, err
 	}

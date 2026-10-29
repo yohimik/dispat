@@ -137,6 +137,7 @@ type Coordinator struct {
 	// nothing else in the process knows what this run put on a mailbox.
 	mu           sync.Mutex
 	probeReplies sync.Mutex
+	probeWaiters sync.Map
 	owned        map[string][]gitx.BranchLease
 	// ownership is what this run asks before every new assignment, and the
 	// cancellations a lost lock has to reach. It is the release's own gate,
@@ -353,23 +354,27 @@ func (c *Coordinator) probe(ctx context.Context, link Link) (*NodeReport, error)
 // situation from here, which is "no report", and the deadline is what decides
 // how long that is tolerated.
 func (c *Coordinator) awaitReport(ctx context.Context, link Link, branch, offered string) (*NodeReport, error) {
+	wake, stopWaiting := c.watchProbeReply(link.Name, branch)
+	defer stopWaiting()
 	interval := minimumPollInterval
 	next := time.NewTimer(interval)
 	defer next.Stop()
 	for {
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("waiting for the node to report: %w", ctx.Err())
-		case <-next.C:
-		}
-		interval = min(interval*2, maximumPollInterval)
-		next.Reset(interval)
 		report, err := c.readReport(ctx, link, branch, offered)
 		if err != nil {
 			return nil, err
 		}
 		if report != nil {
 			return report, nil
+		}
+		next.Reset(interval)
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("waiting for the node to report: %w", ctx.Err())
+		case <-wake:
+			interval = minimumPollInterval
+		case <-next.C:
+			interval = min(interval*2, maximumPollInterval)
 		}
 	}
 }

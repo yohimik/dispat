@@ -35,6 +35,6 @@ const (
 	sweepPlanningBytesChangedErrorText          = "execution: source or configuration bytes changed while the run plan was computed"
 	sweepTaskFailedState                        = true
 	sweepTaskSettlementErrorFormat              = "execution: signed sweep task %s cannot settle: %w"
-	unsupportedDistributionModeErrorFormat      = "unsupported distribution mode %q (this build supports compilation and interpretation)"
+	unsupportedDistributionModeErrorFormat      = "unsupported distribution mode %q (this build supports compilation, interpretation and hybrid)"
 	workerDefaultEndpointUnavailableErrorFormat = "a worker link states no endpoint, and the release remote it would reach could not be resolved: %w"
 )

@@ -28,6 +28,7 @@ func (a *App) planFromMaterialization(ctx context.Context, pinned *planningMater
 		return nil, err
 	}
 	private := NewWorkspace(pinned.root, capturedConfig, workspace, a.log)
+	private.configSourceRoot = pinned.root
 	if a.planningRemotes == nil {
 		a.planningRemotes, err = a.capturePlanningRemotes(ctx)
 		if err != nil {

@@ -16,7 +16,7 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 )
 
-// TestWorkerAuthorityRefusesOnlyTheReleaseWords: a worker's task runs real
+// TestWorkerAuthorityRefusesOnlyTheReleaseWords: a choreographer's task runs real
 // build scripts, and those scripts run dispat. The list is therefore the
 // smallest one that holds: the release and every command that writes a native
 // release ref, with every helper a build legitimately uses left alone. A
@@ -79,14 +79,14 @@ func TestWorkerAuthorityGuardReportsTheRefusal(t *testing.T) {
 		assert.Empty(t, logs)
 	})
 
-	t.Run("worker authority and an allowed command", func(t *testing.T) {
+	t.Run("choreographer authority and an allowed command", func(t *testing.T) {
 		code, isRefused, logs := guard(t, execution.WorkerAuthority, cmdStatus)
 		assert.Equal(t, 0, code)
 		assert.False(t, isRefused)
 		assert.Empty(t, logs)
 	})
 
-	t.Run("worker authority and the release", func(t *testing.T) {
+	t.Run("choreographer authority and the release", func(t *testing.T) {
 		code, isRefused, logs := guard(t, execution.WorkerAuthority, cmdRelease)
 		assert.Equal(t, 1, code)
 		assert.True(t, isRefused)
@@ -96,7 +96,7 @@ func TestWorkerAuthorityGuardReportsTheRefusal(t *testing.T) {
 	})
 }
 
-// TestWorkerFlagShapeIsAUsageError: a `--worker` value is a node name alone or
+// TestWorkerFlagShapeIsAUsageError: a `--choreographer` value is a node name alone or
 // name=endpoint with both halves stated, and anything else is refused before
 // any file is read, without echoing the value, whose second half may be
 // carrying a credential.
@@ -111,7 +111,7 @@ func TestWorkerFlagShapeIsAUsageError(t *testing.T) {
 	} {
 		for _, command := range []string{cmdRelease, cmdRun, cmdStatus} {
 			t.Run(name+" on "+command, func(t *testing.T) {
-				args := []string{command, "--root", root, "--worker", value}
+				args := []string{command, "--root", root, "--choreographer", value}
 				if command == cmdRun {
 					args = append(args, "tests")
 				}
@@ -128,7 +128,7 @@ func TestWorkerFlagShapeIsAUsageError(t *testing.T) {
 // alone, so a mistyped endpoint carrying a credential never reaches a log.
 func TestWorkerFlagEchoesNoEndpoint(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"status", "--root", t.TempDir(), "--worker", "https://user:hunter2@example.com/m.git"},
+	code := Run([]string{"status", "--root", t.TempDir(), "--choreographer", "https://user:hunter2@example.com/m.git"},
 		&stdout, &stderr)
 	assert.Equal(t, 2, code)
 	assert.NotContains(t, stderr.String(), "hunter2")
@@ -141,19 +141,19 @@ func TestWorkerFlagEchoesNoEndpoint(t *testing.T) {
 func TestWorkerFlagBelongsToTheDispatchingCommands(t *testing.T) {
 	root := t.TempDir()
 	for _, args := range [][]string{
-		{"preview", "--worker", "a=file:///m"},
-		{"worker", "--worker", "a=file:///m"},
-		{"exec", "build", "--worker", "a=file:///m"},
+		{"preview", "--choreographer", "a=file:///m"},
+		{"choreographer", "--choreographer", "a=file:///m"},
+		{"exec", "build", "--choreographer", "a=file:///m"},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := Run(append(args, "--root", root), &stdout, &stderr)
 		assert.Equal(t, 2, code, "args: %v\nstderr:\n%s", args, stderr.String())
-		assert.Contains(t, stderr.String(), "--worker", "args: %v", args)
+		assert.Contains(t, stderr.String(), "--choreographer", "args: %v", args)
 	}
 }
 
-func TestDistributionModeAcceptsCompilationAndInterpretation(t *testing.T) {
-	for _, value := range []string{"compilation", "interpretation"} {
+func TestDistributionModeAcceptsAllExecutionModes(t *testing.T) {
+	for _, value := range []string{"compilation", "interpretation", "hybrid"} {
 		t.Run("accepted/"+value, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			Run([]string{"status", "--distribution-mode", value, "--root", t.TempDir()}, &stdout, &stderr)
@@ -161,7 +161,7 @@ func TestDistributionModeAcceptsCompilationAndInterpretation(t *testing.T) {
 				"the mode must pass flag validation before repository loading")
 		})
 	}
-	for _, value := range []string{"orchestration", "choreography", "hybrid", "mixed", "Interpretation", ""} {
+	for _, value := range []string{"orchestration", "choreography", "mixed", "Interpretation", ""} {
 		t.Run(value, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := Run([]string{"status", "--distribution-mode", value, "--root", t.TempDir()}, &stdout, &stderr)
@@ -197,7 +197,7 @@ func TestWorkerFlagIsRefusedUnderWorkerAuthority(t *testing.T) {
 	root := t.TempDir()
 	for _, command := range []string{cmdRun, cmdStatus} {
 		t.Run(command, func(t *testing.T) {
-			args := []string{command, "--root", root, "--worker", "a=file:///srv/mailbox", "--log-format", "json"}
+			args := []string{command, "--root", root, "--choreographer", "a=file:///srv/mailbox", "--log-format", "json"}
 			if command == cmdRun {
 				args = append(args, "tests")
 			}
@@ -216,7 +216,7 @@ func TestWorkerFlagIsRefusedUnderWorkerAuthority(t *testing.T) {
 func TestWorkerFlagAcceptsANameAlone(t *testing.T) {
 	t.Setenv(execution.AuthorityEnv, "")
 	require.NoError(t, os.Unsetenv(execution.AuthorityEnv))
-	r := &runner{o: &options{workers: &[]string{"build-a", "build-b=file:///srv/mailbox"}}}
+	r := &runner{o: &options{choreographers: &[]string{"build-a", "build-b=file:///srv/mailbox"}}}
 	code, isRefused := r.validateWorkerLinks()
 	assert.Equal(t, 0, code)
 	assert.False(t, isRefused)

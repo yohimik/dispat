@@ -83,6 +83,12 @@ func ReadRetainedChoreographyIdentity(ctx context.Context,
 	if err != nil {
 		return RetainedChoreographyIdentity{}, err
 	}
+	if err := validateChoreographyHybridPolicy(bootstrap.Mode, &bootstrap.PinnedInputs, carrier); err != nil {
+		return RetainedChoreographyIdentity{}, err
+	}
+	if err := validateChoreographyRetryPolicy(bootstrap.JoinPolicy, carrier.Tasks); err != nil {
+		return RetainedChoreographyIdentity{}, err
+	}
 	if carrier.AlgorithmVersion != bootstrap.AlgorithmVersion {
 		return RetainedChoreographyIdentity{}, fmt.Errorf(retainedFeedInitializationErrorMessage)
 	}

@@ -116,6 +116,9 @@ func (a *App) loadPinnedConfigurations(private *planningMaterialization,
 	if err != nil {
 		return nil, fmt.Errorf(pinnedPlanningCapturedControlConfigErrorFormat, err)
 	}
+	if err := config.ValidateCapturedSources(private.root, root.SourceFiles); err != nil {
+		return nil, err
+	}
 	if a.planningInvocation.PolyrepoSet {
 		root.Polyrepo = a.planningInvocation.Polyrepo
 	}
@@ -147,6 +150,9 @@ func (a *App) loadPinnedConfigurations(private *planningMaterialization,
 			loaded, loadErr := config.Load(repository.ConfigPath, nil)
 			if loadErr != nil {
 				return nil, fmt.Errorf(pinnedPlanningCapturedConfigErrorFormat, repository.Name, loadErr)
+			}
+			if err := config.ValidateCapturedSources(private.root, loaded.SourceFiles); err != nil {
+				return nil, err
 			}
 			if err := comparePinnedConfig(repository.Config, loaded); err != nil {
 				return nil, fmt.Errorf(pinnedPlanningImportedConfigChangedErrorFormat, repository.Name, err)

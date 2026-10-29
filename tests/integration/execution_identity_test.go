@@ -120,7 +120,7 @@ func TestExecutionEveryLogLineNamesItsNode(t *testing.T) {
 	// refused: the identity is settled before the settings are checked, so
 	// the first line an operator reads off a new machine names that machine.
 	untold := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
-		"worker", "--root", writeNodeConfig(t, harness.BaseFile()),
+		"choreographer", "--root", writeNodeConfig(t, harness.BaseFile()),
 		"--state-dir", t.TempDir(), "--idle-timeout", "1")
 	require.Equal(t, 1, untold.Code, "stdout:\n%s\nstderr:\n%s", untold.Stdout, untold.Stderr)
 	refusal, isRefused := executionLine(untold, "cannot serve tasks")
@@ -252,7 +252,7 @@ func TestExecutionWebhooksNameTheirSender(t *testing.T) {
 	kept := executionPayloadOf(t, payloads, "stage.succeeded", "publish", "assets")
 	assert.NotContains(t, kept, "worker", "a stage this run kept for itself names no node")
 	started := executionPayloadOf(t, payloads, "stage.started", "build", "assets")
-	assert.NotContains(t, started, "worker",
+	assert.NotContains(t, started, "choreographer",
 		"and the event that opens a delegated stage cannot, because nothing is placed yet")
 
 	rendered := formatted.payloads(t)
