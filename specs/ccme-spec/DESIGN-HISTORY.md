@@ -1256,3 +1256,13 @@ is separate from its executor graph and inner compiler DAG; Ninja jobs are not o
 retain per-task evidence, timing boundaries, topology, repetitions and failures without claiming a measured
 speedup or completed conformance from the new schema. This specifies reporting before its implementation;
 it does not change execution, release authority, recovery or the task-graph formulas.
+
+## 2026-10-29: Clock evidence for cross-host formula reporting
+
+The measurement profile now permits explicitly nominal work/span arithmetic when local monotonic durations
+are available but relative clock-rate error is not calibrated. It separates that descriptive arithmetic
+from reference-clock bounds. Optional causally bracketed endpoints need no constant-rate assumption;
+optional affine probe constraints retain their whole-trial rate assumption rather than treating finite
+probes as proof of no drift. Duration and formula enclosures retain uncertainty and undefined denominators.
+This clarification supplies reporting semantics before multi-host collection; it asserts no GCP measurement,
+hardware calibration, successful full LLVM build or performance improvement.

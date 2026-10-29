@@ -40,6 +40,8 @@ fields may carry more evidence without changing these meanings.
 | `timeWindows` | Named `{id, boundary, seconds, clockDomain, clockKind, evidence}` records for release-command span, modeled-task span, coordinator interval, setup, teardown or other phases. A `step-sum` also specifies included step IDs/phase/kind and aggregation convention. Do not label a sum of disjoint commands as end-to-end elapsed. |
 | `observedPeakOverlap` | `{value, evidence, reason}` for the maximum simultaneous measured intervals on a comparable timeline, or null. It is an observation, never a substitute for `taskSlotLimit`. |
 | `analysis` | Records `{id, formula, inputs, value, unit, status, reasons, model}`. Inputs reference this block's fields/evidence or earlier calculations. Status is `computed`, `unavailable` or `inapplicable`; the latter two require null value and reasons. Model distinguishes `descriptive`, `observed-cap-diagnostic`, `fixed-duration-lower-bound` and `one-pool-upper-bound`. |
+| `clockCompatibility` | `{referenceDomain, domains, method, assumptions, uncertainty, evidence}`. Method is `common-domain`, `nominal-seconds`, `causal-brackets`, `conditional-affine` or `unavailable`. `domains` lists the participating clock identities; `referenceDomain` names the comparison clock or is null with a reason. A nominal scale assumption is not a measured rate bound. A report mixing methods identifies `clockMethod` and any `clockMappingIds` in each affected analysis record. |
+| `clockMappings` | Optional records `{id, workerDomain, referenceDomain, model, scope, status, probes, uncertainty, assumptions}` for the methods in §3.1. Retain raw probe/end-point evidence and units. Status is `compatible`, `inconsistent` or `insufficient`; compatible means consistent with the declared model, not proof of that model. |
 
 Arrays may instead be represented by immutable evidence references with counts and digests when too large
 for an inline report. The reader MUST be able to recover the exact vertex/edge/task records used to calculate
@@ -87,6 +89,133 @@ subtraction; the dispatch/result protocol and local endpoints must establish tha
 over a projected task span is not automatically pure scheduler overhead: omitted work, startup, validation
 and transfer may also contribute. Failure elapsed time may be shown as a diagnostic but is not a completed
 trial duration. A timeout threshold is a configured limit, not a measured completion time.
+
+### 3.1 Nominal arithmetic and optional clock bounds
+
+The minimum useful cross-host report retains each local monotonic duration in its API's reported seconds.
+It MAY compute `nominal-work`, `nominal-critical-path`, `nominal-slot-bound` and `nominal-enclosing-ratio`
+using the formulas of §4 on those numbers, with `model: descriptive`, `unit: nominal-seconds` for times,
+and `clockCompatibility.method: nominal-seconds`. Ratios are dimensionless. State the assumption that one
+reported second has a compatible rate across the domains, and state that a quantitative relative-rate
+uncertainty is unknown. Do not store an unmeasured rate as the established interval `[1,1]`. These are
+useful arithmetic summaries of recorded parameters, not demonstrated lower/upper bounds in a common
+reference clock. Missing physical calibration does not make the measured local durations or this explicitly
+nominal arithmetic null. Other missing inputs, failed coverage and model violations remain subject to §4.
+Clock API, OS/kernel, clocksource, resolution and NTP configuration may be recorded as environment evidence;
+none alone establishes a whole-trial rate or drift bound.
+
+The following is the exact minimal shape for the nominal method. The domain names are illustrative;
+actual records use the identities attached to their measured intervals and named numerator window.
+`uncertainty.relativeRateErrorBound` MUST be null for this unknown-error case, and `reason` is required.
+It represents uncertainty about relative elapsed-time scales, not an assertion of physical SI calibration.
+The reference domain identifies the clock against which a comparison is made; naming it does not map
+other domains onto its timeline. `evidence` uses the report's evidence references and may be empty when
+no clock-characterization evidence was collected; duration evidence remains required separately.
+
+```json
+{
+  "referenceDomain": "coordinator:trial-1:epoch-1:monotonic",
+  "domains": [
+    "coordinator:trial-1:epoch-1:monotonic",
+    "worker-a:trial-1:epoch-1:monotonic",
+    "worker-b:trial-1:epoch-1:monotonic"
+  ],
+  "method": "nominal-seconds",
+  "assumptions": [
+    "One reported second is treated as a compatible elapsed-time unit across the listed domains for this trial."
+  ],
+  "uncertainty": {
+    "relativeRateErrorBound": null,
+    "reason": "No quantitative whole-trial relative clock-rate error bound was established."
+  },
+  "evidence": []
+}
+```
+
+For this method, every affected analysis record has `clockMethod: "nominal-seconds"` and
+`model: "descriptive"`. Use `status: "computed"` and a finite scalar `value` when all non-clock inputs
+and premises for that formula are satisfied; unknown rate error alone does not change that status.
+Retain input references to the actual local durations, capacity and named numerator as appropriate.
+The time-valued nominal records use `unit: "nominal-seconds"`; `nominal-enclosing-ratio` uses
+`unit: "dimensionless"`. `clockMethod` selects the corresponding `clockCompatibility` assumptions and
+uncertainty, which readers MUST preserve and show with the result. Missing inputs instead use
+`status: "unavailable"`, and a violated model premise uses `status: "inapplicable"`, both with null value
+and reasons. This naming does not permit a missing duration, capacity, containment proof or undefined
+denominator to be silently assumed. A global task span or overlap remains unavailable across unmapped
+domains even when all four nominal records can be computed.
+
+For stronger bounds, select one coordinator monotonic domain as reference. Its units are reference-clock
+seconds, not independently calibrated physical seconds. Bind every probe to the trial, node, worker clock
+epoch, reference domain and a unique request-attempt ID. A probe records coordinator send `s_p`, a worker
+monotonic sample `u_p` read after receiving that request and before replying, and coordinator receive `r_p`.
+Require `s_p <= r_p`. A replayed response MUST NOT pair an old worker sample with a newer send time; use the
+original bound request or reject it. A restarted process/clock origin starts a new domain. Preserve raw
+readings, their units and any measurement uncertainty; integer nanoseconds may be decimal strings to avoid
+loss in readers whose numeric type cannot represent them exactly. Round derived lower bounds downward and
+upper bounds upward; do not manufacture a quantitative accuracy bound from timestamp resolution.
+
+**Causal brackets, without a rate model.** For a task endpoint `e` measured in the same worker domain,
+let `before(e)` contain probes proved to sample before that endpoint and `after(e)` probes proved to sample
+after it. Strict worker monotonic order, or an explicit causal sequence, can supply that proof. Equal clock
+readings alone do not order two events. Incorporate reading uncertainty before claiming a strict order.
+Then its reference coordinate lies in
+`[lo(e), hi(e)]`, where `lo(e) = max_{p in before(e)} s_p` and
+`hi(e) = min_{p in after(e)} r_p`. Missing sides are unknown, not zero; contradictory brackets are invalid.
+For start and end brackets `[S_lo,S_hi]` and `[E_lo,E_hi]`, its elapsed reference duration is enclosed by
+`[max(0, E_lo - S_hi), E_hi - S_lo]`. Apply this only with finite justified endpoints and a nonnegative,
+consistent interval. This requires no affine-rate assumption.
+
+If only `S_lo` and `E_hi` are finite, start-before-end ordering still yields the valid enclosure
+`[0, E_hi - S_lo]`, provided that upper bound is nonnegative. Finite `E_lo` and `S_hi` may tighten its lower
+side by the preceding formula; missing endpoint coordinates themselves remain unknown. Thus a probe
+before the task and another after it generally give only an enclosing upper duration bound and a lower
+bound of zero. `s_post - r_pre` is not a lower bound on the intervening task; it may count idle gaps.
+Probes during the timed operation can tighten endpoint brackets and yield a positive lower bound, provided
+their local order relative to the actual endpoints is retained. Do not move an endpoint past a handshake
+merely to obtain a stronger bound. Record probe work and any induced overhead in the experiment protocol.
+
+**Optional conditional affine model.** If a report explicitly assumes one constant-rate conversion
+`C = a*M + b`, `a > 0`, over the whole stated worker-clock epoch/trial, the probe constraints are
+`s_p <= a*u_p + b <= r_p`. For every pair with `u_j > u_i`, they imply
+`(s_j - r_i)/(u_j - u_i) <= a <= (r_j - s_i)/(u_j - u_i)`.
+Intersect all such intervals with `a > 0`; equal worker readings require overlapping reference intervals.
+For a candidate rate, an offset exists exactly when
+`max_p(s_p - a*u_p) <= min_p(r_p - a*u_p)`.
+Retain these joint constraints, not independent invented offsets for each task. Empty feasibility is
+inconsistent evidence/model. If no finite upper rate bound exists, store `null` with reason
+`unbounded by probes`; a lower infimum of zero does not establish that zero is an admissible clock rate.
+With exact local duration `d`,
+`[a_lo*d, a_hi*d]` is a conservative duration enclosure where finite bounds exist. Widen the probe constraints
+for a declared reading-error model before calculation. Compatible finite probes do not prove constant rate
+or exclude intervening drift; label every resulting bound `conditional-affine` and retain that assumption.
+Duration scaling alone does not determine cross-host task span or overlap; their coordinates also need
+the offset constraints or causal brackets.
+
+**Propagating enclosures.** With per-vertex reference-duration bounds `d_i in [l_i,u_i]`, calculate
+`W_lo = sum l_i`, `W_hi = sum u_i`, and the longest-path recurrence separately on lower and upper durations
+to obtain `[L_lo,L_hi]`. With a valid fixed slot limit, the model bound is enclosed by
+`[B_lo,B_hi] = [max(L_lo,W_lo/s), max(L_hi,W_hi/s)]`.
+These enclosures remain conservative when endpoints share clock constraints; they are not claimed tight
+or jointly attainable. `B_lo` is a justified lower bound on the actual enclosing time under the model;
+`B_hi` is not necessarily such a lower bound. For numerator interval `[T_lo,T_hi]` and `B_lo > 0`, the
+ratio is enclosed by `[T_lo/B_hi, T_hi/B_lo]`. A zero lower denominator does not justify a finite upper
+ratio by this rule; if the actual denominator can be zero, the ratio is not even established as defined.
+Resource-holding and one-pool premises remain separate requirements.
+
+For these optional methods, `clockMappings.model` is `causal-brackets` or `affine-assumption`; retain endpoint
+brackets or rate/offset constraints and their evidence. An interval-valued analysis adds
+`bounds: {lower, upper, referenceDomain, clockMappingIds}` and `assumptions`, keeps scalar `value: null`,
+and uses `status: computed` only when its stated finite enclosure is established under the recorded model.
+Unbounded sides are null with an explicit reason and the analysis uses `status: unavailable`; a known
+side may remain in `bounds` as a diagnostic. Inconsistent evidence uses `status: inapplicable` with a
+reason. Neither may be labelled a finite bound. A nominal result and a conditional/reference-bound result
+are separate analysis records.
+
+A finite justified `B_lo` can also be emitted as a separate scalar `reference-time-lower-bound` record
+with `status: computed`, `model: fixed-duration-lower-bound` and `unit: reference-seconds`, even when
+the full enclosure is unavailable because its upper side is unbounded. That record identifies the reference
+domain, clock method/mappings, assumptions and lower-duration inputs. It asserts only the stated scalar
+lower bound, not a finite uncertainty enclosure or a defined schedule ratio.
 
 ## 4. Formula records
 
