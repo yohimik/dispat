@@ -465,7 +465,8 @@ func writeTimingMarkdown(out *bufio.Writer, e Experiments) {
 		return
 	}
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "| cell | planning | makespan | Wk | Lk | s | bound | ratio | idle | relation | not honoured |")
+	writeLegacyTimingNote(out, e)
+	fmt.Fprintln(out, legacyTimingMarkdownHeader)
 	fmt.Fprintln(out, "|---|---|---|---|---|---|---|---|---|---|---|")
 	for _, cell := range cells {
 		if t := cell.Timing; t != nil {
@@ -519,7 +520,26 @@ func writeExperimentsPlain(w io.Writer, e Experiments) error {
 			fmt.Fprintf(out, "  plan: %s\n", planOf(cell))
 		}
 	}
+	writeLegacyTimingNote(out, e)
+	writeMeasurementPlain(out, e)
 	return out.Flush()
+}
+
+func writeLegacyTimingNote(out *bufio.Writer, campaign Experiments) {
+	for _, cell := range campaign.Cells {
+		if cell.Timing != nil {
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, legacyTimingDiagnosticNoteText)
+			for _, measuredCell := range campaign.Cells {
+				if len(measuredCell.ExecutionMeasurement) != measurementAbsentBytes {
+					fmt.Fprintln(out, legacyTimingStructuredGuideText)
+					break
+				}
+			}
+			fmt.Fprintln(out)
+			return
+		}
+	}
 }
 
 func escapePipes(s string) string { return strings.ReplaceAll(s, "|", `\|`) }

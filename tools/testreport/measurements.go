@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -11,8 +13,14 @@ import (
 )
 
 const (
-	measurementUnknownText   = "unknown"
-	measurementSecondsFormat = "%.6g"
+	measurementUnknownText          = "unknown"
+	measurementSecondsFormat        = "%.6g"
+	measurementAbsentBytes          = 0
+	measurementEmptyText            = ""
+	measurementJSONIndentText       = "  "
+	measurementListSeparatorText    = "; "
+	measurementInputReferenceFormat = "%s = %s:%s%s"
+	measurementInvalidJSONErrorText = "recorded execution measurement is not a single valid JSON value"
 )
 
 func measurementValue(value *float64) string {
@@ -28,7 +36,7 @@ func writeMeasurementMarkdown(out *bufio.Writer, campaign Experiments) {
 			continue
 		}
 		var measurement executionmeasurement.Measurement
-		if err := json.Unmarshal(cell.ExecutionMeasurement, &measurement); err != nil {
+		if err := decodeMeasurementDisplay(cell.ExecutionMeasurement, &measurement); err != nil {
 			continue
 		}
 		fmt.Fprintf(out, "\n### Recorded execution measurement: %s\n\n", escapePipes(cell.ID))
@@ -48,22 +56,38 @@ func writeMeasurementMarkdown(out *bufio.Writer, campaign Experiments) {
 		fmt.Fprintln(out, "\nFormula calculations\n\n| Formula | Selected inputs | Value/unit | Model/status | Applicability |")
 		fmt.Fprintln(out, "|---|---|---|---|---|")
 		for _, calculation := range measurement.Analysis {
-			inputs := []string{}
-			for symbol, reference := range calculation.Inputs {
-				inputs = append(inputs, symbol+" = "+reference.EvidenceID+reference.Pointer)
-			}
-			sort.Strings(inputs)
-			fmt.Fprintf(out, "| %s | %s | %s %s | %s / %s | %s |\n", escapePipes(calculation.Formula), escapePipes(strings.Join(inputs, "; ")), measurementValue(calculation.Value), calculation.Unit, calculation.Model, calculation.Status, escapePipes(strings.Join(calculation.Reasons, "; ")))
+			fmt.Fprintf(out, "| %s | %s | %s %s | %s / %s | %s |\n", escapePipes(calculation.Formula), escapePipes(formatMeasurementInputs(calculation.Inputs)), measurementValue(calculation.Value), calculation.Unit, calculation.Model, calculation.Status, escapePipes(strings.Join(calculation.Reasons, "; ")))
 		}
 		clock, _ := json.Marshal(measurement.ClockCompatibility)
 		fmt.Fprintf(out, "\nClock assumptions and uncertainty: `%s`\n", escapePipes(string(clock)))
 		fmt.Fprintln(out, "\n<details><summary>Complete retained inputs, resources, intervals and evidence references</summary>\n\n```json")
-		var formatted any
-		if json.Unmarshal(cell.ExecutionMeasurement, &formatted) == nil {
-			if body, err := json.MarshalIndent(formatted, "", "  "); err == nil {
-				fmt.Fprintln(out, string(body))
-			}
-		}
+		fmt.Fprintln(out, formatMeasurementJSON(cell.ExecutionMeasurement))
 		fmt.Fprintln(out, "```\n\n</details>")
 	}
+}
+
+func decodeMeasurementDisplay(body json.RawMessage, measurement *executionmeasurement.Measurement) error {
+	if !json.Valid(body) {
+		return errors.New(measurementInvalidJSONErrorText)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	return decoder.Decode(measurement)
+}
+
+func formatMeasurementInputs(references map[string]executionmeasurement.Reference) string {
+	inputs := []string{}
+	for symbol, reference := range references {
+		inputs = append(inputs, fmt.Sprintf(measurementInputReferenceFormat, symbol, reference.Source, reference.EvidenceID, reference.Pointer))
+	}
+	sort.Strings(inputs)
+	return strings.Join(inputs, measurementListSeparatorText)
+}
+
+func formatMeasurementJSON(body json.RawMessage) string {
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, body, measurementEmptyText, measurementJSONIndentText); err != nil {
+		return measurementUnknownText
+	}
+	return formatted.String()
 }

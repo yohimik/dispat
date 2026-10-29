@@ -263,7 +263,7 @@ func TestRenderingsCarryTheTiming(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"| cell | planning | makespan | Wk | Lk | s | bound | ratio | idle | relation | not honoured |",
+		"| cell | planning | release span | Wk | Lk | observed peak overlap | observed-cap diagnostic | release / diagnostic | idle | relation | not honoured |",
 		"| timing-six-lerna | 1.026s | 5.512s | 4.757s | 2.482s | 3 | 2.482s | 2.22 | 1.400s | build (records: publish) | core publish > cli publish |",
 		"| timing-six-lerna | 6, median 0.502s, max 0.504s, total 3.015s | 6, median 0.138s, max 0.167s, total 0.778s, 1 failed | none | 2 |",
 		"| timing-six-lerna | feat(core): streaming reader | agrees with dispat, 1 package |",
@@ -280,7 +280,7 @@ func TestRenderingsCarryTheTiming(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"  timing: planning 1.026s, makespan 5.512s, Wk 4.757s, Lk 2.482s, s 3, bound 2.482s, ratio 2.22, idle 1.400s, relation build (records: publish), not honoured core publish > cli publish\n",
+		"  timing: planning 1.026s, release span 5.512s, Wk 4.757s, Lk 2.482s, observed peak overlap 3, observed-cap diagnostic 2.482s, release / diagnostic 2.22, idle 1.400s, relation build (records: publish), not honoured core publish > cli publish\n",
 		"  tasks: builds 6, median 0.502s, max 0.504s, total 3.015s; publications 6, median 0.138s, max 0.167s, total 0.778s, 1 failed; npm publish none; builds while planning 2\n",
 		"  plan: agrees with dispat, 1 package\n",
 	} {
@@ -290,6 +290,18 @@ func TestRenderingsCarryTheTiming(t *testing.T) {
 	}
 	if strings.Count(plain.String(), "  timing:") != 1 {
 		t.Errorf("a cell without figures has a timing line:\n%s", plain.String())
+	}
+	for name, output := range map[string]string{"plain": plain.String(), "Markdown": markdown.String()} {
+		for _, qualification := range []string{"Legacy observed-overlap diagnostics", "does not establish a configured concurrency ceiling", "not validated theorem bounds or cross-tool speedups"} {
+			if !strings.Contains(output, qualification) {
+				t.Errorf("%s omitted diagnostic qualification %q", name, qualification)
+			}
+		}
+		for _, inventedSection := range []string{"Captured inputs", "Formula calculations", "Recorded execution measurement", "see below"} {
+			if strings.Contains(output, inventedSection) {
+				t.Errorf("%s implies a structured measurement exists in a legacy-only report: %q", name, inventedSection)
+			}
+		}
 	}
 }
 
