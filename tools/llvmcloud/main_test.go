@@ -20,8 +20,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestCloudOptionsRequireExactCandidateAndExplicitExecutor(t *testing.T) {
@@ -180,43 +178,6 @@ func TestCleanupRequiresIdentityAndReportsDeleteFailures(t *testing.T) {
 				t.Fatalf("cleanup err=%v deleted=%v", err, deleted)
 			}
 		})
-	}
-}
-
-func TestReleasePurposeCannotReachPublicationJobs(t *testing.T) {
-	content, err := os.ReadFile("../../.github/workflows/release.yml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var workflow struct {
-		On struct {
-			Dispatch struct {
-				Inputs map[string]struct {
-					Default string `yaml:"default"`
-				} `yaml:"inputs"`
-			} `yaml:"workflow_dispatch"`
-		} `yaml:"on"`
-		Jobs map[string]struct {
-			If          string            `yaml:"if"`
-			Permissions map[string]string `yaml:"permissions"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal(content, &workflow); err != nil {
-		t.Fatal(err)
-	}
-	if workflow.On.Dispatch.Inputs["purpose"].Default != "release" {
-		t.Fatal("production release default changed")
-	}
-	for name, job := range workflow.Jobs {
-		if strings.HasPrefix(name, "llvm-") {
-			if job.Permissions["contents"] != "read" {
-				t.Fatalf("cloud job %s widened repository permissions", name)
-			}
-			continue
-		}
-		if !strings.Contains(job.If, "inputs.purpose == 'release'") {
-			t.Fatalf("release job %s is not explicitly gated: %s", name, job.If)
-		}
 	}
 }
 

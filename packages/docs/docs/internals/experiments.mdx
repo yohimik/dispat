@@ -361,7 +361,7 @@ representative executables for these checks, while building the complete configu
 fresh committed run identity, preventing another cell's cached build output from satisfying the measurement.
 Fresh output directories do not establish a cold operating-system page cache.
 
-Dispatch the `Release` workflow with `purpose=llvm-gce` and `llvm-profile=full` for the two-VM campaign.
+Dispatch the separate `Build experiments` workflow with `purpose=llvm-gce` and `llvm-profile=full` for the two-VM campaign.
 This purpose runs only experiment jobs. Each cell has a four-hour execution limit and bounded setup and
 cleanup; the VMs have a five-hour maximum lifetime. The final artifact contains all six results, raw evidence
 and a validated report. `llvm-profile=smoke` checks the harness with the smaller target list.
@@ -369,7 +369,7 @@ and a validated report. `llvm-profile=smoke` checks the harness with the smaller
 The documentation release imports successful full LLVM and kernel campaigns selected by the
 `llvm-campaign-run`, `llvm-campaign-attempt`, `kernel-campaign-run`, and `kernel-campaign-attempt` workflow inputs.
 `campaign-binary-sha256` pins their shared measured Dispat binary. Both selected runs must belong to this
-repository's Release workflow at the original checkout revision. Evidence is validated before publication
+repository's `Build experiments` workflow at the original checkout revision. Evidence is validated before publication
 and again when imported after the standard experiment campaign; missing, partial or mismatched inputs fail.
 
 The existing `dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments` command remains an optional
@@ -397,7 +397,7 @@ module counts, target list, source identity and verified artifact digests. Confi
 architecture across competitors. Fresh output trees prevent reuse of prior build artifacts; they do not establish
 cold operating-system page caches. A failure or timeout remains a failed trial.
 
-Dispatch `purpose=kernel-gce` with `llvm-profile=full` in the `Release` workflow. The shared profile input also
+Dispatch `purpose=kernel-gce` with `llvm-profile=full` in the `Build experiments` workflow. The shared profile input also
 accepts `smoke` for a smaller functional check. The kernel campaign has the same execution, setup, cleanup and VM
 lifetime limits as LLVM. Its results and resource evidence are retained in a separate campaign artifact.
 

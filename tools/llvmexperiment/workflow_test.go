@@ -9,7 +9,7 @@ import (
 )
 
 func TestCloudReportCollectsSixExactArtifactsWithoutPreparedImage(t *testing.T) {
-	content, err := os.ReadFile("../../.github/workflows/release.yml")
+	content, err := os.ReadFile("../../.github/workflows/build-experiments.yml")
 	if err != nil {
 		t.Fatal(err)
 	}

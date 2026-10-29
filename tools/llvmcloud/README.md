@@ -1,6 +1,6 @@
 # LLVM and Linux kernel builds on two GCE workers
 
-The `Release` workflow's `purpose=llvm-gce` or `purpose=kernel-gce` dispatch builds the selected checkout
+The `Build experiments` workflow's `purpose=llvm-gce` or `purpose=kernel-gce` dispatch builds the selected checkout
 once, retains its OCI archive, image identity and binary hashes, then runs five
 independent cells. Every cell creates two fresh workers of one selected machine type in
 one selected zone, verifies their exact boot image and matching CPU platform, and
@@ -58,7 +58,7 @@ orchestration, not Nx Cloud or native cross-host scheduling. Changesets has no
 build scheduler and has no measured build cell.
 
 ```sh
-gh workflow run release.yml --ref <reviewed-source-ref> \
+gh workflow run build-experiments.yml --ref <reviewed-source-ref> \
   -f purpose=llvm-gce -f llvm-profile=smoke
 ```
 

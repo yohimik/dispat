@@ -16,16 +16,14 @@ import (
 const (
 	releaseWorkflowPath              = "../../.github/workflows/release.yml"
 	releaseWorkflowPublishJob        = "release"
-	releaseWorkflowRemovedJob        = "tests"
-	releaseWorkflowGuardName         = "Require every release prerequisite to succeed"
-	releaseWorkflowBuildName         = "Build dispat from the checkout"
-	releaseWorkflowGatherName        = "Gather the four test fragments"
-	releaseWorkflowMergeName         = "Verify and merge the complete source-bound suite"
-	releaseWorkflowFreshnessName     = "Verify coverage freshness gate"
-	releaseWorkflowCoverageName      = "Compute coverage totals"
-	releaseWorkflowBadgeName         = "Push badge JSON to the badges branch"
+	releaseWorkflowBuildSelector     = "--target bootstrap-export"
+	releaseWorkflowGatherSelector    = "test-fragment-*"
+	releaseWorkflowMergeSelector     = "dispat exec test-fragment-merge"
+	releaseWorkflowFreshnessSelector = "sh scripts/badge-cache-test.sh"
+	releaseWorkflowCoverageSelector  = "dispat exec coverage-badge"
+	releaseWorkflowBadgeSelector     = "dispat exec push-badge"
 	releaseWorkflowPublishStep       = "dispat"
-	releaseWorkflowPublishCondition  = "inputs.purpose == 'release' && needs.plan.outputs.releasing == 'true'"
+	releaseWorkflowPublishCondition  = "needs.plan.outputs.releasing == 'true'"
 	releaseWorkflowStableCondition   = "needs.plan.outputs.stable == 'true'"
 	releaseWorkflowFullEnvironment   = "DISPAT_TEST_REQUIRE_ALL"
 	releaseWorkflowFullValue         = "true"
@@ -66,14 +64,17 @@ fi
 )
 
 type releaseWorkflowStep struct {
-	Name            string            `yaml:"name"`
 	ID              string            `yaml:"id"`
 	If              string            `yaml:"if"`
 	Run             string            `yaml:"run"`
-	Uses            string            `yaml:"uses"`
 	Env             map[string]string `yaml:"env"`
 	With            map[string]string `yaml:"with"`
 	ContinueOnError bool              `yaml:"continue-on-error"`
+}
+
+type releaseWorkflowDefinition struct {
+	On   map[string]yaml.Node          `yaml:"on"`
+	Jobs map[string]releaseWorkflowJob `yaml:"jobs"`
 }
 
 type releaseWorkflowJob struct {
@@ -89,23 +90,24 @@ type releaseWorkflowJob struct {
 	} `yaml:"strategy"`
 }
 
-func readReleaseWorkflow(t *testing.T) map[string]releaseWorkflowJob {
+func readReleaseWorkflow(t *testing.T) releaseWorkflowDefinition {
 	t.Helper()
 	content, err := os.ReadFile(releaseWorkflowPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var workflow struct {
-		Jobs map[string]releaseWorkflowJob `yaml:"jobs"`
-	}
+	var workflow releaseWorkflowDefinition
 	if err := yaml.Unmarshal(content, &workflow); err != nil {
 		t.Fatal(err)
 	}
-	return workflow.Jobs
+	return workflow
 }
 
 func releaseWorkflowDependencies(t *testing.T, job releaseWorkflowJob) []string {
 	t.Helper()
+	if job.Needs.Kind == 0 {
+		return nil
+	}
 	if job.Needs.Kind == yaml.ScalarNode {
 		return []string{job.Needs.Value}
 	}
@@ -120,7 +122,11 @@ func releaseWorkflowStepIndex(t *testing.T, job releaseWorkflowJob, name string)
 	t.Helper()
 	index := -1
 	for position, step := range job.Steps {
-		if step.Name != name && step.ID != name {
+		matches := strings.Contains(step.Run, name) || step.With["pattern"] == name
+		if name == releaseWorkflowPublishStep {
+			matches = step.ID == name
+		}
+		if !matches {
 			continue
 		}
 		if index >= 0 {
@@ -135,9 +141,45 @@ func releaseWorkflowStepIndex(t *testing.T, job releaseWorkflowJob, name string)
 }
 
 func TestReleaseWorkflowRequiresParallelCompleteLanes(t *testing.T) {
-	jobs := readReleaseWorkflow(t)
-	if _, found := jobs[releaseWorkflowRemovedJob]; found {
-		t.Fatal("obsolete aggregate Full suite job still exists")
+	workflow := readReleaseWorkflow(t)
+	jobs := workflow.Jobs
+	var names []string
+	for name := range jobs {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"ping", "plan", "post-release", "post-release-npm", "release", "test-lane", "test-unit"}) {
+		t.Fatalf("Release must contain only plan, parallel prerequisites, release and post-release jobs; got %v", names)
+	}
+	dispatch, exists := workflow.On["workflow_dispatch"]
+	if !exists || len(workflow.On) != 1 {
+		t.Fatal("production Release must have only its manual trigger")
+	}
+	var manual struct {
+		Inputs map[string]yaml.Node `yaml:"inputs"`
+	}
+	if err := dispatch.Decode(&manual); err != nil {
+		t.Fatal(err)
+	}
+	for name := range manual.Inputs {
+		if name == "purpose" || name == "llvm-profile" || strings.HasPrefix(name, "cloud-") {
+			t.Fatalf("experiment execution input %q remains in production Release", name)
+		}
+	}
+	plan := jobs["plan"]
+	if len(releaseWorkflowDependencies(t, plan)) != 0 || plan.If != "" || plan.ContinueOnError {
+		t.Fatal("the production plan must be the unconditional first stage")
+	}
+	for _, name := range []string{"post-release", "post-release-npm"} {
+		if !slices.Equal(releaseWorkflowDependencies(t, jobs[name]), []string{releaseWorkflowPublishJob}) ||
+			strings.Contains(jobs[name].If, "inputs.purpose") {
+			t.Fatalf("%s must follow only the production release", name)
+		}
+	}
+	ping := jobs["ping"]
+	if !slices.Equal(releaseWorkflowDependencies(t, ping), []string{"plan"}) ||
+		ping.If != releaseWorkflowPublishCondition || ping.ContinueOnError {
+		t.Fatal("the announcement check must run in parallel when the plan has a release")
 	}
 	release := jobs[releaseWorkflowPublishJob]
 	dependencies := releaseWorkflowDependencies(t, release)
@@ -155,12 +197,17 @@ func TestReleaseWorkflowRequiresParallelCompleteLanes(t *testing.T) {
 	}
 	for _, name := range []string{"test-unit", "test-lane"} {
 		job := jobs[name]
-		if !slices.Equal(releaseWorkflowDependencies(t, job), []string{"plan"}) || job.ContinueOnError {
+		if !slices.Equal(releaseWorkflowDependencies(t, job), []string{"plan"}) ||
+			job.If != releaseWorkflowPublishCondition || job.ContinueOnError {
 			t.Fatalf("%s does not run independently after the plan", name)
 		}
 		collected, swept := false, false
+		command := "dispat run test:unit"
+		if name == "test-lane" {
+			command = `dispat run "test:${{ matrix.lane }}"`
+		}
 		for _, step := range job.Steps {
-			if strings.Contains(step.Run, "dispat run") && strings.Contains(step.Run, "test:") {
+			if strings.Contains(step.Run, command) {
 				swept = strings.Contains(step.Run, "--since all") && !step.ContinueOnError
 			}
 			if !strings.Contains(step.Run, "dispat exec test-fragment-collect") {
@@ -176,10 +223,12 @@ func TestReleaseWorkflowRequiresParallelCompleteLanes(t *testing.T) {
 }
 
 func TestReleaseWorkflowPrerequisiteGuardFailsClosed(t *testing.T) {
-	release := readReleaseWorkflow(t)[releaseWorkflowPublishJob]
-	index := releaseWorkflowStepIndex(t, release, releaseWorkflowGuardName)
-	guard := release.Steps[index]
-	if index != 0 || guard.If != "" || guard.ContinueOnError {
+	release := readReleaseWorkflow(t).Jobs[releaseWorkflowPublishJob]
+	if len(release.Steps) == 0 {
+		t.Fatal("the production release has no prerequisite guard")
+	}
+	guard := release.Steps[0]
+	if guard.If != "" || guard.ContinueOnError {
 		t.Fatal("the unconditional prerequisite guard must be the first release step")
 	}
 	bindings := map[string]string{
@@ -218,10 +267,10 @@ func TestReleaseWorkflowPrerequisiteGuardFailsClosed(t *testing.T) {
 }
 
 func TestReleaseWorkflowEvidenceFailuresStopPublication(t *testing.T) {
-	release := readReleaseWorkflow(t)[releaseWorkflowPublishJob]
-	build := releaseWorkflowStepIndex(t, release, releaseWorkflowBuildName)
-	gather := releaseWorkflowStepIndex(t, release, releaseWorkflowGatherName)
-	merge := releaseWorkflowStepIndex(t, release, releaseWorkflowMergeName)
+	release := readReleaseWorkflow(t).Jobs[releaseWorkflowPublishJob]
+	build := releaseWorkflowStepIndex(t, release, releaseWorkflowBuildSelector)
+	gather := releaseWorkflowStepIndex(t, release, releaseWorkflowGatherSelector)
+	merge := releaseWorkflowStepIndex(t, release, releaseWorkflowMergeSelector)
 	publish := releaseWorkflowStepIndex(t, release, releaseWorkflowPublishStep)
 	if !(build < gather && gather < merge && merge < publish) {
 		t.Fatal("the fresh CLI must validate downloaded test fragments before publication")
@@ -231,8 +280,8 @@ func TestReleaseWorkflowEvidenceFailuresStopPublication(t *testing.T) {
 		release.Steps[gather].If != "" || release.Steps[gather].ContinueOnError {
 		t.Fatal("every release must download the four test fragments before verification")
 	}
-	names := []string{releaseWorkflowMergeName, releaseWorkflowFreshnessName,
-		releaseWorkflowCoverageName, releaseWorkflowBadgeName}
+	names := []string{releaseWorkflowMergeSelector, releaseWorkflowFreshnessSelector,
+		releaseWorkflowCoverageSelector, releaseWorkflowBadgeSelector}
 	previous := gather
 	for index, name := range names {
 		position := releaseWorkflowStepIndex(t, release, name)

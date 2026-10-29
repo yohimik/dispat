@@ -84,7 +84,7 @@ COPY --chown=gopher:gopher tools ./tools
 COPY --chown=gopher:gopher pkg/manifest ./pkg/manifest
 COPY --chown=gopher:gopher pkg/scanner ./pkg/scanner
 COPY --chown=gopher:gopher tests/experiments/Dockerfile.llvm tests/experiments/Dockerfile.kernel ./tests/experiments/
-COPY --chown=gopher:gopher .github/workflows/release.yml ./.github/workflows/release.yml
+COPY --chown=gopher:gopher .github/workflows/release.yml .github/workflows/build-experiments.yml ./.github/workflows/
 # The strings testreport and the site both write about one record, which the
 # site's tests read from the same file.
 COPY --chown=gopher:gopher packages/docs/plugins/test-report/testdata ./packages/docs/plugins/test-report/testdata

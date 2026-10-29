@@ -3,30 +3,46 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	experimentWorkflowPath = "../../.github/workflows/build-experiments.yml"
+	productionWorkflowPath = "../../.github/workflows/release.yml"
+)
+
 func TestExperimentDockerStoreIsInitializedBeforeImageUse(t *testing.T) {
-	content, err := os.ReadFile("../../.github/workflows/release.yml")
-	if err != nil {
-		t.Fatal(err)
+	type workflowJob struct {
+		Steps []struct {
+			Run, Uses string
+			With      map[string]string `yaml:"with"`
+		} `yaml:"steps"`
 	}
-	var workflow struct {
-		Jobs map[string]struct {
-			Steps []struct {
-				Run, Uses string
-				With      map[string]string `yaml:"with"`
-			} `yaml:"steps"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal(content, &workflow); err != nil {
-		t.Fatal(err)
+	jobs := make(map[string]workflowJob)
+	for _, path := range []string{experimentWorkflowPath, productionWorkflowPath} {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var workflow struct {
+			Jobs map[string]workflowJob `yaml:"jobs"`
+		}
+		if err := yaml.Unmarshal(content, &workflow); err != nil {
+			t.Fatal(err)
+		}
+		for name, job := range workflow.Jobs {
+			if _, exists := jobs[name]; exists {
+				t.Fatalf("job %s occurs in both production and experiment workflows", name)
+			}
+			jobs[name] = job
+		}
 	}
 	stores := map[string]bool{}
-	for name, job := range workflow.Jobs {
+	for name, job := range jobs {
 		configured := false
 		for _, step := range job.Steps {
 			if strings.HasPrefix(step.Uses, "docker/setup-docker-action@") {
@@ -83,7 +99,7 @@ func TestExperimentDockerStoreIsInitializedBeforeImageUse(t *testing.T) {
 }
 
 func TestDocsCampaignEvidenceIsPinnedAndValidatedBeforePublication(t *testing.T) {
-	content, err := os.ReadFile("../../.github/workflows/release.yml")
+	content, err := os.ReadFile(productionWorkflowPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +126,7 @@ func TestDocsCampaignEvidenceIsPinnedAndValidatedBeforePublication(t *testing.T)
 			continue
 		}
 		gate = step.If == "steps.status.outputs.docs == 'true'"
-		for _, predicate := range []string{".head_sha == $source", ".run_attempt == $attempt", ".conclusion == \"success\"", ".path == \".github/workflows/release.yml\""} {
+		for _, predicate := range []string{".head_sha == $source", ".run_attempt == $attempt", ".conclusion == \"success\"", ".path == \".github/workflows/build-experiments.yml\""} {
 			if !strings.Contains(step.Run, predicate) {
 				t.Fatalf("campaign provenance gate omits %s", predicate)
 			}
@@ -144,5 +160,92 @@ func TestDocsCampaignEvidenceIsPinnedAndValidatedBeforePublication(t *testing.T)
 	}
 	if !published {
 		t.Fatal("release publication step was not checked")
+	}
+}
+
+func TestBuildExperimentsRemainSeparateFromRelease(t *testing.T) {
+	type workflowDocument struct {
+		On          map[string]yaml.Node `yaml:"on"`
+		Permissions map[string]string    `yaml:"permissions"`
+		Jobs        map[string]struct {
+			Uses        string            `yaml:"uses"`
+			Permissions map[string]string `yaml:"permissions"`
+			Steps       []struct {
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	read := func(path string) workflowDocument {
+		t.Helper()
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var workflow workflowDocument
+		if err := yaml.Unmarshal(content, &workflow); err != nil {
+			t.Fatal(err)
+		}
+		return workflow
+	}
+	experiments := read(experimentWorkflowPath)
+	dispatch, exists := experiments.On["workflow_dispatch"]
+	if !exists || len(experiments.On) != 1 {
+		t.Fatal("build experiments must run only by explicit manual dispatch")
+	}
+	var manual struct {
+		Inputs map[string]struct {
+			Default  string   `yaml:"default"`
+			Type     string   `yaml:"type"`
+			Required bool     `yaml:"required"`
+			Options  []string `yaml:"options"`
+		} `yaml:"inputs"`
+	}
+	if err := dispatch.Decode(&manual); err != nil {
+		t.Fatal(err)
+	}
+	purpose := manual.Inputs["purpose"]
+	if purpose.Type != "choice" || !purpose.Required || purpose.Default != "llvm-gce" ||
+		!slices.Equal(purpose.Options, []string{"llvm-gce", "kernel-gce"}) {
+		t.Fatal("experiment dispatch must select only LLVM or kernel, never production release")
+	}
+	if len(experiments.Permissions) != 1 || experiments.Permissions["contents"] != "read" {
+		t.Fatal("build experiment workflow must have read-only repository permissions")
+	}
+	var jobs []string
+	for name, job := range experiments.Jobs {
+		jobs = append(jobs, name)
+		if job.Uses != "" || job.Permissions["contents"] != "read" {
+			t.Fatalf("experiment job %s delegates execution or widens repository access", name)
+		}
+		for permission, level := range job.Permissions {
+			if permission != "id-token" && level != "read" && level != "none" {
+				t.Fatalf("experiment job %s grants %s=%s", name, permission, level)
+			}
+		}
+		for _, step := range job.Steps {
+			for _, command := range []string{"dispat release", "git push", "gh release create", "npm publish", "docker push"} {
+				if strings.Contains(step.Run, command) {
+					t.Fatalf("experiment job %s contains publication command %q", name, command)
+				}
+			}
+		}
+	}
+	slices.Sort(jobs)
+	if !slices.Equal(jobs, []string{"llvm-gce", "llvm-prepare", "llvm-report"}) {
+		t.Fatalf("standalone experiments must contain only prepare, execution and evidence collection: %v", jobs)
+	}
+	production := read(productionWorkflowPath)
+	for name := range production.Jobs {
+		if strings.HasPrefix(name, "llvm-") {
+			t.Fatalf("experiment job %s remains in the production release graph", name)
+		}
+	}
+	manual.Inputs = nil
+	productionDispatch := production.On["workflow_dispatch"]
+	if err := productionDispatch.Decode(&manual); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := manual.Inputs["purpose"]; exists {
+		t.Fatal("production release still accepts an experiment purpose")
 	}
 }
