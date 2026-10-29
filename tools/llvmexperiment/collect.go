@@ -23,12 +23,13 @@ type campaignOptions struct {
 }
 
 type campaignCell struct {
-	Tool     string `json:"tool"`
-	Mode     string `json:"mode"`
-	Status   string `json:"status"`
-	Verdict  string `json:"verdict,omitempty"`
-	Evidence string `json:"evidence,omitempty"`
-	Reason   string `json:"reason,omitempty"`
+	Tool        string `json:"tool"`
+	Mode        string `json:"mode"`
+	Status      string `json:"status"`
+	Verdict     string `json:"verdict,omitempty"`
+	Evidence    string `json:"evidence,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+	TrialStatus string `json:"trialStatus,omitempty"`
 }
 
 func campaignCells() []campaignCell {
@@ -64,27 +65,29 @@ func collectCampaignFiles(settings campaignOptions) error {
 	cells := campaignCells()
 	var failures []error
 	binary := ""
+	var hardware *campaignHardware
 	for index := range cells {
 		cell := &cells[index]
-		if err := collectCampaignCell(settings, cell, &binary); err != nil {
+		if err := collectCampaignCell(settings, cell, &binary, &hardware); err != nil {
 			cell.Status, cell.Reason = failedStatus, err.Error()
 			failures = append(failures, err)
 		}
 	}
 	manifest := struct {
-		Profile      string         `json:"profile"`
-		DispatSource string         `json:"dispatSourceRevision"`
-		LLVMSource   string         `json:"llvmSourceRevision"`
-		Binary       string         `json:"binarySha256"`
-		Cells        []campaignCell `json:"cells"`
-	}{settings.Profile, settings.Source, llvmRevision, binary, cells}
+		Profile      string            `json:"profile"`
+		DispatSource string            `json:"dispatSourceRevision"`
+		LLVMSource   string            `json:"llvmSourceRevision"`
+		Binary       string            `json:"binarySha256"`
+		Cells        []campaignCell    `json:"cells"`
+		Hardware     *campaignHardware `json:"commonHardware,omitempty"`
+	}{settings.Profile, settings.Source, llvmRevision, binary, cells, hardware}
 	if err := writeExclusiveJSON(filepath.Join(settings.Output, "campaign.json"), manifest); err != nil {
 		failures = append(failures, err)
 	}
 	return errors.Join(failures...)
 }
 
-func collectCampaignCell(settings campaignOptions, cell *campaignCell, binary *string) error {
+func collectCampaignCell(settings campaignOptions, cell *campaignCell, binary *string, hardware **campaignHardware) error {
 	name := cell.Tool + "-" + cell.Mode
 	input := filepath.Join(settings.Input, name)
 	entries, err := os.ReadDir(input)
@@ -117,6 +120,9 @@ func collectCampaignCell(settings campaignOptions, cell *campaignCell, binary *s
 	if err := json.Unmarshal(content, &record); err != nil {
 		return err
 	}
+	if record.ExecutionMeasurement != nil {
+		cell.TrialStatus = record.ExecutionMeasurement.Trial.Status
+	}
 	if err := validateCampaignCell(settings, *cell, record); err != nil {
 		return err
 	}
@@ -127,6 +133,17 @@ func collectCampaignCell(settings campaignOptions, cell *campaignCell, binary *s
 		return fmt.Errorf("LLVM cell %s used a different Dispat binary", name)
 	}
 	*binary = record.LLVM.BinarySHA256
+	if cell.Tool != changesetsTool {
+		actual, err := readCampaignHardware(environment, record)
+		if err != nil {
+			return fmt.Errorf("LLVM cell %s hardware evidence: %w", name, err)
+		}
+		if *hardware == nil {
+			*hardware = actual
+		} else if err := compareCampaignHardware(**hardware, *actual); err != nil {
+			return fmt.Errorf("LLVM cell %s hardware differs from the campaign: %w", name, err)
+		}
+	}
 	cell.Verdict = filepath.Join("cells", paths[0], "verdict.json")
 	if err := os.Rename(filepath.Dir(path), filepath.Dir(filepath.Join(settings.Output, cell.Verdict))); err != nil {
 		return err

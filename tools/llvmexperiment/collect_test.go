@@ -131,6 +131,10 @@ func writeCampaignFixture(t *testing.T, settings campaignOptions, cell campaignC
 	if err := os.WriteFile(filepath.Join(root, "fixture.json"), fixture, fileMode); err != nil {
 		t.Fatal(err)
 	}
+	writeFixtureHardware(t, root, &record, &build, defaultFixtureHardware())
+	if err := measurement.Derive(&record); err != nil {
+		t.Fatal(err)
+	}
 	if err := writeJSON(filepath.Join(root, "verdict.json"), verdict{Experiment: experimentName, Tool: cell.Tool, LLVM: &build, Passed: passed, ExecutionMeasurement: &record}); err != nil {
 		t.Fatal(err)
 	}
