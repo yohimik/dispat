@@ -154,6 +154,40 @@ scripts:
       echo
       cat "$ROOT/coverage/experiments.md"
     } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  # The release workflow validates these selected full artifacts before any
+  # release effects, then imports them after standard campaign cache cleanup.
+  # Candidate version/source/hash fields are retained without relabeling.
+  import-build-campaigns: |
+    set -eu
+    : "${EXPERIMENTS_LLVM_CAMPAIGN_DIR:?EXPERIMENTS_LLVM_CAMPAIGN_DIR is required}"
+    : "${EXPERIMENTS_KERNEL_CAMPAIGN_DIR:?EXPERIMENTS_KERNEL_CAMPAIGN_DIR is required}"
+    : "${EXPERIMENTS_BUILD_SOURCE_REVISION:?EXPERIMENTS_BUILD_SOURCE_REVISION is required}"
+    : "${EXPERIMENTS_BUILD_BINARY_SHA256:?EXPERIMENTS_BUILD_BINARY_SHA256 is required}"
+    : "${EXPERIMENTS_LLVM_RUN_ID:?EXPERIMENTS_LLVM_RUN_ID is required}"
+    : "${EXPERIMENTS_LLVM_RUN_ATTEMPT:?EXPERIMENTS_LLVM_RUN_ATTEMPT is required}"
+    : "${EXPERIMENTS_KERNEL_RUN_ID:?EXPERIMENTS_KERNEL_RUN_ID is required}"
+    : "${EXPERIMENTS_KERNEL_RUN_ATTEMPT:?EXPERIMENTS_KERNEL_RUN_ATTEMPT is required}"
+    ROOT=$(git rev-parse --show-toplevel)
+    RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
+    mkdir -p "$RESULTS"
+    set --
+    if [ "${EXPERIMENTS_BUILD_VALIDATE_ONLY:-}" = 1 ]; then
+      set -- --validate-only
+    fi
+    docker run --rm --user "$(id -u):$(id -g)" \
+      -v "$ROOT:/src:ro" -v "$EXPERIMENTS_LLVM_CAMPAIGN_DIR:/incoming/llvm:ro" \
+      -v "$EXPERIMENTS_KERNEL_CAMPAIGN_DIR:/incoming/kernel:ro" -v "$RESULTS:/results" \
+      -w /src/tools -e GOWORK=off -e GOCACHE=/tmp/go-build -e GOMODCACHE=/tmp/go-mod \
+      golang:1.26.10 sh -euc '
+        go build -trimpath -o /tmp/campaign-tools/ ./llvmexperiment ./testreport
+        /tmp/campaign-tools/testreport experiments /incoming/llvm/cells > /dev/null
+        /tmp/campaign-tools/testreport experiments /incoming/kernel/cells > /dev/null
+        exec /tmp/campaign-tools/llvmexperiment import-campaigns "$@"
+      ' import-build-campaigns \
+      --llvm /incoming/llvm --kernel /incoming/kernel --results /results \
+      --source "$EXPERIMENTS_BUILD_SOURCE_REVISION" --binary-sha256 "$EXPERIMENTS_BUILD_BINARY_SHA256" \
+      --llvm-run "$EXPERIMENTS_LLVM_RUN_ID" --llvm-attempt "$EXPERIMENTS_LLVM_RUN_ATTEMPT" \
+      --kernel-run "$EXPERIMENTS_KERNEL_RUN_ID" --kernel-attempt "$EXPERIMENTS_KERNEL_RUN_ATTEMPT" "$@"
   llvm-build: |
     set -eu
     ROOT=$(git rev-parse --show-toplevel)
@@ -188,7 +222,8 @@ scripts:
       > "$RESULTS/$cell.log" 2>&1 || rc=$?
     cat "$RESULTS/$cell.log"
     exit "$rc"
-  # Run after the release campaign: its summary reads these six cells from the same results folder.
+  # Optional one-host diagnostic campaign. Production docs import selected
+  # real-VM LLVM and kernel campaigns through import-build-campaigns instead.
   llvm-experiments: |
     set -eu
     dispat exec llvm-build --for pkg:experiments --in pkg:experiments

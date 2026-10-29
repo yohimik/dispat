@@ -210,12 +210,11 @@ The campaign runs the timing cells after every other cell, one at a time, so no 
 
 ### The LLVM distributed build
 
-`dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments` adds six cells to the normal results
-folder: three Dispat modes (`compilation`, `interpretation`, `hybrid`), Nx distribution, Lerna distribution, and
-Changesets' explicit `unsupported` entry. The docs release hook runs it automatically after the release campaign
-and before `summary`; both campaigns are included by the ordinary `testreport experiments` and documentation
-report readers. For standalone use, run those same commands in that order. The commands remain separate because
-a real LLVM build takes substantially longer than the release fixtures.
+Production docs import full two-VM LLVM and Linux kernel campaign artifacts selected by exact workflow run and attempt IDs. The workflow checks successful runs from this repository, workflow and original checkout source, then calls `dispat exec import-build-campaigns --for pkg:experiments --in pkg:experiments` with `EXPERIMENTS_BUILD_VALIDATE_ONLY=1` before release effects. The docs hook calls the same command after the standard experiment campaign.
+
+The importer requires `EXPERIMENTS_LLVM_CAMPAIGN_DIR`, `EXPERIMENTS_KERNEL_CAMPAIGN_DIR`, `EXPERIMENTS_BUILD_SOURCE_REVISION`, `EXPERIMENTS_BUILD_BINARY_SHA256`, and each workload's `EXPERIMENTS_{LLVM,KERNEL}_RUN_ID` and `EXPERIMENTS_{LLVM,KERNEL}_RUN_ATTEMPT`. Both artifacts must contain all six selected full-profile records. It verifies source, binary, version, trial identity, raw evidence hashes, observed durations and hardware/configuration before replacing previous build-comparison cells. It keeps the measured candidate identities intact; these comparisons do not assert that the later published alpine binary was measured. Missing inputs fail rather than selecting an older campaign or substituting a local run.
+
+`dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments` remains an optional one-host diagnostic campaign. Its three Dispat modes and native Nx Cloud entries are independent of the required production cloud imports. Standalone `summary` includes whatever records were explicitly produced or imported.
 
 The default `full` workload configures and builds LLVM core twice, once with X86 and once with AArch64. Each
 configuration builds the default `all` target, including its tools and libraries. Clang and other subprojects,
@@ -234,10 +233,9 @@ scheduling, CMake configuration, compilation, output transport, and coordinator 
 must identify this run and two distinct executors, and the coordinator checks executable digests, LLVM versions,
 and a demangling result. Full builds return five representative binaries from each configuration rather than
 transferring every library; the work still builds the complete configured target.
-The release workflow caps every cell at 45 minutes, so five runnable entries use at most 225 minutes of its
-six-hour job budget, plus image preparation and the other release stages. Full campaigns can take hours.
-Each verdict records its timeout. A configured executor that fails or exceeds its budget records a failure and
-fails the docs release; blocked and unsupported entries have no duration and do not fail it.
+Full campaigns can take hours; each verdict records its timeout. Production import requires all five runnable
+cloud cells to complete and retains Changesets as unsupported, without a duration. The optional one-host
+diagnostic command may retain blocked native-cloud entries, but those cannot replace a required cloud result.
 
 Nx and Lerna use their documented Nx Cloud distribution with two manually started agents. They require
 `NX_CLOUD_ACCESS_TOKEN` and `EXPERIMENTS_NX_CLOUD_ID` in the caller's environment. Without them, the result is
@@ -245,9 +243,9 @@ Nx and Lerna use their documented Nx Cloud distribution with two manually starte
 `unsupported`, also without a duration. Every task's committed input contains a fresh run identity, preventing
 remote-cache reuse between cells while retaining the cache transport Nx Cloud requires for distribution.
 The token is passed through the environment and is not saved in a fixture or result.
-The release workflow reads the optional repository variable `EXPERIMENTS_NX_CLOUD_ID` and secret
-`NX_CLOUD_ACCESS_TOKEN`; leaving them unset retains the blocked entries. Custom Cloud endpoints and encryption
-use the optional `NX_CLOUD_API` variable and `NX_CLOUD_ENCRYPTION_KEY` secret.
+For the optional one-host command, custom Cloud endpoints and encryption use `NX_CLOUD_API` and
+`NX_CLOUD_ENCRYPTION_KEY`. Production GCE comparisons use the separately labeled manual split adapter for
+Nx and Lerna and do not require native Nx Cloud credentials.
 
 `EXPERIMENTS_LLVM_PROFILE=smoke` selects only `llvm-cxxfilt` and `llvm-size` in both configurations. This validates
 the harness with real LLVM compilation but is explicitly labeled a subset in its result and never reported as a

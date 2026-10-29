@@ -180,6 +180,9 @@ func run(ctx context.Context, args []string) error {
 	if args[0] == "collect" {
 		return collectCampaign(args[1:])
 	}
+	if args[0] == "import-campaigns" {
+		return importCampaigns(ctx, args[1:])
+	}
 	if args[0] != "run" {
 		return fmt.Errorf("LLVM experiment command %q is invalid; expected run or build", args[0])
 	}
