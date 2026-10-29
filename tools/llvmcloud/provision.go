@@ -25,10 +25,19 @@ touch /var/lib/dispat-llvm-ready
 const (
 	minimumCPUPlatformFlagName = "--min-cpu-platform"
 	cpuPlatformMismatchError   = "instance %s has CPU platform %q; expected exact platform %q"
+	bootDiskInterfaceFlagName  = "--boot-disk-interface"
+	networkInterfaceFlagName   = "--network-interface"
+	c3BootDiskInterfaceName    = "NVME"
+	c3NICTypeName              = "GVNIC"
+	c3NetworkInterfaceValue    = "network=default,nic-type=GVNIC"
+	c3InterfaceMismatchError   = "instance %s must have one NVME boot disk and one GVNIC network interface"
 )
 
 func (d *driver) provision(ctx context.Context) error {
-	hardware, err := d.gcloud(ctx, "compute", "machine-types", "describe", machineType, "--zone", d.settings.Zone, "--format=json")
+	if err := validateMachineProfile(d.settings); err != nil {
+		return err
+	}
+	hardware, err := d.gcloud(ctx, "compute", "machine-types", "describe", d.settings.MachineType, "--zone", d.settings.Zone, "--format=json")
 	if err != nil {
 		return err
 	}
@@ -87,10 +96,8 @@ func (d *driver) provision(ctx context.Context) error {
 		if err := d.save(); err != nil {
 			return err
 		}
-		args := []string{"compute", "instances", "create", name, "--zone", d.settings.Zone, "--machine-type", machineType, "--image", d.state.Image, "--boot-disk-size", "100GB", "--boot-disk-type", "pd-balanced", "--no-service-account", "--no-scopes", "--max-run-duration", vmLifetime, "--instance-termination-action", "DELETE", "--provisioning-model", "STANDARD", "--labels", "dispat-experiment=llvm,trial=" + d.settings.ID, "--metadata", "enable-guest-attributes=TRUE,enable-oslogin=FALSE,block-project-ssh-keys=TRUE", "--metadata-from-file", "startup-script=" + filepath.Join(d.settings.Root, "private/startup.sh") + ",ssh-keys=" + filepath.Join(d.settings.Root, "private/ssh-keys"), "--format=json"}
-		if d.settings.CPUPlatform != "" {
-			args = append(args, minimumCPUPlatformFlagName, d.settings.CPUPlatform)
-		}
+		args := []string{"compute", "instances", "create", name, "--zone", d.settings.Zone, "--machine-type", d.settings.MachineType, "--image", d.state.Image, "--boot-disk-size", "100GB", "--boot-disk-type", "pd-balanced", "--no-service-account", "--no-scopes", "--max-run-duration", vmLifetime, "--instance-termination-action", "DELETE", "--provisioning-model", "STANDARD", "--labels", "dispat-experiment=llvm,trial=" + d.settings.ID, "--metadata", "enable-guest-attributes=TRUE,enable-oslogin=FALSE,block-project-ssh-keys=TRUE", "--metadata-from-file", "startup-script=" + filepath.Join(d.settings.Root, "private/startup.sh") + ",ssh-keys=" + filepath.Join(d.settings.Root, "private/ssh-keys"), "--format=json"}
+		args = append(args, buildMachineProfileArguments(d.settings)...)
 		if _, err := d.gcloud(ctx, args...); err != nil {
 			return fmt.Errorf("create %s (no machine or zone fallback): %w", name, err)
 		}
@@ -101,8 +108,11 @@ func (d *driver) provision(ctx context.Context) error {
 		if err := verifyInstance(item, actual); err != nil {
 			return err
 		}
-		if actual.ID == "" || actual.CPUPlatform == "" || actual.MachineType != "https://www.googleapis.com/compute/v1/projects/"+d.settings.Project+"/zones/"+d.settings.Zone+"/machineTypes/"+machineType || len(actual.ServiceAccounts) != 0 || len(actual.Disks) != 1 {
+		if actual.ID == "" || actual.CPUPlatform == "" || actual.MachineType != "https://www.googleapis.com/compute/v1/projects/"+d.settings.Project+"/zones/"+d.settings.Zone+"/machineTypes/"+d.settings.MachineType || len(actual.ServiceAccounts) != 0 || len(actual.Disks) != 1 {
 			return fmt.Errorf("instance %s does not have the required identity/type/no-service-account configuration", name)
+		}
+		if d.settings.MachineType == c3MachineTypeName && (actual.Disks[0].Interface != c3BootDiskInterfaceName || len(actual.NetworkInterfaces) != 1 || actual.NetworkInterfaces[0].NICType != c3NICTypeName) {
+			return fmt.Errorf(c3InterfaceMismatchError, name)
 		}
 		if d.settings.CPUPlatform != "" && actual.CPUPlatform != d.settings.CPUPlatform {
 			return fmt.Errorf(cpuPlatformMismatchError, name, actual.CPUPlatform, d.settings.CPUPlatform)
@@ -136,6 +146,17 @@ func (d *driver) provision(ctx context.Context) error {
 		if err := d.awaitSSH(ctx, actual); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func buildMachineProfileArguments(settings options) []string {
+	if settings.MachineType == c3MachineTypeName {
+		// C3 has one CPU platform; the observed platform is still checked exactly.
+		return []string{bootDiskInterfaceFlagName, c3BootDiskInterfaceName, networkInterfaceFlagName, c3NetworkInterfaceValue}
+	}
+	if settings.CPUPlatform != "" {
+		return []string{minimumCPUPlatformFlagName, settings.CPUPlatform}
 	}
 	return nil
 }
@@ -270,7 +291,7 @@ func (d *driver) prepareWorkers(ctx context.Context) error {
 	}
 	for index, item := range d.state.Instances {
 		name := "llvm-node-" + strconv.Itoa(index+1)
-		node := remoteNode{Name: name, Root: "/cloud/work/" + name + "/repo", State: "/cloud/work/" + name + "/state", EvidenceDir: "/cloud/work/" + name + "/evidence", GitConfig: "/cloud/private/" + name + ".gitconfig", HostID: "gce:" + item.ID, EvidencePath: "/cloud/results/cloud/" + item.Name + ".json", MachineType: machineType, CPUPlatform: item.CPUPlatform, CPUQuota: workerCPUs, MemoryBytes: workerMemoryBytes}
+		node := remoteNode{Name: name, Root: "/cloud/work/" + name + "/repo", State: "/cloud/work/" + name + "/state", EvidenceDir: "/cloud/work/" + name + "/evidence", GitConfig: "/cloud/private/" + name + ".gitconfig", HostID: "gce:" + item.ID, EvidencePath: "/cloud/results/cloud/" + item.Name + ".json", MachineType: d.settings.MachineType, CPUPlatform: item.CPUPlatform, CPUQuota: workerCPUs, MemoryBytes: workerMemoryBytes}
 		d.plan.Nodes = append(d.plan.Nodes, node)
 		if _, err := d.ssh(ctx, item, invocation{Name: "sudo", Args: []string{"install", "-d", "-m", "0700", "-o", sshUser, "-g", sshUser, "/cloud"}}); err != nil {
 			return err

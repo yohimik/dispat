@@ -2,10 +2,11 @@
 
 The `Release` workflow's `purpose=llvm-gce` or `purpose=kernel-gce` dispatch builds the selected checkout
 once, retains its OCI archive, image identity and binary hashes, then runs five
-independent cells. Every cell creates two fresh `n2-standard-4` workers in
+independent cells. Every cell creates two fresh workers of one selected machine type in
 one selected zone, verifies their exact boot image and matching CPU platform, and
 loads the same image bytes. Workers have no service account or cloud scopes.
-The coordinator runs on the GitHub runner. Each worker container has four CPUs,
+The coordinator runs on the GitHub runner. Both supported machine types have
+four vCPUs and 16 GiB memory. Each worker container has four CPUs,
 14 GiB memory, one outer task slot and two inner Ninja or Make jobs. The workflow
 defaults to `us-central1-b` and `Intel Cascade Lake`; these selections apply to
 every competitor and every Dispat mode in the campaign.
@@ -17,18 +18,32 @@ the coordinator and retained with the requested trial options; it does not
 replace or relabel LLVM results. Both workloads use the same exact OCI archive
 and image-identity contract.
 
-Pass the same `--boot-image` and `--cpu-platform` to every `llvmcloud run` in a
+Pass the same `--machine-type`, `--boot-image` and `--cpu-platform` to every `llvmcloud run` in a
 campaign. The boot-image pin must be the full
 `https://www.googleapis.com/compute/v1/projects/ubuntu-os-cloud/global/images/<image-name>`
 selfLink; the driver uses it directly without resolving an image family again.
-The CPU pin accepts `Intel Cascade Lake` or `Intel Ice Lake`. It supplies
-`--min-cpu-platform` at creation and then requires each VM's actual platform to
-equal the pin exactly, including the first VM. A newer platform does not silently
-satisfy an older pin. Invalid pins fail before provisioning, and a mismatch
+The driver defaults to `--machine-type n2-standard-4`, whose CPU pin accepts
+`Intel Cascade Lake` or `Intel Ice Lake`. N2 supplies `--min-cpu-platform` at
+creation. Selecting `--machine-type c3-standard-4` requires the explicit CPU pin
+`Intel Sapphire Rapids`. C3's fixed CPU platform makes the minimum-platform
+selector unnecessary; creation sets an NVMe boot-disk interface and gVNIC on
+the default network, retaining the ephemeral public IP used by SSH. Both
+profiles retain the 100 GB `pd-balanced` boot disk. The driver requires each
+VM's actual platform to equal the pin exactly, including the first VM, and
+checks C3's actual disk and NIC interfaces. A newer platform does not silently
+satisfy an older pin. Invalid machine/CPU pairs fail before provisioning, and a mismatch
 fails the cell without fallback. Requested pins remain in the private journal
 and the retained trial/provenance evidence. Without these optional pins, the
-standalone driver resolves its image family once per cell and checks that the
+standalone N2 driver resolves its image family once per cell and checks that the
 two actual platforms match; that does not establish equality across cells.
+
+The workflow's `cloud-machine-type` and `cloud-cpu-platform` inputs select this
+same fixed profile for every cell. C3 uses the separate regional `C3_CPUS`
+quota: a two-worker cell needs eight free vCPUs. CPU, memory, disk size, task
+slots and inner build jobs remain equal across tools; changing machine series
+starts a separate campaign. See Google's [machine specifications](https://docs.cloud.google.com/compute/docs/general-purpose-machines),
+[Ubuntu interface support](https://docs.cloud.google.com/compute/docs/images/os-details),
+and [CPU quotas](https://docs.cloud.google.com/compute/resource-usage).
 
 The three Dispat cells use compilation, interpretation and hybrid modes. The Nx
 and Lerna cells explicitly use `manual-gcp-split`: the experiment driver assigns

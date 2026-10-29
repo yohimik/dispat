@@ -23,7 +23,6 @@ import (
 const (
 	cloudRoot                  = "/cloud"
 	cloudSchema                = "llvm-remote-plan/v1"
-	machineType                = "n2-standard-4"
 	defaultZone                = "us-central1-a"
 	imageProject               = "ubuntu-os-cloud"
 	imageFamily                = "ubuntu-2404-lts-amd64"
@@ -49,15 +48,24 @@ const (
 )
 
 const (
+	defaultMachineTypeName   = "n2-standard-4"
+	c3MachineTypeName        = "c3-standard-4"
 	bootImageFlagName        = "boot-image"
 	cpuPlatformFlagName      = "cpu-platform"
+	machineTypeFlagName      = "machine-type"
 	bootImageFlagHelp        = "exact ubuntu-os-cloud image selfLink; skips family resolution"
-	cpuPlatformFlagHelp      = "exact expected N2 CPU platform; no platform fallback"
+	cpuPlatformFlagHelp      = "exact expected CPU platform for the selected machine type; no platform fallback"
+	machineTypeFlagHelp      = "fixed worker machine type: n2-standard-4 or c3-standard-4; no fallback"
 	bootImageIdentityPattern = `^https://www\.googleapis\.com/compute/v1/projects/ubuntu-os-cloud/global/images/[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`
 	bootImageIdentityError   = "boot image must be an exact ubuntu-os-cloud image selfLink, not a family or relative image name"
-	cpuPlatformIdentityError = "CPU platform must be exactly Intel Cascade Lake or Intel Ice Lake for n2-standard-4"
+	cpuPlatformIdentityError = "explicit CPU platform must be nonempty and compatible with the selected machine type"
+	machineTypeIdentityError = "machine type must be exactly n2-standard-4 or c3-standard-4, got %q"
+	machineCPUIdentityError  = "CPU platform for %s must be %s, got %q"
+	n2CPUPlatformChoices     = "Intel Cascade Lake or Intel Ice Lake when explicitly selected"
+	c3CPUPlatformChoices     = "explicitly selected Intel Sapphire Rapids"
 	cascadeLakePlatformName  = "Intel Cascade Lake"
 	iceLakePlatformName      = "Intel Ice Lake"
+	sapphirePlatformName     = "Intel Sapphire Rapids"
 )
 
 const (
@@ -75,6 +83,7 @@ var bootImageIdentity = regexp.MustCompile(bootImageIdentityPattern)
 type options struct {
 	Project      string `json:"project"`
 	Zone         string `json:"zone"`
+	MachineType  string `json:"machineType"`
 	BootImage    string `json:"bootImage,omitempty"`
 	CPUPlatform  string `json:"cpuPlatform,omitempty"`
 	ID           string `json:"id"`
@@ -128,9 +137,11 @@ type instance struct {
 	Status          string            `json:"status"`
 	ServiceAccounts []json.RawMessage `json:"serviceAccounts"`
 	Disks           []struct {
-		Source string `json:"source"`
+		Source    string `json:"source"`
+		Interface string `json:"interface"`
 	} `json:"disks"`
 	NetworkInterfaces []struct {
+		NICType       string `json:"nicType"`
 		AccessConfigs []struct {
 			NATIP string `json:"natIP"`
 		} `json:"accessConfigs"`
@@ -205,6 +216,7 @@ func parseOptions(args []string) (options, error) {
 	flags := flag.NewFlagSet("llvmcloud run", flag.ContinueOnError)
 	flags.StringVar(&value.Project, "project", "", "GCP project")
 	flags.StringVar(&value.Zone, "zone", defaultZone, "one fixed GCE zone; no fallback")
+	flags.StringVar(&value.MachineType, machineTypeFlagName, defaultMachineTypeName, machineTypeFlagHelp)
 	flags.StringVar(&value.BootImage, bootImageFlagName, "", bootImageFlagHelp)
 	flags.StringVar(&value.CPUPlatform, cpuPlatformFlagName, "", cpuPlatformFlagHelp)
 	flags.StringVar(&value.ID, "id", "", "unique run/attempt/cell identifier")
@@ -228,13 +240,16 @@ func parseOptions(args []string) (options, error) {
 				pinError = errors.Join(pinError, errors.New(bootImageIdentityError))
 			}
 		case cpuPlatformFlagName:
-			if value.CPUPlatform != cascadeLakePlatformName && value.CPUPlatform != iceLakePlatformName {
+			if value.CPUPlatform == "" {
 				pinError = errors.Join(pinError, errors.New(cpuPlatformIdentityError))
 			}
 		}
 	})
 	if pinError != nil {
 		return value, pinError
+	}
+	if err := validateMachineProfile(value); err != nil {
+		return value, err
 	}
 	if flags.NArg() != 0 || value.Root != cloudRoot || !safeName.MatchString(value.ID) || !safeName.MatchString(value.Project) || !safeName.MatchString(value.Zone) || value.Archive == "" || !isDigest(value.Image, "sha256:", 64) || !isDigest(value.Source, "", 40) || !isDigest(value.BinarySHA256, "", 64) {
 		return value, errors.New("cloud options require /cloud, safe project/zone/run names, exact image/source/binary identities and an archive")
@@ -258,6 +273,23 @@ func parseOptions(args []string) (options, error) {
 		return value, errors.New(workloadSelectionError)
 	}
 	return value, nil
+}
+
+func validateMachineProfile(settings options) error {
+	switch settings.MachineType {
+	case defaultMachineTypeName:
+		if settings.CPUPlatform == "" || settings.CPUPlatform == cascadeLakePlatformName || settings.CPUPlatform == iceLakePlatformName {
+			return nil
+		}
+		return fmt.Errorf(machineCPUIdentityError, settings.MachineType, n2CPUPlatformChoices, settings.CPUPlatform)
+	case c3MachineTypeName:
+		if settings.CPUPlatform == sapphirePlatformName {
+			return nil
+		}
+		return fmt.Errorf(machineCPUIdentityError, settings.MachineType, c3CPUPlatformChoices, settings.CPUPlatform)
+	default:
+		return fmt.Errorf(machineTypeIdentityError, settings.MachineType)
+	}
 }
 
 func isDigest(value, prefix string, length int) bool {
