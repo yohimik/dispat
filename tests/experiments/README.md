@@ -393,11 +393,28 @@ The campaign is whatever `cells` prints and nothing else counts it. The sweep pi
 cache manifest stores it verbatim, and the report's headline counts the records
 it found. A cell added to `cells` is therefore a cell every one of them runs, with no number to update anywhere.
 
+New timing cells also retain `executionMeasurement` beside the existing `timing` figures. Before the first release
+command, the producer captures package dependencies, the selected plan, readiness configuration and source inputs.
+Its graph is explicitly an analysis projection of build and registry-upload operations, with unselected operations
+retained as virtual dependency relays. It is not a native executor graph and lists omitted work.
+
+The additional records use unrounded local monotonic durations. The shared `execution-measurement` command derives
+and validates the formulas; the producer does not duplicate them. Nominal work arithmetic assumes compatible
+reported seconds and records that relative clock-rate uncertainty is unknown. Unmapped task span, overlap and
+unestablished resource capacity remain null with reasons. The older wall-clock `timing` fields keep their existing
+meaning and rounding. Other experiment cells do not acquire reconstructed measurements.
+
+Every new timing run has a unique directory under `execution-measurements/<trial UUID>/`, containing the captured
+inputs, raw task and step records, environment, digests and derivation output. Set `EXPERIMENT_REPETITION` to a
+positive repetition number when invoking a container. The campaign keeps these directories when it replaces the
+current cell results, so reruns and failed trials do not overwrite earlier evidence.
+
 Underneath, one cell is one container:
 
 ```sh
 docker buildx build --file tests/experiments/Dockerfile \
-  --build-arg DISPAT_VERSION=1.7.1 --load -t dispat-experiments tests/experiments
+  --build-arg DISPAT_VERSION=1.7.1 --build-context measurement-source=./tools \
+  --load -t dispat-experiments tests/experiments
 docker run --rm -v "$PWD/coverage/experiments:/results" dispat-experiments midrelease dispat conflict
 ```
 

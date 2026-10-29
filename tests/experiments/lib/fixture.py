@@ -124,12 +124,21 @@ BUILDING = ("propagation", "timing")
 # by the same clock.
 BUILD_HOLD_MS = 500
 TIMED_BUILD = ('node -e \'const fs=require("fs");const start=Date.now()/1000;'
+               'const monotonicStart=process.hrtime.bigint();'
                'fs.mkdirSync("dist",{recursive:true});'
                'fs.writeFileSync("dist/index.js",fs.readFileSync("index.js"));'
                f'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,{BUILD_HOLD_MS});'
+               'const monotonicEnd=process.hrtime.bigint();'
                'const file=process.env.EXPERIMENT_TIMING;'
                'if(file)fs.appendFileSync(file,JSON.stringify({package:require("./package.json").name,'
-               'task:"build",start,end:Date.now()/1000})+"\\n")\'')
+               'task:"build",start,end:Date.now()/1000,measurement:{'
+               'durationSeconds:Number(monotonicEnd-monotonicStart)/1e9,'
+               'startNanoseconds:String(monotonicStart),endNanoseconds:String(monotonicEnd),'
+               'clockKind:"monotonic",clockAPI:"process.hrtime.bigint",'
+               'clockDomain:(process.env.EXPERIMENT_MEASUREMENT_TRIAL_ID||"unrecorded")+":build:"+process.pid+":"+monotonicStart,'
+               'phase:{trialId:process.env.EXPERIMENT_MEASUREMENT_TRIAL_ID||null,'
+               'step:process.env.EXPERIMENT_MEASUREMENT_STEP||null},'
+               'boundary:"build script artifact creation and fixed hold, excluding Node startup and evidence append"}})+"\\n")\'')
 
 # Where lerna and changesets document a build: `lerna publish` and
 # `changeset publish` pack every package they publish, and packing runs the

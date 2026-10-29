@@ -800,7 +800,8 @@ RUN git config --global user.email experiments@dispat.dev \
  && python3 tests/experiments/lib/fixture-test.py \
  && python3 tests/experiments/lib/failproxy-test.py \
  && python3 tests/experiments/lib/plan-test.py \
- && python3 tests/experiments/lib/timing-test.py
+ && python3 tests/experiments/lib/timing-test.py \
+ && python3 tests/experiments/lib/execution-measurement-test.py
 
 # The shell inside the configuration, swept the same way. Every `scripts`
 # entry of a dispat config is a shell command — the tool bootstrap, the image

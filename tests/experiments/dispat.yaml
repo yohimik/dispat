@@ -21,12 +21,14 @@ scripts:
         --build-arg DISPAT_BINARY_SOURCE=candidate-binary \
         --build-arg "DISPAT_BINARY_ID=$EXPERIMENTS_DISPAT_ID" \
         --build-context "candidate-binary=$candidate" \
+        --build-context measurement-source=../../tools \
         $(sh ../../scripts/buildx-cache.sh experiments) --load --tag dispat-experiments .
     else
       : "${version:?no published dispat-alpine image to build the experiments on}"
       echo "building the experiments on yohimik/dispat-alpine:$version"
       docker buildx build --file Dockerfile --build-arg "DISPAT_VERSION=$version" \
         --build-arg "DISPAT_BINARY_ID=shipped:$version" \
+        --build-context measurement-source=../../tools \
         $(sh ../../scripts/buildx-cache.sh experiments) --load --tag dispat-experiments .
     fi
   # One cell, named the way run.sh takes it: EXPERIMENT and TOOL, and
@@ -114,7 +116,7 @@ scripts:
       exit 0
     fi
     docker run --rm -v "$RESULTS:/results" --entrypoint find dispat-experiments \
-      /results -mindepth 1 -delete
+      /results -mindepth 1 -maxdepth 1 ! -name execution-measurements -exec rm -rf '{}' +
     echo "running $(printf '%s\n' "$expected" | sed '/^$/d' | wc -l | tr -d ' ') cells, ${EXPERIMENTS_JOBS:-4} at a time and the timing cells alone, into $RESULTS"
     sweep() { # <jobs>: the cells on stdin, that many at a time
       EXPERIMENTS_RESULTS="$RESULTS" xargs -P "$1" -L 1 sh -c \

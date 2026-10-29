@@ -17,6 +17,7 @@
 # reading is never mistaken for the recorded one.
 #
 #   docker buildx build --file tests/experiments/Dockerfile \
+#     --build-context measurement-source=./tools \
 #     --build-arg DISPAT_VERSION=1.7.1 --load -t dispat-experiments tests/experiments
 #   docker run --rm -v "$PWD/coverage/experiments:/results" dispat-experiments midrelease dispat
 ARG DISPAT_VERSION=1.7.1
@@ -27,6 +28,13 @@ FROM docker.io/yohimik/dispat-alpine:${DISPAT_VERSION} AS official
 FROM official AS shipped-binary
 RUN cp /usr/local/bin/dispat /dispat
 FROM ${DISPAT_BINARY_SOURCE} AS selected-binary
+
+FROM golang:1.26.10 AS measurement-tool
+WORKDIR /measurement
+COPY --from=measurement-source /internal/executionmeasurement ./internal/executionmeasurement
+COPY --from=measurement-source /measurement ./measurement
+RUN printf 'module github.com/yohimik/dispat/tools\n\ngo 1.26.10\n' > go.mod \
+ && CGO_ENABLED=0 go build -trimpath -o /execution-measurement ./measurement
 
 FROM node:${NODE_VERSION}-slim AS runtime
 RUN apt-get update \
@@ -49,6 +57,7 @@ ENV PATH=/opt/tools/node_modules/.bin:$PATH
 # shipped image above.
 ARG DISPAT_BINARY_ID=shipped
 COPY --from=selected-binary /dispat /usr/local/bin/dispat
+COPY --from=measurement-tool /execution-measurement /usr/local/bin/execution-measurement
 RUN sha256sum /usr/local/bin/dispat | cut -d' ' -f1 > /etc/dispat-experiments-binary.sha256
 ENV EXPERIMENTS_DISPAT_BINARY_ID=${DISPAT_BINARY_ID}
 LABEL dev.dispat.experiments.binary-id=${DISPAT_BINARY_ID}
