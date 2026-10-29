@@ -41,7 +41,8 @@ func TestExecutionMalformedObjectStreamCannotPublish(t *testing.T) {
 			rig := newExecutionFaultOutputs(t)
 			// Capturing outputs reads the task checkout. Mailbox verification
 			// reads its bare cache, which must remain intact until this build.
-			env, marker := executionBatchReply(t, "*-C */tasks/*/checkout cat-file --batch", tc.reply)
+			outputOID := gitIn(t, rig.repo.Root, "assets 0.1.0 "+executionNode+"\n", "hash-object", "--stdin")
+			env, marker := executionBatchReply(t, "*-C */tasks/*/checkout cat-file --batch", outputOID, tc.reply)
 			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, env...)
 			res := rig.release()
 			reply := stopAll(t, []*executionWorker{worker})[0]
@@ -61,7 +62,7 @@ func TestExecutionMalformedObjectStreamCannotPublish(t *testing.T) {
 	}
 }
 
-func executionBatchReply(t *testing.T, pattern, reply string) ([]string, string) {
+func executionBatchReply(t *testing.T, pattern, firstObject, reply string) ([]string, string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the Git protocol fixture uses a POSIX shell")
@@ -70,12 +71,39 @@ func executionBatchReply(t *testing.T, pattern, reply string) ([]string, string)
 	require.NoError(t, err)
 	shim := t.TempDir()
 	marker := filepath.Join(shim, "matched")
-	script := "#!/bin/sh\ncase \"$*\" in\n$DISPAT_IT_BATCH_PATTERN)\nIFS= read -r oid || exit 1\nprintf hit >> \"$DISPAT_IT_BATCH_MARKER\"\n" + reply + "\nexit 0;;\nesac\nexec \"$DISPAT_IT_BATCH_GIT\" \"$@\"\n"
+	script := `#!/bin/sh
+case "$*" in
+$DISPAT_IT_BATCH_PATTERN)
+IFS= read -r oid || exit 1
+selected=0
+if [ -n "$DISPAT_IT_BATCH_OBJECT" ]; then
+  [ "$oid" = "$DISPAT_IT_BATCH_OBJECT" ] && selected=1
+else
+  previous=
+  repository=.
+  for argument do
+    if [ "$previous" = -C ]; then repository=$argument; fi
+    previous=$argument
+  done
+  object_type=$(GIT_NO_REPLACE_OBJECTS=1 "$DISPAT_IT_BATCH_GIT" -C "$repository" cat-file -t "$oid") || exit 1
+  [ "$object_type" = blob ] && selected=1
+fi
+if [ "$selected" -eq 0 ]; then
+  { printf '%s\n' "$oid"; cat; } | "$DISPAT_IT_BATCH_GIT" "$@"
+  exit "$?"
+fi
+printf hit >> "$DISPAT_IT_BATCH_MARKER"
+` + reply + `
+exit 0;;
+esac
+exec "$DISPAT_IT_BATCH_GIT" "$@"
+`
 	require.NoError(t, os.WriteFile(filepath.Join(shim, "git"), []byte(script), 0o755))
 	return []string{
 		"PATH=" + shim + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"DISPAT_IT_BATCH_GIT=" + realGit, "DISPAT_IT_BATCH_MARKER=" + marker,
 		"DISPAT_IT_BATCH_PATTERN=" + pattern,
+		"DISPAT_IT_BATCH_OBJECT=" + firstObject,
 	}, marker
 }
 
@@ -158,7 +186,7 @@ func TestExecutionInvalidMessageSizeCannotStartRelease(t *testing.T) {
 				cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 5}
 			})
 			worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 0)
-			env, marker := executionBatchReply(t, executionOutputBatchPattern,
+			env, marker := executionBatchReply(t, executionOutputBatchPattern, "",
 				`printf '%s blob `+tc.size+`\n{' "$oid"`)
 			res := rig.release(env...)
 			stopAll(t, []*executionWorker{worker})

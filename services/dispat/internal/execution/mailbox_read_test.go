@@ -137,7 +137,7 @@ func TestMailboxBatchReadsAreIndependent(t *testing.T) {
 	pending.Wait()
 }
 
-func mailboxBlobTip(t *testing.T, fixture *mailboxFixture, document string) ChainTip {
+func mailboxBlobTip(t testing.TB, fixture *mailboxFixture, document string) ChainTip {
 	t.Helper()
 	plumbing := gitx.NewPlumbing(fixture.git)
 	tip := ChainTip{Kind: MessageAssignment,
