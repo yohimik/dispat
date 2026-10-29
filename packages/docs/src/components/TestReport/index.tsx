@@ -16,6 +16,9 @@ import {validateArchivedReport} from '@site/plugins/test-report/validate';
 import {resolveArchivedState, type ArchivedState} from '@site/plugins/test-report/state';
 import {catchUpText, isSingleCommandCatchUp} from '@site/plugins/test-report/catchup';
 import {finalStateEntries, planRows, taskLists, taskRows, timingRows} from '@site/plugins/test-report/timing';
+import {llvmStatus} from '@site/plugins/test-report/llvm';
+export {ExperimentsLLVMTable} from './ExperimentsLLVMTable';
+export type {BaseExperimentsLLVMTableProps, ExperimentsLLVMTableProps} from './ExperimentsLLVMTable';
 import Admonition from '@theme/Admonition';
 import React, {useEffect, useState} from 'react';
 
@@ -522,17 +525,17 @@ export function ExperimentsSummary(): React.ReactElement | null {
   if (cells.length === 0) {
     return null;
   }
-  const own = cells.filter((cell) => cell.tool === 'dispat');
+  const own = cells.filter((cell) => cell.tool === 'dispat' && cell.llvm === undefined);
   const holding = own.filter((cell) => cell.passed).length;
   const measured = own.filter((cell) => cell.recovery !== undefined);
   const single = measured.filter((cell) => isSingleCommandCatchUp(cell)).length;
   return (
     <p>
-      This release ran <strong>{count(cells.length)} cells</strong> against{' '}
+      This release recorded <strong>{count(cells.length)} cells</strong> against{' '}
       {version ? <code>dispat {version}</code> : <em>more than one dispat version</em>}:{' '}
       {counted({total: distinct({cells, field: 'experiment'}), noun: 'experiment'})} and{' '}
-      {counted({total: distinct({cells, field: 'tool'}), noun: 'release tool'})}, the same fixture each time. Of
-      dispat&apos;s <strong>{count(own.length)} cells</strong>, <strong>{count(holding)}</strong> hold every
+      {counted({total: distinct({cells, field: 'tool'}), noun: 'release tool'})}, with each experiment&apos;s declared fixture. Of
+      dispat&apos;s <strong>{count(own.length)} release protocol cells</strong>, <strong>{count(holding)}</strong> hold every
       expectation. The other tools&apos; cells are records rather than expectations, and their counts describe those
       tools.
       {measured.length > 0 && (
@@ -568,6 +571,9 @@ function experimentTitle(cell: ExperimentCell): string {
 
 /** How a cell ended, in a clause: what held, or everything that did not. */
 function cellOutcome(cell: ExperimentCell): string {
+  if (cell.llvm !== undefined) {
+    return llvmStatus({result: cell.llvm});
+  }
   if (cell.passed) {
     return 'every expectation holds';
   }
@@ -591,7 +597,7 @@ function cellOutcome(cell: ExperimentCell): string {
  */
 export function ExperimentsTable(): React.ReactElement | null {
   const {report, evidence} = useReportState();
-  const cells = (report?.experiments ?? evidence?.experimentResults)?.cells ?? [];
+  const cells = ((report?.experiments ?? evidence?.experimentResults)?.cells ?? []).filter((cell) => cell.llvm === undefined);
   if (cells.length === 0) {
     return null;
   }
@@ -657,7 +663,7 @@ export function ExperimentsTable(): React.ReactElement | null {
 }
 
 /** The campaign's cells, from the report or from recovered evidence. */
-function useExperimentCells(): ExperimentCell[] {
+export function useExperimentCells(): ExperimentCell[] {
   const {report, evidence} = useReportState();
   return (report?.experiments ?? evidence?.experimentResults)?.cells ?? [];
 }

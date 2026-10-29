@@ -2,23 +2,26 @@
 
 Use workers to run parts of a release on other machines. The first node is the **orchestrator**. It also
 executes eligible tasks, and it alone advances canonical task and ledger refs, publishes artifacts, and writes
-release records. Other **workers** execute eligible work, create their own pending and outcome Git branches,
+release records. Other **choreographers** execute eligible work, create their own pending and outcome Git branches,
 and return claim and result requests to the orchestrator over the authenticated non-Git channel.
 
 `--distribution-mode=compilation` is the default. The orchestrator computes the plan and graph,
 creates an inert branch for every executable logical task before work starts, and publishes a signed readiness feed.
 Workers select eligible ready tasks from that graph. In `interpretation`, every admitted node independently derives
 the same semantic plan and graph from the pinned input, verifies both digests, and chooses locally ready work.
-The orchestrator validates and persists each exact proposal in either mode. An accepted signed claim and a
+In `hybrid`, choreographers pick up compiled nonpush commands while the first node evaluates native preparation,
+publication and recording policy after exact prerequisites settle. The signed task graph binds the partition and
+operation policy, retaining dependency gates in both directions. The orchestrator validates and persists each
+exact proposal in every mode. An accepted signed claim and a
 confirmed remote pending ref permit the command to start. A missing input, different digest, or missing required
-attestation refuses execution before any claim. `hybrid` remains unavailable and is refused before task effects.
+attestation refuses execution before any claim. All modes use the same signed attempt limits and recovery rules.
 
 To try it, [configure the nodes](#configuring-the-nodes), [start a worker](#starting-a-worker), then choose
 [where stages run](#where-a-stage-runs) and [which build outputs travel](#build-outputs-as-inputs). Read the
 [security section](#security-what-distributed-execution-exposes-and-how-to-contain-it) before sharing a pool or using
 a public repository as its mailbox. For a stalled or uncertain run, go to [recovery](#locks-failure-and-recovery).
 
-With no `execution` object or an empty `workers` list, releases still run on one machine. The same node pool can
+With no `execution` object or an empty `choreographers` list, releases still run on one machine. The same node pool can
 also run [`dispat run` scripts](#running-scripts-on-workers) without releasing anything.
 
 Distributed first-node and worker processes currently require Linux or macOS. Their shared weighted node-slot
@@ -77,7 +80,7 @@ exact remote OID from that accepted task tip. It pushes a signed output or faile
 result for the orchestrator to verify and settle.
 A stage and its surrounding hooks form a **frame**, which always runs together on one node.
 
-The `dispat worker` command serves a node; it does not initiate a release. Processes running under a task's
+The `dispat choreographer` command serves a node; it does not initiate a release. Processes running under a task's
 authority cannot initiate one. A build script therefore cannot start a second release of the repository it builds.
 
 ## Configuring the nodes
@@ -85,12 +88,12 @@ authority cannot initiate one. A build script therefore cannot start a second re
 Configure `execution` on the orchestrator and each worker. The orchestrator's peer list needs the node names:
 
 ```yaml title="dispat.yaml on the orchestrator"
-runOnly: [worker, orchestrator]
+runOnly: [choreographer, orchestrator]
 
 execution:
   concurrency: 2
   secretEnv: DISPAT_EXECUTION_SECRET
-  workers:
+  choreographers:
     - name: build-a
     - name: build-b
       lateJoin: true
@@ -200,12 +203,12 @@ secret across machines of different trust levels.
 
 ## Starting a worker
 
-A worker runs [`dispat worker`](./cli/worker.md). It needs its configuration file, the signing secret in its
+A worker runs [`dispat choreographer`](./cli/choreographer.md). It needs its configuration file, the signing secret in its
 environment, and whatever its build commands need:
 
 ```sh
 export DISPAT_EXECUTION_SECRET="$(cat /run/secrets/dispat-execution)"
-dispat worker --config dispat.worker.yaml --state-dir /var/lib/dispat/worker --idle-timeout 900
+dispat choreographer --config dispat.worker.yaml --state-dir /var/lib/dispat/worker --idle-timeout 900
 ```
 
 Workers need read access to exact pinned Git inputs and an authenticated return channel to the orchestrator.
@@ -228,7 +231,7 @@ Supply a value for both positions or a `[build, publish]` pair; the publish posi
 `orchestrator`, which both mean orchestrator placement:
 
 ```yaml
-runOnly: [worker, orchestrator]   # build on a worker, publish on the orchestrator
+runOnly: [choreographer, orchestrator]   # build on a worker, publish on the orchestrator
 
 packages:
   ui:
@@ -236,18 +239,18 @@ packages:
   signer:
     runOnly: orchestrator         # this build signs its artefact here
   linux-image:
-    runOnly: [worker, both]       # worker build; publish still stays here
+    runOnly: [choreographer, both]       # worker build; publish still stays here
 ```
 
 | Value          | What it means                                                                                     |
 |----------------|---------------------------------------------------------------------------------------------------|
 | `both`         | the default: a build is eligible on a compatible worker or the orchestrator; publish stays on the orchestrator |
-| `worker`       | build may only be delegated; a run with no worker links is refused with `E225` before any stage runs |
+| `choreographer`       | build may only be delegated; a run with no worker links is refused with `E225` before any stage runs |
 | `orchestrator` | the stage may only run on the machine the release was started on                                   |
 
 The setting follows the same override order as `buildOutputs` and `buildPlatforms`: root, space, space-folder file,
-package, then package-folder file. An override replaces the whole pair. Scalar `runOnly: worker` is refused because
-it also sets the publish position to `worker`; migrate it to `runOnly: [worker, orchestrator]`.
+package, then package-folder file. An override replaces the whole pair. Scalar `runOnly: choreographer` is refused because
+it also sets the publish position to `choreographer`; migrate it to `runOnly: [choreographer, orchestrator]`.
 
 Placement follows these rules:
 
@@ -451,7 +454,7 @@ placed on workers when their credentials must exclude publication.
 ## Running scripts on workers
 
 `dispat run` can run a script across the worker pool without releasing packages. Configure workers in
-`execution.workers` or pass [`--worker`](#naming-a-worker-on-the-command-line). Each selected package becomes one task,
+`execution.choreographers` or pass [`--choreographer`](#naming-a-worker-on-the-command-line). Each selected package becomes one task,
 running its script commands in the package folder.
 
 The task receives `DISPAT_STAGE=run:<script>`, computed `DISPAT_*` values, unresolved configuration `env` pairs and
@@ -468,7 +471,7 @@ dispat run tests --since all
 ### Placement and release locks
 
 Placement uses the package's build `runOnly` setting. An eligible node with free capacity picks compatible ready
-work from the signed compiled frontier. `orchestrator` stays local. `worker` requires an admitted worker or a
+work from the signed compiled frontier. `orchestrator` stays local. `choreographer` requires an admitted worker or a
 preauthorized compatible late worker before the admission deadline; otherwise the
 sweep fails with `E225` before running scripts.
 
@@ -524,19 +527,19 @@ non-ignored files also travel to every task as part of its prepared source state
 
 ### Naming a worker on the command line
 
-For workers created by CI, use repeatable `--worker name` flags on `release`, `run` or `status`. They add links beside
-`execution.workers` and use the release repository as their mailbox. Use `--worker name=endpoint` for a different
+For workers created by CI, use repeatable `--choreographer name` flags on `release`, `run` or `status`. They add links beside
+`execution.choreographers` and use the release repository as their mailbox. Use `--choreographer name=endpoint` for a different
 mailbox:
 
 ```sh
-dispat run tests --since all --worker ci-worker-1
+dispat run tests --since all --choreographer ci-worker-1
 ```
 
 The link is held to every rule a configured one is: a node name, a credential-free endpoint when it states one, a name
 no other link folds to, and a `secretEnv` the file names. A value that is not a node name alone, or leaves either half
 of `name=endpoint` empty, is a usage error. The link is refused with `E226` under a task's authority because a task
 cannot expand the run's node set. It is no part of the plan digest, and
-`dispat status --worker` prints the digest a distributed run would carry, resolves no remote and reaches no node.
+`dispat status --choreographer` prints the digest a distributed run would carry, resolves no remote and reaches no node.
 
 ## Locks, failure and recovery
 
@@ -723,8 +726,8 @@ authority, data integrity and cleanup problems.
 
 | Code   | Category                    | Means                                                                            |
 |--------|-----------------------------|----------------------------------------------------------------------------------|
-| `E225` | `execution-configuration`   | a configuration no distributed run could be executed under: an unknown role, a capacity that is not one, a malformed or credential-carrying endpoint, a duplicated node name, a missing signing secret, a lock bypass beside workers, `commit.verify: false` beside workers on a release, a link with no endpoint whose release remote's push URL carries credentials or is not a Git remote a mailbox can use, a worker with no endpoint started outside a checkout whose release remote a mailbox can be, an unsatisfiable `buildPlatforms`, a worker publish placement (including scalar `runOnly: worker`), a worker build with no worker links, a node that failed preflight, overlapping `buildOutputs`, or a `runOutputs` root that is or holds a package folder or overlaps a build output root |
-| `E226` | `execution-authority`       | work refused because of who asked: a release or a distributed sweep initiated on a worker or under a task's authority, a `--worker` link stated there, a claim that is not authentically this run's, or a write the task's authority does not extend to |
+| `E225` | `execution-configuration`   | a configuration no distributed run could be executed under: an unknown role, a capacity that is not one, a malformed or credential-carrying endpoint, a duplicated node name, a missing signing secret, a lock bypass beside workers, `commit.verify: false` beside workers on a release, a link with no endpoint whose release remote's push URL carries credentials or is not a Git remote a mailbox can use, a worker with no endpoint started outside a checkout whose release remote a mailbox can be, an unsatisfiable `buildPlatforms`, a worker publish placement (including scalar `runOnly: choreographer`), a worker build with no worker links, a node that failed preflight, overlapping `buildOutputs`, or a `runOutputs` root that is or holds a package folder or overlaps a build output root |
+| `E226` | `execution-authority`       | work refused because of who asked: a release or a distributed sweep initiated on a worker or under a task's authority, a `--choreographer` link stated there, a claim that is not authentically this run's, or a write the task's authority does not extend to |
 | `E227` | `io-integrity`              | input or output data that is missing, changed, incomplete, incompatible or escaping its declared roots, or two tasks of one sweep writing one path with different bytes; it fails one prerequisite and blocks that prerequisite's consumers |
 | `E229` | `transport-cleanup`         | transport state the run could not leave in a safe place: an attempt that had to be fenced, or owned refs whose survival leaves an effect unresolved |
 | `W244` | `transport-cleanup`         | the harmless half of the same subject: refs a completed run could not safely delete, and writes a build made outside what it declared. A run that is otherwise clean still exits `0`; inspect a retained ref before deleting it |
@@ -766,7 +769,7 @@ Existing record and lock diagnostics keep their codes and use the `native-record
   earlier process, as a container's process 1 always is, takes the folder over, so a crashed worker restarts without
   anybody deleting a file.
 - **Nested dispat commands on a worker are restricted.** Under a task's authority `release`, a bare `dispat`,
-  `commit`, `github`, `changelog`, `autoversion`, `compute` and `worker` are refused with `E226`. Everything a build
+  `commit`, `github`, `changelog`, `autoversion`, `compute` and `choreographer` are refused with `E226`. Everything a build
   script legitimately uses stays allowed, including `exec`, `if`, `for`, `install`, `scanner`, `writer`, `replacer`,
   `autowriter` and `trigger`.
 - **Stage events come from the orchestrator.** A delegated stage's events are raised on the orchestrator, which names
@@ -780,7 +783,7 @@ Existing record and lock diagnostics keep their codes and use the `native-record
 ## See also
 
 - [The `execution` object](./configuration/execution.md) for every key, default and refusal.
-- [The worker command](./cli/worker.md) for the flags, the state folder and the exit behaviour.
+- [The worker command](./cli/choreographer.md) for the flags, the state folder and the exit behaviour.
 - [The run command](./cli/run.md#running-on-worker-nodes) for a sweep executed on the pool.
 - [Worker nodes on Kubernetes](./examples/kubernetes-workers.md) for a pool that exists for the length of one
   release.

@@ -162,6 +162,11 @@ scripts:
     echo "running the release experiments against yohimik/dispat-alpine:$EXPERIMENTS_DISPAT_VERSION"
     rc=0
     dispat exec experiments --for pkg:experiments --in pkg:experiments || rc=$?
+    llvm_rc=0
+    dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments || llvm_rc=$?
+    if [ "$rc" -eq 0 ]; then
+      rc=$llvm_rc
+    fi
     dispat exec summary --for pkg:experiments --in pkg:experiments || true
     cells=$(find "$ROOT/coverage/experiments" -mindepth 2 -maxdepth 2 -name verdict.json | wc -l | tr -d ' ')
     {

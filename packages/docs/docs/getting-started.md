@@ -129,7 +129,7 @@ option in one annotated file. Four smaller files annotate one arrangement each: 
 [control repository](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.control.yaml), a
 [peer of a choreographed fleet](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.peer.yaml),
 and the [orchestrator](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.orchestrator.yaml)
-and [worker](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.worker.yaml) of a release
+and [worker](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.choreographer.yaml) of a release
 whose builds run on several machines.
 
 ## Commit convention

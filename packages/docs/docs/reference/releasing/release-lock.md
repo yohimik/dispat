@@ -181,7 +181,7 @@ asked for it, so a fleet that meant to bypass one repository can see that it byp
 [diagnostic codes](../plan-errors.md#polyrepository-snapshot-and-recording-diagnostics).
 
 **[Distributed execution](../../distributed-execution.md) refuses both switches.** A run that configures
-`execution.workers` and would release without the remote lock stops with `E225`, naming the repositories and the
+`execution.choreographers` and would release without the remote lock stops with `E225`, naming the repositories and the
 setting that asked for it. The bypass exists for a repository with no remote to coordinate through; a run that
 dispatches work to other machines is the opposite situation, because every node it reaches writes through a remote
 and the lock is the only thing that stops a second run authorizing the same publication from somewhere else.

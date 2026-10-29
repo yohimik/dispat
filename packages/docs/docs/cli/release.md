@@ -100,10 +100,10 @@ question without touching the remote and is what a CI gate should call. Only pac
 count, so held, withheld, or unselected packages do not; see
 [Gating a pipeline on the plan](../reference/ci.md#gating-a-pipeline-on-the-plan).
 
-### `--worker`
+### `--choreographer`
 
 Adds a worker node for this run, written `name` or `name=endpoint`, beside the ones
-[`execution.workers`](../configuration/execution.md#links-named-on-the-command-line) lists, which is how a pipeline
+[`execution.choreographers`](../configuration/execution.md#links-named-on-the-command-line) lists, which is how a pipeline
 names a machine it created a minute before the release. A name alone reaches the repository being released, and an
 endpoint names another mailbox. You can repeat it. The link is held to every rule a configured one is, the file has
 to name `execution.secretEnv`; a process running under a task's authority refuses the flag with `E226`.
@@ -111,10 +111,11 @@ See [Distributed execution](../distributed-execution.md).
 
 ### `--distribution-mode`
 
-Selects `compilation` (default) or `interpretation`. In compilation the first node compiles task descriptors;
+Selects `compilation` (default), `interpretation` or `hybrid`. In compilation the first node compiles task descriptors;
 in interpretation each admitted node independently derives and verifies the pinned plan and graph before it
 proposes locally ready work. The first node validates exact claims and alone advances canonical task, ledger and
-release refs. `hybrid` and unknown values are refused before task effects.
+release refs. Hybrid compiles nonpush commands and evaluates first-only effect policy after its exact
+prerequisites settle. Unknown modes are refused before task effects.
 
 ### `--return-endpoint`, `--return-listen`
 

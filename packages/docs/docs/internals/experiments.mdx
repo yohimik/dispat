@@ -1,5 +1,6 @@
 import {
   ExperimentsPlanTable,
+  ExperimentsLLVMTable,
   ExperimentsSummary,
   ExperimentsTable,
   ExperimentsTasksTable,
@@ -107,8 +108,8 @@ hand. changesets runs `changeset publish` again, and the operator pushes what it
 
 Five more scenarios reach the same catch-up through other ways a consumer comes to be owed its provider, and every
 tool runs each of them. Under dispat, `build-distributed` repeats the `build` fault with every build on a worker node,
-which the release reaches through the repository being released: each command names it with `--worker build-a` and no
-endpoint. Its record matches the local cell's, and its log names the worker that ran `cli`'s build. In `deselected` the
+which the release reaches through the repository being released: `execution.choreographers` names `build-a` and
+the command advertises its authenticated return endpoint. Its record matches the local cell's, and its log names the worker that ran `cli`'s build. In `deselected` the
 first run is `dispat release --package core,ui,api`, so `cli` sits the provider's release out. In `held`, `cli` is held
 by a `Release-As: none` commit while `core` ships, and the operator resumes it with `Release-As: auto` before the
 catch-up. In each, the next full run has to find what `cli` is owed from the provider's release alone.
@@ -231,18 +232,19 @@ not a lower bound of its own release, and the report refuses a row with no edge 
 its bound by more than the clocks' slack.
 
 A ratio of 1 is a release that took no longer than its own tasks allowed at the concurrency it used. Clause 2 of the
-theorem bounds an execution that never leaves a usable slot idle while a task is ready: it finishes within
-`(2 - 1/s)` times the bound. Read with the observed s, a ratio above that is time spent outside the tasks, or tasks
-left waiting while fewer than s ran, and the Idle column is how much of the makespan had no task running at all. The bound is each tool's own: a tool whose relation
+theorem gives the `(2 - 1/s)` bound for identical usable slots, a work-conserving schedule that never leaves a slot
+idle while a task is ready, and no additional resource restriction. Observed peak concurrency alone does not
+establish those premises, so exceeding that ratio is not by itself a theorem violation or proof of scheduler idle
+time. The Idle column measures how much of the makespan had no task running at all. The bound is each tool's own: a tool whose relation
 makes a consumer build wait for more has a longer Lk to be measured against, so read the ratio beside the makespan.
 The ratio is also relative to the concurrency each release used, so a release that ran its tasks one at a time has
 the whole work as its bound and can read close to 1 while taking longest.
 
 Every timing cell is one container on a shared host, run after every other cell of the campaign and one at a time, so
 no other cell runs beside it. Tasks that run at once still share the container's processors, so a release that runs
-many tasks at once also stretches each of them; the Tasks table shows each kind's median and longest. The ratio and the
-planning times relative to one another are the figures to read; the absolute seconds belong to the machine the table
-names.
+many tasks at once also stretches each of them; the Tasks table shows each kind's median and longest. Report elapsed
+time for this recorded workload and host alongside each tool's ratio. Ratios use different graphs, measured durations
+and observed concurrency, so they do not rank cross-tool speed. Absolute seconds describe the machine the table names.
 
 <ExperimentsPlanTable />
 
@@ -305,3 +307,40 @@ that moved during the run.
 
 Running other tools through the same fixture helps distinguish tool behavior from fixture behavior. The results
 describe these versions, configurations, and fault scenarios; they are not a general ranking of release tools.
+
+## LLVM distributed build
+
+<ExperimentsLLVMTable />
+
+The LLVM campaign compares Dispat's `compilation`, `interpretation`, and `hybrid` modes with Nx and Lerna's
+Nx Cloud distribution. Changesets has no distributed build executor, so its entry is `unsupported`.
+Nx and Lerna entries are `blocked` when a connected Nx Cloud workspace and credentials are unavailable; they
+do not run locally or receive a duration in that case. These entries are availability results, not speed results.
+See the [Nx Cloud commands](https://nx.dev/docs/reference/nx-cloud-cli),
+[Lerna distribution documentation](https://lerna.js.org/docs/features/distribute-tasks), and
+[Changesets CLI reference](https://changesets.dev/guide/cli).
+
+The default `full` profile builds LLVM core's default libraries and tools twice, with X86 and AArch64 backends
+in separate clean CMake/Ninja build directories. Both configurations use
+[LLVM 20.1.8's pinned source](https://github.com/llvm/llvm-project/commit/87f0227cb60147a26a1eeb4fb06e3b505e9c7261).
+This is two complete backend configurations, not a single LLVM build split at individual compiler invocations.
+Clang, other LLVM subprojects, runtimes, tests, benchmarks, examples, and documentation are excluded identically.
+The optional `smoke` profile builds only `llvm-cxxfilt` and `llvm-size`; its records explicitly identify that subset.
+
+Each cell has two executor processes with separate task checkouts on one host, one active build per executor,
+and the same Ninja job limit. These results measure distribution across processes, including coordination and
+artifact transfer; they do not model a network between physical hosts. Source acquisition and toolchain installation
+finish before timing, including Nx Cloud client acquisition in the coordinator and both agents. The harness
+requires identical client versions and SHA-256 fingerprints and records them in the result. The clock starts
+before executor startup and coordination, and stops after the coordinator
+verifies returned executable digests, LLVM versions, and a demangling result. The full profile returns five
+representative executables for these checks, while building the complete configured target. Every task contains a
+fresh committed run identity, preventing another cell's cached output from satisfying a cold-build measurement.
+
+Run `dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments` after the release experiment campaign,
+then use the ordinary `summary` script. The docs release hook runs this sequence automatically; the six LLVM
+records go into the same report. Standalone cells default to four hours; the release workflow applies the same
+45-minute cap to every cell within its six-hour job budget. The result records that cap, and an actual executor
+failure prevents publishing the report. Blocked and unsupported entries remain unmeasured. Set
+`EXPERIMENTS_LLVM_PROFILE=smoke` for harness validation. Nx Cloud cells use the existing `NX_CLOUD_ACCESS_TOKEN`
+and `EXPERIMENTS_NX_CLOUD_ID` environment variables; the harness never writes the token into its fixture or report.

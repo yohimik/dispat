@@ -148,8 +148,9 @@ tool's configuration declares, with s the concurrency the release was seen to us
 precedence and runs at most that many tasks at once with those durations finishes sooner. Every edge of the
 precedence is checked against the records, and the edges a release did not honour are listed beside its figures. Each
 tool's plan is also read as a set of packages at their next versions and set beside dispat's plan of the same
-scenario, with what each tool was told and the differences recorded as data. The tables, each task's duration, how to
-read the ratio and why the absolute seconds of one container are not the figures to compare are on
+scenario, with what each tool was told and the differences recorded as data. Report elapsed time for this recorded
+workload and host alongside each tool's ratio. Ratios use different graphs, measured durations and observed
+concurrency, so they do not rank cross-tool speed. The tables, each task's duration and the ratio's limits are on
 [release experiments](./internals/experiments.mdx#planning-and-release-time).
 
 ### Scale and recovery growth

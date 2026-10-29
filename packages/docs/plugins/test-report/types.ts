@@ -300,6 +300,37 @@ export interface ExperimentCell {
   /** Present in the timing cells alone. */
   timing?: ExperimentTiming;
   plan?: ExperimentPlan;
+  llvm?: ExperimentLLVM;
+}
+
+export interface ExperimentLLVMArtifact {
+  package: string;
+  path: string;
+  sha256: string;
+  bytes: number;
+}
+
+export interface ExperimentLLVM {
+  status: 'completed' | 'failed' | 'blocked' | 'unsupported';
+  reason?: string;
+  mode: 'compilation' | 'interpretation' | 'hybrid' | 'distributed';
+  profile: 'full' | 'smoke';
+  llvmVersion: string;
+  sourceRevision: string;
+  topology: string;
+  executorCount: number;
+  jobsPerExecutor: number;
+  timeoutSeconds?: number;
+  buildTargets: string[];
+  backends: string[];
+  cache: string;
+  seconds?: number;
+  nodes: string[];
+  artifacts: ExperimentLLVMArtifact[];
+  platform?: string;
+  toolVersions?: Record<string, string>;
+  binaryId?: string;
+  binarySha256?: string;
 }
 
 /**

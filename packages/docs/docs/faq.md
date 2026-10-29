@@ -173,7 +173,7 @@ not coordinate their dependency graphs automatically.
 
 ### Can the builds of one release run on several machines?
 
-Yes. Configure [`execution`](./configuration/execution.md) and run `dispat worker` on the worker machines. The machine
+Yes. Configure [`execution`](./configuration/execution.md) and run `dispat choreographer` on the worker machines. The machine
 that starts the release remains the orchestrator: it owns the plan, locks, authorizations, and release records.
 
 Workers execute assigned build, test and eligible custom stages. Publication stays on the orchestrator. Verified

@@ -7,6 +7,7 @@ import type {
   CoverageModule,
   CoveragePackage,
   ExperimentCell,
+  ExperimentLLVM,
   ExperimentCheck,
   ExperimentPackage,
   ExperimentPlan,
@@ -496,6 +497,10 @@ function experimentState(value: unknown, at: string): ExperimentState {
 
 function experimentCell(value: unknown, at: string): ExperimentCell {
   const o = object(value, at);
+  const llvm = o.llvm === undefined ? undefined : experimentLLVM({value: o.llvm, at: `${at}.llvm`});
+  if (llvm !== undefined && o.passed !== (llvm.status === 'completed')) {
+    throw new ReportError(`${at}.passed`, 'consistent with LLVM completion status', o.passed);
+  }
   return {
     id: string(o.id, `${at}.id`),
     experiment: string(o.experiment, `${at}.experiment`),
@@ -513,7 +518,84 @@ function experimentCell(value: unknown, at: string): ExperimentCell {
     // Present in the timing cells alone, so every other record validates as it did.
     ...(o.timing === undefined ? {} : {timing: experimentTiming({value: o.timing, at: `${at}.timing`})}),
     ...(o.plan === undefined ? {} : {plan: experimentPlan({value: o.plan, at: `${at}.plan`})}),
+    ...(llvm === undefined ? {} : {llvm}),
   };
+}
+
+function experimentLLVM(options: ExperimentFieldOptions): ExperimentLLVM {
+  const {value, at} = options;
+  const o = object(value, at);
+  const status = string(o.status, `${at}.status`);
+  const mode = string(o.mode, `${at}.mode`);
+  const profile = string(o.profile, `${at}.profile`);
+  if (!['completed', 'failed', 'blocked', 'unsupported'].includes(status)) {
+    throw new ReportError(`${at}.status`, 'completed, failed, blocked, or unsupported', status);
+  }
+  if (!['compilation', 'interpretation', 'hybrid', 'distributed'].includes(mode)) {
+    throw new ReportError(`${at}.mode`, 'a distribution mode', mode);
+  }
+  if (profile !== 'full' && profile !== 'smoke') {
+    throw new ReportError(`${at}.profile`, 'full or smoke', profile);
+  }
+  const stringList = (input: unknown, field: string) => array(input, `${at}.${field}`).map((item, index) =>
+    string(item, `${at}.${field}[${index}]`));
+  const result: ExperimentLLVM = {
+    status: status as ExperimentLLVM['status'], mode: mode as ExperimentLLVM['mode'], profile,
+    llvmVersion: string(o.llvmVersion, `${at}.llvmVersion`), sourceRevision: string(o.sourceRevision, `${at}.sourceRevision`),
+    topology: string(o.topology, `${at}.topology`), executorCount: number(o.executorCount, `${at}.executorCount`),
+    jobsPerExecutor: number(o.jobsPerExecutor, `${at}.jobsPerExecutor`),
+    ...(o.timeoutSeconds === undefined ? {} : {timeoutSeconds: number(o.timeoutSeconds, `${at}.timeoutSeconds`)}),
+    buildTargets: stringList(o.buildTargets, 'buildTargets'), backends: stringList(o.backends, 'backends'),
+    cache: string(o.cache, `${at}.cache`), nodes: stringList(o.nodes, 'nodes'),
+    ...(o.reason === undefined ? {} : {reason: string(o.reason, `${at}.reason`)}),
+    ...(o.seconds === undefined ? {} : {seconds: number(o.seconds, `${at}.seconds`)}),
+    ...(o.platform === undefined ? {} : {platform: string(o.platform, `${at}.platform`)}),
+    ...(o.binaryId === undefined ? {} : {binaryId: string(o.binaryId, `${at}.binaryId`)}),
+    ...(o.binarySha256 === undefined ? {} : {binarySha256: string(o.binarySha256, `${at}.binarySha256`)}),
+    ...(o.toolVersions === undefined ? {} : {toolVersions: Object.fromEntries(
+      Object.entries(object(o.toolVersions, `${at}.toolVersions`)).map(([name, version]) => [name, string(version, `${at}.toolVersions.${name}`)]),
+    )}),
+    artifacts: array(o.artifacts, `${at}.artifacts`).map((item, index) => {
+      const artifact = object(item, `${at}.artifacts[${index}]`);
+      const parsed = {
+        package: string(artifact.package, `${at}.artifacts[${index}].package`),
+        path: string(artifact.path, `${at}.artifacts[${index}].path`),
+        sha256: string(artifact.sha256, `${at}.artifacts[${index}].sha256`),
+        bytes: number(artifact.bytes, `${at}.artifacts[${index}].bytes`),
+      };
+      if (!parsed.package || !parsed.path || !/^[a-f0-9]{64}$/.test(parsed.sha256) || parsed.bytes <= 0) {
+        throw new ReportError(`${at}.artifacts[${index}]`, 'an identified executable with positive size and SHA-256', item);
+      }
+      return parsed;
+    }),
+  };
+  if (!/^[a-f0-9]{40}$/.test(result.sourceRevision) || !result.llvmVersion || !result.topology || !result.cache ||
+      result.executorCount !== 2 || !Number.isInteger(result.jobsPerExecutor) || result.jobsPerExecutor < 1 ||
+      result.buildTargets.length === 0 || result.backends.length !== 2) {
+    throw new ReportError(at, 'a pinned LLVM workload with two executors and positive Ninja parallelism', value);
+  }
+  if (result.binarySha256 !== undefined && !/^[a-f0-9]{64}$/.test(result.binarySha256)) {
+    throw new ReportError(`${at}.binarySha256`, 'a Dispat binary SHA-256 digest', result.binarySha256);
+  }
+  if (result.timeoutSeconds !== undefined && result.timeoutSeconds <= 0) {
+    throw new ReportError(`${at}.timeoutSeconds`, 'a positive timeout in seconds', result.timeoutSeconds);
+  }
+  if (status === 'completed') {
+    const expectedTools = profile === 'full' ? ['llvm-cxxfilt', 'llvm-size', 'llc', 'opt', 'llvm-config'] : ['llvm-cxxfilt', 'llvm-size'];
+    const packages = [...new Set(result.artifacts.map((artifact) => artifact.package))];
+    if (result.seconds === undefined || result.seconds <= 0 || result.nodes.length !== 2 ||
+        result.nodes.some((node) => !node) || new Set(result.nodes).size !== 2 || result.artifacts.length !== expectedTools.length * 2 ||
+        packages.length !== 2 || packages.some((name) => expectedTools.some((tool) =>
+          result.artifacts.filter((artifact) => artifact.package === name && artifact.path === tool).length !== 1))) {
+      throw new ReportError(at, 'a positive duration, two distinct executors, and verified LLVM artifacts', value);
+    }
+  } else if (!result.reason || result.seconds !== undefined) {
+    throw new ReportError(at, 'an unmeasured status with a reason and no duration', value);
+  }
+  if (profile === 'full' && (result.buildTargets.length !== 1 || result.buildTargets[0] !== 'all')) {
+    throw new ReportError(`${at}.buildTargets`, 'all for the full LLVM profile', result.buildTargets);
+  }
+  return result;
 }
 
 function experiments(value: unknown, at: string): Experiments {
