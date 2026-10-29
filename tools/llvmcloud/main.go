@@ -398,5 +398,10 @@ func (d *driver) run(ctx context.Context) (result error) {
 }
 
 func (d *driver) formatCoordinatorRunArgs() []string {
-	return []string{"run", workloadFlagArgument, d.settings.Workload, "--tool", d.settings.Tool, "--mode", d.settings.Mode, "--profile", d.settings.Profile, "--trial-id", d.settings.ID, "--repetition", "1", "--timeout", "4h", "--jobs", "2", "--results", "/cloud/results", "--work", "/cloud/work", "--remote-plan", "/cloud/plan.json"}
+	args := []string{"run", "--tool", d.settings.Tool, "--mode", d.settings.Mode, "--profile", d.settings.Profile, "--trial-id", d.settings.ID, "--repetition", "1", "--timeout", "4h", "--jobs", "2", "--results", "/cloud/results", "--work", "/cloud/work", "--remote-plan", "/cloud/plan.json"}
+	// Existing prepared LLVM images predate the workload selector.
+	if d.settings.Workload == kernelWorkloadName {
+		args = append(args, workloadFlagArgument, d.settings.Workload)
+	}
+	return args
 }

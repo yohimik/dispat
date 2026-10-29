@@ -28,8 +28,11 @@ func TestCloudWorkloadReachesCoordinatorAndRetainedOptions(t *testing.T) {
 				}
 				d := &driver{settings: settings}
 				args := d.formatCoordinatorRunArgs()
-				if !slices.Equal(args[:3], []string{"run", "--workload", workload}) || flagValue(args, "--tool") != executor.tool || flagValue(args, "--mode") != executor.mode || flagValue(args, "--jobs") != "2" || flagValue(args, "--timeout") != "4h" || flagValue(args, "--trial-id") != settings.ID {
+				if args[0] != "run" || flagValue(args, "--tool") != executor.tool || flagValue(args, "--mode") != executor.mode || flagValue(args, "--jobs") != "2" || flagValue(args, "--timeout") != "4h" || flagValue(args, "--trial-id") != settings.ID {
 					t.Fatalf("coordinator changed workload, identity, mode or resource budget: %v", args)
+				}
+				if workload == "llvm" && slices.Contains(args, "--workload") || workload == "linux-kernel" && flagValue(args, "--workload") != workload {
+					t.Fatalf("coordinator lost legacy LLVM entry-point compatibility or explicit kernel selection: %v", args)
 				}
 				encoded, err := json.Marshal(journal{Options: settings})
 				if err != nil {
