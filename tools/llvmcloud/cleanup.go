@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,13 +14,54 @@ import (
 	"strings"
 )
 
-const coordinatorNamePrefix = "llvm-coordinator-"
+const (
+	coordinatorNamePrefix               = "llvm-coordinator-"
+	cleanupJournalNotRegularErrorFormat = "cleanup absence journal %s is not a regular file"
+)
 
 type cleanupRecord struct {
-	Complete          bool   `json:"complete"`
-	ResourcesReleased bool   `json:"resourcesReleased"`
-	Error             string `json:"error,omitempty"`
-	CollectionError   string `json:"collectionError,omitempty"`
+	Complete              bool              `json:"complete"`
+	ResourcesReleased     bool              `json:"resourcesReleased"`
+	Error                 string            `json:"error,omitempty"`
+	CollectionError       string            `json:"collectionError,omitempty"`
+	AbsenceEvidenceSHA256 map[string]string `json:"absenceEvidenceSha256"`
+}
+
+func (d *driver) cleanupAbsenceDigests() (map[string]string, error) {
+	digests := make(map[string]string)
+	var failures []error
+	for _, expected := range d.state.Instances {
+		path, err := d.cleanupAbsencePath(expected.Name)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		info, err := os.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			failures = append(failures, fmt.Errorf(cleanupJournalNotRegularErrorFormat, filepath.Base(path)))
+			continue
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		digest := sha256.New()
+		_, readError := io.Copy(digest, file)
+		if err := errors.Join(readError, file.Close()); err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		digests[filepath.Base(path)] = hex.EncodeToString(digest.Sum(nil))
+	}
+	return digests, errors.Join(failures...)
 }
 
 type coordinatorContainer struct {

@@ -40,8 +40,13 @@ const (
 )
 
 const (
-	cleanupNullLookupErrorFormat = "cleanup absence lookup returned null for instance %s"
-	cleanupAbsenceFileSuffix     = "-cleanup-absence.json"
+	cleanupNullLookupErrorFormat           = "cleanup absence lookup returned null for instance %s"
+	cleanupAbsenceFileSuffix               = "-cleanup-absence.jsonl"
+	maximumCleanupObservationBytes         = 64 << 10
+	cleanupObservationNewlineByte     byte = '\n'
+	cleanupObservationSizeErrorFormat      = "cleanup absence evidence for instance %s exceeds %d bytes"
+	cleanupEvidenceDirectoryPath           = "results/cloud"
+	cleanupInstanceNameErrorFormat         = "cleanup evidence instance name %q is not a local basename"
 )
 
 type cleanupAbsenceEvidence struct {
@@ -467,10 +472,12 @@ func (d *driver) cleanup(ctx context.Context) error {
 	masterCtx, cancelMasters := context.WithTimeout(context.Background(), 30*time.Second)
 	failures = append(failures, d.closeSSHMasters(masterCtx))
 	cancelMasters()
+	absenceDigests, digestError := d.cleanupAbsenceDigests()
+	failures = append(failures, digestError)
 	resourceError := errors.Join(failures...)
 	collectionError := errors.Join(collectionFailures...)
 	err := errors.Join(resourceError, collectionError)
-	record := cleanupRecord{Complete: err == nil, ResourcesReleased: resourceError == nil}
+	record := cleanupRecord{Complete: err == nil, ResourcesReleased: resourceError == nil, AbsenceEvidenceSHA256: absenceDigests}
 	if err != nil {
 		record.Error = err.Error()
 	}
@@ -484,5 +491,32 @@ func (d *driver) recordCleanupAbsence(evidence cleanupAbsenceEvidence, deletionE
 	if deletionError != nil {
 		evidence.DeletionError = deletionError.Error()
 	}
-	return writeJSON(filepath.Join(d.settings.Root, "results/cloud", evidence.InstanceName+cleanupAbsenceFileSuffix), evidence)
+	content, err := json.Marshal(evidence)
+	if err != nil {
+		return err
+	}
+	if len(content) >= maximumCleanupObservationBytes {
+		return fmt.Errorf(cleanupObservationSizeErrorFormat, evidence.InstanceName, maximumCleanupObservationBytes)
+	}
+	path, err := d.cleanupAbsencePath(evidence.InstanceName)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, privateFileMode)
+	if err != nil {
+		return err
+	}
+	content = append(content, cleanupObservationNewlineByte)
+	written, writeError := file.Write(content)
+	if written != len(content) && writeError == nil {
+		writeError = io.ErrShortWrite
+	}
+	return errors.Join(writeError, file.Close())
+}
+
+func (d *driver) cleanupAbsencePath(instanceName string) (string, error) {
+	if !filepath.IsLocal(instanceName) || filepath.Base(instanceName) != instanceName || instanceName == "." {
+		return "", fmt.Errorf(cleanupInstanceNameErrorFormat, instanceName)
+	}
+	return filepath.Join(d.settings.Root, cleanupEvidenceDirectoryPath, instanceName+cleanupAbsenceFileSuffix), nil
 }

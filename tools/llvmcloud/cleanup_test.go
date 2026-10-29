@@ -245,7 +245,7 @@ func TestCleanupReconcilesFailedDeletionWithFreshExactAbsence(t *testing.T) {
 				d.state.Instances[0] = worker
 			}
 			if scenario.blockEvidence {
-				if err := os.Mkdir(filepath.Join(d.settings.Root, "results/cloud/vm-cleanup-absence.json"), privateDirectoryMode); err != nil {
+				if err := os.Mkdir(filepath.Join(d.settings.Root, "results/cloud/vm-cleanup-absence.jsonl"), privateDirectoryMode); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -294,7 +294,7 @@ func TestCleanupReconcilesFailedDeletionWithFreshExactAbsence(t *testing.T) {
 				t.Fatalf("cleanup lost the unresolved deletion or lookup cause: %v", err)
 			}
 			var evidence cleanupAbsenceEvidence
-			evidenceError := readJSON(filepath.Join(d.settings.Root, "results/cloud/vm-cleanup-absence.json"), &evidence)
+			evidenceError := readJSON(filepath.Join(d.settings.Root, "results/cloud/vm-cleanup-absence.jsonl"), &evidence)
 			if scenario.blockEvidence {
 				if evidenceError == nil {
 					t.Fatalf("failed evidence write was accepted: %+v", evidence)
@@ -327,7 +327,7 @@ func TestCleanupRequiresExplicitInitialAbsenceAndRetainsIt(t *testing.T) {
 			}
 			err := d.cleanup(t.Context())
 			var evidence cleanupAbsenceEvidence
-			evidenceError := readJSON(filepath.Join(d.settings.Root, "results/cloud/vm-cleanup-absence.json"), &evidence)
+			evidenceError := readJSON(filepath.Join(d.settings.Root, "results/cloud/vm-cleanup-absence.jsonl"), &evidence)
 			if response == "null" {
 				if err == nil || !errors.Is(evidenceError, os.ErrNotExist) {
 					t.Fatalf("null lookup treated as absence: %v, %+v, %v", err, evidence, evidenceError)
