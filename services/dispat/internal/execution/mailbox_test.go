@@ -64,7 +64,7 @@ func newMailboxFixture(t testing.TB) *mailboxFixture {
 
 // second opens a second party on the same endpoint, with an object store of
 // its own: the orchestrator and the worker never share a checkout.
-func (f *mailboxFixture) second(t *testing.T) *mailboxFixture {
+func (f *mailboxFixture) second(t testing.TB) *mailboxFixture {
 	t.Helper()
 	store := filepath.Join(t.TempDir(), "other.git")
 	out, err := exec.Command("git", "init", "-q", "--bare", store).CombinedOutput()

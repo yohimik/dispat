@@ -117,13 +117,13 @@ func TestChoreographyNoncausalLocalFailureRequiresPriorSignedPackageFailure(t *t
 	require.Equal(t, "failed", restarted.packageState[causal.Package])
 }
 
-func newChoreographyLedgerFixture(t *testing.T, requested ...ChoreographyTaskSpec) (*mailboxFixture, *GitChoreographyPersist,
+func newChoreographyLedgerFixture(t testing.TB, requested ...ChoreographyTaskSpec) (*mailboxFixture, *GitChoreographyPersist,
 	ChoreographyRunBinding, ChoreographyTaskSpec) {
 	return newChoreographyLedgerFixtureWithAuthority(t,
 		"0123456789abcdef0123456789abcdef", requested...)
 }
 
-func newChoreographyLedgerFixtureWithAuthority(t *testing.T, authorityID string,
+func newChoreographyLedgerFixtureWithAuthority(t testing.TB, authorityID string,
 	requested ...ChoreographyTaskSpec) (*mailboxFixture, *GitChoreographyPersist,
 	ChoreographyRunBinding, ChoreographyTaskSpec) {
 	return newChoreographyLedgerFixtureWithSettings(t, choreographyLedgerFixtureSettings{
@@ -131,19 +131,26 @@ func newChoreographyLedgerFixtureWithAuthority(t *testing.T, authorityID string,
 		Tasks: requested})
 }
 
+const choreographyFixtureDefaultPackBytes int64 = 1 << 20
+const choreographyFixtureUnsetPackBytes int64 = 0
+const choreographyFixtureDefaultPlatform = "linux/amd64"
+const choreographyFixtureUnsetPlatform = ""
+
 type choreographyLedgerFixtureSettings struct {
 	AuthorityID                string
+	Platform                   string
 	AdmissionSeconds           int
 	RetryAfterUncertainAttempt bool
 	Mode                       string
 	MaxAttempts                int
 	Tasks                      []ChoreographyTaskSpec
 	OutputRoots                []string
+	Limits                     TransferLimits
 	DeadlineSeconds            int
 	Capacity                   int
 }
 
-func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreographyLedgerFixtureSettings) (*mailboxFixture, *GitChoreographyPersist,
+func newChoreographyLedgerFixtureWithSettings(t testing.TB, settings choreographyLedgerFixtureSettings) (*mailboxFixture, *GitChoreographyPersist,
 	ChoreographyRunBinding, ChoreographyTaskSpec) {
 	t.Helper()
 	fixture := newMailboxFixture(t)
@@ -186,7 +193,7 @@ func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreograph
 		spec.Branch = FormatChoreographyTaskBranch(binding.Run, spec.Task)
 		template := ChoreographyCompiledTemplate{Task: spec.Task, Kind: spec.Kind,
 			Stage: spec.Stage, Weight: spec.Weight, Outputs: settings.OutputRoots,
-			DeadlineSeconds: settings.DeadlineSeconds}
+			DeadlineSeconds: settings.DeadlineSeconds, Limits: settings.Limits}
 		var err error
 		spec.TemplateDigest, err = DigestChoreographyCompiledTemplate(template)
 		require.NoError(t, err)
@@ -224,10 +231,14 @@ func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreograph
 	if capacity == 0 {
 		capacity = 1
 	}
+	platform := settings.Platform
+	if platform == choreographyFixtureUnsetPlatform {
+		platform = choreographyFixtureDefaultPlatform
+	}
 	root, err := PrepareChoreographyLedgerRoot(t.Context(), ChoreographyLedgerRootOptions{
 		Mailbox: fixture.mailbox, Binding: binding, BootstrapOID: bootstrapOID,
 		Roster: ChoreographyRuntimeRoster{
-			Nodes:   []ChoreographyRuntimeNode{{Name: "node-a", Platform: "linux/amd64", Capacity: capacity, First: true, AuthorityID: settings.AuthorityID}},
+			Nodes:   []ChoreographyRuntimeNode{{Name: "node-a", Platform: platform, Capacity: capacity, First: true, AuthorityID: settings.AuthorityID}},
 			Budgets: []ChoreographyRuntimeBudget{{Name: "build", Capacity: capacity}},
 		}})
 	require.NoError(t, err)
@@ -269,10 +280,14 @@ func newChoreographyLedgerFixtureWithSettings(t *testing.T, settings choreograph
 	require.NoError(t, err)
 	require.NoError(t, fixture.git.PushAtomicAdvances(t.Context(), fixture.endpoint,
 		[]gitx.BranchAdvance{{Branch: root.Branch, ExpectedOld: root.OID, OID: initOID}}))
+	maxPackBytes := settings.Limits.MaxPackBytes
+	if maxPackBytes == choreographyFixtureUnsetPackBytes {
+		maxPackBytes = choreographyFixtureDefaultPackBytes
+	}
 	persist, err := NewGitChoreographyPersist(GitChoreographyOptions{Binding: binding,
 		Mailbox: fixture.mailbox, VerifyFirst: func(context.Context) error { return nil },
 		VerifyResult: func(context.Context, ChoreographyResultProposal, Result, *gitx.LocalGitx) error { return nil },
-		MaxPackBytes: 1 << 20, Ledger: root, BootstrapOID: bootstrapOID,
+		MaxPackBytes: maxPackBytes, Ledger: root, BootstrapOID: bootstrapOID,
 		GraphRootOID: graphRootOID, InitializationCompleteOID: initOID,
 		JoinPolicy: policy, AlgorithmVersion: ChoreographyGraphAlgorithmVersion,
 		Tasks: specs, Templates: templates})
@@ -292,7 +307,7 @@ func choreographyFixtureStartCursor(t *testing.T, persist *GitChoreographyPersis
 	return page.Cursor
 }
 
-func completeChoreographyFixtureClaim(t *testing.T, persist *GitChoreographyPersist,
+func completeChoreographyFixtureClaim(t testing.TB, persist *GitChoreographyPersist,
 	proposal *ChoreographyClaimProposal) {
 	t.Helper()
 	head, err := persist.LedgerHead(t.Context())

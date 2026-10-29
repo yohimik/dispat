@@ -541,6 +541,12 @@ func (w *Worker) returnTaskResult(ctx context.Context, task *claimedTask, report
 	if err != nil {
 		return workerReturnNoIdentity, err
 	}
+	if err := w.publishPreparedResult(ctx, workerResultPack{
+		Result: report, OID: resultOID, Payload: payload, MaxBytes: maxPack,
+		ExportedBytes: maxPack - writer.remaining,
+	}); err != nil {
+		return workerReturnNoIdentity, err
+	}
 	inputsDigest := task.assignment.InputsDigest
 	if inputsDigest == workerReturnNoIdentity {
 		inputsDigest = CompiledClaimInputDigest(task.tip.OID)
@@ -605,7 +611,7 @@ func (w *Worker) returnTaskResult(ctx context.Context, task *claimedTask, report
 func (w *Worker) prepareTaskResultCommit(ctx context.Context,
 	request pickupOutcomeRequest) (Result, string, error) {
 	if request.Task.assignment.GraphRootOID != workerReturnNoIdentity {
-		return w.publishPickupOutcome(ctx, request)
+		return w.preparePickupOutcome(ctx, request)
 	}
 	document, err := json.Marshal(request.Report)
 	if err != nil {

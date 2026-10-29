@@ -276,6 +276,18 @@ func (w *Worker) ensurePickupPending(ctx context.Context, task *claimedTask) (wo
 
 func (w *Worker) publishPickupOutcome(ctx context.Context,
 	request pickupOutcomeRequest) (Result, string, error) {
+	result, oid, err := w.preparePickupOutcome(ctx, request)
+	if err != nil {
+		return Result{}, workerPickupNoIdentity, err
+	}
+	if err := w.pushPickupRef(ctx, workerPickupRef{Branch: result.OutcomeBranch, OID: oid}); err != nil {
+		return Result{}, workerPickupNoIdentity, err
+	}
+	return result, oid, nil
+}
+
+func (w *Worker) preparePickupOutcome(ctx context.Context,
+	request pickupOutcomeRequest) (Result, string, error) {
 	task := request.Task
 	if task == nil || task.slotLease.ID == workerPickupNoIdentity {
 		return Result{}, workerPickupNoIdentity, fmt.Errorf(workerPickupStateError)
@@ -339,10 +351,6 @@ func (w *Worker) publishPickupOutcome(ctx context.Context,
 		if err := w.writePickupState(state); err != nil {
 			return Result{}, workerPickupNoIdentity, err
 		}
-	}
-	if err := w.pushPickupRef(ctx, workerPickupRef{Branch: state.OutcomeBranch,
-		OID: state.ResultOID}); err != nil {
-		return Result{}, workerPickupNoIdentity, err
 	}
 	return result, state.ResultOID, nil
 }
