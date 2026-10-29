@@ -257,7 +257,11 @@ func TestAuthenticatedMailboxRoutesGitWritesThroughRoleHook(t *testing.T) {
 		t.Fatal(err)
 	}
 	execPath := strings.TrimSpace(string(git("--exec-path")))
-	server := httptest.NewTLSServer(mailboxHandler{root: root, backend: filepath.Join(execPath, "git-http-backend"), credentials: map[string]string{"coordinator": "test-password", "llvm-node-1": "worker-password"}})
+	handler, err := newMailboxHandler(root, filepath.Join(execPath, "git-http-backend"), map[string]string{"coordinator": "test-password", "llvm-node-1": "worker-password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(handler)
 	defer server.Close()
 	certificate, err := x509.ParseCertificate(server.TLS.Certificates[0].Certificate[0])
 	if err != nil {

@@ -79,6 +79,17 @@ uses TLS and separate per-role credentials; worker pushes are restricted to
 their own pending/outcome refs. Production repository credentials and cloud
 credentials never enter either worker or the coordinator container.
 
+Authenticated Git request bodies are spooled to private temporary files before
+the CGI backend receives their exact byte length. This supports Git's chunked
+artifact pushes without changing `http.postBuffer`. Each request is limited to
+2 GiB, with at most two files retained through backend consumption. Requests
+that fail body validation are rejected before Git starts. Cancellation
+unblocks the upload read and removes the temporary pathname. If the CGI child
+already started, its existing lifecycle is unchanged and the quota remains held
+until it returns; cancellation is not evidence that a Git write stopped. Files
+are also removed after completed requests. Ref authorization and the exact
+artifact/result admission checks remain unchanged.
+
 Only `/cloud/results` is uploaded. `/cloud/private`, the control socket, Git
 credentials, signing secrets and state workspaces are excluded. Physical node
 IDs from `gcloud describe` are checked independently against each VM's metadata

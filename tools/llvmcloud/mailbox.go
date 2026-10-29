@@ -16,14 +16,35 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
 	"net/http/cgi"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+)
+
+const (
+	maximumMailboxBodyBytes        int64 = 2 << 30
+	maximumMailboxBodyCount              = 2
+	mailboxNoBodyBytes             int64 = 0
+	mailboxBodyStartOffsetBytes    int64 = 0
+	mailboxNoTransferEncodingCount       = 0
+	mailboxBodyLengthRadix               = 10
+	mailboxContentLengthHeader           = "Content-Length"
+	mailboxTransferEncodingHeader        = "Transfer-Encoding"
+	mailboxBodyDirectoryName             = ".http-requests"
+	mailboxBodyFilePattern               = "request-*"
+	mailboxBodyTooLargeError             = "Git mailbox request exceeds its body limit"
+	mailboxBodyInvalidError              = "Git mailbox request body is incomplete or invalid"
+	mailboxBodyCancelledError            = "Git mailbox request was cancelled"
+	mailboxBodyStorageError              = "Git mailbox request body could not be retained"
+	mailboxBodyCleanupErrorFormat        = "Git mailbox request temporary file cleanup failed: %v"
 )
 
 func (d *driver) startServers() (func(), error) {
@@ -65,7 +86,10 @@ func (d *driver) startServers() (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	gitHandler := mailboxHandler{root: filepath.Join(d.settings.Root, "mailbox"), backend: filepath.Join(strings.TrimSpace(string(execPath)), "git-http-backend"), credentials: credentials}
+	gitHandler, err := newMailboxHandler(filepath.Join(d.settings.Root, "mailbox"), filepath.Join(strings.TrimSpace(string(execPath)), "git-http-backend"), credentials)
+	if err != nil {
+		return nil, err
+	}
 	mailbox := &http.Server{Handler: gitHandler, ReadHeaderTimeout: 15 * time.Second, MaxHeaderBytes: 16384}
 	listener, err := tls.Listen("tcp", "127.0.0.1:"+mailboxPort, &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12})
 	if err != nil {
@@ -93,6 +117,19 @@ func (d *driver) startServers() (func(), error) {
 type mailboxHandler struct {
 	root, backend string
 	credentials   map[string]string
+	bodyDirectory string
+	bodyLimit     int64
+	bodySlots     chan struct{}
+}
+
+func newMailboxHandler(root, backend string, credentials map[string]string) (mailboxHandler, error) {
+	handler := mailboxHandler{root: root, backend: backend, credentials: credentials,
+		bodyDirectory: filepath.Join(root, mailboxBodyDirectoryName), bodyLimit: maximumMailboxBodyBytes,
+		bodySlots: make(chan struct{}, maximumMailboxBodyCount)}
+	if err := os.MkdirAll(handler.bodyDirectory, privateDirectoryMode); err != nil {
+		return mailboxHandler{}, err
+	}
+	return handler, nil
 }
 
 func (handler mailboxHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
@@ -108,7 +145,77 @@ func (handler mailboxHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 		return
 	}
 	backend := cgi.Handler{Path: handler.backend, Root: "/", Env: []string{"GIT_PROJECT_ROOT=" + handler.root, "GIT_HTTP_EXPORT_ALL=1", "REMOTE_USER=" + username, "AUTH_TYPE=Basic"}}
-	backend.ServeHTTP(writer, request)
+	if request.ContentLength == mailboxNoBodyBytes && len(request.TransferEncoding) == mailboxNoTransferEncodingCount {
+		backend.ServeHTTP(writer, request)
+		return
+	}
+	handler.serveBody(writer, request, &backend)
+}
+
+// CGI requires a known CONTENT_LENGTH. Keep the quota until Git has consumed
+// the file so concurrent completed uploads cannot escape the disk bound.
+func (handler mailboxHandler) serveBody(writer http.ResponseWriter, request *http.Request, backend http.Handler) {
+	if request.ContentLength > handler.bodyLimit {
+		http.Error(writer, mailboxBodyTooLargeError, http.StatusRequestEntityTooLarge)
+		return
+	}
+	select {
+	case handler.bodySlots <- struct{}{}:
+		defer func() { <-handler.bodySlots }()
+	case <-request.Context().Done():
+		http.Error(writer, mailboxBodyCancelledError, http.StatusRequestTimeout)
+		return
+	}
+	file, err := os.CreateTemp(handler.bodyDirectory, mailboxBodyFilePattern)
+	if err != nil {
+		http.Error(writer, mailboxBodyStorageError, http.StatusInternalServerError)
+		return
+	}
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			if err := errors.Join(file.Close(), os.Remove(file.Name())); err != nil {
+				log.Printf(mailboxBodyCleanupErrorFormat, err)
+			}
+		})
+	}
+	defer cleanup()
+	stopCleanup := context.AfterFunc(request.Context(), func() {
+		request.Body.Close()
+		cleanup()
+	})
+	defer stopCleanup()
+	length, err := io.Copy(file, http.MaxBytesReader(writer, request.Body, handler.bodyLimit))
+	if request.Context().Err() != nil {
+		http.Error(writer, mailboxBodyCancelledError, http.StatusRequestTimeout)
+		return
+	}
+	if err != nil {
+		var limit *http.MaxBytesError
+		var storage *os.PathError
+		switch {
+		case errors.As(err, &limit):
+			http.Error(writer, mailboxBodyTooLargeError, http.StatusRequestEntityTooLarge)
+		case errors.As(err, &storage):
+			http.Error(writer, mailboxBodyStorageError, http.StatusInternalServerError)
+		default:
+			http.Error(writer, mailboxBodyInvalidError, http.StatusBadRequest)
+		}
+		return
+	}
+	if request.ContentLength >= mailboxNoBodyBytes && length != request.ContentLength {
+		http.Error(writer, mailboxBodyInvalidError, http.StatusBadRequest)
+		return
+	}
+	if _, err := file.Seek(mailboxBodyStartOffsetBytes, io.SeekStart); err != nil {
+		http.Error(writer, mailboxBodyStorageError, http.StatusInternalServerError)
+		return
+	}
+	forward := request.Clone(request.Context())
+	forward.Body, forward.ContentLength, forward.TransferEncoding = file, length, nil
+	forward.Header.Del(mailboxTransferEncodingHeader)
+	forward.Header.Set(mailboxContentLengthHeader, strconv.FormatInt(length, mailboxBodyLengthRadix))
+	backend.ServeHTTP(writer, forward)
 }
 
 func (d *driver) makeCertificate() (tls.Certificate, error) {
