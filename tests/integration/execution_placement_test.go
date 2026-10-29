@@ -387,13 +387,14 @@ func TestExecutionRunOnlyRefusals(t *testing.T) {
 		stated any
 		want   string
 	}{
-		"a misspelled value":           {stated: "orchestartor", want: "is not a placement"},
-		"a value of another key":       {stated: "any", want: "is not a placement"},
-		"a list of one":                {stated: []any{"worker"}, want: "states both stages"},
-		"a list of three":              {stated: []any{"worker", "worker", "worker"}, want: "states both stages"},
-		"a misspelled stage value":     {stated: []any{"worker", "nowhere"}, want: "is not a placement"},
-		"a scalar worker placement":    {stated: "worker", want: "[choreographer, orchestrator]"},
-		"worker publication in a pair": {stated: []any{"both", "worker"}, want: "[choreographer, orchestrator]"},
+		"a misspelled value":                  {stated: "orchestartor", want: "is not a placement"},
+		"a value of another key":              {stated: "any", want: "is not a placement"},
+		"a list of one":                       {stated: []any{"choreographer"}, want: "states both stages"},
+		"a list of three":                     {stated: []any{"choreographer", "choreographer", "choreographer"}, want: "states both stages"},
+		"a misspelled stage value":            {stated: []any{"choreographer", "nowhere"}, want: "is not a placement"},
+		"a scalar choreographer placement":    {stated: "choreographer", want: "[choreographer, orchestrator]"},
+		"choreographer publication in a pair": {stated: []any{"both", "choreographer"}, want: "[choreographer, orchestrator]"},
+		"removed worker placement":            {stated: []any{"worker", "orchestrator"}, want: "placement worker was removed"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := harness.New(t)

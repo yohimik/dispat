@@ -83,9 +83,7 @@ func testExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t *testing.T, i
 		},
 		func(cfg *models.File) {
 			cfg.Execution.RetryAfterUncertainAttempt = true
-			if interpreted {
-				cfg.Execution.MaxAttempts = models.Int(interpretationSecondAttemptLimit)
-			}
+			cfg.Execution.MaxAttempts = models.Int(interpretationSecondAttemptLimit)
 			cfg.Concurrency = []int{pickupFailoverRunBudget, pickupFailoverWorkerCapacity}
 			cfg.Execution.Concurrency = models.Int(pickupFailoverRunBudget)
 			cfg.Execution.Timeouts.Admission = pickupFailoverAdmissionSeconds
