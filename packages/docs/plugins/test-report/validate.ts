@@ -8,7 +8,9 @@ import type {
   CoverageModule,
   CoveragePackage,
   ExperimentCell,
+  ExperimentBuild,
   ExperimentLLVM,
+  ExperimentLinuxKernel,
   ExperimentCheck,
   ExperimentPackage,
   ExperimentPlan,
@@ -499,8 +501,16 @@ function experimentState(value: unknown, at: string): ExperimentState {
 function experimentCell(value: unknown, at: string): ExperimentCell {
   const o = object(value, at);
   const llvm = o.llvm === undefined ? undefined : experimentLLVM({value: o.llvm, at: `${at}.llvm`});
+  const linuxKernel = o.linuxKernel === undefined ? undefined : experimentLinuxKernel({value: o.linuxKernel, at: `${at}.linuxKernel`});
+  if (llvm !== undefined && linuxKernel !== undefined || linuxKernel !== undefined && o.experiment !== 'linux-kernel' ||
+      o.experiment === 'linux-kernel' && linuxKernel === undefined) {
+    throw new ReportError(at, 'one build payload matching the recorded workload', value);
+  }
   if (llvm !== undefined && o.passed !== (llvm.status === 'completed')) {
     throw new ReportError(`${at}.passed`, 'consistent with LLVM completion status', o.passed);
+  }
+  if (linuxKernel !== undefined && o.passed !== (linuxKernel.status === 'completed')) {
+    throw new ReportError(`${at}.passed`, 'consistent with Linux kernel completion status', o.passed);
   }
   return {
     id: string(o.id, `${at}.id`),
@@ -520,11 +530,12 @@ function experimentCell(value: unknown, at: string): ExperimentCell {
     ...(o.timing === undefined ? {} : {timing: experimentTiming({value: o.timing, at: `${at}.timing`})}),
     ...(o.plan === undefined ? {} : {plan: experimentPlan({value: o.plan, at: `${at}.plan`})}),
     ...(llvm === undefined ? {} : {llvm}),
+    ...(linuxKernel === undefined ? {} : {linuxKernel}),
     ...(o.executionMeasurement === undefined ? {} : {executionMeasurement: validateExecutionMeasurement({value: o.executionMeasurement, at: `${at}.executionMeasurement`})}),
   };
 }
 
-function experimentLLVM(options: ExperimentFieldOptions): ExperimentLLVM {
+function experimentBuild(options: ExperimentFieldOptions): ExperimentBuild {
   const {value, at} = options;
   const o = object(value, at);
   const status = string(o.status, `${at}.status`);
@@ -541,9 +552,9 @@ function experimentLLVM(options: ExperimentFieldOptions): ExperimentLLVM {
   }
   const stringList = (input: unknown, field: string) => array(input, `${at}.${field}`).map((item, index) =>
     string(item, `${at}.${field}[${index}]`));
-  const result: ExperimentLLVM = {
-    status: status as ExperimentLLVM['status'], mode: mode as ExperimentLLVM['mode'], profile,
-    llvmVersion: string(o.llvmVersion, `${at}.llvmVersion`), sourceRevision: string(o.sourceRevision, `${at}.sourceRevision`),
+  const result: ExperimentBuild = {
+    status: status as ExperimentBuild['status'], mode: mode as ExperimentBuild['mode'], profile,
+    sourceRevision: string(o.sourceRevision, `${at}.sourceRevision`),
     topology: string(o.topology, `${at}.topology`), executorCount: number(o.executorCount, `${at}.executorCount`),
     jobsPerExecutor: number(o.jobsPerExecutor, `${at}.jobsPerExecutor`),
     ...(o.timeoutSeconds === undefined ? {} : {timeoutSeconds: number(o.timeoutSeconds, `${at}.timeoutSeconds`)}),
@@ -566,15 +577,15 @@ function experimentLLVM(options: ExperimentFieldOptions): ExperimentLLVM {
         bytes: number(artifact.bytes, `${at}.artifacts[${index}].bytes`),
       };
       if (!parsed.package || !parsed.path || !/^[a-f0-9]{64}$/.test(parsed.sha256) || parsed.bytes <= 0) {
-        throw new ReportError(`${at}.artifacts[${index}]`, 'an identified executable with positive size and SHA-256', item);
+        throw new ReportError(`${at}.artifacts[${index}]`, 'an identified artifact with positive size and SHA-256', item);
       }
       return parsed;
     }),
   };
-  if (!/^[a-f0-9]{40}$/.test(result.sourceRevision) || !result.llvmVersion || !result.topology || !result.cache ||
+  if (!/^[a-f0-9]{40}$/.test(result.sourceRevision) || !result.topology || !result.cache ||
       result.executorCount !== 2 || !Number.isInteger(result.jobsPerExecutor) || result.jobsPerExecutor < 1 ||
       result.buildTargets.length === 0 || result.backends.length !== 2) {
-    throw new ReportError(at, 'a pinned LLVM workload with two executors and positive Ninja parallelism', value);
+    throw new ReportError(at, 'a pinned build workload with two executors and positive inner build parallelism', value);
   }
   if (result.binarySha256 !== undefined && !/^[a-f0-9]{64}$/.test(result.binarySha256)) {
     throw new ReportError(`${at}.binarySha256`, 'a Dispat binary SHA-256 digest', result.binarySha256);
@@ -582,6 +593,20 @@ function experimentLLVM(options: ExperimentFieldOptions): ExperimentLLVM {
   if (result.timeoutSeconds !== undefined && result.timeoutSeconds <= 0) {
     throw new ReportError(`${at}.timeoutSeconds`, 'a positive timeout in seconds', result.timeoutSeconds);
   }
+  if (status !== 'completed' && (!result.reason || result.seconds !== undefined)) {
+    throw new ReportError(at, 'an unmeasured status with a reason and no duration', value);
+  }
+  return result;
+}
+
+function experimentLLVM(options: ExperimentFieldOptions): ExperimentLLVM {
+  const {value, at} = options;
+  const o = object(value, at);
+  const result: ExperimentLLVM = {...experimentBuild(options), llvmVersion: string(o.llvmVersion, `${at}.llvmVersion`)};
+  if (!result.llvmVersion) {
+    throw new ReportError(`${at}.llvmVersion`, 'an identified LLVM version', result.llvmVersion);
+  }
+  const {status, profile} = result;
   if (status === 'completed') {
     const expectedTools = profile === 'full' ? ['llvm-cxxfilt', 'llvm-size', 'llc', 'opt', 'llvm-config'] : ['llvm-cxxfilt', 'llvm-size'];
     const packages = [...new Set(result.artifacts.map((artifact) => artifact.package))];
@@ -596,6 +621,78 @@ function experimentLLVM(options: ExperimentFieldOptions): ExperimentLLVM {
   }
   if (profile === 'full' && (result.buildTargets.length !== 1 || result.buildTargets[0] !== 'all')) {
     throw new ReportError(`${at}.buildTargets`, 'all for the full LLVM profile', result.buildTargets);
+  }
+  return result;
+}
+
+const KERNEL_ARCHITECTURES = ['x86_64', 'arm64'] as const;
+const KERNEL_FULL_TARGETS = ['vmlinux', 'modules', 'architecture-boot-image'];
+const KERNEL_SMOKE_TARGETS = ['vmlinux', 'architecture-boot-image'];
+const KERNEL_FULL_ARTIFACTS = ['vmlinux.stripped', 'boot-image', '.config', 'Module.symvers', 'modules.order', 'modules-manifest.json', 'sample-module.ko.stripped'];
+const KERNEL_SMOKE_ARTIFACTS = ['vmlinux.stripped', 'boot-image', '.config'];
+const KERNEL_CONFIG_ARTIFACT = '.config';
+const KERNEL_PACKAGE_PREFIX = 'kernel-';
+const KERNEL_FULL_CONFIGURATION = 'allmodconfig';
+const KERNEL_SMOKE_CONFIGURATION = 'defconfig';
+const SHA256_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
+const KERNEL_EMPTY_MODULE_COUNT = 0;
+const KERNEL_EXECUTOR_COUNT = 2;
+const KERNEL_ARTIFACT_OCCURRENCE_COUNT = 1;
+const LLVM_VERSION_FIELD = 'llvmversion';
+
+function experimentLinuxKernel(options: ExperimentFieldOptions): ExperimentLinuxKernel {
+  const {value, at} = options;
+  const o = object(value, at);
+  const configuration = string(o.configuration, `${at}.configuration`);
+  if (Object.keys(o).some((name) => name.toLowerCase() === LLVM_VERSION_FIELD)) {
+    throw new ReportError(at, 'a kernel payload without an LLVM version field', value);
+  }
+  const result: ExperimentLinuxKernel = {
+    ...experimentBuild(options),
+    kernelVersion: string(o.kernelVersion, `${at}.kernelVersion`),
+    configuration: configuration as ExperimentLinuxKernel['configuration'],
+    omissions: array(o.omissions, `${at}.omissions`).map((item, index) => string(item, `${at}.omissions[${index}]`)),
+    configDigests: Object.fromEntries(Object.entries(object(o.configDigests ?? {}, `${at}.configDigests`)).map(([architecture, digest]) => {
+      const parsed = string(digest, `${at}.configDigests.${architecture}`);
+      if (!KERNEL_ARCHITECTURES.some((name) => name === architecture) || !SHA256_DIGEST_PATTERN.test(parsed)) {
+        throw new ReportError(`${at}.configDigests.${architecture}`, 'a supported architecture and resolved configuration SHA-256', digest);
+      }
+      return [architecture, parsed];
+    })),
+    moduleCounts: Object.fromEntries(Object.entries(object(o.moduleCounts ?? {}, `${at}.moduleCounts`)).map(([architecture, count]) => {
+      const parsed = number(count, `${at}.moduleCounts.${architecture}`);
+      if (!KERNEL_ARCHITECTURES.some((name) => name === architecture) || !Number.isInteger(parsed) || parsed < KERNEL_EMPTY_MODULE_COUNT) {
+        throw new ReportError(`${at}.moduleCounts.${architecture}`, 'a supported architecture and nonnegative integral module count', count);
+      }
+      return [architecture, parsed];
+    })),
+  };
+  const expectedConfiguration = result.profile === 'full' ? KERNEL_FULL_CONFIGURATION : KERNEL_SMOKE_CONFIGURATION;
+  const expectedTargets = result.profile === 'full' ? KERNEL_FULL_TARGETS : KERNEL_SMOKE_TARGETS;
+  if (!result.kernelVersion || configuration !== expectedConfiguration || result.backends.length !== KERNEL_ARCHITECTURES.length ||
+      KERNEL_ARCHITECTURES.some((architecture, index) => result.backends[index] !== architecture) ||
+      result.omissions.some((omission) => !omission.trim()) || result.profile === 'smoke' && result.omissions.length === KERNEL_EMPTY_MODULE_COUNT ||
+      result.buildTargets.length !== expectedTargets.length || expectedTargets.some((target, index) => result.buildTargets[index] !== target)) {
+    throw new ReportError(at, 'an identified Linux kernel version with exact profile configuration, architectures and targets', value);
+  }
+  if (result.status !== 'completed') return result;
+  const expectedArtifacts = result.profile === 'full' ? KERNEL_FULL_ARTIFACTS : KERNEL_SMOKE_ARTIFACTS;
+  if (result.seconds === undefined || result.seconds <= KERNEL_EMPTY_MODULE_COUNT || result.nodes.length !== KERNEL_EXECUTOR_COUNT ||
+      result.nodes.some((node) => !node) || new Set(result.nodes).size !== KERNEL_EXECUTOR_COUNT ||
+      result.artifacts.length !== expectedArtifacts.length * KERNEL_EXECUTOR_COUNT) {
+    throw new ReportError(at, 'a positive duration, two distinct executors and the complete verified kernel artifact set', value);
+  }
+  for (const architecture of KERNEL_ARCHITECTURES) {
+    const packageName = `${KERNEL_PACKAGE_PREFIX}${architecture}`;
+    const artifacts = result.artifacts.filter((artifact) => artifact.package === packageName);
+    const configurationArtifact = artifacts.find((artifact) => artifact.path === KERNEL_CONFIG_ARTIFACT);
+    const moduleCount = result.moduleCounts[architecture];
+    if (artifacts.length !== expectedArtifacts.length || expectedArtifacts.some((name) =>
+      artifacts.filter((artifact) => artifact.path === name).length !== KERNEL_ARTIFACT_OCCURRENCE_COUNT) ||
+      configurationArtifact?.sha256 !== result.configDigests[architecture] || moduleCount === undefined ||
+      (result.profile === 'full' ? moduleCount <= KERNEL_EMPTY_MODULE_COUNT : moduleCount !== KERNEL_EMPTY_MODULE_COUNT)) {
+      throw new ReportError(`${at}.${architecture}`, 'complete artifacts bound to the resolved configuration and profile module count', value);
+    }
   }
   return result;
 }

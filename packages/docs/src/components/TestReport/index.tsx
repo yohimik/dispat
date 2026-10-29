@@ -17,8 +17,11 @@ import {resolveArchivedState, type ArchivedState} from '@site/plugins/test-repor
 import {catchUpText, isSingleCommandCatchUp} from '@site/plugins/test-report/catchup';
 import {finalStateEntries, planRows, taskLists, taskRows, timingRows} from '@site/plugins/test-report/timing';
 import {llvmStatus} from '@site/plugins/test-report/llvm';
+import {buildStatus} from '@site/plugins/test-report/build';
 export {ExperimentsLLVMTable} from './ExperimentsLLVMTable';
 export type {BaseExperimentsLLVMTableProps, ExperimentsLLVMTableProps} from './ExperimentsLLVMTable';
+export {ExperimentsKernelTable} from './ExperimentsKernelTable';
+export type {BaseExperimentsKernelTableProps, ExperimentsKernelTableProps} from './ExperimentsKernelTable';
 import Admonition from '@theme/Admonition';
 import React, {useEffect, useState} from 'react';
 
@@ -526,7 +529,7 @@ export function ExperimentsSummary(): React.ReactElement | null {
   if (cells.length === 0) {
     return null;
   }
-  const own = cells.filter((cell) => cell.tool === 'dispat' && cell.llvm === undefined);
+  const own = cells.filter((cell) => cell.tool === 'dispat' && cell.llvm === undefined && cell.linuxKernel === undefined);
   const holding = own.filter((cell) => cell.passed).length;
   const measured = own.filter((cell) => cell.recovery !== undefined);
   const single = measured.filter((cell) => isSingleCommandCatchUp(cell)).length;
@@ -575,6 +578,9 @@ function cellOutcome(cell: ExperimentCell): string {
   if (cell.llvm !== undefined) {
     return llvmStatus({result: cell.llvm});
   }
+  if (cell.linuxKernel !== undefined) {
+    return buildStatus({result: cell.linuxKernel});
+  }
   if (cell.passed) {
     return 'every expectation holds';
   }
@@ -598,7 +604,7 @@ function cellOutcome(cell: ExperimentCell): string {
  */
 export function ExperimentsTable(): React.ReactElement | null {
   const {report, evidence} = useReportState();
-  const cells = ((report?.experiments ?? evidence?.experimentResults)?.cells ?? []).filter((cell) => cell.llvm === undefined);
+  const cells = ((report?.experiments ?? evidence?.experimentResults)?.cells ?? []).filter((cell) => cell.llvm === undefined && cell.linuxKernel === undefined);
   if (cells.length === 0) {
     return null;
   }

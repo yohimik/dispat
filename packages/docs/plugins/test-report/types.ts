@@ -301,6 +301,7 @@ export interface ExperimentCell {
   timing?: ExperimentTiming;
   plan?: ExperimentPlan;
   llvm?: ExperimentLLVM;
+  linuxKernel?: ExperimentLinuxKernel;
   executionMeasurement?: import('./measurement').ExecutionMeasurement;
 }
 
@@ -311,12 +312,11 @@ export interface ExperimentLLVMArtifact {
   bytes: number;
 }
 
-export interface ExperimentLLVM {
+export interface ExperimentBuild {
   status: 'completed' | 'failed' | 'blocked' | 'unsupported';
   reason?: string;
   mode: 'compilation' | 'interpretation' | 'hybrid' | 'distributed' | 'manual-gcp-split';
   profile: 'full' | 'smoke';
-  llvmVersion: string;
   sourceRevision: string;
   topology: string;
   executorCount: number;
@@ -332,6 +332,18 @@ export interface ExperimentLLVM {
   toolVersions?: Record<string, string>;
   binaryId?: string;
   binarySha256?: string;
+}
+
+export interface ExperimentLLVM extends ExperimentBuild {
+  llvmVersion: string;
+}
+
+export interface ExperimentLinuxKernel extends ExperimentBuild {
+  kernelVersion: string;
+  configuration: 'allmodconfig' | 'defconfig';
+  omissions: string[];
+  configDigests: Partial<Record<'x86_64' | 'arm64', string>>;
+  moduleCounts: Partial<Record<'x86_64' | 'arm64', number>>;
 }
 
 /**

@@ -1,6 +1,7 @@
 import {
   ExperimentsPlanTable,
   ExperimentsLLVMTable,
+  ExperimentsKernelTable,
   ExperimentsMeasurements,
   ExperimentsSummary,
   ExperimentsTable,
@@ -339,7 +340,7 @@ This is two complete backend configurations, not a single LLVM build split at in
 Clang, other LLVM subprojects, runtimes, tests, benchmarks, examples, and documentation are excluded identically.
 The optional `smoke` profile builds only `llvm-cxxfilt` and `llvm-size`; its records explicitly identify that subset.
 
-Each cloud cell creates a fresh pair of `n2-standard-4` VMs with the same resolved boot image and CPU platform.
+Each cloud cell creates a fresh pair of `n2-standard-4` VMs with one boot image and CPU platform pinned for the whole campaign.
 Each executor has a four-CPU, 14-GiB container limit, one outer task slot and Ninja `-j2` with one concurrent
 link. VM instance IDs, observed container limits, tool versions, image and binary hashes are retained.
 Two inner jobs per task are not two extra outer task slots. Older standalone records use two executor
@@ -361,9 +362,34 @@ hook remain standalone, one-host campaigns. They do not provision GCE. Standalon
 the release hook applies a 45-minute cap, recorded separately from measured completion time. Native Nx Cloud
 cells read `NX_CLOUD_ACCESS_TOKEN` and `EXPERIMENTS_NX_CLOUD_ID`; credentials are not retained in evidence.
 
+## Linux kernel distributed build
+
+<ExperimentsKernelTable />
+
+The large kernel profile builds [Linux 6.18.59 at its pinned source commit](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=1253a6aa5d104312bf0992afacc15220ae35bdf9)
+for `x86_64` and `arm64` in separate fresh output trees. The `full` profile uses `allmodconfig` and builds
+`vmlinux`, the architecture's boot image, and all configured modules. This is a large configuration, not a claim
+that it is the largest possible kernel. The `smoke` profile uses `defconfig`, builds the kernel and boot image,
+and explicitly omits modules.
+
+Every executable competitor receives the same two-node budget as LLVM: two `n2-standard-4` VMs, four CPUs and
+14 GiB per worker container, one outer task per worker, and two inner build jobs. The kernel uses GNU Make `-j2`;
+link commands share those jobs and have no independently configured link pool. Both target architectures build
+on the same host architecture. Dispat runs in compilation, interpretation and hybrid modes; Nx and Lerna use
+the manual GCP split. Changesets remains an unsupported build executor with no completion duration.
+
+Each record retains its compiler versions, exact resolved configuration digests, declared configuration omissions,
+module counts, target list, source identity and verified artifact digests. Configurations must match per target
+architecture across competitors. Fresh output trees prevent reuse of prior build artifacts; they do not establish
+cold operating-system page caches. A failure or timeout remains a failed trial.
+
+Dispatch `purpose=kernel-gce` with `llvm-profile=full` in the `Release` workflow. The shared profile input also
+accepts `smoke` for a smaller functional check. The kernel campaign has the same execution, setup, cleanup and VM
+lifetime limits as LLVM. Its results and resource evidence are retained in a separate campaign artifact.
+
 ## Recorded execution inputs and formulas
 
-New timing and LLVM records separate captured graph/resource inputs, measured operation windows, and formula
+New timing, LLVM and kernel records separate captured graph/resource inputs, measured operation windows, and formula
 calculations. Vertex and typed-edge counts come from the retained graph; omitted phases and nested build
 parameters remain explicit. Local elapsed durations supply nominal work and critical-path arithmetic.
 Cross-host clock-rate uncertainty remains unknown, and unmapped clocks do not supply a global task span or
