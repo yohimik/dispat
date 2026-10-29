@@ -931,7 +931,7 @@ jobs:
             -t dispat-llvm:gce .
           docker image inspect dispat-llvm:gce > "$RUNNER_TEMP/llvm-bundle/image.json"
           docker save dispat-llvm:gce | gzip -1 > "$RUNNER_TEMP/llvm-bundle/image.tar.gz"
-          sha256sum "$RUNNER_TEMP/llvm-bundle/"{dispat,llvmcloud,image.tar.gz} > "$RUNNER_TEMP/llvm-bundle/checksums.txt"
+          (cd "$RUNNER_TEMP/llvm-bundle" && sha256sum dispat llvmcloud image.tar.gz > checksums.txt)
           jq -n --arg source "$SOURCE_SHA" --arg image "$(docker image inspect --format '{{.Id}}' dispat-llvm:gce)" \
             --arg binary "$(sha256sum "$RUNNER_TEMP/llvm-bundle/dispat" | cut -d ' ' -f1)" \
             '{source:$source,image:$image,binarySha256:$binary,goVersion:"1.26.10",platform:"linux/amd64"}' \
@@ -986,6 +986,7 @@ jobs:
           TRIAL_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.tool }}-${{ matrix.mode }}
         run: |
           chmod +x "$RUNNER_TEMP/llvm-bundle/llvmcloud"
+          (cd "$RUNNER_TEMP/llvm-bundle" && sha256sum --check checksums.txt)
           test "$(jq -r .source "$RUNNER_TEMP/llvm-bundle/provenance.json")" = "$GITHUB_SHA"
           docker load -i "$RUNNER_TEMP/llvm-bundle/image.tar.gz"
           sudo install -m 0755 "$RUNNER_TEMP/llvm-bundle/llvmcloud" /usr/local/bin/llvmcloud

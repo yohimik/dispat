@@ -106,6 +106,30 @@ func TestAdapterRejectsForeignTrialsAndPathEscapes(t *testing.T) {
 	}
 }
 
+func TestEvidenceExtractionRefusesExistingSymlinkParents(t *testing.T) {
+	destination, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(destination, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	var content bytes.Buffer
+	writer := tar.NewWriter(&content)
+	if err := writer.WriteHeader(&tar.Header{Name: "escape/record.json", Mode: 0600, Size: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Write([]byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractEvidence(&content, destination); err == nil {
+		t.Fatal("preexisting symlink escaped evidence root")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "record.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("outside file changed: %v", err)
+	}
+}
+
 func TestCleanupRequiresIdentityAndReportsDeleteFailures(t *testing.T) {
 	for _, scenario := range []struct {
 		name       string

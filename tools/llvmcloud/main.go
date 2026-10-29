@@ -327,7 +327,7 @@ func (d *driver) run(ctx context.Context) (result error) {
 	if err != nil {
 		return err
 	}
-	args := []string{"create", "--name", "llvm-coordinator-" + d.settings.ID, "--label", "dispat-trial=" + d.settings.ID, "--network", "host", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--env", "HOME=/cloud/work/home", "--mount", "type=bind,src=" + self + ",dst=/usr/local/bin/llvmcloud,readonly", "--env", "GIT_CONFIG_GLOBAL=" + d.plan.CoordinatorGitConfig, "--env", "GIT_CONFIG_NOSYSTEM=1", d.settings.Image, "run", "--tool", d.settings.Tool, "--mode", d.settings.Mode, "--profile", d.settings.Profile, "--timeout", "4h", "--jobs", "2", "--results", "/cloud/results", "--work", "/cloud/work", "--remote-plan", "/cloud/plan.json"}
+	args := []string{"create", "--name", "llvm-coordinator-" + d.settings.ID, "--label", "dispat-trial=" + d.settings.ID, "--network", "host", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--env", "HOME=/cloud/work/home", "--mount", "type=bind,src=" + self + ",dst=/usr/local/bin/llvmcloud,readonly", "--env", "GIT_CONFIG_GLOBAL=" + d.plan.CoordinatorGitConfig, "--env", "GIT_CONFIG_NOSYSTEM=1", "--entrypoint", "llvmexperiment", d.settings.Image, "run", "--tool", d.settings.Tool, "--mode", d.settings.Mode, "--profile", d.settings.Profile, "--trial-id", d.settings.ID, "--repetition", "1", "--timeout", "4h", "--jobs", "2", "--results", "/cloud/results", "--work", "/cloud/work", "--remote-plan", "/cloud/plan.json"}
 	mounts := []string{}
 	for _, entry := range []struct {
 		path     string

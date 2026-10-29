@@ -270,6 +270,14 @@ func (d *driver) fetchNode(ctx context.Context, item instance, node remoteNode, 
 }
 
 func extractEvidence(input io.Reader, destination string) error {
+	if err := os.MkdirAll(destination, privateDirectoryMode); err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(destination)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	reader := tar.NewReader(io.LimitReader(input, maximumFetchBytes+1))
 	var total int64
 	for {
@@ -285,7 +293,7 @@ func extractEvidence(input io.Reader, destination string) error {
 			return errors.New("evidence archive escapes destination")
 		}
 		if header.Typeflag == tar.TypeDir {
-			if err := os.MkdirAll(path, privateDirectoryMode); err != nil {
+			if err := root.MkdirAll(header.Name, privateDirectoryMode); err != nil {
 				return err
 			}
 			continue
@@ -294,10 +302,10 @@ func extractEvidence(input io.Reader, destination string) error {
 			return errors.New("evidence archive contains a link, unsupported entry, or oversized payload")
 		}
 		total += header.Size
-		if err := os.MkdirAll(filepath.Dir(path), privateDirectoryMode); err != nil {
+		if err := root.MkdirAll(filepath.Dir(header.Name), privateDirectoryMode); err != nil {
 			return err
 		}
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, os.FileMode(header.Mode)&0777|0600)
+		file, err := root.OpenFile(header.Name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, os.FileMode(header.Mode)&0777|0600)
 		if err != nil {
 			return err
 		}
