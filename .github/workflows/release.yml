@@ -41,6 +41,12 @@ on:
         default: full
         type: choice
         options: [full, smoke]
+      cloud-zone:
+        description: One fixed zone for every cell in this build campaign
+        required: true
+        default: us-central1-b
+        type: choice
+        options: [us-central1-a, us-central1-b, us-central1-c, us-central1-f]
 
 # Read by default; the two jobs that push (the badge branch, the release
 # itself) widen to write on their own. The gate and the install check hold
@@ -921,15 +927,16 @@ jobs:
       - name: Pin one boot image and CPU platform for the campaign
         env:
           GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          CLOUD_ZONE: ${{ inputs.cloud-zone }}
         run: |
           mkdir -p "$RUNNER_TEMP/llvm-bundle"
-          gcloud compute zones describe us-central1-a --project "$GCP_PROJECT" --format=json \
+          gcloud compute zones describe "$CLOUD_ZONE" --project "$GCP_PROJECT" --format=json \
             > "$RUNNER_TEMP/llvm-bundle/zone.json"
           jq -e '.availableCpuPlatforms | index("Intel Ice Lake") != null' "$RUNNER_TEMP/llvm-bundle/zone.json"
           gcloud compute images describe-from-family ubuntu-2404-lts-amd64 --project ubuntu-os-cloud \
             --format=json > "$RUNNER_TEMP/llvm-bundle/boot-image.json"
           jq -n --arg bootImage "$(jq -r .selfLink "$RUNNER_TEMP/llvm-bundle/boot-image.json")" \
-            '{bootImage:$bootImage,cpuPlatform:"Intel Ice Lake",zone:"us-central1-a",machineType:"n2-standard-4"}' \
+            --arg zone "$CLOUD_ZONE" '{bootImage:$bootImage,cpuPlatform:"Intel Ice Lake",zone:$zone,machineType:"n2-standard-4"}' \
             > "$RUNNER_TEMP/llvm-bundle/cloud-profile.json"
       - name: Build exact checkout binaries and prepared image
         env:
