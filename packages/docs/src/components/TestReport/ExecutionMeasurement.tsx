@@ -21,7 +21,7 @@ export const ExecutionMeasurement: FC<ExecutionMeasurementProps> = (props) => {
   const {trial, graph, resources, taskIntervals, timeWindows, analysis, clockCompatibility: clock} = measurement;
   return <details>
     <summary>Recorded inputs and formula calculations — {trial.tool}, {trial.mode}, {trial.profile}, repetition {trial.repetition}</summary>
-    <p>Trial <code>{trial.id}</code>: {trial.status}. Source <code>{trial.sourceRevision}</code>.</p>
+    <p>Trial <code>{trial.id}</code>: {trial.status}. Workload source <code>{trial.sourceRevision}</code>.</p>
     <h4>Captured inputs</h4>
     <p>Graph <code>{graph.id}</code> ({graph.scope}). Provenance: {graph.provenance}.</p>
     <div className={styles.scroll}><table>
