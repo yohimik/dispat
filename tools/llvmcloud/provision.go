@@ -19,6 +19,12 @@ set -eu
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q docker.io git curl
+install -d -m 0755 /etc/docker
+cat > /etc/docker/daemon.json <<'DOCKER_CONFIG'
+{"storage-driver":"overlay2","features":{"containerd-snapshotter":false}}
+DOCKER_CONFIG
+systemctl restart docker
+test "$(docker info --format '{{.Driver}}')" = overlay2
 touch /var/lib/dispat-llvm-ready
 `
 
@@ -290,6 +296,9 @@ func (d *driver) prepareWorkers(ctx context.Context) error {
 		d.plan.Orchestration = "manual-gcp-split"
 	}
 	for index, item := range d.state.Instances {
+		if err := d.verifyWorkerDockerStore(ctx, item); err != nil {
+			return err
+		}
 		name := "llvm-node-" + strconv.Itoa(index+1)
 		node := remoteNode{Name: name, Root: "/cloud/work/" + name + "/repo", State: "/cloud/work/" + name + "/state", EvidenceDir: "/cloud/work/" + name + "/evidence", GitConfig: "/cloud/private/" + name + ".gitconfig", HostID: "gce:" + item.ID, EvidencePath: "/cloud/results/cloud/" + item.Name + ".json", MachineType: d.settings.MachineType, CPUPlatform: item.CPUPlatform, CPUQuota: workerCPUs, MemoryBytes: workerMemoryBytes}
 		d.plan.Nodes = append(d.plan.Nodes, node)

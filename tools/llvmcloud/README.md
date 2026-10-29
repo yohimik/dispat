@@ -5,6 +5,12 @@ once, retains its OCI archive, image identity and binary hashes, then runs five
 independent cells. Every cell creates two fresh workers of one selected machine type in
 one selected zone, verifies their exact boot image and matching CPU platform, and
 loads the same image bytes. Workers have no service account or cloud scopes.
+The preparer, coordinator and workers explicitly use Docker's classic `overlay2`
+image store with `containerd-snapshotter` disabled. The driver rejects a different
+store before provisioning or loading worker images and retains each daemon's
+store/version evidence. This keeps the saved image's configuration digest
+identical after loading; all image checks and execution use that exact immutable
+ID. Tags are not an identity fallback.
 The coordinator runs on the GitHub runner. Both supported machine types have
 four vCPUs and 16 GiB memory. Each worker container has four CPUs,
 14 GiB memory, one outer task slot and two inner Ninja or Make jobs. The workflow

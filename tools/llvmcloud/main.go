@@ -384,6 +384,9 @@ func (d *driver) run(ctx context.Context) (result error) {
 	}()
 	setupCtx, cancel := context.WithTimeout(ctx, setupTimeout)
 	defer cancel()
+	if err := d.verifyCoordinatorDockerStore(setupCtx); err != nil {
+		return err
+	}
 	if err := d.provision(setupCtx); err != nil {
 		return err
 	}
