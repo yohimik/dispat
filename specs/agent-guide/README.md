@@ -733,6 +733,14 @@ the fixed graph already separates it. First-only nonpush preparation may also be
 compiling it requires declared write sets and admitted prepared-input identities. Common claim/result/ledger
 transactions do not turn an ordinary compiled command into a native effect.
 
+Keep entry, imported, package and space configuration, including every transitive `$ref` target, inside the
+captured input closure used for distributed planning. An absolute reference to a live checkout or another
+uncaptured path cannot supply pinned policy; move the configuration into a captured repository and reference
+that captured file before retrying. A relative spelling must also resolve inside the captured closure. Different
+entry files at the same source commit can select different native policies, so preserve the exact `--config`
+selection and relevant invocation settings between preview and release. The signed policy identity must bind
+that selection as well as the source snapshots.
+
 Set root `runOnly: [choreographer, orchestrator]` when eligible build and validation stages may use peers while
 publication stays on the orchestrator. Scalar `runOnly: choreographer` and any choreographer publish position are
 refused. The orchestrator also prepares native inputs, checks locks and returned outputs, and runs run-level hooks
