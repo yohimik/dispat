@@ -34,9 +34,9 @@ on:
         required: true
         default: release
         type: choice
-        options: [release, llvm-gce]
+        options: [release, llvm-gce, kernel-gce]
       llvm-profile:
-        description: Full LLVM build or explicitly partial smoke validation
+        description: Full selected workload build or explicitly partial smoke validation
         required: true
         default: full
         type: choice
@@ -911,10 +911,13 @@ jobs:
           '
 
   llvm-prepare:
-    name: Prepare one immutable LLVM experiment image
-    if: inputs.purpose == 'llvm-gce'
+    name: Prepare one immutable ${{ inputs.purpose == 'kernel-gce' && 'Linux kernel' || 'LLVM' }} experiment image
+    if: inputs.purpose == 'llvm-gce' || inputs.purpose == 'kernel-gce'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      BUILD_WORKLOAD: ${{ inputs.purpose == 'kernel-gce' && 'linux-kernel' || 'llvm' }}
+      BUILD_DOCKERFILE: ${{ inputs.purpose == 'kernel-gce' && 'tests/experiments/Dockerfile.kernel' || 'tests/experiments/Dockerfile.llvm' }}
     permissions:
       contents: read
       id-token: write
@@ -962,13 +965,13 @@ jobs:
             --build-arg DISPAT_BINARY_SOURCE=candidate-binary \
             --build-arg "DISPAT_BINARY_ID=1.11.0-rc.13-candidate.$SOURCE_SHA" \
             -t dispat-experiments:llvm-gce tests/experiments
-          docker buildx build --builder default --load -f tests/experiments/Dockerfile.llvm \
+          docker buildx build --builder default --load -f "$BUILD_DOCKERFILE" \
             --build-arg GO_VERSION=1.26.10 --build-arg EXPERIMENTS_IMAGE=dispat-experiments:llvm-gce \
-            -t dispat-llvm:gce .
-          docker image inspect dispat-llvm:gce > "$RUNNER_TEMP/llvm-bundle/image.json"
-          docker save dispat-llvm:gce | gzip -1 > "$RUNNER_TEMP/llvm-bundle/image.tar.gz"
+            -t dispat-build:gce .
+          docker image inspect dispat-build:gce > "$RUNNER_TEMP/llvm-bundle/image.json"
+          docker save dispat-build:gce | gzip -1 > "$RUNNER_TEMP/llvm-bundle/image.tar.gz"
           (cd "$RUNNER_TEMP/llvm-bundle" && sha256sum dispat llvmcloud image.tar.gz cloud-profile.json boot-image.json zone.json > checksums.txt)
-          jq -n --arg source "$SOURCE_SHA" --arg image "$(docker image inspect --format '{{.Id}}' dispat-llvm:gce)" \
+          jq -n --arg source "$SOURCE_SHA" --arg image "$(docker image inspect --format '{{.Id}}' dispat-build:gce)" \
             --arg binary "$(sha256sum "$RUNNER_TEMP/llvm-bundle/dispat" | cut -d ' ' -f1)" \
             '{source:$source,image:$image,binarySha256:$binary,goVersion:"1.26.10",platform:"linux/amd64"}' \
             > "$RUNNER_TEMP/llvm-bundle/provenance.json"
@@ -983,26 +986,28 @@ jobs:
             --mount "type=bind,src=$RUNNER_TEMP/llvm-unsupported,dst=/results" \
             --env "EXPERIMENTS_DISPAT_SOURCE_REVISION=$SOURCE_SHA" \
             "$(jq -r .image "$RUNNER_TEMP/llvm-bundle/provenance.json")" \
-            --tool changesets --mode distributed --profile "$LLVM_PROFILE" --trial-id "$TRIAL_ID" --repetition 1
+            --workload "$BUILD_WORKLOAD" --tool changesets --mode distributed --profile "$LLVM_PROFILE" --trial-id "$TRIAL_ID" --repetition 1
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: llvm-gce-changesets-distributed-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.purpose }}-changesets-distributed-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-unsupported
           retention-days: 30
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: llvm-gce-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.purpose }}-prepared-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-bundle
           retention-days: 7
           compression-level: 0
 
   llvm-gce:
-    name: LLVM GCE · ${{ matrix.tool }} ${{ matrix.mode }}
-    if: inputs.purpose == 'llvm-gce'
+    name: ${{ inputs.purpose }} · ${{ matrix.tool }} ${{ matrix.mode }}
+    if: inputs.purpose == 'llvm-gce' || inputs.purpose == 'kernel-gce'
     needs: llvm-prepare
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    env:
+      BUILD_WORKLOAD: ${{ inputs.purpose == 'kernel-gce' && 'linux-kernel' || 'llvm' }}
     permissions:
       contents: read
       id-token: write
@@ -1022,7 +1027,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: llvm-gce-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.purpose }}-prepared-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-bundle
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
@@ -1046,7 +1051,7 @@ jobs:
           sudo install -m 0755 "$RUNNER_TEMP/llvm-bundle/llvmcloud" /usr/local/bin/llvmcloud
           sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" /cloud
           /usr/local/bin/llvmcloud run \
-            --project "$GCP_PROJECT" --id "$TRIAL_ID" --tool "$LLVM_TOOL" --mode "$LLVM_MODE" --profile "$LLVM_PROFILE" \
+            --workload "$BUILD_WORKLOAD" --project "$GCP_PROJECT" --id "$TRIAL_ID" --tool "$LLVM_TOOL" --mode "$LLVM_MODE" --profile "$LLVM_PROFILE" \
             --zone "$(jq -r .zone "$RUNNER_TEMP/llvm-bundle/cloud-profile.json")" \
             --boot-image "$(jq -r .bootImage "$RUNNER_TEMP/llvm-bundle/cloud-profile.json")" \
             --cpu-platform "$(jq -r .cpuPlatform "$RUNNER_TEMP/llvm-bundle/cloud-profile.json")" \
@@ -1070,17 +1075,19 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: llvm-gce-${{ matrix.tool }}-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.purpose }}-${{ matrix.tool }}-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-results
           retention-days: 30
           if-no-files-found: error
 
   llvm-report:
-    name: Validate and collect all six LLVM campaign records
-    if: ${{ always() && inputs.purpose == 'llvm-gce' && needs.llvm-prepare.result == 'success' }}
+    name: Validate and collect all six build campaign records
+    if: ${{ always() && (inputs.purpose == 'llvm-gce' || inputs.purpose == 'kernel-gce') && needs.llvm-prepare.result == 'success' }}
     needs: [llvm-prepare, llvm-gce]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      BUILD_WORKLOAD: ${{ inputs.purpose == 'kernel-gce' && 'linux-kernel' || 'llvm' }}
     permissions:
       contents: read
     steps:
@@ -1097,39 +1104,39 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         continue-on-error: true
         with:
-          name: llvm-gce-dispat-compilation-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.purpose }}-dispat-compilation-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-incoming/dispat-compilation
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         continue-on-error: true
         with:
-          name: llvm-gce-dispat-interpretation-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.purpose }}-dispat-interpretation-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-incoming/dispat-interpretation
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         continue-on-error: true
         with:
-          name: llvm-gce-dispat-hybrid-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.purpose }}-dispat-hybrid-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-incoming/dispat-hybrid
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         continue-on-error: true
         with:
-          name: llvm-gce-nx-manual-gcp-split-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.purpose }}-nx-manual-gcp-split-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-incoming/nx-manual-gcp-split
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         continue-on-error: true
         with:
-          name: llvm-gce-lerna-manual-gcp-split-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.purpose }}-lerna-manual-gcp-split-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-incoming/lerna-manual-gcp-split
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         continue-on-error: true
         with:
-          name: llvm-gce-changesets-distributed-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.purpose }}-changesets-distributed-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-incoming/changesets-distributed
       - name: Check source, binary, workload, topology and retained formulas
         env:
           LLVM_PROFILE: ${{ inputs.llvm-profile }}
         run: |
           "$RUNNER_TEMP/llvm-report-tools/llvmexperiment" collect --input "$RUNNER_TEMP/llvm-incoming" \
-            --output "$RUNNER_TEMP/llvm-report" --source "$GITHUB_SHA" --profile "$LLVM_PROFILE"
+            --output "$RUNNER_TEMP/llvm-report" --source "$GITHUB_SHA" --profile "$LLVM_PROFILE" --workload "$BUILD_WORKLOAD"
       - name: Render available observations and missing-cell diagnostics
         if: always()
         run: |
@@ -1143,7 +1150,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: llvm-gce-report-${{ inputs.llvm-profile }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.purpose }}-report-${{ inputs.llvm-profile }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-report
           retention-days: 30
           if-no-files-found: error
