@@ -68,6 +68,12 @@ func writeImportFixture(t *testing.T, workload, run string) (importedCampaign, *
 		options["id"], options["tool"], options["mode"], options["workload"], options["profile"] = trialID, cell.Tool, cell.Mode, workload, fullProfile
 		provenance["options"] = options
 		mustWriteImportJSON(t, filepath.Join(cloud, "provenance.json"), provenance)
+		for index, name := range []string{importPrepareDockerInfo, importCoordinatorDockerInfo, "fixture-vm-1" + importWorkerDockerSuffix, "fixture-vm-2" + importWorkerDockerSuffix} {
+			mustWriteImportJSON(t, filepath.Join(cloud, name), importedDockerStore{
+				ServerVersion: []string{"28.0.4", "29.9.2", "28.2.2", "28.3.3"}[index], Driver: "overlay2",
+				DriverStatus: [][]string{{"Backing Filesystem", "extfs"}}, Architecture: "x86_64", OSType: "linux", CgroupDriver: "systemd", CgroupVersion: "2",
+			})
+		}
 		for _, node := range []string{"fixture-vm-1", "fixture-vm-2"} {
 			var disk map[string]any
 			mustReadImportJSON(t, filepath.Join(cloud, node+"-disk.json"), &disk)
@@ -208,6 +214,7 @@ func TestCampaignImportPreservesCandidateBytesAndReplacesOnlyBuildCells(t *testi
 	if !strings.Contains(validated.Version, "candidate.") || validated.BinaryID != "candidate."+settings.Source {
 		t.Fatal("candidate identity was relabeled")
 	}
+	assertImportedDockerEvidence(t, settings.Results, validated)
 	if err := installCampaignImport(t.Context(), settings.Results, validated); err != nil {
 		t.Fatal("same explicit selection could not replace prior import:", err)
 	}
@@ -247,7 +254,7 @@ func TestCampaignImportMissingSelectionAndValidateOnlyHaveNoResultsEffects(t *te
 }
 
 func TestCampaignImportInstallRefusesChangedValidatedBytesAndForeignDestinations(t *testing.T) {
-	for _, scenario := range []string{"verdict changed", "raw changed", "foreign destination", "unmanaged build row", "symlink"} {
+	for _, scenario := range []string{"verdict changed", "raw changed", "store changed", "foreign destination", "unmanaged build row", "symlink"} {
 		t.Run(scenario, func(t *testing.T) {
 			selected, imported := writeImportFixture(t, llvmWorkload, "101")
 			if err := validateImportedCampaign(t.Context(), &selected, imported); err != nil {
@@ -266,6 +273,9 @@ func TestCampaignImportInstallRefusesChangedValidatedBytesAndForeignDestinations
 				if err := os.WriteFile(filepath.Join(source, "fixture.json"), []byte("changed"), fileMode); err != nil {
 					t.Fatal(err)
 				}
+			case "store changed":
+				path := filepath.Join(selected.root, "environment", "dispat-compilation", "cloud", importPrepareDockerInfo)
+				mustWriteImportJSON(t, path, importedDockerStore{ServerVersion: "29.9.2", Driver: "overlayfs"})
 			case "foreign destination":
 				if err := os.Mkdir(filepath.Join(results, name), directoryMode); err != nil {
 					t.Fatal(err)

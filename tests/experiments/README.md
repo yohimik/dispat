@@ -214,6 +214,8 @@ Production docs import full two-VM LLVM and Linux kernel campaign artifacts sele
 
 The importer requires `EXPERIMENTS_LLVM_CAMPAIGN_DIR`, `EXPERIMENTS_KERNEL_CAMPAIGN_DIR`, `EXPERIMENTS_BUILD_SOURCE_REVISION`, `EXPERIMENTS_BUILD_BINARY_SHA256`, and each workload's `EXPERIMENTS_{LLVM,KERNEL}_RUN_ID` and `EXPERIMENTS_{LLVM,KERNEL}_RUN_ATTEMPT`. Both artifacts must contain all six selected full-profile records. It verifies source, binary, version, trial identity, raw evidence hashes, observed durations and hardware/configuration before replacing previous build-comparison cells. It keeps the measured candidate identities intact; these comparisons do not assert that the later published alpine binary was measured. Missing inputs fail rather than selecting an older campaign or substituting a local run.
 
+Each executed cell must also retain sanitized Docker store observations from preparation, the coordinator, and both workers. The importer requires classic `overlay2` store semantics, rejects containerd snapshotter observations, and retains the original files with SHA256 hashes. Each daemon's observed version remains independent; matching versions are not assumed or required.
+
 `dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments` remains an optional one-host diagnostic campaign. Its three Dispat modes and native Nx Cloud entries are independent of the required production cloud imports. Standalone `summary` includes whatever records were explicitly produced or imported.
 
 The default `full` workload configures and builds LLVM core twice, once with X86 and once with AArch64. Each

@@ -17,6 +17,7 @@ func retainImportedEnvironment(root string, imported *campaignImport) error {
 			}
 			cloud := filepath.Join("environment", cell.Tool+"-"+cell.Mode, "cloud")
 			paths = append(paths, filepath.Join(cloud, "provenance.json"))
+			paths = append(paths, filepath.Join(cloud, importPrepareDockerInfo), filepath.Join(cloud, importCoordinatorDockerInfo))
 			var census struct {
 				Instances []hardwareInstance `json:"instances"`
 			}
@@ -27,7 +28,7 @@ func retainImportedEnvironment(root string, imported *campaignImport) error {
 				if instance.Name == "" || instance.Name == "." || instance.Name == ".." || filepath.Base(instance.Name) != instance.Name {
 					return fmt.Errorf("retained instance identity is not a safe filename")
 				}
-				for _, suffix := range []string{".json", "-disk.json", "-resources.txt"} {
+				for _, suffix := range []string{".json", "-disk.json", "-resources.txt", importWorkerDockerSuffix} {
 					paths = append(paths, filepath.Join(cloud, instance.Name+suffix))
 				}
 			}

@@ -46,6 +46,9 @@ func bindImportedCloudIdentity(environment string, imported *campaignImport, rec
 		return fmt.Errorf("cloud cells mix prepared images within %s", record.Experiment)
 	}
 	imported.Images[record.Experiment] = census.Options.Image
+	if err := validateImportedDockerStores(environment, census.Instances); err != nil {
+		return err
+	}
 	for _, instance := range census.Instances {
 		var disk importDiskProfile
 		if err := readHardwareJSON(filepath.Join(environment, "cloud", instance.Name+"-disk.json"), &disk); err != nil {
