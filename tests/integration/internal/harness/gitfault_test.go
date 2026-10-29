@@ -20,10 +20,15 @@ import (
 // the script's path directly would prove the script works and say nothing
 // about whether it is the one a run would find.
 func runThroughFault(t testing.TB, fault *GitFault, args ...string) (code int, stdout, stderr string) {
+	return runInputThroughFault(t, fault, "", args...)
+}
+
+func runInputThroughFault(t testing.TB, fault *GitFault, input string, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", `exec git "$@"`, "sh")
 	cmd.Args = append(cmd.Args, args...)
 	cmd.Env = append(os.Environ(), fault.Env()...)
+	cmd.Stdin = strings.NewReader(input)
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {
@@ -32,6 +37,44 @@ func runThroughFault(t testing.TB, fault *GitFault, args ...string) (code int, s
 		code = exitErr.ExitCode()
 	}
 	return code, out.String(), errOut.String()
+}
+
+func TestGitFaultScopesBatchReadsToTheFirstObject(t *testing.T) {
+	fault := NewGitFault(t, GitFault{Pattern: "*cat-file --batch", Nth: 2, Onward: true})
+	root := t.TempDir()
+	git := func(input string, args ...string) string {
+		cmd := exec.Command(fault.realGit, append([]string{"-C", root}, args...)...)
+		cmd.Stdin = strings.NewReader(input)
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", out)
+		return string(out)
+	}
+	git("", "init", "--bare", "-q")
+	messageOID := strings.TrimSpace(git("signed message", "hash-object", "-w", "--stdin"))
+	outputOID := strings.TrimSpace(git("build output", "hash-object", "-w", "--stdin"))
+	fault.FirstInputLine = outputOID
+	args := []string{"-C", root, "cat-file", "--batch"}
+	for _, input := range []string{messageOID + "\n" + outputOID + "\n", messageOID, ""} {
+		code, stdout, stderr := runInputThroughFault(t, fault, input, args...)
+		assert.Zero(t, code)
+		assert.Equal(t, git(input, "cat-file", "--batch"), stdout,
+			"a nonmatch replays the entire request stream byte for byte")
+		assert.Empty(t, stderr)
+		assert.Zero(t, fault.Matches(), "an unrelated first object consumes no ordinal")
+	}
+	input := outputOID + "\n" + messageOID + "\n"
+	code, stdout, stderr := runInputThroughFault(t, fault, input, args...)
+	assert.Zero(t, code)
+	assert.Equal(t, git(input, "cat-file", "--batch"), stdout,
+		"an unselected matching ordinal also preserves both requests")
+	assert.Empty(t, stderr)
+	for ordinal := 2; ordinal <= 3; ordinal++ {
+		code, stdout, stderr = runInputThroughFault(t, fault, input, args...)
+		assert.Equal(t, 1, code)
+		assert.Empty(t, stdout)
+		assert.Contains(t, stderr, GitFaultMarker)
+		assert.Equal(t, ordinal, fault.Matches(), "Onward counts only scoped object matches")
+	}
 }
 
 // TestGitFaultSelectsMatchesAndPassesTheRestThrough: the stand-in is the real

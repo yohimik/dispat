@@ -941,6 +941,7 @@ func executionCarries(t *testing.T, mailbox, branch, kind string) bool {
 // code, the run publishes nothing, and the node carries on serving.
 const executionOutputGitFaultWait = 60 * time.Second
 const executionOutputGitFaultWorkerDiagnosticWait = 5 * time.Second
+const executionOutputBatchPattern = "*cat-file --batch"
 
 func TestExecutionOutputGitFaults(t *testing.T) {
 	for name, tc := range map[string]struct {
@@ -950,12 +951,19 @@ func TestExecutionOutputGitFaults(t *testing.T) {
 		"the outputs cannot be hashed":         {pattern: "*hash-object -w --no-filters --stdin-paths*", onWorker: true},
 		"the outputs cannot be staged":         {pattern: "*update-index -z --add --index-info*", onWorker: true},
 		"the output tree cannot be written":    {pattern: "*write-tree*", onWorker: true},
-		"the outputs cannot be read to digest": {pattern: "*cat-file --batch*", onWorker: true},
-		"the outputs cannot be installed here": {pattern: "*cat-file --batch*", onWorker: false},
+		"the outputs cannot be read to digest": {pattern: executionOutputBatchPattern, onWorker: true},
+		"the outputs cannot be installed here": {pattern: executionOutputBatchPattern, onWorker: false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rig := newExecutionOutputWorkspace(t, executionOneWorker)
-			fault := harness.NewGitFault(t, harness.GitFault{Pattern: tc.pattern, Onward: true, Nth: 1})
+			selected := harness.GitFault{Pattern: tc.pattern, Onward: true, Nth: 1}
+			if tc.pattern == executionOutputBatchPattern {
+				// The first producer's exact output distinguishes its reader
+				// from concurrent signed-message readers in the same Git store.
+				selected.FirstInputLine = gitIn(t, rig.repo.Root,
+					"assets 0.1.0 "+executionNode+"\n", "hash-object", "--stdin")
+			}
+			fault := harness.NewGitFault(t, selected)
 			workerEnv := []string{}
 			releaseEnv := []string{}
 			if tc.onWorker {
@@ -976,6 +984,8 @@ func TestExecutionOutputGitFaults(t *testing.T) {
 
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			assert.Positive(t, fault.Matches(), "the fault reached the invocation it names")
+			assert.Equal(t, 1, executionBuildCount(rig, "assets"),
+				"the producer's build completed before its output operation failed")
 			assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode),
 				"the affected package is refused with the integrity code\nstdout:\n%s", res.Stdout)
 			assert.Empty(t, executionReleaseTags(rig), "nothing was published")
