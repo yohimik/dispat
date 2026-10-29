@@ -1201,3 +1201,37 @@ First-only nonpush preparation may be interpreted conservatively; compiling it r
 write-set and prepared-input contract. Lazy effect evaluation retains typed gates and durable intent before
 effects. Vectors 52 and 53 exercise these boundaries. This completes the implementation contract without
 asserting that a particular binary implements hybrid or that one execution mode is faster.
+
+## 2026-10-29: Mathematical audit and convergence limits
+
+The propagation prose now distinguishes channel freshness from source delivery on the bump axis, preserves
+already-published contributions when a source is later held, and limits the tag-position screen to a chosen
+provider tag that actually carries the contribution. Equal baseline tags do not exclude fresh pending work.
+The cycle rationale retains `E200` as an ordering policy without claiming every cyclic declaration is
+unreleaseable. The configured-stage corollaries explicitly require a feasible comparison class and an acyclic
+complete task graph, including plan-specific outcome edges.
+
+G6 now states a finite-debt potential and its progress premises. The former unconditional `n + m` count
+does not cover fixed-counter group rides: one member can publish a new prerelease on every retry while
+another retains fresh work and keeps failing. A disposable two-package Git fixture, using a CLI built from
+`e0cce942a8de50fe3447cc8976d2b1e7a6b9cdd2`, reproduced five such plans at one unchanged source head,
+recording only the first member's hypothetical successes with local tags. This is planner evidence and an
+arbitrarily extendable mathematical counterexample, not an external publication experiment. The corrected
+bound counts first successes and newly discharged source-delivery incidences; unsuccessful attempts and
+fixed-counter rides without that progress have no finite bound from G6.
+
+The distributed cost account separately charges coordination events, which can grow while the task graph
+stays fixed. Hybrid classification excludes its common claim/result bookkeeping, and a sweep generation
+isolates coordination without fencing arbitrary trusted-script effects. These clarifications preserve the
+existing readiness, authority and external-effect recovery obligations.
+
+Proof review covered the propagation and closure calculations, conditional planner costs, graph and
+scheduling results, configured stages, mode simulation, recovery, artifact continuation, clock/entropy and
+reuse accounting. Independent exact finite checks passed for 377,253 one-pool schedules, 125,751 disjoint-pool
+schedules, 22,140 chain-readiness cases and 1,590 small undirected optimum comparisons; 61,440 graph/source
+cases, 4,096 owner closures and 26,704 connected six-vertex graphs; and 45,786 rational reuse and probability
+checks. Their finite domains supplement the proofs and do not establish implementation-wide correctness.
+Wolfram Alpha confirmed selected algebraic identities in the browser. The local Wolfram CLI was unavailable
+because activation failed, so this audit does not report a successful run of `verify-math.wls`.
+Both specification and agent-guide consistency and disposable release-lifecycle suites passed with the
+CLI built from the audited base. No production release or performance measurement is asserted here.
