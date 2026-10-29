@@ -83,6 +83,7 @@ FROM runner AS src-tools
 COPY --chown=gopher:gopher tools ./tools
 COPY --chown=gopher:gopher pkg/manifest ./pkg/manifest
 COPY --chown=gopher:gopher pkg/scanner ./pkg/scanner
+COPY --chown=gopher:gopher tests/experiments/Dockerfile.llvm ./tests/experiments/Dockerfile.llvm
 # The strings testreport and the site both write about one record, which the
 # site's tests read from the same file.
 COPY --chown=gopher:gopher packages/docs/plugins/test-report/testdata ./packages/docs/plugins/test-report/testdata
