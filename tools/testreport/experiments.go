@@ -27,6 +27,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/yohimik/dispat/tools/internal/executionmeasurement"
 )
 
 // experimentsDirName is where a campaign's cells land under coverage/, beside
@@ -42,17 +44,18 @@ const baselineState = "baseline"
 // decode straight into the report's own types, because the harness's field
 // names are where those names came from.
 type verdict struct {
-	Experiment string       `json:"experiment"`
-	Tool       string       `json:"tool"`
-	Scenario   string       `json:"scenario"`
-	Dispat     string       `json:"dispat"`
-	Steps      []Step       `json:"steps"`
-	Checks     []Check      `json:"checks"`
-	Passed     bool         `json:"passed"`
-	Recovery   *Recovery    `json:"recovery"`
-	Timing     *Timing      `json:"timing"`
-	Plan       *verdictPlan `json:"plan"`
-	LLVM       *LLVMBuild   `json:"llvm"`
+	Experiment           string          `json:"experiment"`
+	Tool                 string          `json:"tool"`
+	Scenario             string          `json:"scenario"`
+	Dispat               string          `json:"dispat"`
+	Steps                []Step          `json:"steps"`
+	Checks               []Check         `json:"checks"`
+	Passed               bool            `json:"passed"`
+	Recovery             *Recovery       `json:"recovery"`
+	Timing               *Timing         `json:"timing"`
+	Plan                 *verdictPlan    `json:"plan"`
+	LLVM                 *LLVMBuild      `json:"llvm"`
+	ExecutionMeasurement json.RawMessage `json:"executionMeasurement"`
 }
 
 // observation is one line of observations.jsonl, reduced to the part a report
@@ -145,6 +148,11 @@ func readCell(dir, id string) (*Cell, error) {
 	if err := validateLLVM(v.LLVM); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if len(v.ExecutionMeasurement) != 0 {
+		if err := executionmeasurement.Validate(v.ExecutionMeasurement); err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+	}
 	if v.LLVM != nil && v.Passed != (v.LLVM.Status == llvmCompletedStatus) {
 		return nil, fmt.Errorf("%s: LLVM completion status contradicts its verdict", path)
 	}
@@ -154,6 +162,7 @@ func readCell(dir, id string) (*Cell, error) {
 		Dispat: version, Platform: platform,
 		Steps: v.Steps, Checks: v.Checks, Passed: v.Passed, Recovery: v.Recovery,
 		Timing: v.Timing, Plan: newPlan(v.Plan), LLVM: v.LLVM,
+		ExecutionMeasurement: v.ExecutionMeasurement,
 	}
 	last, err := readLastObservation(filepath.Join(dir, id, "observations.jsonl"))
 	if err != nil {
@@ -430,6 +439,7 @@ func writeExperimentsMarkdown(w io.Writer, e Experiments) error {
 	}
 	writeTimingMarkdown(out, e)
 	writeLLVMMarkdown(out, e)
+	writeMeasurementMarkdown(out, e)
 	return out.Flush()
 }
 
