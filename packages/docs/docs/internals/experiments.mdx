@@ -321,6 +321,11 @@ describe these versions, configurations, and fault scenarios; they are not a gen
 
 ## LLVM distributed build
 
+The build tables retain the exact Dispat binary identity measured by each campaign. An identity containing
+`candidate` denotes an unpublished build; importing its results into a later documentation release does not
+turn it into a measurement of that release's shipped binary. The row details retain binary hashes, toolchain
+versions and artifact digests, and the measurement panels retain the tested source revision.
+
 <ExperimentsLLVMTable />
 
 The GCP campaign runs Dispat's `compilation`, `interpretation`, and `hybrid` modes on two separate GCE VMs.

@@ -1,5 +1,5 @@
 import type {ExperimentCell, ExperimentLinuxKernel} from './types';
-import {buildElapsed, buildStatus} from './build.ts';
+import {buildBinary, buildElapsed, buildStatus} from './build.ts';
 
 export interface KernelRow {
   id: string;
@@ -12,6 +12,7 @@ export interface KernelRow {
   targets: string;
   source: string;
   topology: string;
+  binary: string;
   configuration: string;
   modules: string;
   record: ExperimentLinuxKernel;
@@ -31,6 +32,7 @@ export function kernelRows(options: KernelCellsOptions): KernelRow[] {
       status: buildStatus({result}), elapsed: buildElapsed({result}),
       capacity: `${result.executorCount} × ${result.jobsPerExecutor}`,
       targets: result.buildTargets.join(', '), source: result.sourceRevision, topology: result.topology,
+      binary: buildBinary({result}),
       configuration: result.configuration,
       modules: KERNEL_ARCHITECTURES.map((architecture) => `${architecture}: ${result.moduleCounts[architecture] ?? UNKNOWN_COUNT_TEXT}`).join('; '),
       record: result,

@@ -63,14 +63,14 @@ func writeLLVMMarkdown(out *bufio.Writer, campaign Experiments) {
 			continue
 		}
 		if !printed {
-			fmt.Fprintln(out, "\n| LLVM distributed build | profile | mode | result | elapsed | executors × Ninja jobs | targets | source |")
-			fmt.Fprintln(out, "|---|---|---|---|---|---|---|---|")
+			fmt.Fprintln(out, "\n| LLVM distributed build | profile | mode | result | elapsed | executors × Ninja jobs | targets | source | campaign Dispat binary |")
+			fmt.Fprintln(out, "|---|---|---|---|---|---|---|---|---|")
 			printed = true
 		}
 		result := cell.LLVM
-		fmt.Fprintf(out, "| %s | %s | %s | %s | %s | %d × %d | %s | %s |\n",
+		fmt.Fprintf(out, "| %s | %s | %s | %s | %s | %d × %d | %s | %s | %s |\n",
 			escapePipes(cell.Tool), escapePipes(result.Profile), escapePipes(result.Mode), escapePipes(llvmOutcome(result)),
 			llvmSeconds(result), result.ExecutorCount, result.JobsPerExecutor,
-			escapePipes(strings.Join(result.BuildTargets, ", ")), result.SourceRevision)
+			escapePipes(strings.Join(result.BuildTargets, ", ")), result.SourceRevision, escapePipes(result.BinaryID))
 	}
 }

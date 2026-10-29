@@ -1,5 +1,5 @@
 import type {ExperimentCell, ExperimentLLVM} from './types';
-import {buildElapsed, buildStatus} from './build.ts';
+import {buildBinary, buildElapsed, buildStatus} from './build.ts';
 
 export interface LLVMRow {
   id: string;
@@ -12,6 +12,8 @@ export interface LLVMRow {
   targets: string;
   source: string;
   topology: string;
+  binary: string;
+  record: ExperimentLLVM;
 }
 
 interface LLVMCellsOptions {
@@ -42,6 +44,7 @@ export function llvmRows(options: LLVMCellsOptions): LLVMRow[] {
       status: llvmStatus({result}), elapsed: llvmElapsed({result}),
       capacity: `${result.executorCount} × ${result.jobsPerExecutor}`,
       targets: result.buildTargets.join(', '), source: result.sourceRevision, topology: result.topology,
+      binary: buildBinary({result}), record: result,
     }];
   });
 }

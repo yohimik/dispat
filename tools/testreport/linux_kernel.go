@@ -122,15 +122,15 @@ func writeLinuxKernelMarkdown(out *bufio.Writer, campaign Experiments) {
 			continue
 		}
 		if !printed {
-			fmt.Fprintln(out, "\n| Linux kernel distributed build | version | profile / configuration | mode | result | elapsed | executors × make jobs | targets | omissions | source |")
-			fmt.Fprintln(out, "|---|---|---|---|---|---|---|---|---|---|")
+			fmt.Fprintln(out, "\n| Linux kernel distributed build | version | profile / configuration | mode | result | elapsed | executors × make jobs | targets | omissions | source | campaign Dispat binary |")
+			fmt.Fprintln(out, "|---|---|---|---|---|---|---|---|---|---|---|")
 			printed = true
 		}
 		result := cell.LinuxKernel
-		fmt.Fprintf(out, "| %s | %s | %s / %s | %s | %s | %s | %d × %d | %s | %s | %s |\n",
+		fmt.Fprintf(out, "| %s | %s | %s / %s | %s | %s | %s | %d × %d | %s | %s | %s | %s |\n",
 			escapePipes(cell.Tool), result.KernelVersion, escapePipes(result.Profile), escapePipes(result.Configuration),
 			escapePipes(result.Mode), escapePipes(buildOutcome(&result.DistributedBuild)), buildSeconds(&result.DistributedBuild),
 			result.ExecutorCount, result.JobsPerExecutor, escapePipes(strings.Join(result.BuildTargets, ", ")),
-			escapePipes(strings.Join(result.Omissions, "; ")), result.SourceRevision)
+			escapePipes(strings.Join(result.Omissions, "; ")), result.SourceRevision, escapePipes(result.BinaryID))
 	}
 }

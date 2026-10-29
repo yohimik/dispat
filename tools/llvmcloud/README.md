@@ -1,12 +1,14 @@
-# LLVM on two GCE workers
+# LLVM and Linux kernel builds on two GCE workers
 
-The `Release` workflow's `purpose=llvm-gce` dispatch builds the selected checkout
+The `Release` workflow's `purpose=llvm-gce` or `purpose=kernel-gce` dispatch builds the selected checkout
 once, retains its OCI archive, image identity and binary hashes, then runs five
 independent cells. Every cell creates two fresh `n2-standard-4` workers in
-`us-central1-a`, verifies their exact boot image and matching CPU platform, and
+one selected zone, verifies their exact boot image and matching CPU platform, and
 loads the same image bytes. Workers have no service account or cloud scopes.
 The coordinator runs on the GitHub runner. Each worker container has four CPUs,
-14 GiB memory, one outer task slot and two inner Ninja jobs.
+14 GiB memory, one outer task slot and two inner Ninja or Make jobs. The workflow
+defaults to `us-central1-b` and `Intel Cascade Lake`; these selections apply to
+every competitor and every Dispat mode in the campaign.
 
 The driver defaults to `--workload llvm`. Use `--workload linux-kernel` to select
 the runner's separate Linux-kernel build profile with the same VM, container,
@@ -30,7 +32,7 @@ two actual platforms match; that does not establish equality across cells.
 
 The three Dispat cells use compilation, interpretation and hybrid modes. The Nx
 and Lerna cells explicitly use `manual-gcp-split`: the experiment driver assigns
-one LLVM backend to each VM and invokes the tool there. That is custom
+one LLVM backend or kernel architecture to each VM and invokes the tool there. That is custom
 orchestration, not Nx Cloud or native cross-host scheduling. Changesets has no
 build scheduler and has no measured build cell.
 
@@ -40,7 +42,10 @@ gh workflow run release.yml --ref <reviewed-source-ref> \
 ```
 
 Use `llvm-profile=full` for both complete LLVM backend builds. Smoke is a partial
-functional check and cannot be reported as a full LLVM build. Every cell has a
+functional check and cannot be reported as a full LLVM build. For `kernel-gce`,
+the full profile builds the large `allmodconfig` kernel-and-modules workload for
+`x86_64` and `arm64`; smoke uses `defconfig` and omits modules. Fresh output trees
+do not establish a cold operating-system page cache. Every cell has a
 four-hour execution limit; setup has a separate 35-minute limit. The job and VM
 lifetimes are bounded at five hours, leaving cleanup time. No machine/zone
 fallback, warm build directory or silent competitor fallback is allowed.
@@ -64,4 +69,6 @@ Cleanup rechecks each instance's name, numeric ID and ownership labels, deletes
 only that trial's resources, and verifies that the exact IDs disappeared. An
 API failure is an error, not proof of absence. A journal preserves uncertain
 creation outcomes for the workflow's always-run cleanup step. The VM lifetime
-is the fallback if the runner itself is lost.
+is the fallback if the runner itself is lost. Cleanup records distinguish
+`resourcesReleased` from evidence-collection errors; either failure still makes
+the cell fail.
