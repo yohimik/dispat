@@ -606,6 +606,7 @@ func (b *FirstNodeBroker) replayEvent(event ChoreographyEvent) error {
 		return nil
 	case ChoreographyInertCancelled:
 		if !b.stopping || task.spec.Virtual || task.terminal ||
+			hasUnsettledChoreographyPickups(task) ||
 			task.claim != choreographyReplayMissingIdentity || task.result != choreographyReplayMissingIdentity || task.offeredNode != choreographyReplayMissingIdentity ||
 			task.queueFence != choreographyReplayMissingIdentity || event.PriorTaskOID != task.tip ||
 			event.GraphRootOID != b.graphRootOID || event.Package != task.spec.Package ||

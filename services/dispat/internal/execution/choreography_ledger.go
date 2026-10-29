@@ -44,6 +44,8 @@ const choreographyLedgerPageMinEvents = 1
 const choreographyLedgerRefusalStartAttempt = 0
 const choreographyLedgerKnownEventKind = true
 const choreographyLedgerUnknownEventKind = false
+const choreographyPendingEventIndexed = true
+const choreographyPendingEventNotIndexed = false
 const choreographyLedgerActiveClaim = true
 const choreographyLedgerInactiveClaim = false
 const choreographyLedgerTaskClaimKeyPrefix = "task:"
@@ -518,6 +520,10 @@ func (g *GitChoreographyPersist) persistAtomic(ctx context.Context, mutation cho
 			errors.Join(errChoreographyAtomicUnresolved,
 				joinAtomicPushErrors(pushErr, taskReadErr, slotReadErr, ledgerReadErr)))
 	}
+	indexed, indexErr := g.isPendingIndexedLocked(pending)
+	if indexErr != nil {
+		return indexErr
+	}
 	if g.opts.OnRefAdvance != nil {
 		if pending.mutation.TaskBranch != choreographyLedgerMissingIdentity {
 			g.opts.OnRefAdvance(ctx, ChoreographyRefAdvance{Branch: pending.mutation.TaskBranch,
@@ -529,6 +535,10 @@ func (g *GitChoreographyPersist) persistAtomic(ctx context.Context, mutation cho
 		}
 		g.opts.OnRefAdvance(ctx, ChoreographyRefAdvance{Branch: g.opts.Ledger.Branch,
 			OldOID: pending.oldLedger, NewOID: pending.newLedger})
+	}
+	if indexed {
+		g.pending = nil
+		return nil
 	}
 	g.ledgerTip = pending.newLedger
 	g.sequence++
@@ -582,6 +592,34 @@ func (g *GitChoreographyPersist) persistAtomic(ctx context.Context, mutation cho
 	}
 	g.pending = nil
 	return nil
+}
+
+// Remote confirmation above remains mandatory. A reader may have authenticated
+// the exact pending event while its original push acknowledgement was unknown.
+func (g *GitChoreographyPersist) isPendingIndexedLocked(pending *choreographyAtomicPush) (bool, error) {
+	sequence := pending.mutation.Event.Sequence
+	prior, knownPrior := g.eventIndex[pending.oldLedger]
+	if !knownPrior || prior+choreographyLedgerFirstSequence != sequence ||
+		pending.mutation.ExpectedLedgerOID != choreographyLedgerMissingIdentity &&
+			pending.mutation.ExpectedLedgerOID != pending.oldLedger {
+		return choreographyPendingEventNotIndexed, fmt.Errorf(choreographyLedgerPendingCASErr)
+	}
+	indexed, found := g.eventIndex[pending.newLedger]
+	if !found {
+		if g.ledgerTip != pending.oldLedger || g.sequence != prior {
+			return choreographyPendingEventNotIndexed, fmt.Errorf(choreographyLedgerPendingCASErr)
+		}
+		return choreographyPendingEventNotIndexed, nil
+	}
+	expected := pending.mutation.Event
+	expected.LedgerOID = pending.newLedger
+	if indexed != sequence || g.ledgerTip != pending.newLedger || g.sequence != sequence ||
+		sequence > uint64(len(g.events)) || sequence > uint64(len(g.eventOIDs)) ||
+		g.eventOIDs[sequence-choreographyLedgerFirstSequence] != pending.newLedger ||
+		!reflect.DeepEqual(g.events[sequence-choreographyLedgerFirstSequence], expected) {
+		return choreographyPendingEventNotIndexed, fmt.Errorf(choreographyLedgerPendingCASErr)
+	}
+	return choreographyPendingEventIndexed, nil
 }
 
 // StopClaims durably ends admission before the first node begins cancelling

@@ -189,13 +189,35 @@ func TestChoreographyPickupSuccessorWaitsForSignedCapacityOrStop(t *testing.T) {
 			case got := <-result:
 				require.Error(t, got.err)
 				require.NotErrorIs(t, got.err, ErrChoreographyPickupCapacityHeld)
+				require.True(t, got.outcome.UnresolvedOffer, "contact loss retains an unsettled accepted claim after stop")
+				require.Nil(t, got.outcome.NoClaim, "an accepted physical pickup cannot become a no-claim outcome")
 			case <-time.After(pickupBudgetWaitBound):
 				t.Fatal("explicit cancellation did not end the pending observer")
 			}
 			broker.mu.Lock()
-			defer broker.mu.Unlock()
-			require.Equal(t, capacity, broker.used[spec.Budget], "no unsettled physical charge was released")
-			require.False(t, broker.tasks[spec.Task].pickups[claim.PickupID].settled)
+			isTerminal := broker.tasks[spec.Task].terminal
+			isPendingInert := broker.tasks[spec.Task].pendingInertCancel
+			isOldSettled = broker.tasks[spec.Task].pickups[claim.PickupID].settled
+			used = broker.used[spec.Budget]
+			broker.mu.Unlock()
+			require.Equal(t, capacity, used, "no unsettled physical charge was released")
+			require.False(t, isOldSettled)
+			require.False(t, isTerminal, "stop cannot fabricate inert finality for an unsettled pickup")
+			require.False(t, isPendingInert)
+			coldPersist, err := NewGitChoreographyPersist(persist.opts)
+			require.NoError(t, err)
+			opts.Persist = coldPersist
+			cold, err := RecoverFirstNodeBroker(t.Context(), opts)
+			require.NoError(t, err)
+			require.Equal(t, capacity, cold.used[spec.Budget])
+			require.False(t, cold.tasks[spec.Task].terminal)
+			require.False(t, cold.tasks[spec.Task].pendingInertCancel)
+			require.False(t, cold.tasks[spec.Task].pickups[claim.PickupID].settled)
+			page, err := coldPersist.ReadEvents(t.Context(), ChoreographyEventCursor{}, choreographyLedgerPageMaxEvents)
+			require.NoError(t, err)
+			for _, event := range page.Events {
+				require.NotEqual(t, ChoreographyInertCancelled, event.Kind, "stop must not publish fabricated no-claim finality")
+			}
 		})
 	}
 }
