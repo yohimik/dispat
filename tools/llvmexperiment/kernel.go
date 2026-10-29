@@ -19,6 +19,9 @@ const kernelResolvedConfig = "resolved.config"
 const kernelConfiguredConfig = "configured.config"
 const kernelModulesManifest = "modules-manifest.json"
 const kernelModulesOrder = "modules.order"
+const kernelObjectFileSuffix = ".o"
+const kernelModuleFileSuffix = ".ko"
+const kernelParentPathPrefix = "../"
 
 type kernelVerification struct {
 	ConfigSHA256    string `json:"configSha256,omitempty"`
@@ -282,16 +285,18 @@ func kernelModulePaths(path string) ([]string, error) {
 		return nil, err
 	}
 	paths := []string{}
-	seen := map[string]bool{}
+	seen := map[string]struct{}{}
 	for _, entry := range strings.Fields(string(content)) {
-		if strings.HasSuffix(entry, ".o") {
-			entry = strings.TrimSuffix(entry, ".o") + ".ko"
+		normalized := filepath.Clean(entry)
+		if strings.HasSuffix(normalized, kernelObjectFileSuffix) {
+			normalized = strings.TrimSuffix(normalized, kernelObjectFileSuffix) + kernelModuleFileSuffix
 		}
-		if !strings.HasSuffix(entry, ".ko") || filepath.IsAbs(entry) || filepath.Clean(entry) != entry || strings.HasPrefix(entry, "../") || seen[entry] {
+		_, isRepeated := seen[normalized]
+		if !strings.HasSuffix(normalized, kernelModuleFileSuffix) || filepath.IsAbs(normalized) || strings.HasPrefix(normalized, kernelParentPathPrefix) || isRepeated {
 			return nil, fmt.Errorf(kernelModuleOrderError, entry)
 		}
-		seen[entry] = true
-		paths = append(paths, entry)
+		seen[normalized] = struct{}{}
+		paths = append(paths, normalized)
 	}
 	return paths, nil
 }
