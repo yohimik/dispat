@@ -12,7 +12,7 @@ import (
 // every one of them, and answer with the documented default. The other half
 // is the contract every model in this package keeps, that a marshalled model
 // is a loadable config, which for this key also has to hold that a node that
-// never heard of worker nodes marshals no execution key whatsoever.
+// never heard of choreographer nodes marshals no execution key whatsoever.
 
 func TestExecutionDefaultsAnswerAnAbsentKey(t *testing.T) {
 	// Nil is what File.Execution holds when the key is absent, and it is the
@@ -99,18 +99,18 @@ func TestExecutionResolvesStatedValues(t *testing.T) {
 
 func TestExecutionIsDistributedFollowsTheWorkerList(t *testing.T) {
 	// Delegation is the one question the release path asks before anything
-	// about execution changes, and it is the worker list that answers it: a
+	// about execution changes, and it is the choreographer list that answers it: a
 	// role, a capacity or a mailbox of its own changes nothing.
 	for name, tc := range map[string]struct {
 		config *ExecutionConfig
 		want   bool
 	}{
-		"absent":            {nil, false},
-		"empty object":      {&ExecutionConfig{}, false},
-		"named node only":   {&ExecutionConfig{Name: "build-a", Endpoint: "/srv/mail.git"}, false},
-		"empty worker list": {&ExecutionConfig{Workers: []ExecutionWorkerConfig{}}, false},
-		"one worker":        {&ExecutionConfig{Workers: []ExecutionWorkerConfig{{Name: "a"}}}, true},
-		"late worker only":  {&ExecutionConfig{Workers: []ExecutionWorkerConfig{{Name: "a", LateJoin: true}}}, true},
+		"absent":                   {nil, false},
+		"empty object":             {&ExecutionConfig{}, false},
+		"named node only":          {&ExecutionConfig{Name: "build-a", Endpoint: "/srv/mail.git"}, false},
+		"empty choreographer list": {&ExecutionConfig{Workers: []ExecutionWorkerConfig{}}, false},
+		"one choreographer":        {&ExecutionConfig{Workers: []ExecutionWorkerConfig{{Name: "a"}}}, true},
+		"late choreographer only":  {&ExecutionConfig{Workers: []ExecutionWorkerConfig{{Name: "a", LateJoin: true}}}, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := tc.config.IsDistributed(); got != tc.want {
@@ -123,7 +123,7 @@ func TestExecutionIsDistributedFollowsTheWorkerList(t *testing.T) {
 func TestExecutionModelRoundTrip(t *testing.T) {
 	// The json tag is the config file's key, so a marshalled model is a
 	// loadable dispat.json. Node names keep their case through the file,
-	// which is the whole reason workers are a list of objects rather than a
+	// which is the whole reason choreographers are a list of objects rather than a
 	// map, and a stated capacity of 0 survives as a stated 0 because the
 	// field is a pointer.
 	f := File{
@@ -162,22 +162,22 @@ func TestExecutionModelRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("the execution key must marshal back into a loadable file: %s", data)
 	}
-	for _, key := range []string{"concurrency", "name", "endpoint", "secretEnv", "identityKeyEnv", "retryAfterUncertainAttempt", "workers", "timeouts", "transfer"} {
+	for _, key := range []string{"concurrency", "name", "endpoint", "secretEnv", "identityKeyEnv", "retryAfterUncertainAttempt", "choreographers", "timeouts", "transfer"} {
 		if _, stated := execution[key]; !stated {
 			t.Errorf("execution is missing key %q: %v", key, execution)
 		}
 	}
-	workers, ok := execution["workers"].([]any)
-	if !ok || len(workers) != 1 {
-		t.Fatalf("workers must marshal as a list: %v", execution["workers"])
+	choreographers, ok := execution["choreographers"].([]any)
+	if !ok || len(choreographers) != 1 {
+		t.Fatalf("choreographers must marshal as a list: %v", execution["choreographers"])
 	}
-	if name := workers[0].(map[string]any)["name"]; name != "Build-B" {
+	if name := choreographers[0].(map[string]any)["name"]; name != "Build-B" {
 		t.Errorf("node name case lost in the round trip: %v", name)
 	}
-	if lateJoin := workers[0].(map[string]any)["lateJoin"]; lateJoin != true {
+	if lateJoin := choreographers[0].(map[string]any)["lateJoin"]; lateJoin != true {
 		t.Errorf("late admission policy lost in the round trip: %v", lateJoin)
 	}
-	if key := workers[0].(map[string]any)["identityPublicKey"]; key != "public-key-model-roundtrip" {
+	if key := choreographers[0].(map[string]any)["identityPublicKey"]; key != "public-key-model-roundtrip" {
 		t.Errorf("late admission public identity key lost in the round trip: %v", key)
 	}
 	// A stated capacity of 0 is a refusal the loader owes the reader, so the
@@ -189,7 +189,7 @@ func TestExecutionModelRoundTrip(t *testing.T) {
 	if want := `{"execution":{"concurrency":0}}`; string(zero) != want {
 		t.Errorf("a stated zero capacity must reach the file:\n got %s\nwant %s", zero, want)
 	}
-	// A configuration that never heard of worker nodes writes no execution
+	// A configuration that never heard of choreographer nodes writes no execution
 	// key at all, which is what keeps every existing file byte for byte what
 	// it was.
 	empty, err := json.Marshal(File{})

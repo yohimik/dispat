@@ -15,7 +15,7 @@ func TestPublicAPIModelRunOnlyPreservesStagePlacement(t *testing.T) {
 		name, input, output, build, publish string
 	}{
 		{"one placement", `"orchestrator"`, `"orchestrator"`, "orchestrator", "orchestrator"},
-		{"stage pair", `["worker","orchestrator"]`, `["worker","orchestrator"]`, "worker", "orchestrator"},
+		{"stage pair", `["choreographer","orchestrator"]`, `["choreographer","orchestrator"]`, "choreographer", "orchestrator"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var placement models.RunOnly
@@ -44,11 +44,11 @@ func TestPublicAPIModelRunOnlyPreservesStagePlacement(t *testing.T) {
 		t.Fatal("unstated placement did not permit either machine")
 	}
 	for _, tc := range []struct{ input, want string }{
-		{`["worker"]`, "both stages"},
-		{`["worker","orchestrator","both"]`, "both stages"},
-		{`["worker",42]`, "runOnly[1]"},
-		{`["Worker","orchestrator"]`, `runOnly[0]`},
-		{`["choreographer","orchestrator"]`, `runOnly[0]`},
+		{`["choreographer"]`, "both stages"},
+		{`["choreographer","orchestrator","both"]`, "both stages"},
+		{`["choreographer",42]`, "runOnly[1]"},
+		{`["Choreographer","orchestrator"]`, `runOnly[0]`},
+		{`["worker","orchestrator"]`, `runOnly[0]`},
 		{`"local"`, "is not a placement"},
 		{`42`, "wants"},
 		{`{`, "unexpected end"},
@@ -58,7 +58,7 @@ func TestPublicAPIModelRunOnlyPreservesStagePlacement(t *testing.T) {
 			t.Errorf("decode %s = %v; want %q", tc.input, err, tc.want)
 		}
 	}
-	if _, err := models.NormalizeRunOnly([]string{"worker", "orchestrator"}, "spaces[ops].runOnly"); err != nil {
+	if _, err := models.NormalizeRunOnly([]string{"choreographer", "orchestrator"}, "spaces[ops].runOnly"); err != nil {
 		t.Fatalf("typed YAML pair: %v", err)
 	}
 }

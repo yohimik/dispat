@@ -31,7 +31,7 @@ func TestRunOnlyReadsBothShapes(t *testing.T) {
 			want:     RunOnly{Build: RunOnlyBoth, Publish: RunOnlyBoth},
 		},
 		"a pair naming each stage": {
-			document: `["worker", "orchestrator"]`,
+			document: `["choreographer", "orchestrator"]`,
 			want:     RunOnly{Build: RunOnlyWorker, Publish: RunOnlyOrchestrator},
 		},
 		"a pair whose halves agree": {
@@ -59,17 +59,17 @@ func TestRunOnlyRefusesWhatTheKeyDoesNotSay(t *testing.T) {
 		raw  any
 		want string
 	}{
-		"a misspelled value":         {raw: "orchestartor", want: "is not a placement"},
-		"a value of another key":     {raw: "any", want: "is not a placement"},
-		"a list of one":              {raw: []any{"worker"}, want: "states both stages"},
-		"a list of three":            {raw: []any{"worker", "worker", "worker"}, want: "states both stages"},
-		"an empty list":              {raw: []any{}, want: "states both stages"},
-		"a misspelled stage value":   {raw: []any{"worker", "orchestartor"}, want: "is not a placement"},
-		"future choreographer token": {raw: []any{"choreographer", "orchestrator"}, want: "is not a placement"},
-		"a number where a word is":   {raw: []any{"worker", 3}, want: "wants"},
-		"an object where a word is":  {raw: map[string]any{"build": "worker"}, want: "wants"},
-		"worker for both stages":     {raw: "worker", want: "[worker, orchestrator]"},
-		"worker publish in a pair":   {raw: []any{"both", "worker"}, want: "publication runs on the orchestrator"},
+		"a misspelled value":              {raw: "orchestartor", want: "is not a placement"},
+		"a value of another key":          {raw: "any", want: "is not a placement"},
+		"a list of one":                   {raw: []any{"choreographer"}, want: "states both stages"},
+		"a list of three":                 {raw: []any{"choreographer", "choreographer", "choreographer"}, want: "states both stages"},
+		"an empty list":                   {raw: []any{}, want: "states both stages"},
+		"a misspelled stage value":        {raw: []any{"choreographer", "orchestartor"}, want: "is not a placement"},
+		"removed worker token":            {raw: []any{"worker", "orchestrator"}, want: "worker was removed"},
+		"a number where a word is":        {raw: []any{"choreographer", 3}, want: "wants"},
+		"an object where a word is":       {raw: map[string]any{"build": "choreographer"}, want: "wants"},
+		"choreographer for both stages":   {raw: "choreographer", want: "[choreographer, orchestrator]"},
+		"choreographer publish in a pair": {raw: []any{"both", "choreographer"}, want: "publication runs on the orchestrator"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := NormalizeRunOnly(row.raw, `packages["core"].runOnly`)
@@ -100,7 +100,7 @@ func TestRunOnlyWritesTheShortestShape(t *testing.T) {
 		},
 		"the stages differ": {
 			value: RunOnly{Build: RunOnlyWorker, Publish: RunOnlyOrchestrator},
-			want:  `["worker","orchestrator"]`,
+			want:  `["choreographer","orchestrator"]`,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -164,7 +164,7 @@ func TestRunOnlyLevelsTellAStatementFromSilence(t *testing.T) {
 			if stated := runOnlyOf(level); stated != nil {
 				t.Fatalf("%s read silence as %+v", name, stated)
 			}
-			if err := json.Unmarshal([]byte(`{"runOnly": ["worker", "orchestrator"]}`), level); err != nil {
+			if err := json.Unmarshal([]byte(`{"runOnly": ["choreographer", "orchestrator"]}`), level); err != nil {
 				t.Fatalf("reading %s: %v", name, err)
 			}
 			stated := runOnlyOf(level)
@@ -175,7 +175,7 @@ func TestRunOnlyLevelsTellAStatementFromSilence(t *testing.T) {
 			if err != nil {
 				t.Fatalf("writing %s: %v", name, err)
 			}
-			if !strings.Contains(string(written), `"runOnly":["worker","orchestrator"]`) {
+			if !strings.Contains(string(written), `"runOnly":["choreographer","orchestrator"]`) {
 				t.Fatalf("%s wrote the stated value back as %s", name, written)
 			}
 		})

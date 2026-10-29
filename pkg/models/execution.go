@@ -37,7 +37,7 @@ const (
 	// knowing what the node runs.
 	DefaultExecutionConcurrency = 1
 	// DefaultExecutionMaxAttempts is the total accepted pickups permitted for
-	// one interpretation task when no attempt policy is stated.
+	// one delegated task when no attempt policy is stated.
 	DefaultExecutionMaxAttempts = 1
 	// MaximumExecutionMaxAttempts bounds signed task history and replay work.
 	MaximumExecutionMaxAttempts = 64
@@ -90,10 +90,10 @@ const (
 // makes distributed execution an addition rather than a new code path every
 // existing repository travels.
 type ExecutionConfig struct {
-	// MaxAttempts bounds total accepted pickups of a delegated interpretation
+	// MaxAttempts bounds total accepted pickups of a delegated
 	// task. Stating more than one asserts that a settled failed command and its
 	// hooks can safely be repeated. Contact-loss retry additionally requires
-	// RetryAfterUncertainAttempt. Compilation keeps its established policy.
+	// RetryAfterUncertainAttempt.
 	MaxAttempts *int `json:"maxAttempts,omitempty"`
 	// RetryAfterUncertainAttempt is an operator assertion that every delegated
 	// command in this run can be repeated after uncertain external effects
@@ -131,11 +131,13 @@ type ExecutionConfig struct {
 	// map so that node names keep the case the file wrote them in: dispat
 	// folds every map key it decodes. An empty or absent list preserves local
 	// execution.
+	// The Go field name is retained for source compatibility; configuration
+	// JSON spells this field execution.choreographers.
 	//
 	// A present but empty list is the one state this field cannot round-trip:
 	// omitempty drops it on the way out, and it means what an absent list
 	// means anyway.
-	Workers []ExecutionWorkerConfig `json:"workers,omitempty"`
+	Workers []ExecutionWorkerConfig `json:"choreographers,omitempty"`
 	// Timeouts bounds the waits a distributed run makes. nil means every
 	// default; see ExecutionTimeoutsConfig.
 	Timeouts *ExecutionTimeoutsConfig `json:"timeouts,omitempty"`
@@ -145,7 +147,7 @@ type ExecutionConfig struct {
 }
 
 // ResolveMaxAttempts preserves an explicit zero for the loader to reject.
-// The optional interpretation setting defaults to one total accepted pickup.
+// Every execution mode defaults to one total accepted pickup.
 func (c *ExecutionConfig) ResolveMaxAttempts() int {
 	if c == nil || c.MaxAttempts == nil {
 		return DefaultExecutionMaxAttempts
@@ -153,7 +155,7 @@ func (c *ExecutionConfig) ResolveMaxAttempts() int {
 	return *c.MaxAttempts
 }
 
-// ExecutionWorkerConfig is one entry of `execution.workers`: a
+// ExecutionWorkerConfig is one entry of `execution.choreographers`: a
 // node that may execute tasks, and the mailbox repository it reads
 // them from. Name is required; an empty Endpoint reaches the orchestrator's
 // release remote (the push URL its lock is taken on; the entry repository's
