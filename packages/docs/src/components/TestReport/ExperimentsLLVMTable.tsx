@@ -13,7 +13,8 @@ const NO_ROWS_COUNT = 0;
 
 export const ExperimentsLLVMTable: FC<ExperimentsLLVMTableProps> = (props) => {
   const {} = props;
-  const rows = llvmRows({cells: useExperimentCells()});
+  const cells = useExperimentCells();
+  const rows = llvmRows({cells});
   if (rows.length === NO_ROWS_COUNT) {
     return <p>No LLVM build campaign has been recorded for this version.</p>;
   }

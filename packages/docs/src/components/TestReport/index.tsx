@@ -26,6 +26,7 @@ import {PlanTable} from './PlanTable';
 import styles from './styles.module.css';
 import {TasksTable} from './TasksTable';
 import {TimingTable} from './TimingTable';
+import {ExecutionMeasurement} from './ExecutionMeasurement';
 
 // The coverage, test-results, benchmarks and experiments pages, insofar as
 // they are numbers.
@@ -666,6 +667,12 @@ export function ExperimentsTable(): React.ReactElement | null {
 export function useExperimentCells(): ExperimentCell[] {
   const {report, evidence} = useReportState();
   return (report?.experiments ?? evidence?.experimentResults)?.cells ?? [];
+}
+
+export function ExperimentsMeasurements(): React.ReactElement | null {
+  const cells = useExperimentCells().filter((cell) => cell.executionMeasurement);
+  if (cells.length === 0) return null;
+  return <>{cells.map((cell) => <ExecutionMeasurement key={cell.id} measurement={cell.executionMeasurement!} />)}</>;
 }
 
 /**

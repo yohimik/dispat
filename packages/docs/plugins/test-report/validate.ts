@@ -1,3 +1,4 @@
+import {validateExecutionMeasurement} from './measurement.ts';
 import type {
   Benchmark,
   BenchGroup,
@@ -519,6 +520,7 @@ function experimentCell(value: unknown, at: string): ExperimentCell {
     ...(o.timing === undefined ? {} : {timing: experimentTiming({value: o.timing, at: `${at}.timing`})}),
     ...(o.plan === undefined ? {} : {plan: experimentPlan({value: o.plan, at: `${at}.plan`})}),
     ...(llvm === undefined ? {} : {llvm}),
+    ...(o.executionMeasurement === undefined ? {} : {executionMeasurement: validateExecutionMeasurement({value: o.executionMeasurement, at: `${at}.executionMeasurement`})}),
   };
 }
 
@@ -531,7 +533,7 @@ function experimentLLVM(options: ExperimentFieldOptions): ExperimentLLVM {
   if (!['completed', 'failed', 'blocked', 'unsupported'].includes(status)) {
     throw new ReportError(`${at}.status`, 'completed, failed, blocked, or unsupported', status);
   }
-  if (!['compilation', 'interpretation', 'hybrid', 'distributed'].includes(mode)) {
+  if (!['compilation', 'interpretation', 'hybrid', 'distributed', 'manual-gcp-split'].includes(mode)) {
     throw new ReportError(`${at}.mode`, 'a distribution mode', mode);
   }
   if (profile !== 'full' && profile !== 'smoke') {

@@ -301,6 +301,7 @@ export interface ExperimentCell {
   timing?: ExperimentTiming;
   plan?: ExperimentPlan;
   llvm?: ExperimentLLVM;
+  executionMeasurement?: import('./measurement').ExecutionMeasurement;
 }
 
 export interface ExperimentLLVMArtifact {
@@ -313,7 +314,7 @@ export interface ExperimentLLVMArtifact {
 export interface ExperimentLLVM {
   status: 'completed' | 'failed' | 'blocked' | 'unsupported';
   reason?: string;
-  mode: 'compilation' | 'interpretation' | 'hybrid' | 'distributed';
+  mode: 'compilation' | 'interpretation' | 'hybrid' | 'distributed' | 'manual-gcp-split';
   profile: 'full' | 'smoke';
   llvmVersion: string;
   sourceRevision: string;
