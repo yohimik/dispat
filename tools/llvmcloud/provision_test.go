@@ -73,7 +73,7 @@ func TestBootImageResolutionUsesExactPinWithoutFamilyFallback(t *testing.T) {
 			calls := 0
 			d.runCommand = func(_ context.Context, request invocation) ([]byte, error) {
 				calls++
-				if !slices.Contains(request.Args, "describe-from-family") {
+				if request.Name != "gcloud" || !slices.Equal(request.Args, []string{"--quiet", "--project", "ubuntu-os-cloud", "compute", "images", "describe-from-family", "ubuntu-2404-lts-amd64", "--format=value(selfLink)"}) {
 					t.Fatalf("unexpected resolver command %+v", request)
 				}
 				return []byte(scenario.response), scenario.failure

@@ -144,7 +144,7 @@ func (d *driver) resolveBootImage(ctx context.Context) (string, error) {
 	if d.settings.BootImage != "" {
 		return d.settings.BootImage, nil
 	}
-	resolved, err := d.gcloud(ctx, "compute", "images", "describe-from-family", imageFamily, "--image-project", imageProject, "--format=value(selfLink)")
+	resolved, err := d.runCommand(ctx, invocation{Name: "gcloud", Args: []string{"--quiet", "--project", imageProject, "compute", "images", "describe-from-family", imageFamily, "--format=value(selfLink)"}})
 	if err != nil {
 		return "", err
 	}
