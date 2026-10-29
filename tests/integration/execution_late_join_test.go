@@ -680,7 +680,7 @@ func TestExecutionLateWorkerDeadlineSignsNoClaimWithoutResult(t *testing.T) {
 		cfg.IdentityKeyEnv = executionLateJoinIdentitySeedEnv
 	}))
 	keyless := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
-		"worker", "--root", keylessRoot, "--state-dir", t.TempDir(), "--idle-timeout", "5")
+		"choreographer", "--root", keylessRoot, "--state-dir", t.TempDir(), "--idle-timeout", "5")
 	require.NotEqual(t, 0, keyless.Code, "the shared message secret cannot authenticate a late join")
 	require.Contains(t, diagnosticText(keyless), "identity", "the keyless worker is refused by the late-join path")
 	var expired, settled executionLateJoinLedgerEvent

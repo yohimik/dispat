@@ -370,7 +370,7 @@ permissions:
   contents: write
 
 jobs:
-  workers:
+  choreographers:
     strategy:
       matrix:
         node: [build-a, build-b]
@@ -378,7 +378,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: yohimik/dispat@v1
-      - run: dispat worker --config .dispat/${{ matrix.node }}.yaml --idle-timeout 900
+      - run: dispat choreographer --config .dispat/${{ matrix.node }}.yaml --idle-timeout 900
         env:
           DISPAT_EXECUTION_SECRET: ${{ secrets.DISPAT_EXECUTION_SECRET }}
 
@@ -400,7 +400,7 @@ The worker and release jobs need to agree on these settings:
 - **Both jobs reach the repository being released and hold the same signing secret.** The release job's
   `execution` object lists `build-a` and `build-b` by name alone, so their coordination branches go to the remote the
   release takes its lock on; each worker's file names itself and that repository as its endpoint. A job that creates
-  its workers with names the committed file cannot know passes them as `--worker name` instead.
+  its workers with names the committed file cannot know passes them as `--choreographer name` instead.
 - **A hosted runner needs no inbound network.** The transport is Git only: a worker polls the repository and pushes
   its answers back, so it serves from behind NAT with no port open and no address to reach it at.
 - **A worker's Git credential writes coordination branches and nothing else.** The worker jobs reach the repository
@@ -427,11 +427,11 @@ cluster that adds and removes machines for the pool.
 
 A job can create a worker machine for one run and remove it afterwards. dispat's own release uses this approach for
 its full test suite. The job that runs `dispat run tests --since all` before a
-release creates one Compute Engine instance, starts `dispat worker` on it with a signing secret generated for that run
+release creates one Compute Engine instance, starts `dispat choreographer` on it with a signing secret generated for that run
 alone, and names the machine on the command line by name alone:
 
 ```sh
-dispat run tests --since all --worker "ci-worker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+dispat run tests --since all --choreographer "ci-worker-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 ```
 
 The link states no endpoint, so the machine's coordination branches go to the repository itself: the job reaches it

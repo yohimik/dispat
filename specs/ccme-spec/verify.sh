@@ -5,7 +5,7 @@ set -eu
 
 cd "$(dirname "$0")"
 
-for file in VERSION SPEC.md LICENSE VCS-PROTOCOL.md ROLLBACK.md DESIGN-HISTORY.md; do
+for file in VERSION SPEC.md LICENSE VCS-PROTOCOL.md ROLLBACK.md DESIGN-HISTORY.md EXPERIMENT-MEASUREMENTS.md; do
   if [ -L "$file" ] || [ ! -f "$file" ]; then
     echo "refusing to verify symlinked or non-regular $file" >&2
     exit 1
@@ -65,6 +65,7 @@ grep -Fq '### 27.11 Linked peer topology' SPEC.md
 grep -Fq '(./VCS-PROTOCOL.md)' SPEC.md
 grep -Fq '(./ROLLBACK.md)' SPEC.md
 grep -Fq '(./DESIGN-HISTORY.md)' SPEC.md
+grep -Fq '(./EXPERIMENT-MEASUREMENTS.md)' SPEC.md
 grep -Fq 'repository-qualified revision identity' SPEC.md
 
 echo "CCME specification $version is internally consistent"

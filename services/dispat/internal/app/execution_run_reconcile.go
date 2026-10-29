@@ -162,7 +162,7 @@ func (a *App) reconcilePriorSweep(ctx context.Context,
 		return fmt.Errorf(retainedSweepBootstrapUnauthenticErrorFormat, err)
 	}
 	binding := bootstrap.ChoreographyRunBinding
-	if (bootstrap.Mode != retainedRunCompilationModeName && bootstrap.Mode != interpretedModeName) || binding.Run != identity.Run ||
+	if (bootstrap.Mode != retainedRunCompilationModeName && bootstrap.Mode != interpretedModeName && bootstrap.Mode != hybridModeName) || binding.Run != identity.Run ||
 		binding.Generation != identity.Generation ||
 		bootstrap.ReturnEndpoint != identity.Endpoint ||
 		bootstrap.ReturnCertSHA256 != identity.CertPin {
@@ -209,6 +209,13 @@ func (a *App) reconcilePriorSweep(ctx context.Context,
 	}
 	applyChoreographyRetrySafety(recomputedSpecs, bootstrap.JoinPolicy.RetryAfterUncertainAttempt)
 	applyChoreographyAttemptLimit(recomputedSpecs, bootstrap.JoinPolicy)
+	if bootstrap.Mode == hybridModeName {
+		if err := execution.BindChoreographyHybridPolicy(execution.ChoreographyLogicalGraphInventory{
+			Binding: binding, SemanticGraphDigest: retained.Carrier.SemanticGraphDigest, Tasks: recomputedSpecs,
+		}, &bootstrap.PinnedInputs); err != nil {
+			return err
+		}
+	}
 	if !slices.Equal(budgets, roster.Budgets) {
 		return fmt.Errorf(retainedSweepRosterPolicyMismatchError)
 	}

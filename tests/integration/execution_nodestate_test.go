@@ -72,7 +72,7 @@ func TestExecutionWorkerStateRefusals(t *testing.T) {
 			tc.prepare(t, state)
 
 			res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret},
-				"worker", "--root", root, "--state-dir", state, "--idle-timeout", "1")
+				"choreographer", "--root", root, "--state-dir", state, "--idle-timeout", "1")
 
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			_, isRefused := executionLine(res, "cannot serve tasks")
@@ -100,7 +100,7 @@ func TestExecutionWorkerKeepsItsStateUnderTheCacheDirectory(t *testing.T) {
 	home := t.TempDir()
 
 	res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret, "HOME=" + home},
-		"worker", "--root", root, "--idle-timeout", "1")
+		"choreographer", "--root", root, "--idle-timeout", "1")
 
 	require.Equal(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	started, isStarted := executionLine(res, "worker started")
@@ -111,7 +111,7 @@ func TestExecutionWorkerKeepsItsStateUnderTheCacheDirectory(t *testing.T) {
 		"and named it after itself, so two nodes on one machine keep their records apart")
 
 	homeless := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret, "HOME=", "XDG_CACHE_HOME="},
-		"worker", "--root", root, "--idle-timeout", "1")
+		"choreographer", "--root", root, "--idle-timeout", "1")
 	assert.NotEqual(t, 0, homeless.Code, "stdout:\n%s\nstderr:\n%s", homeless.Stdout, homeless.Stderr)
 	assert.True(t, harness.IsCodePresent(executionEvents(homeless), executionRefusalCode),
 		"stdout:\n%s", homeless.Stdout)

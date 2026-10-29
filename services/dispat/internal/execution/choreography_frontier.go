@@ -992,6 +992,7 @@ func (f *ChoreographyFrontier) ApplyEventPage(page ChoreographyEventPage) error 
 			}
 		case ChoreographyInertCancelled:
 			if f.graphRootOID == frontierNoGraphRootOID || !f.stopped || event.GraphRootOID != f.graphRootOID ||
+				hasUnsettledFrontierPickups(task) ||
 				task.state == frontierBusy || task.state == frontierTerminal ||
 				event.PriorTaskOID != task.tipOID || event.Node != frontierNoNode ||
 				event.Succeeded || event.OutputOID != frontierNoOutputOID || event.BlockedBy != choreographyInertCancelCause ||

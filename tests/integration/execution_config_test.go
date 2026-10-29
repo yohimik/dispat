@@ -45,8 +45,7 @@ func executionLocalRepo(t *testing.T, writeConfig func(*harness.Repo)) *harness.
 	return r
 }
 
-// The worker serving command cannot be mistaken for a script of the same
-// name. The script remains available through the explicit run command.
+// The removed command must not fall through to a script of the same name.
 func TestExecutionWorkerCommandDoesNotRunScript(t *testing.T) {
 	r := harness.New(t)
 	r.SeedPackage("packages", "core")
@@ -57,8 +56,8 @@ func TestExecutionWorkerCommandDoesNotRunScript(t *testing.T) {
 
 	serving := r.CommandEnv(nil, "worker")
 	require.NotEqual(t, 0, serving.Code, "stdout:\n%s\nstderr:\n%s", serving.Stdout, serving.Stderr)
-	requireExecutionRefusal(t, serving, executionRefusalCode, executionConfigurationCategory)
-	assert.Contains(t, diagnosticText(serving), "execution.name", "the command reached worker startup")
+	assert.Equal(t, 2, serving.Code)
+	assert.Contains(t, diagnosticText(serving), "use dispat choreographer")
 	assert.NoFileExists(t, r.Path("packages", "core", "worker-script-ran"))
 
 	explicit := r.CommandEnv(nil, "run", "worker", "--since", "all")
@@ -67,19 +66,16 @@ func TestExecutionWorkerCommandDoesNotRunScript(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// The CLI keeps the worker spelling and refuses hybrid execution.
-// Future names and unsupported modes are refused by the real executable before a hook
-// can run, even when the repository would otherwise be releasable.
+// Removed names and unknown modes fail before task effects.
 func TestExecutionFutureNamesAndModesRefuseBeforeEffects(t *testing.T) {
 	r := executionLocalRepo(t, func(r *harness.Repo) {
 		cfg := libsConfig("printf built > future-mode-build-ran", 1)
 		r.WriteConfigModel(cfg)
 	})
 	for _, args := range [][]string{
-		{"release", "--choreographer", "future"},
-		{"release", "--distribution-mode", "hybrid"},
+		{"release", "--worker", "old-node"},
 		{"release", "--distribution-mode", "mixed"},
-		{"run", "build", "--since", "all", "--distribution-mode", "hybrid"},
+		{"run", "build", "--since", "all", "--distribution-mode", "mixed"},
 	} {
 		res := r.CommandEnv(nil, args...)
 		require.NotEqual(t, 0, res.Code, "args: %v\nstdout:\n%s\nstderr:\n%s", args, res.Stdout, res.Stderr)
@@ -169,7 +165,7 @@ func TestExecutionAbsentKeepsLocalReleaseUnchanged(t *testing.T) {
 			data, err := json.Marshal(cfg)
 			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(data, &raw))
-			raw["execution"] = map[string]any{"workers": []any{}}
+			raw["execution"] = map[string]any{"choreographers": []any{}}
 			r.WriteConfigRaw(raw)
 		}},
 		{"an orchestrator with a capacity", writeTyped(&models.ExecutionConfig{
@@ -315,51 +311,51 @@ func TestExecutionConfigRefusals(t *testing.T) {
 		"a link with no name": executionStated(&models.ExecutionConfig{
 			SecretEnv: "DISPAT_IT_EXECUTION_SECRET",
 			Workers:   []models.ExecutionWorkerConfig{{Endpoint: "/srv/a.git"}},
-		}, "execution.workers[0]: name is required"),
+		}, "execution.choreographers[0]: name is required"),
 		"a link name that is not one": executionStated(&models.ExecutionConfig{
 			SecretEnv: "DISPAT_IT_EXECUTION_SECRET",
 			Workers:   []models.ExecutionWorkerConfig{{Name: "build/a", Endpoint: "/srv/a.git"}},
-		}, "execution.workers[0]: name"),
+		}, "execution.choreographers[0]: name"),
 		"two links naming one node": executionStated(&models.ExecutionConfig{
 			SecretEnv: "DISPAT_IT_EXECUTION_SECRET",
 			Workers: []models.ExecutionWorkerConfig{
 				{Name: "build-a", Endpoint: "/srv/a.git"},
 				{Name: "BUILD-A", Endpoint: "/srv/b.git"},
 			},
-		}, "execution.workers[1]: name"),
+		}, "execution.choreographers[1]: name"),
 		"links with no signing secret": executionStated(&models.ExecutionConfig{
 			Workers: []models.ExecutionWorkerConfig{{Name: "build-a", Endpoint: "/srv/a.git"}},
-		}, "execution.secretEnv is required with execution.workers"),
+		}, "execution.secretEnv is required with execution.choreographers"),
 		"a mailbox with credentials": executionStated(
-			executionLink("https://user:secret@git.example.test/a.git"), "execution.workers[0]: endpoint"),
+			executionLink("https://user:secret@git.example.test/a.git"), "execution.choreographers[0]: endpoint"),
 		"a mailbox with a token in the https user half": executionStated(
-			executionLink("https://token@git.example.test/a.git"), "execution.workers[0]: endpoint"),
+			executionLink("https://token@git.example.test/a.git"), "execution.choreographers[0]: endpoint"),
 		"a mailbox with a password beside the ssh account": executionStated(
-			executionLink("ssh://git:secret@git.example.test/a.git"), "execution.workers[0]: endpoint"),
+			executionLink("ssh://git:secret@git.example.test/a.git"), "execution.choreographers[0]: endpoint"),
 		"a mailbox with a password in the scp form": executionStated(
-			executionLink("git:secret@git.example.test:a.git"), "execution.workers[0]: endpoint"),
+			executionLink("git:secret@git.example.test:a.git"), "execution.choreographers[0]: endpoint"),
 		"a mailbox with a query": executionStated(
-			executionLink("https://git.example.test/a.git?token=x"), "execution.workers[0]: endpoint"),
+			executionLink("https://git.example.test/a.git?token=x"), "execution.choreographers[0]: endpoint"),
 		"a mailbox with a fragment": executionStated(
-			executionLink("https://git.example.test/a.git#main"), "execution.workers[0]: endpoint"),
+			executionLink("https://git.example.test/a.git#main"), "execution.choreographers[0]: endpoint"),
 		"a mailbox that would be read as an option": executionStated(
-			executionLink("--upload-pack=touch"), "execution.workers[0]: endpoint"),
+			executionLink("--upload-pack=touch"), "execution.choreographers[0]: endpoint"),
 		"a mailbox naming a transport helper": executionStated(
-			executionLink("ext::sh -c touch"), "execution.workers[0]: endpoint"),
+			executionLink("ext::sh -c touch"), "execution.choreographers[0]: endpoint"),
 		"a mailbox over http": executionStated(
-			executionLink("http://git.example.test/a.git"), "execution.workers[0]: endpoint"),
+			executionLink("http://git.example.test/a.git"), "execution.choreographers[0]: endpoint"),
 		"a mailbox over the git protocol": executionStated(
-			executionLink("git://git.example.test/a.git"), "execution.workers[0]: endpoint"),
+			executionLink("git://git.example.test/a.git"), "execution.choreographers[0]: endpoint"),
 		"a mailbox over an unknown scheme": executionStated(
-			executionLink("ftp://git.example.test/a.git"), "execution.workers[0]: endpoint"),
+			executionLink("ftp://git.example.test/a.git"), "execution.choreographers[0]: endpoint"),
 		"a mailbox that is not a URL": executionStated(
-			executionLink("https://exa mple.test/a.git"), "execution.workers[0]: endpoint"),
+			executionLink("https://exa mple.test/a.git"), "execution.choreographers[0]: endpoint"),
 		"a mailbox with no host": executionStated(
-			executionLink("https:///a.git"), "execution.workers[0]: endpoint"),
+			executionLink("https:///a.git"), "execution.choreographers[0]: endpoint"),
 		"a mailbox written as a relative path": executionStated(
-			executionLink("mailboxes/a.git"), "execution.workers[0]: endpoint"),
+			executionLink("mailboxes/a.git"), "execution.choreographers[0]: endpoint"),
 		"a mailbox carrying both a password and a token": executionStated(
-			executionLink("git:secret@git.example.test:a.git?token=x"), "execution.workers[0]: endpoint"),
+			executionLink("git:secret@git.example.test:a.git?token=x"), "execution.choreographers[0]: endpoint"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := libsConfig(echoBuild, 1)
@@ -378,7 +374,8 @@ func TestExecutionConfigRefusals(t *testing.T) {
 // A static role cannot silently remove first-node authority.
 func TestExecutionStaticRoleIsRefused(t *testing.T) {
 	for name, legacy := range map[string]map[string]any{
-		"static role": {"role": "worker"},
+		"static role":   {"role": "worker"},
+		"removed links": {"workers": []any{}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := harness.New(t)
@@ -393,7 +390,7 @@ func TestExecutionStaticRoleIsRefused(t *testing.T) {
 			r.Commit("feat(core): bootstrap")
 			res := r.Status("--log-format", "json")
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.Contains(t, res.Stderr, "unknown key")
+			assert.Contains(t, res.Stderr, "was removed")
 			for key := range legacy {
 				assert.Contains(t, res.Stderr, "execution."+key)
 			}
@@ -426,7 +423,7 @@ func TestExecutionRefusalNeverPrintsACredential(t *testing.T) {
 			text := diagnosticText(res)
 			assert.NotContains(t, text, "hunter2")
 			assert.NotContains(t, text, "swordfish")
-			assert.Contains(t, text, "execution.workers[0]: endpoint")
+			assert.Contains(t, text, "execution.choreographers[0]: endpoint")
 		})
 	}
 }

@@ -668,6 +668,7 @@ func TestExecutionTaskTimeoutCancelsAndSettlesAttempt(t *testing.T) {
 		return executionTaskTimeoutScript
 	}, func(cfg *models.File) {
 		cfg.Execution.RetryAfterUncertainAttempt = true
+		cfg.Execution.MaxAttempts = models.Int(3)
 		cfg.Concurrency = []int{1, 1}
 		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 3, Cancel: executionTaskTimeoutCancelSeconds}
 		executionOneWorker(cfg)

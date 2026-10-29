@@ -1,6 +1,6 @@
 package config
 
-// The `execution` key: this node's capacity and its linked workers.
+// The `execution` key: this node's capacity and its linked choreographers.
 //
 // Two things make the key unlike every other object in the language, and both
 // are enforced here. It is a node-startup setting, so its line lives in
@@ -59,14 +59,14 @@ func LoadResolvedNode(found ResolvedFile, flags *pflag.FlagSet) (*File, error) {
 
 // DiagnosticExecution reports a configuration no distributed run could be
 // executed under. As the configuration is read, that is an `execution` object
-// with an unknown role, a capacity that is not a capacity, a worker link that
+// with an unknown role, a capacity that is not a capacity, a choreographer link that
 // names no node or states an endpoint no mailbox could be, or a missing
 // signing secret; and it is a `buildOutputs` or `buildPlatforms` list that
 // does not describe a place a build product can travel from, two packages that
 // claimed one folder included. A run that dispatches reports the same code for
 // what only it can decide: before any lock, a lock bypass, a lock it could not
 // read back, a missing secret or a release remote a link with no endpoint may
-// not reach; and once the plan is fixed, a stage pinned to a worker it has
+// not reach; and once the plan is fixed, a stage pinned to a choreographer it has
 // none of, a platform no node satisfies or a node that failed preflight. No
 // command has run whichever it is.
 const DiagnosticExecution = "E225"
@@ -82,6 +82,67 @@ const invalidExecutionIdentityKeyEnvErrorFormat = "execution.identityKeyEnv %q i
 const invalidExecutionAdmissionTimeoutErrorFormat = "execution.timeouts.admission must be <= %d seconds, got %d"
 const invalidExecutionMaxAttemptsErrorFormat = "execution.maxAttempts must be between 1 and %d total accepted pickups, got %d"
 
+func refuseRemovedExecutionKeys(raw map[string]any) error {
+	return refuseRemovedExecutionKeyPath(raw, nil)
+}
+
+func refuseRemovedExecutionKeyPath(raw map[string]any, parent []string) error {
+	for _, key := range sortedKeys(raw) {
+		path := append(parent, strings.Split(key, keyDelim)...)
+		if removed := removedExecutionKey(path); removed != "" {
+			return WithDiagnostic(DiagnosticExecution, fmt.Errorf(
+				"%s: execution.%s was removed; use execution.choreographers for linked nodes and dispat choreographer to serve tasks",
+				strings.Join(path, keyDelim), removed))
+		}
+		if nested, ok := raw[key].(map[string]any); ok && isExecutionConfigPath(path) {
+			if err := refuseRemovedExecutionKeyPath(nested, path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func isExecutionConfigPath(path []string) bool {
+	switch len(path) {
+	case 1:
+		return strings.EqualFold(path[0], "execution") || strings.EqualFold(path[0], "packages") || strings.EqualFold(path[0], "spaces")
+	case 2:
+		return strings.EqualFold(path[0], "packages") || strings.EqualFold(path[0], "spaces")
+	case 3:
+		return (strings.EqualFold(path[0], "packages") || strings.EqualFold(path[0], "spaces")) && strings.EqualFold(path[2], "execution") ||
+			strings.EqualFold(path[0], "spaces") && strings.EqualFold(path[2], "packages")
+	case 4:
+		return strings.EqualFold(path[0], "spaces") && strings.EqualFold(path[2], "packages")
+	case 5:
+		return strings.EqualFold(path[0], "spaces") && strings.EqualFold(path[2], "packages") && strings.EqualFold(path[4], "execution")
+	}
+	return false
+}
+
+func removedExecutionKey(path []string) string {
+	if len(path) < 2 || !strings.EqualFold(path[len(path)-2], "execution") {
+		return ""
+	}
+	key := lib.Fold(path[len(path)-1])
+	if key != "role" && key != "workers" {
+		return ""
+	}
+	switch len(path) {
+	case 2:
+		return key
+	case 4:
+		if strings.EqualFold(path[0], "packages") || strings.EqualFold(path[0], "spaces") {
+			return key
+		}
+	case 6:
+		if strings.EqualFold(path[0], "spaces") && strings.EqualFold(path[2], "packages") {
+			return key
+		}
+	}
+	return ""
+}
+
 const (
 	executionConcurrencyFieldKey    = "concurrency"
 	executionMaxAttemptsFieldKey    = "maxattempts"
@@ -90,7 +151,7 @@ const (
 	executionSecretEnvFieldKey      = "secretenv"
 	executionIdentityKeyEnvFieldKey = "identitykeyenv"
 	executionRetryUncertainFieldKey = "retryafteruncertainattempt"
-	executionWorkersFieldKey        = "workers"
+	executionWorkersFieldKey        = "choreographers"
 	executionTimeoutsFieldKey       = "timeouts"
 	executionTransferFieldKey       = "transfer"
 	executionLateJoinFieldKey       = "latejoin"
@@ -131,7 +192,7 @@ func executionFields(dst *ExecutionConfig) fields {
 	}
 }
 
-// executionWorkerFields is one entry of `execution.workers`. It is a list of
+// executionWorkerFields is one entry of `execution.choreographers`. It is a list of
 // objects rather than a map for the reason a webhook's headers are: node
 // names keep the case the file wrote them in, which a folded map key could
 // not.
@@ -276,20 +337,20 @@ func validateExecutionNode(x *ExecutionConfig) error {
 	// locks rather than after them; whether the variable is actually set is a
 	// question for the run.
 	if x.IsDistributed() && x.SecretEnv == "" {
-		return fmt.Errorf("execution.secretEnv is required with execution.workers: every message a mailbox carries is signed with the secret it names")
+		return fmt.Errorf("execution.secretEnv is required with execution.choreographers: every message a mailbox carries is signed with the secret it names")
 	}
 	return nil
 }
 
-// validateExecutionWorkers checks the worker links on their own: each names a
+// validateExecutionWorkers checks the choreographer links on their own: each names a
 // node, the names are distinct, and each endpoint a link states is a remote
 // git could be pointed at. A link that states none reaches the repository
 // being released, whose remote is resolved and held to the same rules when a
 // run that dispatches starts.
-func validateExecutionWorkers(workers []ExecutionWorkerConfig) error {
+func validateExecutionWorkers(choreographers []ExecutionWorkerConfig) error {
 	namedBy := map[string]string{}
-	for i, worker := range workers {
-		if err := validateExecutionWorker(fmt.Sprintf("execution.workers[%d]", i), worker, namedBy); err != nil {
+	for i, choreographer := range choreographers {
+		if err := validateExecutionWorker(fmt.Sprintf("execution.choreographers[%d]", i), choreographer, namedBy); err != nil {
 			return err
 		}
 	}
@@ -298,48 +359,48 @@ func validateExecutionWorkers(workers []ExecutionWorkerConfig) error {
 
 // validateExecutionWorker checks one link, under the label that tells the
 // reader where it was stated, against the names the links before it took.
-func validateExecutionWorker(label string, worker ExecutionWorkerConfig, namedBy map[string]string) error {
-	if worker.Name == "" {
+func validateExecutionWorker(label string, choreographer ExecutionWorkerConfig, namedBy map[string]string) error {
+	if choreographer.Name == "" {
 		return fmt.Errorf("%s: name is required: it is how a node recognises the work addressed to it", label)
 	}
-	if !isExecutionNodeName(worker.Name) {
-		return fmt.Errorf("%s: name %q is not a node name (letters, digits, dot, underscore and hyphen, with no two dots in a row)", label, worker.Name)
+	if !isExecutionNodeName(choreographer.Name) {
+		return fmt.Errorf("%s: name %q is not a node name (letters, digits, dot, underscore and hyphen, with no two dots in a row)", label, choreographer.Name)
 	}
 	// Folded, because two spellings of one name would be two links to one
 	// node, and the second would silently take the first one's work.
-	folded := lib.Fold(worker.Name)
+	folded := lib.Fold(choreographer.Name)
 	if previous, isDuplicate := namedBy[folded]; isDuplicate {
-		return fmt.Errorf("%s: name %q is already used by %s", label, worker.Name, previous)
+		return fmt.Errorf("%s: name %q is already used by %s", label, choreographer.Name, previous)
 	}
 	namedBy[folded] = label
-	if worker.LateJoin || worker.IdentityPublicKey != executionIdentityUnsetText {
-		key, err := base64.RawURLEncoding.DecodeString(worker.IdentityPublicKey)
+	if choreographer.LateJoin || choreographer.IdentityPublicKey != executionIdentityUnsetText {
+		key, err := base64.RawURLEncoding.DecodeString(choreographer.IdentityPublicKey)
 		if err != nil || len(key) != ed25519.PublicKeySize ||
-			base64.RawURLEncoding.EncodeToString(key) != worker.IdentityPublicKey {
+			base64.RawURLEncoding.EncodeToString(key) != choreographer.IdentityPublicKey {
 			return fmt.Errorf(invalidLateJoinIdentityPublicKeyErrorFormat, label)
 		}
 	}
-	if worker.Endpoint == "" {
+	if choreographer.Endpoint == "" {
 		return nil
 	}
-	if err := gitx.RequireTransportEndpoint(worker.Endpoint); err != nil {
+	if err := gitx.RequireTransportEndpoint(choreographer.Endpoint); err != nil {
 		return fmt.Errorf("%s: endpoint: %w", label, err)
 	}
 	return nil
 }
 
-// WorkerFlag is the command-line flag that names a worker node for one
-// invocation, `--worker name` or `--worker name=endpoint`, repeatable. It
+// WorkerFlag is the command-line flag that names a choreographer node for one
+// invocation, `--choreographer name` or `--choreographer name=endpoint`, repeatable. It
 // exists for the machine a pipeline created a minute before the run: a link
 // the committed file cannot know about, stated where the pipeline knows it. A
 // name alone reaches the repository being released, as a configured link with
 // no endpoint does.
-const WorkerFlag = "worker"
+const WorkerFlag = "choreographer"
 
 // DiagnosticExecutionAuthority reports a task authority refusal.
 const DiagnosticExecutionAuthority = "E226"
 
-// ParseWorkerLink reads one `--worker` value as the link it names: a node name
+// ParseWorkerLink reads one `--choreographer` value as the link it names: a node name
 // alone, or name=endpoint with both halves stated.
 //
 // The value is never echoed. The half after the separator is an endpoint, and
@@ -379,8 +440,8 @@ func appendCommandLineWorkers(c *File, flags *pflag.FlagSet) error {
 		c.Execution = &ExecutionConfig{}
 	}
 	namedBy := map[string]string{}
-	for i, worker := range c.Execution.Workers {
-		namedBy[lib.Fold(worker.Name)] = fmt.Sprintf("execution.workers[%d]", i)
+	for i, choreographer := range c.Execution.Workers {
+		namedBy[lib.Fold(choreographer.Name)] = fmt.Sprintf("execution.choreographers[%d]", i)
 	}
 	for _, value := range values {
 		link, err := ParseWorkerLink(value)
@@ -396,7 +457,7 @@ func appendCommandLineWorkers(c *File, flags *pflag.FlagSet) error {
 	return nil
 }
 
-// readWorkerFlag is every `--worker` value the invocation passed, in order,
+// readWorkerFlag is every `--choreographer` value the invocation passed, in order,
 // and nothing for a flag set that does not declare the flag or never set it.
 func readWorkerFlag(flags *pflag.FlagSet) []string {
 	if flags == nil {

@@ -305,7 +305,7 @@ func newExecutionQueuedRepository(t *testing.T, options executionQueuedRepositor
 func TestExecutionTransportBranchesAreNotRejectedAssignments(t *testing.T) {
 	rig := newExecutionRig(t, func(cfg *models.File) {
 		space := cfg.Spaces["libs"]
-		space.RunOnly = &models.RunOnly{Build: "worker", Publish: "orchestrator"}
+		space.RunOnly = placedOn(models.RunOnlyChoreographer, models.RunOnlyOrchestrator)
 		cfg.Spaces["libs"] = space
 		cfg.Scripts["build"] = models.Script{executionRecordingScript}
 	})

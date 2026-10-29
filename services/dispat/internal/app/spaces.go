@@ -28,6 +28,7 @@ type spaceConfigResolver struct {
 	root, owner string
 	file        *config.File
 	workspace   *config.Workspace
+	sourceRoot  string
 	once        sync.Once
 	spaces      map[string]config.SpaceConfig
 	err         error
@@ -35,7 +36,7 @@ type spaceConfigResolver struct {
 
 func (r *spaceConfigResolver) resolve() (map[string]config.SpaceConfig, error) {
 	r.once.Do(func() {
-		r.spaces, r.err = config.ResolvedRepositorySpaceConfigs(r.file, r.root, r.workspace)
+		r.spaces, r.err = config.ResolvedRepositorySpaceConfigsWithin(r.file, r.root, r.workspace, r.sourceRoot)
 	})
 	return r.spaces, r.err
 }
@@ -58,7 +59,7 @@ func (a *App) resolveSpaces() ([]spaceOwner, error) {
 				a.spacesErr = fmt.Errorf("space configuration is missing for repository %q", repo.Name)
 				return
 			}
-			resolver := &spaceConfigResolver{root: repo.Root, owner: repo.Name, file: repo.Config, workspace: a.workspace}
+			resolver := &spaceConfigResolver{root: repo.Root, owner: repo.Name, file: repo.Config, workspace: a.workspace, sourceRoot: a.configSourceRoot}
 			for name, space := range repo.Config.Spaces {
 				a.spaceCfgs = append(a.spaceCfgs, spaceOwner{
 					name: name, root: repo.Root, file: repo.Config, space: space, resolver: resolver,

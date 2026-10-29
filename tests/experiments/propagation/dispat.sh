@@ -92,11 +92,11 @@ run_experiment() {
 
 # ---- build, publish, build-distributed ---------------------------------------
 
-# start_worker: a worker node in this container, named build-a, whose mailbox
+# start_choreographer: a worker node in this container, named build-a, whose mailbox
 # is the fixture's own origin. It shares nothing with the release but the
 # origin and the signing secret: its configuration names no space and no
 # package, and it materializes a checkout of its own for every task.
-start_worker() {
+start_choreographer() {
   EXPERIMENT_EXECUTION_SECRET=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
   export EXPERIMENT_EXECUTION_SECRET
   mkdir -p /work/node
@@ -107,26 +107,26 @@ execution:
   secretEnv: EXPERIMENT_EXECUTION_SECRET
 logFormat: json
 EOF
-  dispat --root /work/node worker --state-dir /work/node-state --idle-timeout 600 > "$OUT/worker.log" 2>&1 &
+  dispat --root /work/node choreographer --state-dir /work/node-state --idle-timeout 600 > "$OUT/worker.log" 2>&1 &
   WORKER_PID=$!
-  echo "   worker build-a started (pid $WORKER_PID), mailbox $REPO-origin.git"
+  echo "   choreographer build-a started (pid $WORKER_PID), mailbox $REPO-origin.git"
 }
 
-# stop_worker: SIGTERM, which a worker answers by finishing what it claimed
+# stop_choreographer: SIGTERM, which a worker answers by finishing what it claimed
 # and exiting 0.
-stop_worker() {
+stop_choreographer() {
   [ -n "${WORKER_PID:-}" ] || return 0
   kill -TERM "$WORKER_PID" 2>/dev/null || true
   local rc=0
   wait "$WORKER_PID" || rc=$?
-  echo "   worker build-a stopped with exit $rc"
+  echo "   choreographer build-a stopped with exit $rc"
 }
 
 run_fault() {
   fixture dispat --propagation
   baseline_publish
   observe before
-  [ "$SCENARIO" = build-distributed ] && start_worker
+  [ "$SCENARIO" = build-distributed ] && start_choreographer
 
   arm_fault
   step release:release1 dispat release "${WORKER[@]}" --log-format json
@@ -171,7 +171,7 @@ run_fault() {
   keep_publish_logs after-recovery
   observe after-recovery
   step query:final-plan dispat status --require-release --log-format json
-  stop_worker
+  stop_choreographer
 
   first_run_asserts release1 after-failure
   assert "cli built only after core was published" published_before_built release1
@@ -195,7 +195,7 @@ run_fault() {
       ;;
   esac
   if [ "$SCENARIO" = build-distributed ]; then
-    assert "cli's build ran on the worker build-a" \
+    assert "cli's build ran on the choreographer build-a" \
       logged release1 '.message == "task outcome" and .package == "cli" and .stage == "build"
         and .worker == "build-a" and .here == false'
   fi

@@ -7,7 +7,8 @@
     "baseUrl": ".",
     "ignoreDeprecations": "6.0",
     "strict": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true
   },
   "exclude": [".docusaurus", "build", "demo"]
 }

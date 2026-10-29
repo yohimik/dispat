@@ -18,8 +18,8 @@ func TestRunBinCommandUsesDebuggerOnlyForOptedInRelease(t *testing.T) {
 	require.Equal(t, append([]string{binary}, releaseArgs...), runBinCommand(binary, releaseArgs).Args)
 
 	t.Setenv(testDebuggerEnv, testDebuggerGDB)
-	require.Equal(t, []string{binary, "worker", "--root", root},
-		runBinCommand(binary, []string{"worker", "--root", root}).Args)
+	require.Equal(t, []string{binary, "choreographer", "--root", root},
+		runBinCommand(binary, []string{"choreographer", "--root", root}).Args)
 
 	debugged := runBinCommand(binary, releaseArgs)
 	require.Equal(t, testDebuggerGDB, debugged.Args[testDebuggerFirstArg])

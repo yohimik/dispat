@@ -9,7 +9,7 @@
 #                                     control repository
 #   dispat.example.orchestrator.yaml  builds and publishes delegated to
 #                                     worker nodes
-#   dispat.example.worker.yaml        a worker node
+#   dispat.example.choreographer.yaml        a worker node
 scripts:
   install: "npm ci"
   build: "npm run build"

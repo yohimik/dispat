@@ -1318,7 +1318,7 @@ func (g *GitChoreographyPersist) PersistBlocked(ctx context.Context,
 
 // LookupReceipt walks only one exact task ref, never all task refs. This is
 // for ambiguous responses/restart reconciliation, not the normal poll path.
-func (g *GitChoreographyPersist) LookupReceipt(ctx context.Context, q ChoreographyReceiptQuery) (ChoreographyReceipt, bool, error) {
+func (g *GitChoreographyPersist) LookupReceipt(ctx context.Context, q ChoreographyReceiptQuery) (receipt ChoreographyReceipt, isFound bool, err error) {
 	if !strings.HasPrefix(q.Branch, reservationBranchPrefix) ||
 		(q.Kind != choreographyClaimKind && q.Kind != choreographyResultKind && q.Kind != MessageAck) || q.ProposalDigest == choreographyGitAbsentState ||
 		q.ChoreographyRunBinding != g.opts.Binding ||
@@ -1344,6 +1344,12 @@ func (g *GitChoreographyPersist) LookupReceipt(ctx context.Context, q Choreograp
 	candidateOID := choreographyGitAbsentState
 	expectedFound := choreographyGitExpectedTipUnseen
 	var expectedKind MessageKind
+	var parentReader *gitx.ObjectReader
+	defer func() {
+		if parentReader != nil {
+			err = errors.Join(err, parentReader.Close())
+		}
+	}()
 	for steps := choreographyGitHistoryStartStep; oid != choreographyGitAbsentState && steps < spec.EffectiveMaxAttempts()*choreographyGitHistoryStepsPerAttempt+choreographyGitHistoryFixedSteps; steps++ {
 		if err := ctx.Err(); err != nil {
 			return ChoreographyReceipt{}, choreographyGitReceiptMissing, err
@@ -1414,11 +1420,20 @@ func (g *GitChoreographyPersist) LookupReceipt(ctx context.Context, q Choreograp
 			carried.kind != MessageAssignment && carried.kind != MessageCancel && carried.kind != MessageResult {
 			return ChoreographyReceipt{}, choreographyGitReceiptMissing, fmt.Errorf(choreographyGitTaskRefCarriesUnexpectedStateNamedErrorFormat, carried.kind)
 		}
-		parent, err := m.remote.ResolveCommit(ctx, oid+choreographyGitParentSuffix)
+		if parentReader == nil {
+			parentReader, err = gitx.OpenObjectReader(ctx, m.plumbing)
+			if err != nil {
+				return ChoreographyReceipt{}, choreographyGitReceiptMissing, err
+			}
+		}
+		parents, err := parentReader.CommitParents(oid)
 		if err != nil {
+			return ChoreographyReceipt{}, choreographyGitReceiptMissing, err
+		}
+		if len(parents) == choreographyGitFirstParentIndex {
 			break
 		}
-		oid = parent
+		oid = parents[choreographyGitFirstParentIndex]
 	}
 	if oid != choreographyGitAbsentState && !foundRoot {
 		return ChoreographyReceipt{}, choreographyGitReceiptMissing, fmt.Errorf(choreographyGitTaskReceiptChainMissesCanonicalReservationError)

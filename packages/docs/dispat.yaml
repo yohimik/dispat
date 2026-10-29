@@ -152,8 +152,9 @@ scripts:
   # whose expectations did not hold fails the docs package and no site ships
   # for that run. The records are the artifact either way.
   #
-  # The cell list and selected image tag travel as outputs alongside the
-  # measurements. The report reads the CLI version from each cell's verdict.
+  # Full cloud comparisons are imported from explicitly selected, validated
+  # workflow artifacts. Their candidate source/version/hash remain separate
+  # from the standard cells measured against the published alpine image.
   experiments: |
     set -eu
     ROOT=$(git rev-parse --show-toplevel)
@@ -162,13 +163,18 @@ scripts:
     echo "running the release experiments against yohimik/dispat-alpine:$EXPERIMENTS_DISPAT_VERSION"
     rc=0
     dispat exec experiments --for pkg:experiments --in pkg:experiments || rc=$?
+    import_rc=0
+    dispat exec import-build-campaigns --for pkg:experiments --in pkg:experiments || import_rc=$?
+    if [ "$rc" -eq 0 ]; then
+      rc=$import_rc
+    fi
     dispat exec summary --for pkg:experiments --in pkg:experiments || true
     cells=$(find "$ROOT/coverage/experiments" -mindepth 2 -maxdepth 2 -name verdict.json | wc -l | tr -d ' ')
     {
       echo "REPORT_EXPERIMENTS=$(find "$ROOT/coverage/experiments" -mindepth 2 -maxdepth 2 -name verdict.json | sed 's|/verdict\.json$||; s|.*/||' | sort | tr '\n' ' ')"
       echo "REPORT_EXPERIMENTS_VERSION=$EXPERIMENTS_DISPAT_VERSION"
     } >> "$DISPAT_OUTPUT"
-    echo "recorded $cells cells on dispat $EXPERIMENTS_DISPAT_VERSION"
+    echo "recorded $cells cells: published standard experiments and separately identified cloud comparisons"
     exit "$rc"
 
   # The release announcement, posted by this package because every link in it

@@ -1751,13 +1751,13 @@ func (tc *taskCtx) runHook(ctx context.Context, name string, commands []string, 
 // provider's outcome cascades a skip onto it — and, when it does run, resolves
 // which provider updates are still live for it.
 //
-// It reports whether the caller should proceed. Every path that answers false
-// has already recorded the outcome and told the observers about it.
-func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
+// It returns this task's admission decision, including its own causal blocker.
+// Every denied path has already recorded the outcome and told its observers.
+func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) admission {
 	verdict := r.settleAdmission(ctx, tc, res)
 	switch {
 	case verdict.isAdmitted:
-		return true
+		return verdict
 	case verdict.isCancelled:
 		ev := packageEvent(tc.t.pkg, tc.rel, EventPackageCancelled)
 		ev.Status = StatusCancelled.String()
@@ -1765,7 +1765,7 @@ func (r *run) admit(ctx context.Context, tc *taskCtx, res *Result) bool {
 	case verdict.blocker != "":
 		r.reportBlocked(ctx, tc, verdict)
 	}
-	return false
+	return verdict
 }
 
 // admission is what settleAdmission decided about one task: that it runs, that
@@ -2215,9 +2215,13 @@ func (r *run) execute(ctx context.Context, t task) {
 	// snapshot guard have been given back by their own defers, which a
 	// panic unwinds through like any other return.
 	defer tc.containPanic(ctx, res)
-	if !r.admit(ctx, tc, res) {
+	verdict := r.admit(ctx, tc, res)
+	if !verdict.isAdmitted {
 		if firstOnly || reserved != nil || localAuthority {
-			tc.firstOnlyBlocked = res.BlockedBy
+			// A later task of an already-settled package is blocked by that
+			// package. Result.BlockedBy retains the original provider for the
+			// report and onSkip; it is not this task's admission witness.
+			tc.firstOnlyBlocked = verdict.blocker
 			if tc.firstOnlyBlocked == executorNoTaskBlocker {
 				tc.firstOnlyBlocked = t.pkg
 			}

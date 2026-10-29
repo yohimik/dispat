@@ -212,16 +212,16 @@ func TestExecutionDefaultMailboxRefusesACredentialCarryingRemote(t *testing.T) {
 		})
 		rig.repo.Git("remote", "set-url", "--push", "origin", pushURL)
 
-		refused(t, rig, rig.sweep(nil, "--worker", executionNode))
+		refused(t, rig, rig.sweep(nil, "--choreographer", executionNode))
 
 		worker := rig.startWorker(executionWorkerConfig(rig.origin), 0)
-		res := rig.sweep(nil, "--worker", executionNode+"=file://"+rig.origin)
+		res := rig.sweep(nil, "--choreographer", executionNode+"=file://"+rig.origin)
 		stopAll(t, []*executionWorker{worker})
 		require.Equal(t, 0, res.Code, "a clean endpoint to the same repository runs\nstdout:\n%s\nstderr:\n%s",
 			res.Stdout, res.Stderr)
 		assert.Equal(t, executionNode, rig.nodesByPackage()["core"], "%v", rig.runs())
 
-		res = rig.sweep(nil, "--worker", executionNode+"=")
+		res = rig.sweep(nil, "--choreographer", executionNode+"=")
 		assert.Equal(t, 2, res.Code, "an empty endpoint is a usage error\nstderr:\n%s", res.Stderr)
 	})
 }
@@ -260,7 +260,7 @@ func TestExecutionDefaultMailboxRefusesAPushURLNoMailboxCanBe(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(checkout, "dispat.json"), document, 0o644))
 
-		res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret}, "worker",
+		res := runWorker(t, rig, []string{executionSecretEnv + "=" + executionSecret}, "choreographer",
 			"--root", checkout, "--state-dir", t.TempDir(), "--idle-timeout", "5")
 		assert.NotEqual(t, 0, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 		assert.Contains(t, diagnosticText(res), "whose push URL cannot be a mailbox (")
@@ -309,7 +309,7 @@ func TestExecutionWorkerFindsItsMailboxInItsCheckout(t *testing.T) {
 	workerStateDir := t.TempDir()
 	proc := rig.repo.StartCommandEnv(append(executionNodeHomeEnv(t, workerStateDir),
 		executionSecretEnv+"="+executionSecret, executionBuildLogEnv+"="+rig.builds),
-		"worker", "--root", checkout, "--state-dir", workerStateDir,
+		"choreographer", "--root", checkout, "--state-dir", workerStateDir,
 		"--idle-timeout", fmt.Sprint(resolveWorkerIdleBackstop(0)))
 	worker := &executionWorker{t: t, proc: proc}
 

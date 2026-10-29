@@ -1,5 +1,8 @@
 import {
   ExperimentsPlanTable,
+  ExperimentsLLVMTable,
+  ExperimentsKernelTable,
+  ExperimentsMeasurements,
   ExperimentsSummary,
   ExperimentsTable,
   ExperimentsTasksTable,
@@ -107,8 +110,8 @@ hand. changesets runs `changeset publish` again, and the operator pushes what it
 
 Five more scenarios reach the same catch-up through other ways a consumer comes to be owed its provider, and every
 tool runs each of them. Under dispat, `build-distributed` repeats the `build` fault with every build on a worker node,
-which the release reaches through the repository being released: each command names it with `--worker build-a` and no
-endpoint. Its record matches the local cell's, and its log names the worker that ran `cli`'s build. In `deselected` the
+which the release reaches through the repository being released: `execution.choreographers` names `build-a` and
+the command advertises its authenticated return endpoint. Its record matches the local cell's, and its log names the worker that ran `cli`'s build. In `deselected` the
 first run is `dispat release --package core,ui,api`, so `cli` sits the provider's release out. In `held`, `cli` is held
 by a `Release-As: none` commit while `core` ships, and the operator resumes it with `Release-As: auto` before the
 catch-up. In each, the next full run has to find what `cli` is owed from the provider's release alone.
@@ -187,31 +190,36 @@ was told, from the record.
 **Planning** is the duration of the tool's plan command: `dispat status`, `lerna version` with nothing committed,
 tagged or pushed in a scratch clone (lerna has no dry run), `nx release --dry-run`, and `changeset status --verbose`.
 Each runs as it is. nx's dry run also runs its pre-version command, and the Tasks table counts the builds that ran
-inside each plan command. **Makespan** runs from the start of the release's first command to the end of its last:
+inside each plan command. **Release span** runs from the start of the release's first command to the end of its last:
 `dispat release`; `lerna version` and `lerna publish from-git`; `nx release` and the push of the commit it leaves on
-the clone; `changeset version`, the commit, `changeset publish` and the push. **Idle** is the part of the makespan in
-which no task was running.
+the clone; `changeset version`, the commit, `changeset publish` and the push. **Idle** is the portion of that span
+with no recorded build or registry upload active. It does not measure CPU idleness or isolate scheduler overhead.
 
-The tasks are timed by the fixture and the registry, never read from a tool's log, so all four tools are measured by
-one clock and one definition of a task. A task is a build or a publication, and nothing else. Every build writes a
-line with its start and end, and holds for a fixed time first so it lasts as long as a short compile rather than as
-long as node takes to start. Every publication is timed as its upload, from the moment the registry's proxy receives
-the request to the moment the registry answers, because the upload is the one point every tool's publication passes
-through: lerna publishes in-process, and the others through `npm publish`. What a publication timed at the registry
-leaves out is the client's side of it: node starting, packing, and preparing the request. Those, and every tool's
-versioning, commits, tags and pushes, fall outside the tasks under all four tools alike, and show in the idle time and
-the ratio rather than in Wk. An `npm` shim first on `PATH` during the release also times every `npm publish` process
-whole, with its own package's build cut out; the Tasks table shows those beside the uploads, and they are no part of
-Wk or Lk.
+The fixture and registry record task intervals directly, using the same operation boundaries for all four tools;
+they are not inferred from tool logs. A task in this projection is a build or a registry upload. Every build writes
+its start and end and holds for a fixed time first, giving it a deliberate workload beyond process startup. Every
+publication is timed from receipt of its upload request at the registry proxy through the registry's response. This
+is the common publication boundary even when a tool publishes in-process instead of invoking `npm publish`.
+
+The upload interval excludes client startup, packing and request preparation. Versioning, commits, tags, pushes and
+other work outside the selected build/upload operations also contribute to the release span without contributing to
+Wk or Lk. Such work can overlap recorded tasks, so it is not all included in Idle. An `npm` shim also records each
+whole `npm publish` process, excluding its package's nested build; the Tasks table shows those observations alongside
+uploads, but they are not added to Wk or Lk.
 
 <ExperimentsTasksTable />
 
-The figures are those of the [dispat theorem](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md#1311-complexity-and-scale)
-(CCME specification §13.11). **Wk** is the summed duration of the release's tasks and **Lk** the duration of the
-longest precedence chain through them. **s** here is the most tasks the release was seen running at one instant: an
-observed concurrency, not the theorem's count of task slots usable at once. With s read that way, **max(Lk, Wk / s)**,
-the bound, is a time no execution of the plan beats that honours its precedence and runs at most that many tasks at
-once with these measured durations, and the ratio is the makespan over it.
+This table preserves the legacy `timing` calculation. **Wk** is the sum of the recorded build and upload durations;
+**Lk** is the longest path through that tool's declared build/publication projection, using those durations.
+**Observed peak overlap**, written `s_obs`, is the largest number of those recorded tasks active at once.
+**Observed-cap diagnostic** is `B_obs = max(Lk, Wk / s_obs)`, and **Release / diagnostic** is
+`T_release / B_obs`, where `T_release` is the Release span. These labels preserve the existing values; observed
+overlap is not an evidenced limit on the task capacity available to the scheduler.
+
+For fixed measured durations, valid precedence and comparable timing, `B_obs` is a lower bound for schedules
+restricted to at most `s_obs` simultaneous modeled tasks. This argument does not establish the same lower bound
+for a comparison that allows more capacity. The separate `executionMeasurement` view retains its own graph, capacity evidence, clock assumptions,
+measured intervals and formula applicability; its nominal calculations do not silently replace this legacy diagnostic.
 
 The precedence is the plan's: every package builds before it publishes, a provider publishes before its consumer
 (§19.2), and what a consumer's build waits for of its providers is the build readiness relation (§19.2a): their
@@ -223,26 +231,31 @@ its `nx.json` declares no `dependsOn` for the build target, so nx orders no buil
 `changeset publish` publishes in chunks of the dependency graph, each after the one before, and npm runs a package's
 `prepack` build inside its own `npm publish`, so a consumer builds after its providers have published: `publish`.
 
-Each cell's records are then held to that precedence edge by edge. The Relation column prints the declared relation,
-and beside it, where they differ, the strongest relation every consumer build in the records honoured. The Edges not
-honoured column lists every edge of the declared precedence a task started before the task it follows had ended. The
-bound holds only for an execution that honours its precedence, so a row with an edge listed there has a bound that is
-not a lower bound of its own release, and the report refuses a row with no edge listed whose makespan is shorter than
-its bound by more than the clocks' slack.
+Each cell's records are checked against its declared precedence edge by edge. The Relation column prints the declared
+relation and, where different, the strongest relation honoured by every recorded consumer build. Edges not honoured
+lists prerequisites whose successor started before the predecessor ended. Such a violation prevents interpreting the
+diagnostic as a lower bound on that observed release. The legacy validator also checks for a release span shorter
+than its diagnostic when no precedence violation is listed, using its recorded numerical clock slack. That check is
+a consistency check under the legacy clock assumptions, not a clock-calibration result.
 
-A ratio of 1 is a release that took no longer than its own tasks allowed at the concurrency it used. Clause 2 of the
-theorem bounds an execution that never leaves a usable slot idle while a task is ready: it finishes within
-`(2 - 1/s)` times the bound. Read with the observed s, a ratio above that is time spent outside the tasks, or tasks
-left waiting while fewer than s ran, and the Idle column is how much of the makespan had no task running at all. The bound is each tool's own: a tool whose relation
-makes a consumer build wait for more has a longer Lk to be measured against, so read the ratio beside the makespan.
-The ratio is also relative to the concurrency each release used, so a release that ran its tasks one at a time has
-the whole work as its bound and can read close to 1 while taking longest.
+A ratio near 1 means the release span is close to this run's diagnostic. It does not rank cross-tool speed: a serial
+release can have `B_obs = Wk` and a ratio near 1 while taking longer than a concurrent release. A tool whose declared
+readiness relation adds waiting can also have a larger Lk and therefore a larger diagnostic denominator. Read the
+ratio alongside the release span, task durations and declared relation.
+
+[CCME §13.11](https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md#1311-complexity-and-scale)
+separates lower bounds from the one-pool scheduling guarantee. Its task-time upper bound requires fixed nonpreemptive
+tasks, a fixed available pool of interchangeable unit slots, work conservation, immediate zero-time readiness closure,
+no additional binding resource or placement restriction, and no transfer or scheduling overhead. Observed peak
+overlap does not establish those premises. The guarantee applies to modeled task time, so applying its
+`2 - 1/s` ratio limit to the enclosing Release span is not justified by this table. A larger legacy ratio alone
+neither disproves the theorem nor identifies scheduler idle time.
 
 Every timing cell is one container on a shared host, run after every other cell of the campaign and one at a time, so
 no other cell runs beside it. Tasks that run at once still share the container's processors, so a release that runs
-many tasks at once also stretches each of them; the Tasks table shows each kind's median and longest. The ratio and the
-planning times relative to one another are the figures to read; the absolute seconds belong to the machine the table
-names.
+many tasks at once also stretches each of them; the Tasks table shows each kind's median and longest. Report elapsed
+time for this recorded workload and host alongside each tool's ratio. Ratios use different graphs, measured durations
+and observed concurrency, so they do not rank cross-tool speed. Absolute seconds describe the machine the table names.
 
 <ExperimentsPlanTable />
 
@@ -305,3 +318,96 @@ that moved during the run.
 
 Running other tools through the same fixture helps distinguish tool behavior from fixture behavior. The results
 describe these versions, configurations, and fault scenarios; they are not a general ranking of release tools.
+
+## LLVM distributed build
+
+The build tables retain the exact Dispat binary identity measured by each campaign. An identity containing
+`candidate` denotes an unpublished build; importing its results into a later documentation release does not
+turn it into a measurement of that release's shipped binary. The row details retain binary hashes, toolchain
+versions and artifact digests, and the measurement panels retain the tested source revision.
+
+<ExperimentsLLVMTable />
+
+The GCP campaign runs Dispat's `compilation`, `interpretation`, and `hybrid` modes on two separate GCE VMs.
+Nx and Lerna use the explicitly labelled `manual-gcp-split` mode: the harness assigns one backend build to
+each VM and invokes that tool there. This is custom orchestration; it does not claim Nx Cloud scheduling.
+Changesets has no distributed build executor, so its entry is `unsupported` with no completion duration.
+The standalone harness also supports native Nx Cloud agents; those entries remain `blocked` without a
+connected workspace and credentials. Each record identifies the mode that actually ran.
+See the [Nx Cloud commands](https://nx.dev/docs/reference/nx-cloud-cli),
+[Lerna distribution documentation](https://lerna.js.org/docs/features/distribute-tasks), and
+[Changesets CLI reference](https://changesets.dev/guide/cli).
+
+The default `full` profile builds LLVM core's default libraries and tools twice, with X86 and AArch64 backends
+in separate clean CMake/Ninja build directories. Both configurations use
+[LLVM 20.1.8's pinned source](https://github.com/llvm/llvm-project/commit/87f0227cb60147a26a1eeb4fb06e3b505e9c7261).
+This is two complete backend configurations, not a single LLVM build split at individual compiler invocations.
+Clang, other LLVM subprojects, runtimes, tests, benchmarks, examples, and documentation are excluded identically.
+The optional `smoke` profile builds only `llvm-cxxfilt` and `llvm-size`; its records explicitly identify that subset.
+
+Each cloud cell creates a fresh pair of VMs with one machine type, boot image and CPU platform pinned for the whole campaign.
+The selectable `n2-standard-4` and `c3-standard-4` profiles both allocate four CPUs and 16 GiB per VM;
+C3 requires Sapphire Rapids, while N2 pins Cascade Lake or Ice Lake. A campaign never changes machine type
+or CPU platform between competitors.
+Each executor has a four-CPU, 14-GiB container limit, one outer task slot and Ninja `-j2` with one concurrent
+link. VM instance IDs, observed container limits, tool versions, image and binary hashes are retained.
+Two inner jobs per task are not two extra outer task slots. Older standalone records use two executor
+processes on one host; their recorded topology keeps them distinguishable from the cloud campaign.
+Source acquisition and toolchain installation finish before timing. Native Nx Cloud runs also prepare the
+same client version on every participant before timing. The clock starts
+before executor startup and coordination, and stops after the coordinator
+verifies returned executable digests, LLVM versions, and a demangling result. The full profile returns five
+representative executables for these checks, while building the complete configured target. Every task contains a
+fresh committed run identity, preventing another cell's cached build output from satisfying the measurement.
+Fresh output directories do not establish a cold operating-system page cache.
+
+Dispatch the `Release` workflow with `purpose=llvm-gce` and `llvm-profile=full` for the two-VM campaign.
+This purpose runs only experiment jobs. Each cell has a four-hour execution limit and bounded setup and
+cleanup; the VMs have a five-hour maximum lifetime. The final artifact contains all six results, raw evidence
+and a validated report. `llvm-profile=smoke` checks the harness with the smaller target list.
+
+The documentation release imports successful full LLVM and kernel campaigns selected by the
+`llvm-campaign-run`, `llvm-campaign-attempt`, `kernel-campaign-run`, and `kernel-campaign-attempt` workflow inputs.
+`campaign-binary-sha256` pins their shared measured Dispat binary. Both selected runs must belong to this
+repository's Release workflow at the original checkout revision. Evidence is validated before publication
+and again when imported after the standard experiment campaign; missing, partial or mismatched inputs fail.
+
+The existing `dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments` command remains an optional
+standalone, one-host diagnostic campaign. It does not provision GCE. Standalone cells default to four hours.
+Native Nx Cloud cells read `NX_CLOUD_ACCESS_TOKEN` and `EXPERIMENTS_NX_CLOUD_ID`; credentials are not retained in evidence.
+
+## Linux kernel distributed build
+
+<ExperimentsKernelTable />
+
+The large kernel profile builds [Linux 6.18.59 at its pinned source commit](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=1253a6aa5d104312bf0992afacc15220ae35bdf9)
+for `x86_64` and `arm64` in separate fresh output trees. The `full` profile uses `allmodconfig` and builds
+`vmlinux`, the architecture's boot image, and all configured modules. This is a large configuration, not a claim
+that it is the largest possible kernel. The `smoke` profile uses `defconfig`, builds the kernel and boot image,
+and explicitly omits modules.
+
+Every executable competitor receives the same two-node budget and selected machine profile as LLVM: four CPUs and
+14 GiB per worker container, one outer task per worker, and two inner build jobs. The kernel uses GNU Make `-j2`;
+link commands share those jobs and have no independently configured link pool. Both target architectures build
+on the same host architecture. Dispat runs in compilation, interpretation and hybrid modes; Nx and Lerna use
+the manual GCP split. Changesets remains an unsupported build executor with no completion duration.
+
+Each record retains its compiler versions, exact resolved configuration digests, declared configuration omissions,
+module counts, target list, source identity and verified artifact digests. Configurations must match per target
+architecture across competitors. Fresh output trees prevent reuse of prior build artifacts; they do not establish
+cold operating-system page caches. A failure or timeout remains a failed trial.
+
+Dispatch `purpose=kernel-gce` with `llvm-profile=full` in the `Release` workflow. The shared profile input also
+accepts `smoke` for a smaller functional check. The kernel campaign has the same execution, setup, cleanup and VM
+lifetime limits as LLVM. Its results and resource evidence are retained in a separate campaign artifact.
+
+## Recorded execution inputs and formulas
+
+New timing, LLVM and kernel records separate captured graph/resource inputs, measured operation windows, and formula
+calculations. Vertex and typed-edge counts come from the retained graph; omitted phases and nested build
+parameters remain explicit. Local elapsed durations supply nominal work and critical-path arithmetic.
+Cross-host clock-rate uncertainty remains unknown, and unmapped clocks do not supply a global task span or
+peak overlap. Every formula names its inputs and reports missing evidence or violated premises beside the
+result. Earlier records retain their original observed-overlap diagnostics without invented inputs.
+
+<ExperimentsMeasurements />

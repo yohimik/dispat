@@ -94,8 +94,8 @@ tool runs each of them. dispat's protocol is described first; the other tools fo
 through its own nearest mechanism:
 
 - `build-distributed` is the `build` fault with every build on a worker node, `build-a`, started in the container.
-  The fixture sets `runOnly: [worker, orchestrator]`, names the signing secret's variable, and preauthorizes `build-a`
-  in `execution.workers`. The worker reads the fixture's origin as its mailbox, while the first node serves an HTTPS
+  The fixture sets `runOnly: [choreographer, orchestrator]`, names the signing secret's variable, and preauthorizes `build-a`
+  in `execution.choreographers`. The choreographer reads the fixture's origin as its mailbox, while the first node serves an HTTPS
   return endpoint inside the isolated container. The log names `build-a` in the task outcome of `cli`'s build.
 - `deselected` has no fault: the first run is `dispat release --package core,ui,api`, so `cli` sits the provider's
   release out, and the next full run must find what it is owed from the provider's release alone.
@@ -207,6 +207,53 @@ outside the graph or straddle the release's span is not a record and fails. The 
 the dispat cell's plan of the same scenario and records agreement or the differences.
 
 The campaign runs the timing cells after every other cell, one at a time, so no other cell shares the host with one.
+
+### The LLVM distributed build
+
+Production docs import full two-VM LLVM and Linux kernel campaign artifacts selected by exact workflow run and attempt IDs. The workflow checks successful runs from this repository, workflow and original checkout source, then calls `dispat exec import-build-campaigns --for pkg:experiments --in pkg:experiments` with `EXPERIMENTS_BUILD_VALIDATE_ONLY=1` before release effects. The docs hook calls the same command after the standard experiment campaign.
+
+The importer requires `EXPERIMENTS_LLVM_CAMPAIGN_DIR`, `EXPERIMENTS_KERNEL_CAMPAIGN_DIR`, `EXPERIMENTS_BUILD_SOURCE_REVISION`, `EXPERIMENTS_BUILD_BINARY_SHA256`, and each workload's `EXPERIMENTS_{LLVM,KERNEL}_RUN_ID` and `EXPERIMENTS_{LLVM,KERNEL}_RUN_ATTEMPT`. Both artifacts must contain all six selected full-profile records. It verifies source, binary, version, trial identity, raw evidence hashes, observed durations and hardware/configuration before replacing previous build-comparison cells. It keeps the measured candidate identities intact; these comparisons do not assert that the later published alpine binary was measured. Missing inputs fail rather than selecting an older campaign or substituting a local run.
+
+Each executed cell must also retain sanitized Docker store observations from preparation, the coordinator, and both workers. The importer requires classic `overlay2` store semantics, rejects containerd snapshotter observations, and retains the original files with SHA256 hashes. Each daemon's observed version remains independent; matching versions are not assumed or required.
+
+`dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments` remains an optional one-host diagnostic campaign. Its three Dispat modes and native Nx Cloud entries are independent of the required production cloud imports. Standalone `summary` includes whatever records were explicitly produced or imported.
+
+The default `full` workload configures and builds LLVM core twice, once with X86 and once with AArch64. Each
+configuration builds the default `all` target, including its tools and libraries. Clang and other subprojects,
+runtimes, tests, examples, benchmarks, and documentation are disabled equally. The source is
+[LLVM 20.1.8](https://github.com/llvm/llvm-project/commit/87f0227cb60147a26a1eeb4fb06e3b505e9c7261), pinned by full
+commit and checked again before each task. Both configurations begin with a new build directory. This measures
+two independent complete backend builds, not the subdivision of one Ninja graph into remote compiler invocations.
+
+Two executor processes use independent checkouts on the same host. Each can run one task with two Ninja jobs by
+default. The container's default CPU quota is four; `EXPERIMENTS_LLVM_CPUS` and `EXPERIMENTS_LLVM_JOBS` set those
+budgets for every cell. `EXPERIMENTS_LLVM_TIMEOUT` defaults to four hours per cell. Source checkout and toolchain
+installation happen outside the measurement. The image contains the compiler tools and source; Nx's Cloud client
+is acquired and fingerprinted in all three workspaces before timing. Client versions and SHA-256 fingerprints
+must match, and the verdict records both. Timing includes node startup, registration,
+scheduling, CMake configuration, compilation, output transport, and coordinator verification. Returned manifests
+must identify this run and two distinct executors, and the coordinator checks executable digests, LLVM versions,
+and a demangling result. Full builds return five representative binaries from each configuration rather than
+transferring every library; the work still builds the complete configured target.
+Full campaigns can take hours; each verdict records its timeout. Production import requires all five runnable
+cloud cells to complete and retains Changesets as unsupported, without a duration. The optional one-host
+diagnostic command may retain blocked native-cloud entries, but those cannot replace a required cloud result.
+
+Nx and Lerna use their documented Nx Cloud distribution with two manually started agents. They require
+`NX_CLOUD_ACCESS_TOKEN` and `EXPERIMENTS_NX_CLOUD_ID` in the caller's environment. Without them, the result is
+`blocked`, with no duration and no local substitute. Changesets has no distributed build runner, so it receives
+`unsupported`, also without a duration. Every task's committed input contains a fresh run identity, preventing
+remote-cache reuse between cells while retaining the cache transport Nx Cloud requires for distribution.
+The token is passed through the environment and is not saved in a fixture or result.
+For the optional one-host command, custom Cloud endpoints and encryption use `NX_CLOUD_API` and
+`NX_CLOUD_ENCRYPTION_KEY`. Production GCE comparisons use the separately labeled manual split adapter for
+Nx and Lerna and do not require native Nx Cloud credentials.
+
+`EXPERIMENTS_LLVM_PROFILE=smoke` selects only `llvm-cxxfilt` and `llvm-size` in both configurations. This validates
+the harness with real LLVM compilation but is explicitly labeled a subset in its result and never reported as a
+full build. `tools/llvmexperiment` implements the protocol, and `Dockerfile.llvm` prepares its shared environment.
+Each cell writes `verdict.json`, `observations.jsonl`, and `transcript.txt`; the verdict's `llvm` object records
+availability, workload, source revision, resource budget, executor names, durations, and artifact digests.
 
 ### The catch-up
 
@@ -346,11 +393,28 @@ The campaign is whatever `cells` prints and nothing else counts it. The sweep pi
 cache manifest stores it verbatim, and the report's headline counts the records
 it found. A cell added to `cells` is therefore a cell every one of them runs, with no number to update anywhere.
 
+New timing cells also retain `executionMeasurement` beside the existing `timing` figures. Before the first release
+command, the producer captures package dependencies, the selected plan, readiness configuration and source inputs.
+Its graph is explicitly an analysis projection of build and registry-upload operations, with unselected operations
+retained as virtual dependency relays. It is not a native executor graph and lists omitted work.
+
+The additional records use unrounded local monotonic durations. The shared `execution-measurement` command derives
+and validates the formulas; the producer does not duplicate them. Nominal work arithmetic assumes compatible
+reported seconds and records that relative clock-rate uncertainty is unknown. Unmapped task span, overlap and
+unestablished resource capacity remain null with reasons. The older wall-clock `timing` fields keep their existing
+meaning and rounding. Other experiment cells do not acquire reconstructed measurements.
+
+Every new timing run has a unique directory under `execution-measurements/<trial UUID>/`, containing the captured
+inputs, raw task and step records, environment, digests and derivation output. Set `EXPERIMENT_REPETITION` to a
+positive repetition number when invoking a container. The campaign keeps these directories when it replaces the
+current cell results, so reruns and failed trials do not overwrite earlier evidence.
+
 Underneath, one cell is one container:
 
 ```sh
 docker buildx build --file tests/experiments/Dockerfile \
-  --build-arg DISPAT_VERSION=1.7.1 --load -t dispat-experiments tests/experiments
+  --build-arg DISPAT_VERSION=1.7.1 --build-context measurement-source=./tools \
+  --load -t dispat-experiments tests/experiments
 docker run --rm -v "$PWD/coverage/experiments:/results" dispat-experiments midrelease dispat conflict
 ```
 

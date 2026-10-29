@@ -10,6 +10,11 @@
 !Dockerfile.gotest
 !go.work
 !go.work.sum
+!.github
+.github/*
+!.github/workflows
+.github/workflows/*
+!.github/workflows/release.yml
 !pkg
 !tools
 !tests

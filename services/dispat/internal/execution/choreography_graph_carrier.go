@@ -181,6 +181,9 @@ func (c *Coordinator) PublishChoreographyGraphRoot(ctx context.Context,
 	if err := validateChoreographyGraphCarrier(carrier); err != nil {
 		return graphCarrierMissingIdentity, err
 	}
+	if err := validateChoreographyHybridPolicy(c.Mode, c.PinnedInputs, carrier); err != nil {
+		return graphCarrierMissingIdentity, err
+	}
 	document, err := json.Marshal(carrier)
 	if err != nil {
 		return graphCarrierMissingIdentity, err

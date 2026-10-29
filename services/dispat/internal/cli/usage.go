@@ -123,10 +123,10 @@ repositories with no remote to coordinate through.
 release lock and planning. The refusal exits 3, apart from exit 1's failures.
 Use "dispat status --require-release" for a lock-free CI plan gate.
 
---worker name adds a worker node for this run beside the ones
-execution.workers lists, which is how a pipeline names a machine it has
+--choreographer name adds a choreographer node for this run beside the ones
+execution.choreographers lists, which is how a pipeline names a machine it has
 just created. A name alone reaches the repository being released, and
---worker name=endpoint names another mailbox. It is held to every rule a
+--choreographer name=endpoint names another mailbox. It is held to every rule a
 configured link is.
 
 This is what a bare "dispat" does.`,
@@ -149,7 +149,7 @@ selection the plan cannot release, exits 1; --require-release with a correct
 plan that releases nothing exits 3, so a pipeline gating on it can tell
 "nothing to do" from "something is wrong".
 
-With worker links, from execution.workers or from --worker name[=endpoint],
+With choreographer links, from execution.choreographers or from --choreographer name[=endpoint],
 it fixes and prints the plan digest a distributed run would carry, and
 still resolves no remote, dispatches nothing and takes no lock.`,
 		flags: append([]string{releaseStrictFlagName, requireReleaseFlagName, linkedWorkerFlagName, distributionModeFlagName}, selectionFlags...),
@@ -172,8 +172,8 @@ Anything after "--" is appended to each package's command, so
 package the run covers. A bare word without the "--" is still a usage error:
 packages are selected with flags.
 
-With worker links, from execution.workers or from --worker name[=endpoint],
-eligible tasks can run on this machine or an admitted worker within their
+With choreographer links, from execution.choreographers or from --choreographer name[=endpoint],
+eligible tasks can run on this machine or an admitted choreographer within their
 available capacity. The folders runOutputs declares for the script are
 carried back and merged into this checkout once every task has answered.
 A link with no endpoint reaches the repository being released.
@@ -403,7 +403,7 @@ Links are proposed without changes unless --write or --interactive is used.`,
 		flags: append([]string{"write", "interactive", "check", "topology"}, selectionFlags...),
 	},
 	{
-		name:  cmdWorker,
+		name:  cmdChoreographer,
 		short: "serve the tasks an orchestrator addressed to this node",
 		long:  workerCompiledUsageText,
 		flags: []string{"state-dir", "idle-timeout"},

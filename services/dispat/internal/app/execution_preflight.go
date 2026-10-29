@@ -70,6 +70,7 @@ func (a *App) preflightWorkers(ctx context.Context, request releasePreflightRequ
 	if err := setChoreographyCoordinatorMode(coordinator, request.mode, a.cfg.Execution); err != nil {
 		return coordinator, a.reportPreflightFailure(err)
 	}
+	coordinator.PinnedInputs = request.pinnedInputs
 	if compiled == nil {
 		return coordinator, a.reportPreflightFailure(execution.NewDiagnostic(
 			execution.CodeConfiguration, execution.CategoryConfiguration,
@@ -88,7 +89,6 @@ func (a *App) preflightWorkers(ctx context.Context, request releasePreflightRequ
 	coordinator.ReturnEndpoint = returnChannel.endpoint
 	coordinator.ReturnCertSHA256 = returnChannel.certPin
 	coordinator.PinnedSources = request.pinnedSources
-	coordinator.PinnedInputs = request.pinnedInputs
 	if err := a.prepareRunChoreographyBootstrap(ctx, coordinator); err != nil {
 		return coordinator, a.reportPreflightFailure(err)
 	}
@@ -190,9 +190,8 @@ func (a *App) newCoordinator(generation string, ownership *execution.OwnershipGa
 func setChoreographyCoordinatorMode(coordinator *execution.Coordinator,
 	mode string, settings *models.ExecutionConfig) error {
 	coordinator.Mode = mode
-	if mode == string(models.DistributionModeInterpretation) {
-		coordinator.JoinPolicy.MaxAttempts = settings.ResolveMaxAttempts()
-	}
+	coordinator.JoinPolicy.DistributionMode = mode
+	coordinator.JoinPolicy.MaxAttempts = settings.ResolveMaxAttempts()
 	if err := coordinator.JoinPolicy.Validate(coordinator.CanonicalEndpoint); err != nil {
 		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
 			invalidExecutionAdmissionPolicyErrorFormat, err)

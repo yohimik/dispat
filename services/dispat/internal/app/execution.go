@@ -26,10 +26,9 @@ import (
 	"github.com/yohimik/dispat/services/dispat/internal/execution"
 )
 
-// Hybrid remains unavailable until its semantic transition can be verified.
 func (a *App) checkDistributionMode(mode public.DistributionMode) error {
 	switch mode {
-	case choreographyAbsentIdentityText, public.DistributionModeCompilation, public.DistributionModeInterpretation:
+	case choreographyAbsentIdentityText, public.DistributionModeCompilation, public.DistributionModeInterpretation, public.DistributionModeHybrid:
 		return nil
 	default:
 		return execution.NewDiagnostic(execution.CodeConfiguration, execution.CategoryConfiguration,
@@ -129,12 +128,12 @@ func (a *App) refuseDispatchWithoutLock(started runKind) error {
 	if started == runSweep {
 		return a.reportExecutionRefusal(started, execution.NewDiagnostic(
 			execution.CodeConfiguration, execution.CategoryConfiguration,
-			"execution.workers dispatches work to other machines, and %s is configured to run without the remote release lock (%s): a repository with no remote to coordinate through has none to dispatch a sweep through either",
+			"execution.choreographers dispatches work to other machines, and %s is configured to run without the remote release lock (%s): a repository with no remote to coordinate through has none to dispatch a sweep through either",
 			strings.Join(repositories, ", "), strings.Join(settings, ", ")), repositories, settings)
 	}
 	return a.reportExecutionRefusal(started, execution.NewDiagnostic(
 		execution.CodeConfiguration, execution.CategoryConfiguration,
-		"execution.workers dispatches work to other machines, and %s would release without the remote release lock (%s): a release nothing coordinates cannot be delegated",
+		"execution.choreographers dispatches work to other machines, and %s would release without the remote release lock (%s): a release nothing coordinates cannot be delegated",
 		strings.Join(repositories, ", "), strings.Join(settings, ", ")), repositories, settings)
 }
 
@@ -158,7 +157,7 @@ func (a *App) refuseDispatchWithoutLockRead(started runKind) error {
 	}
 	return a.reportExecutionRefusal(started, execution.NewDiagnostic(
 		execution.CodeConfiguration, execution.CategoryConfiguration,
-		"execution.workers dispatches work to other machines, and commit.verify is off for %s: a release that delegates work reads its release lock back before dispatch and orchestrator publication, and a remote it may not read cannot show that this run still owns the lock",
+		"execution.choreographers dispatches work to other machines, and commit.verify is off for %s: a release that delegates work reads its release lock back before dispatch and orchestrator publication, and a remote it may not read cannot show that this run still owns the lock",
 		strings.Join(repositories, ", ")), repositories, []string{"commit.verify"})
 }
 

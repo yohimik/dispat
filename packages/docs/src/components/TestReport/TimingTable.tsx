@@ -24,13 +24,13 @@ export const TimingTable: FC<TimingTableProps> = (props) => {
             <th>Tool</th>
             <th>Relation</th>
             <th className={styles.number}>Planning</th>
-            <th className={styles.number}>Makespan</th>
+            <th className={styles.number}>Release span</th>
             <th className={styles.number}>Idle</th>
             <th className={styles.number}>Wk</th>
             <th className={styles.number}>Lk</th>
-            <th className={styles.number}>s</th>
-            <th className={styles.number}>Bound</th>
-            <th className={styles.number}>Ratio</th>
+            <th className={styles.number}>Observed peak overlap</th>
+            <th className={styles.number}>Observed-cap diagnostic</th>
+            <th className={styles.number}>Release / diagnostic</th>
             <th>Edges not honoured</th>
             <th>Longest chain</th>
           </tr>

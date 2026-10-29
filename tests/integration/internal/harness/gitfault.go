@@ -54,6 +54,10 @@ type GitFault struct {
 	// invocation, as `case "$*" in <Pattern>)`. An empty pattern matches
 	// nothing, so a fault must always say what it is about.
 	Pattern string
+	// FirstInputLine narrows a matched command to one exact first stdin line,
+	// such as the immutable output blob requested from cat-file --batch. A
+	// different request is passed through unchanged and is not counted.
+	FirstInputLine string
 	// Code is the exit status a failed invocation reports. Zero selects 1,
 	// which is what `git config` answers for a key that is absent; 128 is what
 	// it answers for a file it cannot read, and the two are told apart by the
@@ -211,6 +215,7 @@ func (f *GitFault) settings() []string {
 	return []string{
 		realKey + "=" + realGit,
 		f.prefix + "PATTERN=" + f.Pattern,
+		f.prefix + "FIRST_INPUT_LINE=" + f.FirstInputLine,
 		f.prefix + "CODE=" + strconv.Itoa(code),
 		f.prefix + "NTH=" + strconv.Itoa(f.Nth),
 		f.prefix + "ONWARD=" + onward,
@@ -273,6 +278,23 @@ const gitFaultScript = `#!/bin/sh
 # Written by tests/integration/internal/harness/gitfault.go. It stands in for
 # git on the PATH of one dispat process and passes everything it is not asked
 # about through to the real one.
+input_read=0
+input_has_newline=1
+first_input_line=
+run_real_git() {
+	if [ "$input_read" -eq 1 ]; then
+		{ printf '%s' "$first_input_line"; if [ "$input_has_newline" -eq 1 ]; then printf '\n'; fi; cat; } | "$DISPAT_IT_GIT_REAL" "$@"
+	else
+		"$DISPAT_IT_GIT_REAL" "$@"
+	fi
+}
+pass_through() {
+	if [ "$input_read" -eq 1 ]; then
+		run_real_git "$@"
+		exit "$?"
+	fi
+	exec "$DISPAT_IT_GIT_REAL" "$@"
+}
 if [ -n "$DISPAT_IT_GIT_FAULT_ARM" ] && [ ! -f "$DISPAT_IT_GIT_FAULT_HOLD_DIR/armed" ]; then
 	case "$*" in
 	$DISPAT_IT_GIT_FAULT_ARM) : > "$DISPAT_IT_GIT_FAULT_HOLD_DIR/armed" ;;
@@ -281,6 +303,16 @@ if [ -n "$DISPAT_IT_GIT_FAULT_ARM" ] && [ ! -f "$DISPAT_IT_GIT_FAULT_HOLD_DIR/ar
 fi
 case "$*" in
 $DISPAT_IT_GIT_FAULT_PATTERN)
+	if [ -n "$DISPAT_IT_GIT_FAULT_FIRST_INPUT_LINE" ]; then
+		input_read=1
+		if ! IFS= read -r first_input_line; then
+			input_has_newline=0
+			pass_through "$@"
+		fi
+		if [ "$first_input_line" != "$DISPAT_IT_GIT_FAULT_FIRST_INPUT_LINE" ]; then
+			pass_through "$@"
+		fi
+	fi
 	# Claimed directories form a contiguous prefix. Find its first hole with
 	# shell builtins; probing every earlier ordinal with mkdir becomes quadratic
 	# when a worker verifies hundreds of signed Git objects. Another invocation
@@ -323,13 +355,13 @@ $DISPAT_IT_GIT_FAULT_PATTERN)
 			while [ ! -f "$DISPAT_IT_GIT_FAULT_HOLD_DIR/resumed" ]; do
 				sleep 0.1
 			done
-			exec "$DISPAT_IT_GIT_REAL" "$@"
+			pass_through "$@"
 		fi
 		if [ "$DISPAT_IT_GIT_FAULT_AFTER" -eq 1 ]; then
 			if [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT" ] || [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT_FILE" ]; then
-				"$DISPAT_IT_GIT_REAL" "$@" >/dev/null || exit "$?"
+				run_real_git "$@" >/dev/null || exit "$?"
 			else
-				"$DISPAT_IT_GIT_REAL" "$@" || exit "$?"
+				run_real_git "$@" || exit "$?"
 			fi
 		fi
 		if [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT_FILE" ]; then
@@ -345,5 +377,5 @@ $DISPAT_IT_GIT_FAULT_PATTERN)
 	fi
 	;;
 esac
-exec "$DISPAT_IT_GIT_REAL" "$@"
+pass_through "$@"
 `

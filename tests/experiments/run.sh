@@ -96,8 +96,11 @@ protocol() {
 exec 3>&1
 SHOWN=0
 show_transcript() {
+  local exit_status=$?
   [ "$SHOWN" = 1 ] && return 0
   SHOWN=1
+  if [ "$exit_status" != 0 ] && [ "${rc:-0}" = 0 ]; then rc=$exit_status; fi
+  finalize_measurement "${rc:-1}" || rc=1
   cat "$OUT/transcript.txt" >&3 2>/dev/null || true
 }
 trap show_transcript EXIT

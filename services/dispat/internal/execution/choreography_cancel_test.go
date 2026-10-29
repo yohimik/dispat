@@ -179,6 +179,16 @@ func TestCompiledPickupCancellationRetainsExactAckFinalityAcrossColdReplay(t *te
 	require.NoError(t, err)
 	require.Equal(t, 0, cold.used[spec.Budget])
 	require.True(t, cold.tasks[spec.Task].pickups[claim.PickupID].settled)
+	_, err = cold.StopClaims(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, cold.CancelInertTask(t.Context(), spec.Task),
+		"a signed settled retry has no retained physical claim")
+	restartedPersist, err := NewGitChoreographyPersist(persist.opts)
+	require.NoError(t, err)
+	restarted, err := RecoverFirstNodeBroker(t.Context(), choreographyFixtureBrokerOptions(restartedPersist))
+	require.NoError(t, err)
+	require.True(t, restarted.tasks[spec.Task].terminal)
+	require.Zero(t, restarted.used[spec.Budget])
 }
 
 func TestCompiledCancelWithoutAckCannotSealOrRetry(t *testing.T) {

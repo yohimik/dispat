@@ -33,6 +33,13 @@ const namedGroup = 4
 // wholeState is the most packages a final state lists one by one.
 const wholeState = 8
 
+const (
+	legacyTimingPlainFormat         = "planning %s, release span %s, Wk %s, Lk %s, observed peak overlap %d, observed-cap diagnostic %s, release / diagnostic %.2f, idle %s, relation %s, not honoured %s"
+	legacyTimingMarkdownHeader      = "| cell | planning | release span | Wk | Lk | observed peak overlap | observed-cap diagnostic | release / diagnostic | idle | relation | not honoured |"
+	legacyTimingDiagnosticNoteText  = "Legacy observed-overlap diagnostics: observed peak overlap does not establish a configured concurrency ceiling. The observed-cap diagnostic and release / diagnostic quotient are not validated theorem bounds or cross-tool speedups."
+	legacyTimingStructuredGuideText = "For model claims on cells with recorded execution measurements, use their separate Formula calculations sections, selected inputs and applicability reasons."
+)
+
 var relations = map[string]bool{"publish": true, "build": true, "none": true}
 
 // verdictPlan is the plan as verdict.json carries it: package to version, and
@@ -353,15 +360,12 @@ func statsOf(s TaskStats) string {
 	return text
 }
 
-// timingOf renders a cell's figures as one line, `planning 0.009s, makespan
-// 1.942s, Wk 3.442s, Lk 1.399s, s 4, bound 1.399s, ratio 1.39, idle 0.448s,
-// relation build, not honoured none`.
 func timingOf(cell Cell) string {
 	t := cell.Timing
 	if t == nil {
 		return "not measured"
 	}
-	return fmt.Sprintf("planning %s, makespan %s, Wk %s, Lk %s, s %d, bound %s, ratio %.2f, idle %s, relation %s, not honoured %s",
+	return fmt.Sprintf(legacyTimingPlainFormat,
 		seconds(t.PlanningSeconds), seconds(t.MakespanSeconds), seconds(t.Work), seconds(t.CriticalPath),
 		t.Parallelism, seconds(t.Bound), t.Ratio, seconds(t.IdleSeconds), relationOf(t), violationsOf(t))
 }

@@ -41,7 +41,7 @@ type mailboxFixture struct {
 	signer   *Signer
 }
 
-func newMailboxFixture(t *testing.T) *mailboxFixture {
+func newMailboxFixture(t testing.TB) *mailboxFixture {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

@@ -56,7 +56,7 @@ type ChoreographyInertCancellation struct {
 	Cause        string `json:"cause"`
 }
 
-// CancelInertTask settles a stopped task which never acquired a lease. A
+// CancelInertTask settles a stopped task with no unsettled accepted lease. A
 // release package keeps its outgoing outcome gate until the executor settles
 // same-package siblings and failure hooks.
 func (b *FirstNodeBroker) CancelInertTask(ctx context.Context, taskID string) error {
@@ -65,7 +65,8 @@ func (b *FirstNodeBroker) CancelInertTask(ctx context.Context, taskID string) er
 	task := b.tasks[taskID]
 	if !b.stopping || task == nil || task.spec.Virtual ||
 		task.terminal || task.claim != choreographyInertCancelEmptyIdentity || task.result != choreographyInertCancelEmptyIdentity || task.offeredNode != choreographyInertCancelEmptyIdentity ||
-		task.queueFence != choreographyInertCancelEmptyIdentity || task.tip == choreographyInertCancelEmptyIdentity {
+		task.queueFence != choreographyInertCancelEmptyIdentity || task.tip == choreographyInertCancelEmptyIdentity ||
+		hasUnsettledChoreographyPickups(task) {
 		return fmt.Errorf(choreographyInertCancelStateError)
 	}
 	persist, ok := b.persist.(interface {
@@ -147,21 +148,16 @@ func (g *GitChoreographyPersist) PersistInertCancellation(ctx context.Context,
 		outcome.Cause != choreographyInertCancelCause {
 		return choreographyInertCancelEmptyIdentity, fmt.Errorf(choreographyInertCancelStateError)
 	}
-	if _, err := g.LedgerHead(ctx); err != nil {
-		return choreographyInertCancelEmptyIdentity, err
-	}
-	g.mu.Lock()
-	stopping := g.stopping
-	g.mu.Unlock()
-	if !stopping {
-		return choreographyInertCancelEmptyIdentity, fmt.Errorf(choreographyInertCancelStateError)
-	}
 	document, err := json.Marshal(outcome)
 	if err != nil {
 		return choreographyInertCancelEmptyIdentity, err
 	}
 	sum := sha256.Sum256(document)
 	identity := hex.EncodeToString(sum[:])
+	head, err := g.inertCancellationPrefix(ctx, outcome, identity)
+	if err != nil {
+		return choreographyInertCancelEmptyIdentity, err
+	}
 	oid := g.pendingTaskOID(identity)
 	if oid == choreographyInertCancelEmptyIdentity {
 		oid, err = g.opts.Mailbox.commitMessage(ctx, choreographyInertCancelKind, document, []string{outcome.ExpectedOID}, nil)
@@ -170,7 +166,8 @@ func (g *GitChoreographyPersist) PersistInertCancellation(ctx context.Context,
 		}
 	}
 	if err := g.persistAtomic(ctx, choreographyLedgerMutation{Identity: identity,
-		TaskBranch: spec.Branch, OldTaskOID: outcome.ExpectedOID, NewTaskOID: oid,
+		ExpectedLedgerOID: head,
+		TaskBranch:        spec.Branch, OldTaskOID: outcome.ExpectedOID, NewTaskOID: oid,
 		Event: ChoreographyEvent{Kind: ChoreographyInertCancelled, Task: outcome.Task,
 			Attempt: outcome.Attempt, TaskOID: oid, PriorTaskOID: outcome.ExpectedOID,
 			GraphRootOID: outcome.GraphRootOID, Package: outcome.Package,
@@ -249,7 +246,37 @@ func (g *GitChoreographyPersist) verifyInertCancelEvent(ctx context.Context, eve
 		outcome.Cause != choreographyInertCancelCause {
 		return fmt.Errorf(choreographyInertCancelStateError)
 	}
-	return nil
+	return g.verifyInertPrefixLocked(outcome, g.sequence)
+}
+
+func (g *GitChoreographyPersist) inertCancellationPrefix(ctx context.Context,
+	outcome ChoreographyInertCancellation, identity string) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.pending != nil {
+		if g.pending.mutation.Identity != identity || g.pending.mutation.Event.Kind != ChoreographyInertCancelled {
+			return choreographyInertCancelEmptyIdentity, fmt.Errorf(choreographyLedgerPendingCASErr)
+		}
+		head := g.pending.oldLedger
+		sequence, found := g.eventIndex[head]
+		if !found || g.pending.mutation.ExpectedLedgerOID != head {
+			return choreographyInertCancelEmptyIdentity, fmt.Errorf(choreographyInertCancelStateError)
+		}
+		if err := g.verifyInertPrefixLocked(outcome, sequence); err != nil {
+			return choreographyInertCancelEmptyIdentity, err
+		}
+		return head, nil
+	}
+	if err := g.syncLedgerLocked(ctx); err != nil {
+		return choreographyInertCancelEmptyIdentity, err
+	}
+	if !g.stopping {
+		return choreographyInertCancelEmptyIdentity, fmt.Errorf(choreographyInertCancelStateError)
+	}
+	if err := g.verifyInertPrefixLocked(outcome, g.sequence); err != nil {
+		return choreographyInertCancelEmptyIdentity, err
+	}
+	return g.ledgerTip, nil
 }
 
 func (g *GitChoreographyPersist) verifyInertCancelSettlementEvent(ctx context.Context, event ChoreographyEvent) error {

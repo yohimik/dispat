@@ -6,7 +6,7 @@ import (
 )
 
 // This file is the `runOnly` key: where a package's build may run. Publication
-// stays on the orchestrator, so the second value cannot name a worker.
+// stays on the orchestrator, so the second value cannot name a choreographer.
 //
 // Some work must never leave the machine that holds the trust. A build whose
 // artefact is signed, a publish that logs in, a stage that reads a credential
@@ -18,7 +18,7 @@ import (
 // as `concurrency` does:
 //
 //	runOnly: orchestrator          # build and publish stay here
-//	runOnly: [worker, orchestrator] # build on a node, publish here
+//	runOnly: [choreographer, orchestrator] # build on a node, publish here
 //
 // `build` and `publish` are the two values because they are the two placements
 // a run has: the test stage and the stages a flow defines before the records
@@ -35,11 +35,13 @@ const (
 	// RunOnlyBoth is the default: builds may run on either node type, while
 	// publication remains on the orchestrator.
 	RunOnlyBoth = "both"
-	// RunOnlyWorker pins the stage to a worker node. A run with no worker
+	// RunOnlyChoreographer pins the stage to a choreographer node. A run with no choreographer
 	// links cannot execute such a stage at all and is refused before it
 	// starts, rather than running the work in the one place it was told not
 	// to.
-	RunOnlyWorker = "worker"
+	RunOnlyChoreographer = "choreographer"
+	// Deprecated: use RunOnlyChoreographer.
+	RunOnlyWorker = RunOnlyChoreographer
 	// RunOnlyOrchestrator pins the stage to the machine the release was
 	// started on, which is where the credentials, the locks and the records
 	// are.
@@ -51,8 +53,8 @@ const (
 //
 // Two named fields rather than a list, because the pair is what every reader
 // wants and the list is only how a file may write it. A level that states one
-// value states it for both stages, while a worker build needs the explicit
-// pair `[worker, orchestrator]` because worker publication is refused.
+// value states it for both stages, while a choreographer build needs the explicit
+// pair `[choreographer, orchestrator]` because choreographer publication is refused.
 type RunOnly struct {
 	Build   string
 	Publish string
@@ -156,7 +158,7 @@ func NormalizeRunOnly(raw any, where string) (RunOnly, error) {
 	if out.Publish == RunOnlyWorker {
 		return RunOnly{}, fmt.Errorf(
 			"%s: publication runs on the orchestrator; set publish to orchestrator or both "+
-				"(use [worker, orchestrator] for worker builds)", where)
+				"(use [choreographer, orchestrator] for choreographer builds)", where)
 	}
 	return out, nil
 }
@@ -184,6 +186,9 @@ func normalizeRunOnlyPair(where string, stated []string) (RunOnly, error) {
 
 // checkRunOnlyValue holds one word to the vocabulary the key has.
 func checkRunOnlyValue(where, value string) error {
+	if value == "worker" {
+		return fmt.Errorf("%s: placement worker was removed; use choreographer (with orchestrator for publication)", where)
+	}
 	switch value {
 	case RunOnlyBoth, RunOnlyWorker, RunOnlyOrchestrator:
 		return nil
@@ -193,4 +198,4 @@ func checkRunOnlyValue(where, value string) error {
 
 // runOnlyVocabulary is the whole of what the key accepts, written once so
 // that every refusal offers the reader the same three words.
-const runOnlyVocabulary = `"both", "worker" or "orchestrator"`
+const runOnlyVocabulary = `"both", "choreographer" or "orchestrator"`

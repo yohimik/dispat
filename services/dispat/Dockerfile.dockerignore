@@ -48,3 +48,6 @@ tools/*
 !tools/go.mod
 !tools/go.sum
 !tools/testreport
+!tools/internal
+tools/internal/*
+!tools/internal/executionmeasurement

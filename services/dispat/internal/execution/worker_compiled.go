@@ -57,6 +57,7 @@ type workerCompiledRun struct {
 	joining         bool
 	retainedFeed    *RetainedChoreographyFeed
 	interpreted     *InterpretedRun
+	claimRefresh    *compiledClaimRefresh
 }
 
 type workerCompiledClaim struct {
@@ -217,6 +218,9 @@ func (w *Worker) handleCompiledNotice(ctx context.Context,
 		carrier.LogicalDescriptorDigest != binding.GraphDigest {
 		return compiledNoSelectionProgress, fmt.Errorf(compiledNoticeIdentityError)
 	}
+	if err := validateChoreographyHybridPolicy(bootstrap.Mode, &bootstrap.PinnedInputs, carrier); err != nil {
+		return compiledNoSelectionProgress, err
+	}
 	if err := validateChoreographyRetryPolicy(bootstrap.JoinPolicy, carrier.Tasks); err != nil {
 		return compiledNoSelectionProgress, err
 	}
@@ -373,7 +377,7 @@ func (w *Worker) pollCompiledRuns(ctx context.Context) (bool, error) {
 			}
 		}
 		if run.frontier != nil && run.membershipEpoch != compiledMissingIdentity {
-			claimed, claimErr := w.pickCompiledTasks(ctx, run)
+			claimed, claimErr := w.pickCompiledTasksWithRefresh(ctx, run)
 			if claimErr != nil {
 				return progress, claimErr
 			}
@@ -471,12 +475,16 @@ func (w *Worker) pollCompiledEvents(ctx context.Context, run *workerCompiledRun)
 		}
 		progress = progress || changed
 		if !page.More {
+			run.completeClaimRefresh()
 			return progress, nil
 		}
 	}
 }
 
 func (w *Worker) applyCompiledEventPage(run *workerCompiledRun, page ChoreographyEventPage) (bool, error) {
+	if err := run.verifyClaimRefreshPage(page); err != nil {
+		return compiledNoSelectionProgress, err
+	}
 	for _, event := range page.Events {
 		if event.Kind == ChoreographyInitializationComplete && run.membershipEpoch == compiledMissingIdentity {
 			run.membershipEpoch = event.LedgerOID
@@ -501,6 +509,7 @@ func (w *Worker) applyCompiledEventPage(run *workerCompiledRun, page Choreograph
 	if err := run.frontier.ApplyEventPage(page); err != nil {
 		return compiledNoSelectionProgress, err
 	}
+	w.notifyClaimedFinality(run.binding, page.Events)
 	return len(page.Events) != compiledNoSignedEvents, nil
 }
 
@@ -511,9 +520,9 @@ func (w *Worker) pickCompiledTasks(ctx context.Context, run *workerCompiledRun) 
 		if err != nil {
 			return progress, err
 		}
-		progress = progress || settled
+		progress = progress || settled != compiledClaimUnsettled
 	}
-	if !w.isStateOwned() || len(w.slots) == cap(w.slots) || run.frontier.stopped || run.frontier.sealed ||
+	if run.claimRefresh != nil || !w.isStateOwned() || len(w.slots) == cap(w.slots) || run.frontier.stopped || run.frontier.sealed ||
 		run.frontier.head == len(run.frontier.ready) {
 		return progress, nil
 	}
@@ -603,33 +612,42 @@ func (w *Worker) pickCompiledTasks(ctx context.Context, run *workerCompiledRun) 
 		if err != nil {
 			return progress, err
 		}
-		progress = progress || settled
+		progress = progress || settled != compiledClaimUnsettled
+		if settled == compiledClaimNeedsRefresh {
+			return progress, nil
+		}
 	}
 	return progress, nil
 }
 
 func (w *Worker) settleCompiledClaim(ctx context.Context, run *workerCompiledRun,
-	pending *workerCompiledClaim) (bool, error) {
+	pending *workerCompiledClaim) (compiledClaimSettlement, error) {
 	proposal := pending.proposal
 	receipt, settled, err := w.submitReturnClaim(ctx, run.channel, proposal)
 	if !settled {
 		// An unknown outcome retains the exact proposal and physical lease.
-		return compiledNoSelectionProgress, err
+		return compiledClaimUnsettled, err
 	}
 	if receipt.GraphRootOID != run.rootOID || receipt.Task != proposal.Task ||
 		receipt.Node != w.Node || receipt.Branch != proposal.Branch {
-		return compiledNoSelectionProgress, fmt.Errorf(compiledNoticeIdentityError)
+		return compiledClaimUnsettled, fmt.Errorf(compiledNoticeIdentityError)
 	}
 	if receipt.Refused {
+		refresh, err := run.prepareClaimRefresh(proposal, receipt)
+		if err != nil {
+			return compiledClaimUnsettled, err
+		}
 		if err := w.releaseNodeSlot(ctx, pending.lease, receipt.FenceOID); err != nil {
-			return compiledNoSelectionProgress, err
+			return compiledClaimUnsettled, err
 		}
 		<-w.slots
 		delete(run.pending, proposal.Task)
 		if receipt.RefusalReason == ChoreographyRefusalStale {
-			if err := run.frontier.RequeueFenced(proposal.Task); err != nil {
-				return compiledNoSelectionProgress, err
+			if err := run.requeueStaleClaim(proposal.Task); err != nil {
+				return compiledClaimUnsettled, err
 			}
+			run.claimRefresh = refresh
+			return compiledClaimNeedsRefresh, nil
 		} else if receipt.RefusalReason == ChoreographyRefusalCapacity {
 			resource := receipt.Budget
 			if receipt.CapacityScope == compiledCapacityScopeNode {
@@ -638,25 +656,25 @@ func (w *Worker) settleCompiledClaim(ctx context.Context, run *workerCompiledRun
 			run.parked[proposal.Task] = compiledParkedCapacity{
 				scope: receipt.CapacityScope, resource: resource}
 		}
-		return compiledSelectionProgress, nil
+		return compiledClaimSettled, nil
 	}
 	if !receipt.Accepted || receipt.AssignmentOID == compiledMissingIdentity {
-		return compiledNoSelectionProgress, fmt.Errorf(compiledNoticeIdentityError)
+		return compiledClaimUnsettled, fmt.Errorf(compiledNoticeIdentityError)
 	}
 	if run.interpreted != nil && pending.frame == nil {
-		return compiledNoSelectionProgress, fmt.Errorf(interpretedReadyFrameMissingError)
+		return compiledClaimUnsettled, fmt.Errorf(interpretedReadyFrameMissingError)
 	}
 	mailbox, ok := w.Mailbox.(*GitMailbox)
 	if !ok {
-		return compiledNoSelectionProgress, fmt.Errorf(compiledNoticeMailboxError)
+		return compiledClaimUnsettled, fmt.Errorf(compiledNoticeMailboxError)
 	}
 	if err := verifyFetchedCompiledClaim(ctx, mailbox, proposal, receipt); err != nil {
-		return compiledNoSelectionProgress, err
+		return compiledClaimUnsettled, err
 	}
 	assignment, err := mailbox.VerifyAssignmentCarriers(ctx, receipt.AssignmentOID,
 		w.Report.Limits.MaxManifestBytes)
 	if err != nil {
-		return compiledNoSelectionProgress, err
+		return compiledClaimUnsettled, err
 	}
 	if assignment == nil || assignment.GraphRootOID != run.rootOID ||
 		assignment.InputsDigest != proposal.InputsDigest ||
@@ -664,10 +682,10 @@ func (w *Worker) settleCompiledClaim(ctx context.Context, run *workerCompiledRun
 		assignment.GraphDigest != run.binding.GraphDigest ||
 		assignment.Node != w.Node || assignment.Task != proposal.Task ||
 		assignment.Attempt != proposal.Attempt || assignment.Branch != proposal.Branch {
-		return compiledNoSelectionProgress, fmt.Errorf(compiledNoticeIdentityError)
+		return compiledClaimUnsettled, fmt.Errorf(compiledNoticeIdentityError)
 	}
 	if err := VerifyChoreographyAssignmentTemplate(run.templates[proposal.Task], *assignment); err != nil {
-		return compiledNoSelectionProgress, err
+		return compiledClaimUnsettled, err
 	}
 	fullBindings := ChoreographyTaskBindings{Repositories: assignment.Repositories,
 		Inputs: assignment.Inputs, Exports: assignment.Exports, Env: assignment.Env,
@@ -675,18 +693,18 @@ func (w *Worker) settleCompiledClaim(ctx context.Context, run *workerCompiledRun
 		PreparedInputOID:      proposal.Bindings.PreparedInputOID}
 	digest, err := DigestChoreographyTaskBindings(fullBindings)
 	if err != nil {
-		return compiledNoSelectionProgress, err
+		return compiledClaimUnsettled, err
 	}
 	if digest != assignment.BindingsDigest {
-		return compiledNoSelectionProgress, fmt.Errorf(compiledNoticeIdentityError)
+		return compiledClaimUnsettled, fmt.Errorf(compiledNoticeIdentityError)
 	}
 	if pending.frame != nil {
 		interpretedDigest, digestErr := DigestChoreographyTaskBindings(pending.frame.Bindings)
 		if digestErr != nil {
-			return compiledNoSelectionProgress, digestErr
+			return compiledClaimUnsettled, digestErr
 		}
 		if interpretedDigest != assignment.BindingsDigest {
-			return compiledNoSelectionProgress, fmt.Errorf(interpretedReadyFrameMismatchError)
+			return compiledClaimUnsettled, fmt.Errorf(interpretedReadyFrameMismatchError)
 		}
 	}
 	assignmentTip := ChainTip{OID: receipt.AssignmentOID, Branch: proposal.Branch,
@@ -698,7 +716,10 @@ func (w *Worker) settleCompiledClaim(ctx context.Context, run *workerCompiledRun
 	if done {
 		delete(run.pending, proposal.Task)
 	}
-	return started, err
+	if started {
+		return compiledClaimSettled, err
+	}
+	return compiledClaimUnsettled, err
 }
 
 // verifyFetchedCompiledClaim imports only the advertised canonical task ref.

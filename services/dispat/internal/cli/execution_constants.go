@@ -6,13 +6,13 @@ package cli
 const (
 	compiledDistributionModeName         = "compilation"
 	distributionModeFlagName             = "distribution-mode"
-	distributionModeUsageText            = "release, run and status: compilation or interpretation"
+	distributionModeUsageText            = "release, run and status: compilation (default), interpretation or hybrid"
 	invalidInvocationExitCode            = 2
 	invalidPlanningConcurrencyErrorText  = "invalid concurrency override"
 	invalidReturnChannelAddressErrorText = "invalid return channel address"
 	invocationValidationCompleteState    = true
-	linkedWorkerFlagName                 = "worker"
-	linkedWorkerUsageText                = "release, run and status: add a worker for this invocation, name[=endpoint] (repeatable); a name alone reaches the repository being released; held to every rule a link in execution.workers is, and never part of the plan digest"
+	linkedWorkerFlagName                 = "choreographer"
+	linkedWorkerUsageText                = "release, run and status: add a choreographer for this invocation, name[=endpoint] (repeatable); a name alone reaches the repository being released; held to every rule a link in execution.choreographers is, and never part of the plan digest"
 	planningConcurrencyFlagName          = "concurrency"
 	planningLogFormatFlagName            = "log-format"
 	planningLogLevelFlagName             = "log-level"
@@ -25,9 +25,9 @@ const (
 	returnEndpointUsageText              = "release and run: reachable HTTPS address of this run's first-node return channel"
 	returnListenFlagName                 = "return-listen"
 	returnListenUsageText                = "release and run: local host:port binding for the return channel (defaults to the address in --return-endpoint)"
-	unsupportedDistributionModeErrorText = "unsupported --distribution-mode value (this build supports compilation and interpretation)"
+	unsupportedDistributionModeErrorText = "unsupported --distribution-mode value (this build supports compilation, interpretation and hybrid)"
 	workerCompiledUsageText              = `Serve the build and validation tasks another node's release assigns to this
-one, and nothing else. A worker never starts a release, never writes a
+one, and nothing else. A choreographer never starts a release, never writes a
 release record and never plans: it reads the work addressed to it, runs
 what its assignment authorized, and reports back.
 
@@ -45,9 +45,9 @@ git repository at the root, because a serving node is told what to do rather
 than discovering it.
 
 The mailbox is read over Git; claims and results return over the first node's
-authenticated HTTPS channel, so a worker needs no inbound network address.
+authenticated HTTPS channel, so a choreographer needs no inbound network address.
 --state-dir names the folder this node keeps its object
-cache and its record of already-answered work in; two workers must not share
+cache and its record of already-answered work in; two choreographers must not share
 one folder for one node name, and the second one to start refuses.
 --idle-timeout stops the process after that many seconds with nothing to do,
 which is how a node started for one release ends by itself. A SIGINT or a

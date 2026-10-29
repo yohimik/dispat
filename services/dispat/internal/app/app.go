@@ -44,6 +44,9 @@ type App struct {
 	// workspace is nil for legacy single-repository behavior. In polyrepo
 	// mode it is the immutable ownership map shared by every command.
 	workspace *config.Workspace
+	// configSourceRoot confines all configuration references for a private
+	// planner to its immutable materialization. Ordinary Apps leave it empty.
+	configSourceRoot string
 
 	// sender is who this process is when it takes part in distributed
 	// execution, and the zero sender when it does not. It is resolved once,
@@ -164,7 +167,7 @@ type workspaceDiscovery struct {
 func (a *App) discovery() workspaceDiscovery {
 	a.discoveryOnce.Do(func() {
 		d := &a.discovered
-		d.packages, d.declared, d.excluded, d.err = config.DiscoverWorkspacePackages(a.cfg, a.root, a.workspace)
+		d.packages, d.declared, d.excluded, d.err = config.DiscoverWorkspacePackagesWithin(a.cfg, a.root, a.workspace, a.configSourceRoot)
 	})
 	return a.discovered
 }

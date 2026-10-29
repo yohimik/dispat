@@ -141,6 +141,7 @@ func (c *Coordinator) AcceptProbeReply(ctx context.Context, reply ChoreographyPr
 			!reflect.DeepEqual(result.Report, &reply.Report) {
 			return ChoreographyReceipt{}, fmt.Errorf(choreographyProbeResultMismatchError)
 		}
+		c.notifyProbeReply(reply.Node, reply.Branch)
 		return c.probeReceipt(reply, tip.OID), nil
 	}
 	var claimed string
@@ -197,6 +198,7 @@ func (c *Coordinator) AcceptProbeReply(ctx context.Context, reply ChoreographyPr
 		return ChoreographyReceipt{}, err
 	}
 	c.recordOwnedRef(ctx, ownedRefStep{node: reply.Node, branch: reply.Branch, oid: resultOID, parent: claimed})
+	c.notifyProbeReply(reply.Node, reply.Branch)
 	return c.probeReceipt(reply, resultOID), nil
 }
 

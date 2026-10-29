@@ -15,8 +15,8 @@ package integration
 //
 // A definite failure before authorization stops the work with the integrity
 // code and no publication. An ambiguous task-and-ledger push retains its run
-// and lock for exact reconciliation. One failed read of an already signed
-// Result retries that same evidence without repeating the worker effect.
+// and lock for exact reconciliation. A failed transport read after Result
+// creation recovers without repeating the worker effect.
 //
 // The assertions are codes, exit statuses and git state. No row reads a git
 // message: the stand-in reports failures in this suite's own words, which is
@@ -62,9 +62,8 @@ func newExecutionFaultWorkspace(t *testing.T) *executionRig {
 	})
 }
 
-// One package makes the choreography Result receipt the delegated build's.
-// Its first-node version ticket uses the distinct local Result message. Other
-// packages would race independent first-local reads with the answer fault.
+// One package makes Result creation refer to the sole delegated build, so a
+// later read failure can be checked against that build's single effect.
 func newExecutionFaultSinglePackage(t *testing.T) *executionRig {
 	t.Helper()
 	return newExecutionRig(t, func(cfg *models.File) {
@@ -110,6 +109,9 @@ type executionGitFault struct {
 	// of them; a row about a call the run depends on fails it for good.
 	nth      int
 	isOnward bool
+	// isAfter fails the process only after the real command has supplied its
+	// bytes, so a clean batch exit remains part of message acceptance.
+	isAfter bool
 	// code is the exit status the release must report, which is the whole
 	// difference between the halves of each table.
 	code int
@@ -119,6 +121,8 @@ type executionGitFault struct {
 	diagnostic string
 	// errorText identifies an early refusal before a task status exists.
 	errorText string
+	// isBeforeStages expects input capture to fail before any release effect.
+	isBeforeStages bool
 	// isRetained expects the transport-cleanup warning rather than a failure.
 	isRetained bool
 	// noClaim expects signed terminal refusal when no task ref could be read.
@@ -140,21 +144,21 @@ type executionGitFault struct {
 // A read that can never succeed refuses the release before a stage runs.
 // Definitive input and assignment preparation failures refuse the package
 // without publication. An uncertain atomic push retains its exact refs and
-// lock. Reading the signed Result once unsuccessfully costs a retry; the
-// worker's effect is not rerun and the release still completes.
+// lock. A transport read that fails once after Result creation costs a retry;
+// the worker's effect is not rerun and the release still completes.
 func TestExecutionOrchestratorGitFaults(t *testing.T) {
 	for name, row := range map[string]executionGitFault{
 		"no message can be resolved at all": {
-			pattern: "*cat-file -e*", nth: 1, isOnward: true,
+			pattern: "*show-ref --verify --hash -- refs/dispat-transport/*", nth: 1, isOnward: true,
 			code: 1, diagnostic: executionRefusalCode,
 		},
-		"no message can be measured at all": {
-			pattern: "*cat-file -s*", nth: 1, isOnward: true,
-			code: 1, diagnostic: executionRefusalCode,
+		"no transport object stream can be opened": {
+			pattern: "*cat-file --batch", nth: 1, isOnward: true,
+			code: 1, errorText: "execution: planning snapshot parents of", isBeforeStages: true,
 		},
-		"no message can be read at all": {
-			pattern: "*cat-file blob*", nth: 1, isOnward: true,
-			code: 1, diagnostic: executionRefusalCode,
+		"no transport object stream exits cleanly": {
+			pattern: "*cat-file --batch", nth: 1, isOnward: true, isAfter: true,
+			code: 1, errorText: "execution: planning snapshot parents of", isBeforeStages: true,
 		},
 		"the input state cannot be committed": {
 			pattern: "*commit-tree*dispat transport snapshot*", nth: 1, isOnward: true,
@@ -181,15 +185,15 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			nth:     1, isOnward: true,
 			code: 1, unknownOutcome: true, newRig: newExecutionFaultPreparation,
 		},
-		"the answer cannot be retrieved once": {
-			pattern: "*rev-list --parents --max-count=1*", nth: 1,
+		"a transport reader after Result creation exits unsuccessfully once": {
+			pattern: "*cat-file --batch", nth: 1, isAfter: true,
 			armAfter: "*commit-tree*dispat transport choreography-result*",
 			newRig:   newExecutionFaultSinglePackage,
 		},
-		"a node's answer cannot be read once": {
-			// A task-ref push may be initialization or a Claim. Start counting
-			// only after the first node has written the accepted Result receipt.
-			pattern: "*cat-file blob*", nth: 1,
+		"a transport read after Result creation fails once": {
+			// Other transport objects can be read concurrently with the Result.
+			// Arming here proves a post-creation retry, not a specific blob read.
+			pattern: "*cat-file --batch", nth: 1,
 			armAfter: "*commit-tree*dispat transport choreography-result*",
 			newRig:   newExecutionFaultSinglePackage,
 		},
@@ -200,7 +204,7 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 				func(settings *models.ExecutionConfig) { settings.Concurrency = models.Int(4) }), 0)
 			fault := harness.NewGitFault(t, harness.GitFault{
 				Pattern: row.pattern, Nth: row.nth, Onward: row.isOnward,
-				ArmAfter: row.armAfter})
+				ArmAfter: row.armAfter, After: row.isAfter})
 
 			res := rig.repo.StartReleaseEnv(rig.env(fault.Env()...), "release",
 				"--return-endpoint", rig.returnURL).WaitForDiagnostic(90*time.Second, func() {
@@ -225,7 +229,7 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 			if row.code == 0 {
 				assert.Positive(t, fault.Matches(), "the one-shot fault reached a post-Result read\nstdout:\n%s", res.Stdout)
 				assert.Equal(t, 1, executionBuildCount(rig, "core"),
-					"the signed Result is reread without repeating the worker effect: %v", rig.runs())
+					"the post-Result read failure recovers without repeating the worker effect: %v", rig.runs())
 				assert.NotEmpty(t, rig.repo.TagList(), "a call that is retried costs a tick and nothing else")
 				assert.NotEmpty(t, executionProtocolRefs(t, rig.mailbox, "dispat-ledger-"),
 					"the completed run retains its signed ledger for recovery")
@@ -239,8 +243,11 @@ func TestExecutionOrchestratorGitFaults(t *testing.T) {
 				assert.Contains(t, res.Stdout, row.errorText)
 			}
 			assert.Empty(t, executionReleasedPackages(res), "nothing was published")
-			if row.diagnostic == executionRefusalCode {
+			if row.diagnostic == executionRefusalCode || row.isBeforeStages {
 				assert.Empty(t, rig.runs(), "and no stage of the release ran anywhere")
+			}
+			if row.isBeforeStages {
+				assert.False(t, remoteHoldsLock(t, rig.origin), "the refused planning capture released its lock")
 			}
 		})
 	}
@@ -294,8 +301,8 @@ func TestExecutionWorkerTransportGitFaults(t *testing.T) {
 			pattern: "*rev-parse --verify --end-of-options*", nth: 1, isOnward: true, code: 1,
 			newRig: newExecutionFaultOutputs,
 		},
-		"a message cannot be read once": {
-			pattern: "*cat-file blob*", nth: 1,
+		"a transport object cannot be read once": {
+			pattern: "*cat-file --batch", nth: 1,
 		},
 		"the checkout records cannot be pruned": {
 			pattern: "*worktree prune*", nth: 1, isOnward: true, isRetained: true,

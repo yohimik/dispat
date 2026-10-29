@@ -300,6 +300,50 @@ export interface ExperimentCell {
   /** Present in the timing cells alone. */
   timing?: ExperimentTiming;
   plan?: ExperimentPlan;
+  llvm?: ExperimentLLVM;
+  linuxKernel?: ExperimentLinuxKernel;
+  executionMeasurement?: import('./measurement').ExecutionMeasurement;
+}
+
+export interface ExperimentLLVMArtifact {
+  package: string;
+  path: string;
+  sha256: string;
+  bytes: number;
+}
+
+export interface ExperimentBuild {
+  status: 'completed' | 'failed' | 'blocked' | 'unsupported';
+  reason?: string;
+  mode: 'compilation' | 'interpretation' | 'hybrid' | 'distributed' | 'manual-gcp-split';
+  profile: 'full' | 'smoke';
+  sourceRevision: string;
+  topology: string;
+  executorCount: number;
+  jobsPerExecutor: number;
+  timeoutSeconds?: number;
+  buildTargets: string[];
+  backends: string[];
+  cache: string;
+  seconds?: number;
+  nodes: string[];
+  artifacts: ExperimentLLVMArtifact[];
+  platform?: string;
+  toolVersions?: Record<string, string>;
+  binaryId?: string;
+  binarySha256?: string;
+}
+
+export interface ExperimentLLVM extends ExperimentBuild {
+  llvmVersion: string;
+}
+
+export interface ExperimentLinuxKernel extends ExperimentBuild {
+  kernelVersion: string;
+  configuration: 'allmodconfig' | 'defconfig';
+  omissions: string[];
+  configDigests: Partial<Record<'x86_64' | 'arm64', string>>;
+  moduleCounts: Partial<Record<'x86_64' | 'arm64', number>>;
 }
 
 /**

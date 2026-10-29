@@ -50,7 +50,7 @@ func (a *App) checkStagePlacements(pl *plan.Plan) error {
 			}
 			return a.reportPreflightFailure(execution.NewDiagnostic(
 				execution.CodeConfiguration, execution.CategoryConfiguration,
-				"%s states runOnly %q for its %s stage and this configuration declares no execution.workers: "+
+				"%s states runOnly %q for its %s stage and this configuration declares no execution.choreographers: "+
 					"a stage that may only run on a worker has nowhere to run",
 				rel.Pkg.Name, stage.value, stage.name))
 		}

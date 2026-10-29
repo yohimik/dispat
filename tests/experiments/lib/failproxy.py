@@ -33,6 +33,8 @@ import sys
 import time
 import urllib.parse
 
+from measurement_clock import active_phase, local_interval, monotonic_sample
+
 UPSTREAM = os.environ.get("UPSTREAM", "127.0.0.1:4874")
 DENY_DIR = os.environ.get("DENY_DIR", "/deny")
 PORT = int(os.environ.get("PORT", "4873"))
@@ -90,12 +92,15 @@ def wait_for_gate(path, timeout, poll=GATE_POLL, clock=time.monotonic, sleep=tim
     return f"after {path}"
 
 
-def record_upload(path, package, start, end, status):
+def record_upload(path, package, start, end, status, measurement=None):
     """One forwarded upload's interval, appended as a line of its own. A
     single write of a short line in append mode lands whole beside the
     builds' and the npm shim's lines in the same file."""
-    line = json.dumps({"package": package, "task": "upload", "start": round(start, 6),
-                       "end": round(end, 6), "status": status})
+    record = {"package": package, "task": "upload", "start": round(start, 6),
+              "end": round(end, 6), "status": status}
+    if measurement is not None:
+        record["measurement"] = measurement
+    line = json.dumps(record)
     with open(path, "a") as f:
         f.write(line + "\n")
 
@@ -155,6 +160,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _forward(self):
         started = time.time()
+        measured_start = monotonic_sample()
+        measured_phase = active_phase()
         name = package_of(self.path)
         try:
             body = self._read_body()
@@ -201,7 +208,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # whose first segment is `-` is the registry's own API, a login rather
         # than a package.
         if TIMING and self.command == "PUT" and not name.startswith("-"):
-            record_upload(TIMING, name, started, time.time(), resp.status)
+            measurement = local_interval(measured_start, monotonic_sample(), "registry-proxy")
+            measurement["phase"] = measured_phase
+            measurement["boundary"] = "proxy request handling start through complete upstream registry response body, before downstream response"
+            record_upload(TIMING, name, started, time.time(), resp.status, measurement)
         self._respond(resp.status, data, kept, length)
 
     do_GET = do_PUT = do_POST = do_DELETE = do_HEAD = do_PATCH = do_OPTIONS = _forward

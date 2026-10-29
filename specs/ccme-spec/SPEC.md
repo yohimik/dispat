@@ -1582,8 +1582,10 @@ Every input is read from the unit and from tags at `HEAD`, so the result is dete
 intended one: a consumer dragged along by a dependency that shipped on `beta` also ships on `beta`, and the prerelease
 train stays installable as a set.
 
-**Discharge of the channel axis.** Both axes use the same fresh-work gate: once `d` releases, the commit leaves
-`Wfresh(d)`, so neither its bump nor its channel can be re-admitted (§13.7c G4). The final
+**Discharge of the channel axis.** A channel contribution is admitted only while its commit lies in
+`Wfresh(d)`; after `d` releases past it, that channel contribution is discharged (§13.7c G7). Bump admission
+instead uses `owed(u, d)` (§13.4a): a consumer that released before its provider can still be owed a bump
+after the commit leaves its fresh window. Only delivery discharges that bump (§13.7c G4). The final
 `propagatedChannelFor` comparison against `channelOf(baseline(d))` remains independently necessary while work is fresh:
 `target == cur` produces `W199`, and a transition whose `<from>` no longer matches proposes nothing. That comparison
 prevents a no-op channel proposal; it is not the ledger-discharge mechanism and MUST NOT be used in place of
@@ -2111,12 +2113,13 @@ do not break dependency propagation, version groups (§13.9a), publish ordering,
 cycle is `E200`, repository-scoped: the run aborts before any plan is computed, and the diagnostic MUST name every
 package in the cycle and the manifest field carrying each edge, because a cycle is otherwise tedious to locate by hand.
 
-A cycle is rejected rather than accommodated because it has no correct release. Registries have no transactions and
-§19.1 forbids moving or deleting a tag, so the members of a cycle cannot be published atomically: whichever goes first
-declares a range on a version that does not yet exist, and if the run then fails, that unresolvable state is permanent.
-No publish order avoids this, because a cycle admits no order. Accepting cycles would mean specifying a release that is
-transiently broken by construction and occasionally broken for ever, so the graph constraint is stated once, here, and
-everything downstream may assume a DAG.
+This is CCME's ordering policy: a directed cycle admits no strict provider-before-consumer order. When every
+member requires another member's not-yet-published version, separate publications can expose an unresolved
+reference if the run stops partway. Later successful publication may repair availability, but this specification
+provides no general atomic visibility primitive across those artifacts and their records. Existing compatible
+versions can satisfy other cyclic declarations, so the rejection is not a theorem that every cyclic dependency
+admits no correct release. The informative cyclic extension in §13.11 distinguishes determined intent from
+executable prerequisites. It does not relax `E200`; all following normative phases may assume a DAG.
 
 `devDependencies` are not in either edge-kind list by default, so a cycle existing only through them is not a cycle for
 this purpose and does not trigger `E200`, which is the common and legitimate case, since test fixtures routinely depend
@@ -2199,9 +2202,11 @@ baseline the two windows coincide. These roles MUST NOT be conflated:
 |-------------------------------------------|----------------------------------|-------------|
 | Compute `P`'s aggregate train bump/target | `W(P)`, the unit's own package   | §11.4, §11.5, §13.9 |
 | Admit a fresh direct bump or channel      | `Wfresh(P)`                      | §13.6, §13.8 |
-| Admit a bump or channel for dependent `D` | `Wfresh(D)`, the **dependent's** | §13.7       |
+| Admit a channel for dependent `D`        | `Wfresh(D)`, the **dependent's** | §9.3, §13.7 |
+| Admit a bump for dependent `D`           | `owed(u, D)` from source delivery evidence, including owed windows | §9.2, §13.4a |
 
-Reading the dependent-admission row against the source's window silently loses releases; §13.7a is about exactly that.
+Reading dependent admission solely against the source's window silently loses releases. Restricting bump
+admission to `Wfresh(D)` also loses a provider's later delivery to a consumer that released first (§13.7a).
 
 ### 13.4 Parse and resolve
 
@@ -2418,7 +2423,8 @@ published continue to propagate, per the `discharged` rule of §13.4a.
 ### 13.7 Propagation
 
 Run §9.2 over the surviving tuples, using `sourcePackages(u)` (§13.4a), skipping any unit whose source set is entirely
-held, and removing held packages from every unit's source set.
+empty after its window-scoped suppression. A held source is removed only for work it has not released;
+holding a provider after publication does not erase the contribution its consumers are still owed.
 
 §9.2 is a three-phase procedure and its phases interleave with this section: phase 1 propagates channels, phase 2 is the
 channel resolution of §13.8, and phase 3 propagates bumps using the channels phase 2 produced. §13.8 is therefore
@@ -2553,13 +2559,21 @@ banner or a CI dashboard, compares release positions directly:
 > `D` is possibly behind `P` if `tagCommit(baseline(P))` is **not** an ancestor-or-self of `tagCommit(baseline(D))`.
 
 That is the "the provider's tag is newer than the consumer's tag" intuition, expressed as ancestry so that it stays
-deterministic under merges, rebases, and equal commit dates (§10.4). It is the shape of `delivered` (§13.4a) with the
-unit's commit left out, which is why it screens: a consumer owed something has a provider release its own release does
-not reach. It MUST NOT be used as the authoritative test: it is *necessary but not sufficient*. A provider can
+deterministic under merges and equal commit dates (§10.4). It is a necessary screen for non-delivery of a
+particular contribution only when the chosen provider baseline tag already carries that contribution and
+both baseline positions exist. If that provider tag were reachable from the consumer baseline, it would
+itself witness `delivered(P, C, D)`. In the polyrepository profile use the consumer's proven position in the
+provider's history (§27), not unrelated cross-repository SHAs.
+
+The screen is not necessary for all `staleSources(D)` results. For example, let both baselines be at `t0`
+and add `C = feat(P)^` after `t0`, with `D` consuming `P`. The fresh unit can admit a bump for `D` although
+the baseline tags are still equal. A missing baseline or a chosen provider baseline that does not carry
+the unit likewise cannot exclude its contribution. Such work still needs the full §9.2/§13.4a evaluation.
+Even within the screen's stated domain it is not sufficient: a provider can
 legitimately be ahead of a consumer with nothing owed: the units between them may all be `^none`, or `+0`, or scoped
 away by `Propagate-Scope`, or reach `D` only beyond their declared depth, or be `devDependencies`-only edges. Using the
-screen to decide releases would manufacture bumps that no commit asked for. Use it to *find* candidates; use §9.2 to
-decide.
+screen to decide releases would manufacture bumps that no commit asked for. Use it to flag already-released
+provider positions for inspection, without discarding other pending work; use §9.2 to decide.
 
 Note also the case the screen cannot see at all: `P` and `D` released at the **same commit**, in the same run, but with
 `D` published first. Ancestry cannot distinguish them, and no rule over tags can. That case is prevented rather than
@@ -2605,12 +2619,34 @@ the source, traversal, and channel-admission predicates stay fixed while `delive
 invariant, publishing a suppressed source (the failure of H2) or changing resolved channel admission may expose finite
 catch-up targets. Such widening MUST be surfaced for review (§18.1).
 
-**G6, restricted convergence.** Under the retry invariant, repeated running at a fixed `HEAD` reaches an empty non-held
-plan in at most `n + m` successful-progress runs, where `n` is the number of publishable packages in the first plan and
-`m` the number of those that proceeded past a failed provider (§19.3): G4 removes a published package, G5 admits no new
-one, and a proceeded consumer returns once, for the catch-up its provider's later release owes it. Without H2, a source
-release may expose a finite follow-up obligation; other failures of the invariant may also change admission. §19.6
-therefore classifies the post-run replan; it does not claim global convergence outside the retry invariant.
+**G6, restricted convergence.** The retry invariant alone does not bound runs that contain some successful
+publication. A finite-debt progress premise is also required. Let `n` count the non-held packages in the initial
+plan, and let `K` count its initially outstanding admitted `(unit, source, target)` delivery incidences.
+In addition to the retry invariant, assume
+these are finite, no new package or direct, channel, exact-version or group cause is introduced, delivery only
+grows, all successful records become authoritative, and every successful publication after a package's first
+success discharges at least one previously outstanding delivery incidence. These conditions exclude repeated
+group rides that deliver no new cause. They must be established for the retry policy, not inferred from a
+successful upload or from the existence of a tag.
+
+The potential consisting of unconsumed first-success tokens plus outstanding delivery incidences starts at
+`n + K` and never increases. A package's first success consumes its token; each later success consumes at
+least one still-outstanding incidence by the premise and G4. Thus there are at most `n + K` successful
+publications, and at most that many runs containing one. If every nonempty residual plan eventually obtains
+such progress and no unresolved authority, identity or `E201` condition stops it, the residual plan becomes
+empty. Arbitrarily many failed or blocked attempts have no finite run-count or time bound. Several providers
+can require several catch-ups by one consumer; counting that consumer only once does not count its debts.
+The smaller `n + m` count follows if at most `m` packages are
+republished and each is republished at most once.
+
+In particular, fixed shared prerelease counters (§13.9a) can violate the progress premise. Take two independent
+non-sparse members `A` and `B` on a shared `1.1.0-rc.0` train with stable baselines `1.0.0`, then a fresh
+`fix(A,B)` at the fixed `HEAD`. If only `A` succeeds on every run, `B` retains fresh work; the fixed-counter
+group keeps engaging, and `A` publishes `rc.1`, then rides `rc.2`, `rc.3`, and so on while `B` keeps failing. Every run has a successful
+publication but the plan never empties. No propagation edge or `E201` case is needed. A shared counter's
+convergence therefore needs successful settlement of the lagging members, not merely success somewhere
+in the group. Without H2, or with other changes outside the retry invariant, new obligations can also arise.
+Section 19.6 classifies the post-run replan and does not promise convergence outside these stated premises.
 
 **Why tagging is universal.** It is tempting to version a private or artefact-less package in the plan but not tag it;
 there is, after all, nothing in a registry for the tag to correspond to. Such a package can never converge: its window
@@ -2869,6 +2905,10 @@ prerelease than the one the failed run planned, and the members that already pub
 covers the group's core, not its counter. The core is stable across the retry because §11.4 recomputes it from the
 stable baseline, and it is the core that a consumer's range and a reader's expectations are about. An implementation
 MUST NOT present the counter as stable under this axis.
+G6's finite-debt progress premise is not automatic for fixed counters: a successful ride can leave the
+same lagging member's fresh work pending and advance the next retry again. The counterexample in G6
+shows why success by some member on every run is insufficient for convergence. This does not change the
+specified counter or alignment rules.
 
 ### 13.10 Emit
 
@@ -4319,8 +4359,9 @@ settle or fence it, or rely on destination deduplication. After publication but 
 same effect and write the tag; skip the put if the destination already holds verified `J`. After a durable
 tag, the next plan skips that completed package. Induction over any finite sequence of crashes preserves each
 verified effect and tag identity for a fixed attempted `(K, J)`. With fair retries, stable inputs, settled attempts
-and eventual successful effect and record writes, replay of that identity is safe. Under §13.7c's retry invariant,
-G6 gives an empty non-held forward plan after bounded successful-progress runs. The sequence can include catch-up
+and eventual successful effect and record writes, replay of that identity is safe. Under §13.7c's retry invariant
+and G6's additional finite-debt and eventual-progress premises, G6 gives an empty non-held forward plan after
+bounded successful-progress runs. The sequence can include catch-up
 releases, so its records need not equal those of an all-successful first run. Replay-protected pre-record obligations
 complete before their tags; completion of post-record or untracked side effects does not follow. After partial
 success, new valid records change the inventory and discharge completed units. The next run derives a residual
@@ -4336,7 +4377,8 @@ completed record describes an effect allowed by that plan. Induct on task preced
 its required predecessors, and a recorded irreversible task has a verified effect with the planned identity.
 After a crash, a later invocation reads the updated record inventory. If other inputs remain fixed and the
 retry invariant of §13.7c holds, immutable records discharge completed units and §17.2 derives the residual
-plan from verified state. Under the stated fairness and eventual-success premises and the retry invariant,
+plan from verified state. Under the stated fairness and eventual-success premises, the retry invariant and
+G6's finite-debt progress premises,
 §13.7c G6 gives an empty non-held forward plan, possibly after catch-up records. This composition establishes
 record soundness and discharge of eligible obligations, not equality with an all-successful first-run record set.
 Post-record effects require their own durable replay contract for a completion claim. Planner work, graph
@@ -4764,8 +4806,9 @@ runs (§28.2), and such a task waits on no record unit, so no wait cycle forms. 
 (§28.6), and so can its other stages, since §28.6 serializes only publication and recording.
 
 *The compiled plan.* The plan of the dispat theorem is the union over the planned packages of their package graphs with
-the cross-package edges, and its `R` holds the publications and the records. For a realisable configuration the
-theorem's premises hold: the tasks are finite, every dependency is known before the first task starts, and the
+the cross-package edges, and its `R` holds the publications and the records. For a realisable configuration whose
+complete plan task graph also passes the acyclicity check, the structural premises hold: the tasks are finite,
+every dependency is known before the first task starts, and the
 precedence relation is acyclic. The clauses hold with `Lk` the longest chain of the whole task graph, `rec_p` included.
 Where every task that takes time takes a slot, clause 1's bound is `max(Lk, Wk / s)`. Under the capacities of §28.2 and
 §28.6 the separate resource terms of clause 1 apply, including `Wunit / m_rec` for reserved record units. Clause 2's
@@ -4775,7 +4818,10 @@ draws on one pool of `s` slots, and no owner lane binds. Two corollaries follow.
 
 1. **An edge no data needs never makes the plan faster.** Hold the configurations of the other packages fixed, and
    compare the realisable configurations of `p` that serve `D_p` and share `S_p`, the scripts and their durations, the
-   cross-package edges and the post-publication set `A_p`. The publication and record edges depend only on `S_p` and
+   cross-package edges and the post-publication set `A_p`. Assume this comparison class is nonempty and its
+   complete plan graphs pass the acyclicity check. For example, data requirements containing `build -> version`
+   conflict with required `version -> build`, leaving no such configuration to optimize.
+   The publication and record edges depend only on `S_p` and
    `A_p`, so they are one set `F_p` for all of them, and `G_p = E_p ∪ F_p` is monotone in `E_p`.
    When the closure of one
    configuration's `E_p` contains another's, so does the closure of its `G_p`, and so does that of the whole plan, since
@@ -4807,7 +4853,7 @@ draws on one pool of `s` slots, and no owner lane binds. Two corollaries follow.
 
    `parallel` adds no edge and asserts that two stages stay unordered, which condition 3 checks: it is how a
    configuration states independence.
-2. **Nodes affect aggregate work; order affects span.** The configured order changes neither tasks nor durations,
+2. **Node capacity affects the work bound; order affects span.** The configured order changes neither tasks nor durations,
    so `Wslot`, `Wunit`, `Wrec`, each stage load and each owner's sum are fixed. `Lk` cannot rise when an actual
    precedence edge is removed, since every chain of the smaller order was a chain of the larger one. Let `n` be
    summed node capacity and keep the graph, task durations, stage limits, recording capacity, owner lanes and node
@@ -10052,8 +10098,8 @@ and when effect decisions are evaluated:
 * In `hybrid`, the orchestrator compiles known nonpush command paths for eligible node pickup and interprets
   first-only effect decisions after exact prerequisites settle.
 
-`--distribution-mode=hybrid` is specified here for a later implementation. A binary MUST reject a mode it does
-not implement; it MUST NOT silently execute it as compilation. An implementation's dated conformance status
+A binary MUST reject a distribution mode it does not implement; it MUST NOT silently execute hybrid as
+compilation. An implementation's dated conformance status
 belongs in DESIGN-HISTORY.md, not in the normative meaning of these values. No mode changes which packages or versions
 `Plan(input)` selects. Execution links are independent of the history-selection modes in §27 and MUST NOT
 change source ownership, repository discovery or release scope.
@@ -10069,7 +10115,7 @@ positive cross-run command capacity, and `runOnly: choreographer` for a task eli
 policy cannot change node capacity or the first node's authority. Node names identify execution endpoints,
 not repository peers.
 
-For interpretation, `execution.maxAttempts` is the positive maximum number of accepted physical pickups
+In every distribution mode, `execution.maxAttempts` is the positive maximum number of accepted physical pickups
 of one delegated logical task, including its first pickup. Omission means one total attempt; the accepted range
 is 1 through 64, and values outside it are refused before effects. The resolved value is signed into
 the bootstrap and complete task graph, and every node verifies the same value. First-only native effects
@@ -10239,13 +10285,17 @@ The orchestrator cannot certify a peer's actual free local slots from a timestam
 attests its own cross-run limit. A failed attempt is not a logical terminal failure until its retry/exhaustion
 decision is durable. First-node local work uses the same broker rules.
 
-In `hybrid`, the orchestrator compiles known tasks whose engine-managed effects do not advance canonical or
-native Git refs or perform a native release mutation; eligible nodes pick up ready compiled command paths
+In `hybrid`, the orchestrator compiles known tasks whose payload performs no engine-managed native Git-ref,
+release or receipt mutation; eligible nodes pick up ready compiled command paths
 under the same exact claim rules. The worker's create-only pickup refs do not make such a command a native
-Git-push effect.
+Git-push effect. The common canonical Claim, Result, ledger and event transactions of §28.4 are admission
+and finality bookkeeping for every segment; they do not reclassify a compiled command as an interpreted effect.
 Delegable preparation, test, build and user stages are in that
 segment. Version, sign, syncLock and shared-file preparation may be compiled there only when their
 engine-managed effects are nonpush; they retain required first-node placement and file/owner lanes.
+An implementation MAY conservatively interpret those first-only preparation tasks instead. It fixes that
+choice in each signed descriptor before execution; first-node placement alone does not grant a peer
+authority or permit a native effect inside a compiled command.
 Login and publish hooks, publication, native release commits/tags/ref pushes, peer settlement, receipt
 reconciliation, recording and postrecord hooks belong to the first-only interpreted effect segment.
 An engine-managed native release, VCS ref or receipt mutation in an earlier preparing stage also belongs
@@ -10255,11 +10305,30 @@ prepared-state OID gates consumers. It cannot perform a release, ref or receipt 
 as a file edit.
 This is an authority classification, not a claim that arbitrary trusted shell commands are sandboxed.
 Virtual relay vertices are graph gates rather than separately executable tasks. Every executable task has
-exactly one policy owner. Signed exact outcome and effective-input gates cross the partition in both directions:
+exactly one policy owner. If one executable task contains both ordinary preparation and an interpreted
+effect, the whole task belongs to the first-only interpreted segment. Splitting it is permitted only when
+the fixed graph already contains the separate vertices and preserves their hook, failure, input and
+ordering semantics; execution MUST NOT invent vertices or reclassify a task after dispatch.
+The signed semantic descriptor and `GraphDigest` bind this segment classification and the exact pinned
+operation or command policy. An effect descriptor MAY refer to that pinned policy instead of duplicating
+command bytes, but a missing command body alone neither identifies an effect nor authorizes it.
+The policy reference MAY use a digest of the complete selected pinned policy envelope. It MUST bind
+the source/configuration object identities, selected configuration paths and import provenance, and all
+nonsecret invocation and destination settings that select or change the operation. A semantic plan or
+structural graph digest alone suffices only if it already binds every such policy input: two configuration
+entry files in one source commit can select different native policies while producing the same semantic
+plan. The bootstrap's pinned selection MUST agree with the descriptor's reference. Compute this input
+identity before the final graph/carrier hashes; it MUST NOT depend circularly on those final hashes.
+Runtime Result, output and prepared-input holes retain their separate exact bindings.
+A lazy effect callback still waits for its typed gates and records the signed first-only claim or effect intent
+of §28.4 before the first possible effect. Hybrid command pickups use the same signed attempt limit,
+repeat-safety policy, exact pickup identity and cancellation/finality rules as the other modes.
+Signed exact outcome and effective-input gates cross the partition in both directions:
 a build can unlock publication, and a settled provider publication/record can unlock a later consumer build.
 These alternations may recur along one dependency chain; hybrid is not a global two-phase barrier.
 The same fixed graph and failure semantics apply throughout. The orchestrator interprets effect decisions only
-after those predecessors settle and alone performs every authorized push.
+after those predecessors settle and alone performs every canonical or native Git push. Peers retain only
+their create-only pickup-ref exception under §28.4.
 
 **Elastic choreographer participation in every mode.** Compilation, interpretation and hybrid MUST admit an
 authorized choreographer while a run is active, non-stopping and unsealed. This includes a task-only sweep
@@ -10390,14 +10459,14 @@ tasks do not invite a peer claim, but they use the same exact branch identity an
 The canonical task branch is the sole logical winner authority. A Claim atomically advances that branch and
 names one unique pickup ID. The worker creates its pending ref from the accepted Claim tip and an outcome
 ref from that exact pending commit; each ref is create-only and unique to the run, task, node and
-pickup. In interpretation the pickup ref name includes its creation time and a separately generated,
-persisted random pickup identity; equal timestamps cannot collide, and a timestamp is never claim authority,
-readiness evidence, or a reason to free capacity. An interpretation success uses a completed ref; a failure
-or cancellation uses a failed ref, both direct children of that pickup's pending commit. A successful task
+pickup. Every mode uses a separately generated, persisted random pickup identity; a ref name MAY also
+include its creation time, but equal timestamps MUST NOT collapse distinct pickups. A timestamp is never
+claim authority, readiness evidence, or a reason to free capacity. A success uses an output (completed)
+ref; a failure or cancellation uses a failed ref, both direct children of that pickup's pending commit. A successful task
 with no declared output still retains the signed completed commit and canonical terminal marker. A signed Result
 or Ack may be admitted as pickup evidence on the ledger without advancing the
 canonical task tip while a successor pickup is active. The first node selects at most one verified successful
-Result as the canonical terminal winner before installing its outputs. In interpretation, a durably settled
+Result as the canonical terminal winner before installing its outputs. In every mode, a durably settled
 failed Result, including the required package-hook outcome, may reopen the task for a sequential successor
 only while its signed `execution.maxAttempts` total has not been exhausted. The default total of one gives
 an accepted failure terminal finality. A failed attempt alone discharges no logical successor edge.
@@ -10647,15 +10716,27 @@ Reported elapsed intervals use readings of the same monotonic clock. Subtracting
 different nodes is not exact latency without an explicit bounded-uncertainty model; signed event order alone
 does not measure duration.
 
+**Experiment inputs and formula results.** A report applying the task-graph formulas MUST identify the actual
+graph and timed operations, retain the measured inputs and resource evidence, and display them separately from
+the derived bounds and ratios. Package counts, executor counts, inner build-tool jobs and observed overlap are
+different quantities. A projected workload graph MUST NOT be described as the complete executor or compiler
+graph. Configured capacity MUST NOT be inferred from observed overlap. Missing inputs or unsatisfied theorem
+premises MUST remain explicit; a failed or unsupported trial is not a zero-duration success. The normative
+[experiment measurement profile](./EXPERIMENT-MEASUREMENTS.md) defines the additive report fields, formula
+semantics, clock and capacity conditions, and the standard-release and nested-build mappings. It changes no
+execution, admission, release or recovery rule and does not retroactively supply missing historical evidence.
+
 For an already supplied explicit graph of `n` vertices and `e` edges, one adjacency-list construction and
-one incremental readiness pass inspect `Theta(n + e)` required records and do `O(n + e)` graph/event work
-without retries. Each of `q` participating nodes indexes a local frontier in every mode, so aggregate
-explicit graph state and event processing can be `O(q(n + e))`; interpretation additionally repeats semantic
-planning on those nodes. Fixed-size claim, membership and terminal
-events update indexed successors; polling all predecessors or all task refs after every event does not meet
-this bound. Semantic `Plan(input)`, sorting, Git history and record discovery, transport, publication,
-retries and recovery are separate costs. These bounds neither establish a fastest implementation nor a
-wall-time gain.
+one logical-terminal readiness drain inspect `Theta(n + e)` required records and do `O(n + e)` work.
+With one initialization on each of `q` nodes, graph indexing and that drain cost `O(q(n + e))` in aggregate.
+If node `r` additionally processes `F_r` coordination events, include `O(sum_r F_r)` even without task retries:
+one long task can coexist with arbitrarily many membership, claim-refusal or capacity events. A logical
+terminal or settled outcome updates its applicable successor edges once; a claim or membership event does
+not discharge those edges. Event payloads, verification and eligibility searches carry their actual costs.
+Restarts and repeated initialization use the `Qint` account in §13.11; interpretation additionally repeats
+semantic planning. Polling all predecessors or task refs after every event does not meet the incremental
+readiness bound. Semantic `Plan(input)`, sorting, Git history and record discovery, transport, publication,
+retries and recovery are separate costs. These bounds neither establish a fastest implementation nor a wall-time gain.
 
 ### 28.8 Conformance vectors
 
@@ -10825,6 +10906,17 @@ is not applicable, while that mode's invocation must fail before effects. Every 
 51. Skew node clocks so one deadline expires and a heartbeat or reply is lost while the accepted attempt still
     runs. Signed attempt and epoch order remains authoritative; timeout or clock skew alone neither frees
     physical capacity nor proves cancellation finality or permits a conflicting publication.
+52. In each mode, omit `execution.maxAttempts` and settle a failed command: the one accepted attempt is
+    terminal. With a signed limit of two, a settled failed first attempt may yield one sequential successor
+    with a distinct persisted pickup identity; neither failure nor a lost receipt discharges dependency edges
+    before logical finality. Reply loss for an existing pickup reuses its exact identity and does not consume
+    a new attempt. Exhausting the limit never enables another pickup. Uncertain contact loss additionally
+    requires vector 43's repeat-safety and cancellation fence, with old capacity retained.
+53. In hybrid, one fixed task contains a prepared-file edit and an engine-managed receipt or ref mutation:
+    classify the whole task as interpreted first-only. A first-only nonpush preparation may also be
+    interpreted conservatively. Changing either signed segment classification invalidates the graph identity;
+    supplying no command bytes does not bypass its pinned policy or first-only effect intent. A peer never
+    executes an interpreted descriptor, and no callback runs before the exact signed prerequisites settle.
 
 ### 28.9 Operational diagnostics
 
@@ -10861,9 +10953,12 @@ Diagnostic output order follows the semantic order of §17.2, independently of a
 An engine that runs one declared command across the packages a plan selects, without releasing them, MAY delegate
 that sweep to choreographers under this profile. A sweep is not a release: it records nothing, discharges nothing,
 and its receipts are execution evidence only (§28.3). It takes no release lock. Its messages are bound to an ownership
-generation drawn from a fresh run identity, one value per sweep, which rejects duplicate and stale messages exactly as
-a lock-derived generation does; a sweep authorizes no effect a generation would have to fence, so it needs no
-exclusion, and a release of the same repositories MAY run beside it. The plan digest is fixed and reported as for a
+generation drawn from a fresh run identity, one value per sweep, which rejects duplicate and stale coordination
+messages. It grants no native release or ref authority, and a release of the same repositories MAY run beside it.
+The sweep generation does not fence arbitrary effects of trusted scripts using independently available credentials.
+The physical-lease, cancellation-finality and safe-retry rules of §§28.2 and 28.4 still apply; an isolated run
+identity alone never proves an old external request stopped. No repository release lock is acquired for the sweep.
+The plan digest is fixed and reported as for a
 release, so that every claim or assignment names the plan the sweep ran over. A serving choreographer MUST NOT
 turn an assigned script into nested sweep initiation. A separately invoked node may start its own sweep with a
 new first-node identity; that does not grant the current assignment first-node authority. A configured or

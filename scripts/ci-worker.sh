@@ -3,7 +3,7 @@
 # Engine instance per run, created before `dispat run tests --since all`,
 # serving that sweep alone, and deleted when the job ends whatever the suite
 # did. The job is the orchestrator; this script only provisions the second
-# node and starts `dispat worker` on it, so the release logic stays dispat's
+# node and starts `dispat choreographer` on it, so the release logic stays dispat's
 # and the workflow stays plumbing.
 #
 #   sh scripts/ci-worker.sh create          create the instance and wait until it answers
@@ -15,7 +15,7 @@
 #   sh scripts/ci-worker.sh delete          delete the instance (a missing one is not an error)
 #
 # The mailbox is the repository being released. The workflow passes the same
-# DISPAT_CI_WORKER_REPOSITORY to this script and the orchestrator's --worker
+# DISPAT_CI_WORKER_REPOSITORY to this script and the orchestrator's --choreographer
 # link. The orchestrator uses its checkout's credential; the worker reads the same
 # repository and creates its own pending/output/failed refs over https with a
 # contents-write token of its own. Host rules must protect canonical and release
@@ -376,7 +376,7 @@ start() {
   # starts in a session of its own below rather than in this one.
   worker_ssh "sudo install -m 0755 dispat /usr/local/bin/dispat && sudo usermod -aG docker $user \
     && mkdir -p ~/node ~/state && chmod 700 ~/node \
-    && git config --global user.email worker@dispat.invalid && git config --global user.name 'dispat worker'"
+    && git config --global user.email worker@dispat.invalid && git config --global user.name 'dispat choreographer'"
   # The secret, the token, the repository and the commit travel one way:
   # over ssh, into files only this user reads, never on a command line.
   printf '%s' "$DISPAT_EXECUTION_SECRET" | worker_ssh "umask 077 && cat > ~/node/secret"
@@ -450,7 +450,7 @@ GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $basic"
 DISPAT_EXECUTION_SECRET=$(cat "$HOME/node/secret")
 GITHUB_SHA=$(cat "$HOME/node/commit")
 export GIT_TERMINAL_PROMPT GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 DISPAT_EXECUTION_SECRET GITHUB_SHA
-exec dispat worker --root "$HOME/node" --state-dir "$HOME/state" --idle-timeout 0 --log-level debug
+exec dispat choreographer --root "$HOME/node" --state-dir "$HOME/state" --idle-timeout 0 --log-level debug
 LAUNCHER
   worker_ssh "setsid -f ~/node/serve.sh > ~/worker.log 2>&1 < /dev/null"
   sleep 3

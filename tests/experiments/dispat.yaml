@@ -21,12 +21,14 @@ scripts:
         --build-arg DISPAT_BINARY_SOURCE=candidate-binary \
         --build-arg "DISPAT_BINARY_ID=$EXPERIMENTS_DISPAT_ID" \
         --build-context "candidate-binary=$candidate" \
+        --build-context measurement-source=../../tools \
         $(sh ../../scripts/buildx-cache.sh experiments) --load --tag dispat-experiments .
     else
       : "${version:?no published dispat-alpine image to build the experiments on}"
       echo "building the experiments on yohimik/dispat-alpine:$version"
       docker buildx build --file Dockerfile --build-arg "DISPAT_VERSION=$version" \
         --build-arg "DISPAT_BINARY_ID=shipped:$version" \
+        --build-context measurement-source=../../tools \
         $(sh ../../scripts/buildx-cache.sh experiments) --load --tag dispat-experiments .
     fi
   # One cell, named the way run.sh takes it: EXPERIMENT and TOOL, and
@@ -114,7 +116,7 @@ scripts:
       exit 0
     fi
     docker run --rm -v "$RESULTS:/results" --entrypoint find dispat-experiments \
-      /results -mindepth 1 -delete
+      /results -mindepth 1 -maxdepth 1 ! -name execution-measurements -exec rm -rf '{}' +
     echo "running $(printf '%s\n' "$expected" | sed '/^$/d' | wc -l | tr -d ' ') cells, ${EXPERIMENTS_JOBS:-4} at a time and the timing cells alone, into $RESULTS"
     sweep() { # <jobs>: the cells on stdin, that many at a time
       EXPERIMENTS_RESULTS="$RESULTS" xargs -P "$1" -L 1 sh -c \
@@ -152,3 +154,79 @@ scripts:
       echo
       cat "$ROOT/coverage/experiments.md"
     } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  # The release workflow validates these selected full artifacts before any
+  # release effects, then imports them after standard campaign cache cleanup.
+  # Candidate version/source/hash fields are retained without relabeling.
+  import-build-campaigns: |
+    set -eu
+    : "${EXPERIMENTS_LLVM_CAMPAIGN_DIR:?EXPERIMENTS_LLVM_CAMPAIGN_DIR is required}"
+    : "${EXPERIMENTS_KERNEL_CAMPAIGN_DIR:?EXPERIMENTS_KERNEL_CAMPAIGN_DIR is required}"
+    : "${EXPERIMENTS_BUILD_SOURCE_REVISION:?EXPERIMENTS_BUILD_SOURCE_REVISION is required}"
+    : "${EXPERIMENTS_BUILD_BINARY_SHA256:?EXPERIMENTS_BUILD_BINARY_SHA256 is required}"
+    : "${EXPERIMENTS_LLVM_RUN_ID:?EXPERIMENTS_LLVM_RUN_ID is required}"
+    : "${EXPERIMENTS_LLVM_RUN_ATTEMPT:?EXPERIMENTS_LLVM_RUN_ATTEMPT is required}"
+    : "${EXPERIMENTS_KERNEL_RUN_ID:?EXPERIMENTS_KERNEL_RUN_ID is required}"
+    : "${EXPERIMENTS_KERNEL_RUN_ATTEMPT:?EXPERIMENTS_KERNEL_RUN_ATTEMPT is required}"
+    ROOT=$(git rev-parse --show-toplevel)
+    RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
+    mkdir -p "$RESULTS"
+    set --
+    if [ "${EXPERIMENTS_BUILD_VALIDATE_ONLY:-}" = 1 ]; then
+      set -- --validate-only
+    fi
+    docker run --rm --user "$(id -u):$(id -g)" \
+      -v "$ROOT:/src:ro" -v "$EXPERIMENTS_LLVM_CAMPAIGN_DIR:/incoming/llvm:ro" \
+      -v "$EXPERIMENTS_KERNEL_CAMPAIGN_DIR:/incoming/kernel:ro" -v "$RESULTS:/results" \
+      -w /src/tools -e GOWORK=off -e GOCACHE=/tmp/go-build -e GOMODCACHE=/tmp/go-mod \
+      golang:1.26.10 sh -euc '
+        go build -trimpath -o /tmp/campaign-tools/ ./llvmexperiment ./testreport
+        /tmp/campaign-tools/testreport experiments /incoming/llvm/cells > /dev/null
+        /tmp/campaign-tools/testreport experiments /incoming/kernel/cells > /dev/null
+        exec /tmp/campaign-tools/llvmexperiment import-campaigns "$@"
+      ' import-build-campaigns \
+      --llvm /incoming/llvm --kernel /incoming/kernel --results /results \
+      --source "$EXPERIMENTS_BUILD_SOURCE_REVISION" --binary-sha256 "$EXPERIMENTS_BUILD_BINARY_SHA256" \
+      --llvm-run "$EXPERIMENTS_LLVM_RUN_ID" --llvm-attempt "$EXPERIMENTS_LLVM_RUN_ATTEMPT" \
+      --kernel-run "$EXPERIMENTS_KERNEL_RUN_ID" --kernel-attempt "$EXPERIMENTS_KERNEL_RUN_ATTEMPT" "$@"
+  llvm-build: |
+    set -eu
+    ROOT=$(git rev-parse --show-toplevel)
+    dispat exec build --for pkg:experiments --in pkg:experiments
+    docker buildx build --file "$ROOT/tests/experiments/Dockerfile.llvm" \
+      --load --tag dispat-experiments-llvm "$ROOT"
+  llvm-cells: |
+    for tool in nx lerna changesets; do
+      echo "$tool distributed"
+    done
+    for mode in compilation interpretation hybrid; do
+      echo "dispat $mode"
+    done
+  llvm-cell: |
+    set -eu
+    : "${TOOL:?TOOL is required}"
+    : "${DISTRIBUTION_MODE:?DISTRIBUTION_MODE is required}"
+    case "$TOOL" in dispat|nx|lerna|changesets) ;; *) exit 2 ;; esac
+    case "$DISTRIBUTION_MODE" in compilation|interpretation|hybrid|distributed) ;; *) exit 2 ;; esac
+    profile=${EXPERIMENTS_LLVM_PROFILE:-full}
+    case "$profile" in full|smoke) ;; *) exit 2 ;; esac
+    ROOT=$(git rev-parse --show-toplevel)
+    RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
+    mkdir -p "$RESULTS"
+    cell=llvm-$profile-$DISTRIBUTION_MODE-$TOOL
+    rm -f "$RESULTS/$cell/verdict.json"
+    rc=0
+    docker run --rm --cpus "${EXPERIMENTS_LLVM_CPUS:-4}" -v "$RESULTS:/results" \
+      -e NX_CLOUD_ACCESS_TOKEN -e EXPERIMENTS_NX_CLOUD_ID -e NX_CLOUD_API -e NX_CLOUD_ENCRYPTION_KEY \
+      dispat-experiments-llvm --tool "$TOOL" --mode "$DISTRIBUTION_MODE" --profile "$profile" \
+      --jobs "${EXPERIMENTS_LLVM_JOBS:-2}" --timeout "${EXPERIMENTS_LLVM_TIMEOUT:-4h}" \
+      > "$RESULTS/$cell.log" 2>&1 || rc=$?
+    cat "$RESULTS/$cell.log"
+    exit "$rc"
+  # Optional one-host diagnostic campaign. Production docs import selected
+  # real-VM LLVM and kernel campaigns through import-build-campaigns instead.
+  llvm-experiments: |
+    set -eu
+    dispat exec llvm-build --for pkg:experiments --in pkg:experiments
+    dispat exec llvm-cells --for pkg:experiments --in pkg:experiments \
+      | xargs -P 1 -L 1 sh -c \
+        'TOOL=$0 DISTRIBUTION_MODE=$1 dispat exec llvm-cell --for pkg:experiments --in pkg:experiments'

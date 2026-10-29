@@ -78,7 +78,7 @@ execution:
     preflight: 600   # covers image pulls and new machines
     task: 3600
     cancel: 60
-  workers:
+  choreographers:
     - {name: w-0}
     - {name: w-1}
     - {name: w-2}
@@ -90,7 +90,7 @@ names that repository as its own endpoint. Protect its release branches, its rel
 tag with the host's rules, so the worker key can write `dispat-worker-*` coordination refs without gaining
 release-record authority.
 
-A pipeline that creates its workers for the run can name them on the command line instead, with `--worker name` on
+A pipeline that creates its workers for the run can name them on the command line instead, with `--choreographer name` on
 the release, beside a file that states only the secret and the waits.
 
 A worker's name is read from its configuration file, so each pod writes its own file from its index before it starts
@@ -139,7 +139,7 @@ spec:
                 "logFormat": "json"
               }
               EOF
-              exec dispat worker --root /work --state-dir /state --idle-timeout 900
+              exec dispat choreographer --root /work --state-dir /state --idle-timeout 900
           env:
             - name: DISPAT_EXECUTION_SECRET
               valueFrom:
@@ -197,7 +197,7 @@ What a cluster adds to that:
 - A pool sharing one secret is one trust zone. Two namespaces that should not be able to run each other's commands
   need two secrets.
 - Keep publishing credentials off the workers. The publish stage always runs on the orchestrator, with or without a
-  space login. Use `runOnly: [worker, orchestrator]` to keep eligible build work on workers.
+  space login. Use `runOnly: [choreographer, orchestrator]` to keep eligible build work on workers.
 - A preempted pod's claimed task stays assigned until its deadline rather than moving to another pod in that run.
 
 ## What dispat does not do

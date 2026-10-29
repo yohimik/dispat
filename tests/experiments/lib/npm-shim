@@ -37,13 +37,24 @@ package=$(jq -er .name "$folder/package.json")
 
 # python's clock rather than date's: `date +%N` is GNU's, and the shim's own
 # tests run wherever the harness's do.
-now() { python3 -c 'import time; print("%.6f" % time.time())'; }
+now() { python3 -c 'import time; print("%.6f %d" % (time.time(), time.monotonic_ns()))'; }
 
-start=$(now)
+sample=$(now)
+start=${sample% *}
+monotonic_start=${sample#* }
 rc=0
 "$real" "$@" || rc=$?
-end=$(now)
+sample=$(now)
+end=${sample% *}
+monotonic_end=${sample#* }
 # `end` is a jq keyword, so the variables are named apart from the fields.
 jq -nc --arg package "$package" --argjson began "$start" --argjson ended "$end" --argjson code "$rc" \
-  '{package: $package, task: "publish", start: $began, end: $ended, exit: $code}' >> "$EXPERIMENT_TIMING"
+  --arg monotonicStart "$monotonic_start" --arg monotonicEnd "$monotonic_end" \
+  --arg clock "${EXPERIMENT_MEASUREMENT_TRIAL_ID:-unrecorded}:npm-shim:$$:python-monotonic" \
+  --arg trial "${EXPERIMENT_MEASUREMENT_TRIAL_ID:-}" --arg step "${EXPERIMENT_MEASUREMENT_STEP:-}" \
+  '{package: $package, task: "publish", start: $began, end: $ended, exit: $code,
+    measurement: {startNanoseconds: $monotonicStart, endNanoseconds: $monotonicEnd,
+      clockKind: "monotonic", clockDomain: $clock, clockAPI: "time.monotonic_ns",
+      phase: {trialId: $trial, step: $step},
+      boundary: "npm shim sample before forwarding publish through sample after process exit; includes nested prepack"}}' >> "$EXPERIMENT_TIMING"
 exit "$rc"

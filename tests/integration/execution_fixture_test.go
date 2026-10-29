@@ -6,7 +6,7 @@ package integration
 // Goal 57: the fixture a distributed run is driven through.
 //
 // Two machines are two processes here: a release started in one repository,
-// and a `dispat worker` started against a configuration of its own, talking
+// and a `dispat choreographer` started against a configuration of its own, talking
 // through a bare repository that stands in for the mailbox. Nothing is
 // mocked, because the claims are about what one process leaves on a git
 // remote and what the other makes of it.
@@ -234,7 +234,7 @@ func (r *executionRig) branches() []string {
 	return executionMailboxBranches(r.t, r.mailbox)
 }
 
-// executionWorker is one `dispat worker` process: its own configuration
+// executionWorker is one `dispat choreographer` process: its own configuration
 // folder, its own state folder, and the process itself.
 type executionWorker struct {
 	t        *testing.T
@@ -292,7 +292,7 @@ func startWorker(t *testing.T, repo *harness.Repo, cfg models.File, idleSeconds 
 	// explicit env overrides still let a test model a shared account.
 	env := append([]string{executionSecretEnv + "=" + executionSecret}, executionNodeHomeEnv(t, state)...)
 	env = append(env, extraEnv...)
-	proc := repo.StartCommandEnv(env, "worker",
+	proc := repo.StartCommandEnv(env, "choreographer",
 		"--root", root, "--state-dir", state,
 		"--idle-timeout", fmt.Sprint(resolveWorkerIdleBackstop(idleSeconds)))
 	return &executionWorker{t: t, proc: proc, stateDir: state, root: root}
@@ -335,7 +335,7 @@ func (w *executionWorker) restart(t *testing.T, repo *harness.Repo, idleSeconds 
 	t.Helper()
 	env := append([]string{executionSecretEnv + "=" + executionSecret}, executionNodeHomeEnv(t, w.stateDir)...)
 	env = append(env, extraEnv...)
-	proc := repo.StartCommandEnv(env, "worker",
+	proc := repo.StartCommandEnv(env, "choreographer",
 		"--root", w.root, "--state-dir", w.stateDir,
 		"--idle-timeout", fmt.Sprint(resolveWorkerIdleBackstop(idleSeconds)))
 	return &executionWorker{t: t, proc: proc, stateDir: w.stateDir, root: w.root}

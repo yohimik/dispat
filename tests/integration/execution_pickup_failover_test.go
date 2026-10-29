@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/yohimik/dispat/pkg/models"
@@ -27,6 +29,7 @@ const (
 	pickupFailoverOutcomeWait          = 45 * time.Second
 	pickupFailoverReleaseWait          = 75 * time.Second
 	pickupFailoverPoll                 = 50 * time.Millisecond
+	pickupFailoverDiagnosticBytes      = 64 * 1024
 	pickupFailoverFirstMarkerName      = "first-computed"
 	pickupFailoverSecondMarkerName     = "second-computed"
 	pickupFailoverTaskPackage          = "alpha"
@@ -83,9 +86,7 @@ func testExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t *testing.T, i
 		},
 		func(cfg *models.File) {
 			cfg.Execution.RetryAfterUncertainAttempt = true
-			if interpreted {
-				cfg.Execution.MaxAttempts = models.Int(interpretationSecondAttemptLimit)
-			}
+			cfg.Execution.MaxAttempts = models.Int(interpretationSecondAttemptLimit)
 			cfg.Concurrency = []int{pickupFailoverRunBudget, pickupFailoverWorkerCapacity}
 			cfg.Execution.Concurrency = models.Int(pickupFailoverRunBudget)
 			cfg.Execution.Timeouts.Admission = pickupFailoverAdmissionSeconds
@@ -141,13 +142,27 @@ func testExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t *testing.T, i
 			secondWorker.stop(t)
 		}
 	}()
-	require.Eventually(t, func() bool {
-		events := pickupFailoverEventsForTask(executionLateJoinLedgerEvents(t, rig.mailbox), task)
+	var observedMu sync.Mutex
+	var lastObservedEvents []executionLateJoinLedgerEvent
+	if !assert.Eventually(t, func() bool {
+		ledger := executionLateJoinLedgerEvents(t, rig.mailbox)
+		observedMu.Lock()
+		lastObservedEvents = ledger
+		observedMu.Unlock()
+		events := pickupFailoverEventsForTask(ledger, task)
 		lost, _ := pickupFailoverFindEvent(events, pickupFailoverContactLostKind, executionNode)
 		second, _ := pickupFailoverFindEvent(events, pickupFailoverClaimKind, executionSecondNode)
 		return lost >= 0 && second > lost
 	}, pickupFailoverOutcomeWait, pickupFailoverPoll,
-		"a second process may claim only after signed Cancel grace and contact loss")
+		"a second process may claim only after signed Cancel grace and contact loss") {
+		observedMu.Lock()
+		t.Logf("last authenticated failover ledger: %+v", lastObservedEvents)
+		observedMu.Unlock()
+		pickupFailoverLogOutput(t, "first node", firstNode)
+		pickupFailoverLogOutput(t, "first worker", firstWorker.proc)
+		pickupFailoverLogOutput(t, "second worker", secondWorker.proc)
+		t.FailNow()
+	}
 	require.Eventually(t, func() bool {
 		events := pickupFailoverEventsForTask(executionLateJoinLedgerEvents(t, rig.mailbox), task)
 		_, result := pickupFailoverFindEvent(events, pickupFailoverResultKind, executionSecondNode)
@@ -210,4 +225,16 @@ func testExecutionTwoWorkersFailOverAfterSignedPickupContactLoss(t *testing.T, i
 	secondWorker.stop(t)
 	secondStopped = true
 	require.Equal(t, []string{pickupFailoverTaskPackage + "@0.1.0"}, rig.repo.TagList())
+}
+
+func pickupFailoverLogOutput(t *testing.T, name string, process *harness.Proc) {
+	t.Helper()
+	stdout, stderr := process.CapturedOutput()
+	if len(stdout) > pickupFailoverDiagnosticBytes {
+		stdout = stdout[len(stdout)-pickupFailoverDiagnosticBytes:]
+	}
+	if len(stderr) > pickupFailoverDiagnosticBytes {
+		stderr = stderr[len(stderr)-pickupFailoverDiagnosticBytes:]
+	}
+	t.Logf("%s stdout tail:\n%s\nstderr tail:\n%s", name, stdout, stderr)
 }

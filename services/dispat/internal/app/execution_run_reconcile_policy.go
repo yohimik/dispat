@@ -47,6 +47,7 @@ func verifyRetainedChoreographyPolicy(options retainedChoreographyPolicyOptions)
 			task.Stage != want.Stage || task.Recording != want.Recording ||
 			task.Virtual != want.Virtual || task.LocalAuthority != want.LocalAuthority ||
 			task.ExecutorOwned != want.ExecutorOwned ||
+			task.HybridSegment != want.HybridSegment || task.OperationPolicyDigest != want.OperationPolicyDigest ||
 			task.MaxAttempts != want.MaxAttempts ||
 			task.RetryAfterUncertainAttempt != want.RetryAfterUncertainAttempt ||
 			task.NeedsPreparedInput != want.NeedsPreparedInput ||

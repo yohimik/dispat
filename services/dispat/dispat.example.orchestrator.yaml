@@ -5,13 +5,13 @@
 #
 # Start with `dispat release --distribution-mode=compilation` (the default) to
 # plan and assign ready work here. Other modes are not available in this build.
-# Start peers with dispat.example.worker.yaml and `dispat worker`.
+# Start peers with dispat.example.choreographer.yaml and `dispat choreographer`.
 # Supply DISPAT_EXECUTION_SECRET and publication credentials outside this file.
 
 execution:
   concurrency: 2
   secretEnv: DISPAT_EXECUTION_SECRET
-  workers:
+  choreographers:
     - name: build-a
     - name: build-b
     - name: build-arm

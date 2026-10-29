@@ -126,7 +126,7 @@ func orchestratorWithWorkers() *ExecutionConfig {
 }
 
 func TestLoadExecutionAbsentStaysAbsent(t *testing.T) {
-	// nil is what keeps a repository that has never heard of worker nodes on
+	// nil is what keeps a repository that has never heard of choreographer nodes on
 	// exactly the path it was on, so nothing may fill the object in.
 	loaded, err := loadModel(t, minimalConfig(), "pkgs/core")
 	require.NoError(t, err)
@@ -139,7 +139,7 @@ func TestLoadExecutionAcceptedShapes(t *testing.T) {
 		execution *ExecutionConfig
 		assert    func(*testing.T, *File)
 	}{
-		"an orchestrator with two workers": {orchestratorWithWorkers(), func(t *testing.T, loaded *File) {
+		"an orchestrator with two choreographers": {orchestratorWithWorkers(), func(t *testing.T, loaded *File) {
 			require.Len(t, loaded.Execution.Workers, 2)
 			// The node names keep the case the file wrote them in, which is
 			// the whole reason the links are a list rather than a map.
@@ -152,13 +152,13 @@ func TestLoadExecutionAcceptedShapes(t *testing.T) {
 		}, func(t *testing.T, loaded *File) {
 			assert.True(t, loaded.Execution.RetryAfterUncertainAttempt)
 		}},
-		"a serving worker": {&ExecutionConfig{
+		"a serving choreographer": {&ExecutionConfig{
 			Name:      "build-a",
 			Endpoint:  "/srv/mailboxes/build-a.git",
 			SecretEnv: "DISPAT_EXECUTION_SECRET",
 		}, func(t *testing.T, loaded *File) {
 			assert.False(t, loaded.Execution.IsDistributed())
-			// A worker states no capacity here, so it takes the default.
+			// A choreographer states no capacity here, so it takes the default.
 			assert.Equal(t, models.DefaultExecutionConcurrency, loaded.Execution.ResolveConcurrency())
 		}},
 		"stated bounds": {&ExecutionConfig{
@@ -195,7 +195,7 @@ func TestLoadExecutionAcceptedShapes(t *testing.T) {
 				loaded.Execution.Workers)
 			assert.True(t, loaded.Execution.IsDistributed())
 		}},
-		"only a preauthorized late worker": {&ExecutionConfig{
+		"only a preauthorized late choreographer": {&ExecutionConfig{
 			SecretEnv: "S",
 			Workers: []ExecutionWorkerConfig{{Name: "build-a", LateJoin: true,
 				IdentityPublicKey: executionTestPublicKey(t)}},
@@ -221,7 +221,7 @@ func TestLoadExecutionEmptyWorkerListIsLocalExecution(t *testing.T) {
 	root := writeRawRepo(t, map[string]any{
 		"scripts":   map[string]any{"build": []string{"echo b"}},
 		"spaces":    map[string]any{"libs": map[string]any{"path": []string{"pkgs"}}},
-		"execution": map[string]any{"workers": []any{}},
+		"execution": map[string]any{"choreographers": []any{}},
 	}, "pkgs/core")
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)
 	require.NoError(t, err)
@@ -230,16 +230,19 @@ func TestLoadExecutionEmptyWorkerListIsLocalExecution(t *testing.T) {
 
 func TestRemovedExecutionKeysAreRefused(t *testing.T) {
 	for _, key := range []string{"role", "workers"} {
-		t.Run(key, func(t *testing.T) {
-			root := writeRawRepo(t, map[string]any{
-				"scripts":   map[string]any{"build": []string{"echo b"}},
-				"spaces":    map[string]any{"libs": map[string]any{"path": []string{"pkgs"}}},
-				"execution": map[string]any{key: "worker"},
-			}, "pkgs/core")
-			_, err := Load(filepath.Join(root, "dispat.json"), nil)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), key)
-		})
+		for _, value := range []any{"worker", nil, []any{}, map[string]any{}} {
+			t.Run(key, func(t *testing.T) {
+				root := writeRawRepo(t, map[string]any{
+					"scripts":   map[string]any{"build": []string{"echo b"}},
+					"spaces":    map[string]any{"libs": map[string]any{"path": []string{"pkgs"}}},
+					"execution": map[string]any{key: value},
+				}, "pkgs/core")
+				_, err := Load(filepath.Join(root, "dispat.json"), nil)
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "execution."+key+" was removed")
+				assert.Equal(t, DiagnosticExecution, DiagnosticCode(err))
+			})
+		}
 	}
 }
 
@@ -276,26 +279,26 @@ func TestLoadExecutionRejections(t *testing.T) {
 			&ExecutionConfig{IdentityKeyEnv: "2seed"}, `execution.identityKeyEnv "2seed" is not an environment variable name`},
 		"late admission with no pinned identity key": {
 			&ExecutionConfig{SecretEnv: "S", Workers: []ExecutionWorkerConfig{{Name: "late", LateJoin: true}}},
-			"execution.workers[0].identityPublicKey must be a canonical base64url Ed25519 public key"},
+			"execution.choreographers[0].identityPublicKey must be a canonical base64url Ed25519 public key"},
 		"late admission with a malformed identity key": {
 			&ExecutionConfig{SecretEnv: "S", Workers: []ExecutionWorkerConfig{{Name: "late", LateJoin: true,
 				IdentityPublicKey: "not-a-key"}}},
-			"execution.workers[0].identityPublicKey must be a canonical base64url Ed25519 public key"},
+			"execution.choreographers[0].identityPublicKey must be a canonical base64url Ed25519 public key"},
 		"a link with no name": {
 			&ExecutionConfig{SecretEnv: "S", Workers: []ExecutionWorkerConfig{{Endpoint: "/srv/a.git"}}},
-			"execution.workers[0]: name is required"},
+			"execution.choreographers[0]: name is required"},
 		"a link name that is not one": {
 			&ExecutionConfig{SecretEnv: "S", Workers: []ExecutionWorkerConfig{{Name: "build/a", Endpoint: "/srv/a.git"}}},
-			`execution.workers[0]: name "build/a" is not a node name`},
+			`execution.choreographers[0]: name "build/a" is not a node name`},
 		"a link name git could not write into a branch name": {
 			&ExecutionConfig{SecretEnv: "S", Workers: []ExecutionWorkerConfig{{Name: "a..b", Endpoint: "/srv/a.git"}}},
-			`execution.workers[0]: name "a..b" is not a node name`},
+			`execution.choreographers[0]: name "a..b" is not a node name`},
 		"two links naming one node": {
 			&ExecutionConfig{SecretEnv: "S", Workers: []ExecutionWorkerConfig{
 				{Name: "build-a", Endpoint: "/srv/a.git"},
 				{Name: "BUILD-A", Endpoint: "/srv/b.git"},
 			}},
-			`execution.workers[1]: name "BUILD-A" is already used by execution.workers[0]`},
+			`execution.choreographers[1]: name "BUILD-A" is already used by execution.choreographers[0]`},
 		"a mailbox with credentials": {
 			executionWithEndpoint("https://user:secret@git.example.test/a.git"),
 			"carries user information"},
@@ -329,7 +332,7 @@ func TestLoadExecutionRejections(t *testing.T) {
 			executionWithEndpoint("git:secret@git.example.test:a.git?token=x"), "carries a query"},
 		"links with no signing secret": {
 			&ExecutionConfig{Workers: []ExecutionWorkerConfig{{Name: "a", Endpoint: "/srv/a.git"}}},
-			"execution.secretEnv is required with execution.workers"},
+			"execution.secretEnv is required with execution.choreographers"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := loadModel(t, executionConfig(tc.execution), "pkgs/core")
@@ -359,7 +362,7 @@ func TestLoadExecutionRefusalNeverEchoesACredential(t *testing.T) {
 			require.Error(t, err)
 			assert.NotContains(t, err.Error(), "hunter2")
 			assert.NotContains(t, err.Error(), "swordfish")
-			assert.Contains(t, err.Error(), "execution.workers[0]: endpoint")
+			assert.Contains(t, err.Error(), "execution.choreographers[0]: endpoint")
 		})
 	}
 }
@@ -413,7 +416,7 @@ func TestExecutionIsARootKeyOnly(t *testing.T) {
 }
 
 // loadWithWorkerFlags loads a configuration the way the command line does,
-// with every `--worker` value the invocation passed.
+// with every `--choreographer` value the invocation passed.
 func loadWithWorkerFlags(t *testing.T, cfg File, values ...string) (*File, error) {
 	t.Helper()
 	flags := pflag.NewFlagSet("dispat", pflag.ContinueOnError)
@@ -466,17 +469,17 @@ func TestWorkerFlagRefusals(t *testing.T) {
 			want: "name or name=endpoint", code: DiagnosticExecution},
 		"a name that is not a node name": {
 			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"build..c=file:///m"},
-			want: "--worker build..c: name", code: DiagnosticExecution},
+			want: "--choreographer build..c: name", code: DiagnosticExecution},
 		"a configured link spelled again": {
 			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"BUILD-A=file:///m"},
-			want: "--worker BUILD-A: name \"BUILD-A\" is already used by execution.workers[0]",
+			want: "--choreographer BUILD-A: name \"BUILD-A\" is already used by execution.choreographers[0]",
 			code: DiagnosticExecution},
 		"two flags naming one node": {
 			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"w=file:///m", "W=file:///n"},
-			want: "is already used by --worker w", code: DiagnosticExecution},
+			want: "is already used by --choreographer w", code: DiagnosticExecution},
 		"a credential in the endpoint": {
 			cfg: executionConfig(orchestratorWithWorkers()), values: []string{"w=https://user:hunter2@example.test/m.git"},
-			want: "--worker w: endpoint", code: DiagnosticExecution},
+			want: "--choreographer w: endpoint", code: DiagnosticExecution},
 		"no signing secret named": {
 			cfg: minimalConfig(), values: []string{"w=file:///m"},
 			want: "execution.secretEnv is required", code: DiagnosticExecution},
@@ -506,7 +509,7 @@ func TestReadWorkerFlagAsksOnlyASetFlag(t *testing.T) {
 	assert.Nil(t, readWorkerFlag(scalar), "a flag of another shape is not a list of links")
 }
 
-// TestParseWorkerLinkShapes: a `--worker` value is a node name alone, which
+// TestParseWorkerLinkShapes: a `--choreographer` value is a node name alone, which
 // reaches the repository being released, or name=endpoint with both halves
 // stated. Anything else is a usage mistake, refused without echoing what was
 // typed, because a value that is not a node name is most likely an endpoint

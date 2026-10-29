@@ -63,7 +63,7 @@ type fakeRemote struct {
 
 	// publishAway is the package whose publish this pool delegates. Every
 	// other publish takes the local path, which is what the placement does for
-	// everything but an explicit `runOnly: worker`.
+	// everything but an explicit `runOnly: choreographer`.
 	publishAway string
 	// publishes are the requests Publish was called with, in order, and
 	// publishedHere are the packages whose publish took the local path.

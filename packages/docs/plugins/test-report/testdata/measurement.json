@@ -1,0 +1,329 @@
+{
+  "analysis": [
+    {
+      "id": "nominal-work",
+      "formula": "W_nom = sum_i d_i",
+      "inputs": {
+        "a": {
+          "source": "measurement",
+          "pointer": "/graph/vertices/0/durationInputs"
+        },
+        "b": {
+          "source": "measurement",
+          "pointer": "/graph/vertices/1/durationInputs"
+        }
+      },
+      "value": 6,
+      "unit": "nominal-seconds",
+      "status": "computed",
+      "reasons": [],
+      "model": "descriptive",
+      "clockMethod": "nominal-seconds"
+    },
+    {
+      "id": "nominal-critical-path",
+      "formula": "F_i = d_i + max_{j -\u003e i} F_j; L_nom = max_i F_i",
+      "inputs": {
+        "E": {
+          "source": "measurement",
+          "pointer": "/graph/edges"
+        },
+        "d": {
+          "source": "measurement",
+          "pointer": "/graph/vertices"
+        }
+      },
+      "value": 4,
+      "unit": "nominal-seconds",
+      "status": "computed",
+      "reasons": [],
+      "model": "descriptive",
+      "clockMethod": "nominal-seconds",
+      "criticalPath": [
+        "a"
+      ]
+    },
+    {
+      "id": "nominal-slot-bound",
+      "formula": "B_nom = max(L_nom, W_nom / s)",
+      "inputs": {
+        "L_nom": {
+          "source": "measurement",
+          "pointer": "/analysis/1/value"
+        },
+        "W_nom": {
+          "source": "measurement",
+          "pointer": "/analysis/0/value"
+        },
+        "s": {
+          "source": "measurement",
+          "pointer": "/resources/taskSlotLimit/value"
+        }
+      },
+      "value": 4,
+      "unit": "nominal-seconds",
+      "status": "computed",
+      "reasons": [],
+      "model": "descriptive",
+      "clockMethod": "nominal-seconds"
+    },
+    {
+      "id": "nominal-enclosing-ratio",
+      "formula": "R_nom = T_enclosing / B_nom",
+      "inputs": {
+        "B_nom": {
+          "source": "measurement",
+          "pointer": "/analysis/2/value"
+        },
+        "T_enclosing": {
+          "source": "measurement",
+          "pointer": "/timeWindows/0/seconds"
+        }
+      },
+      "value": 2,
+      "unit": "dimensionless",
+      "status": "computed",
+      "reasons": [],
+      "model": "descriptive",
+      "clockMethod": "nominal-seconds"
+    },
+    {
+      "id": "one-pool-upper-bound",
+      "formula": "U = W/s + (1 - 1/s)*L",
+      "inputs": {
+        "L": {
+          "source": "measurement",
+          "pointer": "/analysis/1/value"
+        },
+        "W": {
+          "source": "measurement",
+          "pointer": "/analysis/0/value"
+        },
+        "s": {
+          "source": "measurement",
+          "pointer": "/resources/usableOnePoolSlots/value"
+        }
+      },
+      "value": null,
+      "unit": "nominal-seconds",
+      "status": "unavailable",
+      "reasons": [
+        "one-pool upper-bound evaluation is unsupported by this nominal reporting profile",
+        "fixed available interchangeable slots and all CCME §13.11 clause 2 premises are not established"
+      ],
+      "model": "descriptive",
+      "clockMethod": "nominal-seconds"
+    }
+  ],
+  "clockCompatibility": {
+    "referenceDomain": "coordinator:monotonic",
+    "domains": [
+      "coordinator:monotonic",
+      "host-a:monotonic",
+      "host-b:monotonic"
+    ],
+    "method": "nominal-seconds",
+    "assumptions": [
+      "One reported second is treated as a compatible elapsed-time unit across the listed domains for this trial."
+    ],
+    "uncertainty": {
+      "relativeRateErrorBound": null,
+      "reason": "No quantitative whole-trial relative clock-rate error bound was established."
+    },
+    "evidence": []
+  },
+  "graph": {
+    "counts": {
+      "vertices": 2,
+      "edges": 0,
+      "virtualVertices": 0,
+      "timedVertices": 2
+    },
+    "edges": [],
+    "evidence": [
+      {
+        "source": "evidence",
+        "evidenceId": "fixture",
+        "pointer": ""
+      }
+    ],
+    "id": "two-operations",
+    "omittedWork": [
+      "setup",
+      "artifact verification"
+    ],
+    "provenance": "test fixture, not experiment evidence",
+    "scope": "analysis-projection",
+    "vertices": [
+      {
+        "id": "a",
+        "operation": "build",
+        "isVirtual": false,
+        "durationInputs": [
+          {
+            "source": "measurement",
+            "pointer": "/taskIntervals/0/durationSeconds"
+          }
+        ]
+      },
+      {
+        "id": "b",
+        "operation": "build",
+        "isVirtual": false,
+        "durationInputs": [
+          {
+            "source": "measurement",
+            "pointer": "/taskIntervals/1/durationSeconds"
+          }
+        ]
+      }
+    ]
+  },
+  "observedPeakOverlap": {
+    "value": null,
+    "evidence": [],
+    "reason": "worker clock origins are unmapped"
+  },
+  "premises": {
+    "precedenceValid": true,
+    "evidence": [
+      {
+        "source": "evidence",
+        "evidenceId": "fixture",
+        "pointer": ""
+      }
+    ],
+    "enclosingWindowId": "coordinator"
+  },
+  "producerExtra": {
+    "kept": true
+  },
+  "resources": {
+    "nodes": [
+      {
+        "id": "host-a",
+        "hostId": "host-a"
+      },
+      {
+        "id": "host-b",
+        "hostId": "host-b"
+      }
+    ],
+    "pools": [],
+    "nested": [],
+    "taskSlotLimit": {
+      "value": 2,
+      "evidence": [
+        {
+          "source": "evidence",
+          "evidenceId": "fixture",
+          "pointer": ""
+        }
+      ],
+      "reason": ""
+    },
+    "usableOnePoolSlots": {
+      "value": null,
+      "evidence": [],
+      "reason": "placement is not interchangeable"
+    }
+  },
+  "schema": "ccme-execution-measurement/v1",
+  "taskIntervals": [
+    {
+      "taskId": "a",
+      "attemptId": "attempt-1",
+      "nodeId": "host-a",
+      "status": "completed",
+      "operation": "build",
+      "boundary": "configure and compile",
+      "durationSeconds": 4,
+      "clockDomain": "host-a:monotonic",
+      "clockKind": "monotonic",
+      "evidence": [
+        {
+          "source": "evidence",
+          "evidenceId": "fixture",
+          "pointer": ""
+        }
+      ]
+    },
+    {
+      "taskId": "b",
+      "attemptId": "attempt-1",
+      "nodeId": "host-b",
+      "status": "completed",
+      "operation": "build",
+      "boundary": "configure and compile",
+      "durationSeconds": 2,
+      "clockDomain": "host-b:monotonic",
+      "clockKind": "monotonic",
+      "evidence": [
+        {
+          "source": "evidence",
+          "evidenceId": "fixture",
+          "pointer": ""
+        }
+      ]
+    }
+  ],
+  "timeWindows": [
+    {
+      "id": "coordinator",
+      "boundary": "peer start through result verification",
+      "seconds": 8,
+      "clockDomain": "coordinator:monotonic",
+      "clockKind": "monotonic",
+      "evidence": [
+        {
+          "source": "evidence",
+          "evidenceId": "fixture",
+          "pointer": ""
+        }
+      ],
+      "containsTasks": [
+        "a",
+        "b"
+      ],
+      "containmentEvidence": [
+        {
+          "source": "evidence",
+          "evidenceId": "fixture",
+          "pointer": ""
+        }
+      ]
+    },
+    {
+      "id": "task-span",
+      "boundary": "first modeled start through final modeled end",
+      "seconds": null,
+      "clockDomain": "unmapped",
+      "clockKind": "monotonic",
+      "evidence": [],
+      "reason": "worker clock origins are unmapped"
+    }
+  ],
+  "trial": {
+    "id": "test-nominal",
+    "repetition": 1,
+    "status": "completed",
+    "tool": "dispat",
+    "mode": "hybrid",
+    "profile": "test",
+    "workload": "two synthetic operations",
+    "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "binarySha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "protocolRevision": "cccccccccccccccccccccccccccccccccccccccc",
+    "configurationSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "toolchain": {
+      "go": "1.26.10"
+    },
+    "evidence": [
+      {
+        "id": "fixture",
+        "path": "fixture.json",
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ]
+  }
+}

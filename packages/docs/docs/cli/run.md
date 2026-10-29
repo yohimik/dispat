@@ -62,8 +62,8 @@ from, with the item described by `DISPAT_*` variables. Use `dispat run` when eac
 
 ## Running on worker nodes
 
-With worker links, from [`execution.workers`](../configuration/execution.md#workers) or from
-`--worker`, a sweep runs on the pool the way a release runs its builds: each package's task is placed by
+With worker links, from [`execution.choreographers`](../configuration/execution.md#choreographers) or from
+`--choreographer`, a sweep runs on the pool the way a release runs its builds: each package's task is placed by
 its `runOnly`, with peer nodes and the orchestrator both able to execute eligible work, and runs the script with
 `DISPAT_STAGE=run:<script>`. A provider's exports still reach its consumers, whichever machines they ran on. The sweep
 takes no release lock, so it neither waits for nor excludes a release of the same repositories, and it ends with one
@@ -71,7 +71,7 @@ takes no release lock, so it neither waits for nor excludes a release of the sam
 before the usual `run finished` line.
 
 ```sh
-dispat run tests --since all --worker ci-worker-1
+dispat run tests --since all --choreographer ci-worker-1
 ```
 
 What a delegated task writes stays on its node unless the script declares it.
@@ -83,7 +83,7 @@ task runs in this checkout, as it always has.
 
 `--distribution-mode=compilation` is the default. In `interpretation`, each admitted node independently derives
 the same pinned plan and graph before proposing a ready task; the first node still validates exact claims and
-receives results. `hybrid` remains unavailable. A sweep does not acquire a release lock or publish release artifacts.
+receives results. In `hybrid`, nodes pick up compiled commands and the first node evaluates its effect policy after prerequisites settle. A sweep does not acquire a release lock or publish release artifacts.
 
 ## Choosing the packages
 
@@ -220,18 +220,19 @@ The default is `skip`. Use with every sweeping command (`run`, `autowriter`, `au
 `autoversion`, `commit`, `github`) to control what a failed package does to its dependents. Choose `skip` (transitive)
 or `continue`. Either way, the command exits `1` on any failure.
 
-### `--worker`
+### `--choreographer`
 
 Adds a worker node for this sweep, written `name` or `name=endpoint`, beside the ones
-[`execution.workers`](../configuration/execution.md#links-named-on-the-command-line) lists. A name alone reaches the
+[`execution.choreographers`](../configuration/execution.md#links-named-on-the-command-line) lists. A name alone reaches the
 repository being released, whose remote is resolved when the sweep starts, and an endpoint names another mailbox. You
 can repeat it. The link is held to every rule a configured one is, and the file has to name `execution.secretEnv`. See
 [Running on worker nodes](#running-on-worker-nodes).
 
 ### `--distribution-mode`
 
-Selects `compilation` (default) or `interpretation`. The latter makes every admitted node independently derive and
-verify the pinned plan and graph before choosing ready work. `hybrid` and unknown values are refused before task
+Selects `compilation` (default), `interpretation` or `hybrid`. Interpretation makes every admitted node independently
+derive and verify the pinned plan and graph before choosing ready work. Hybrid compiles nonpush commands and
+reserves effect decisions for the first node after exact prerequisites settle. Unknown values are refused before task
 effects. See [Running on worker nodes](#running-on-worker-nodes).
 
 ### `--return-endpoint`, `--return-listen`

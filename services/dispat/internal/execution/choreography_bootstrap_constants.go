@@ -18,6 +18,7 @@ const (
 	bootstrapInitialEntryCount                      = 0
 	bootstrapInitialTreeCapacity                    = 1
 	bootstrapInterpretationModeName                 = "interpretation"
+	bootstrapHybridModeName                         = "hybrid"
 	bootstrapInventoryItemPresentState              = true
 	bootstrapMultipleTagStoresErrorText             = "execution: one repository has multiple tag source stores"
 	bootstrapNativeRefInvalidErrorText              = "execution: invalid bootstrap native ref"

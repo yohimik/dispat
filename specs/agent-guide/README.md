@@ -32,7 +32,7 @@ Keep the configuration and API references from the installed binary's help pinne
 10. Serialize normal releases, but interrupt a release immediately when an urgent correction invalidates its contents. The lock must not delay cancellation or local repairs. Verify remote outcomes before retrying.
 11. Report what ran, what published, what failed or was skipped, and what remains uncertain.
 12. Release through the repository's CI/CD workflow. Configure the release path instead of publishing by hand.
-13. When a release delegates work to workers, start those nodes through the pipeline and never from your own shell, and read the per-task summary before reporting what a run did.
+13. When a release delegates work to choreographers, start those nodes through the pipeline and never from your own shell, and read the per-task summary before reporting what a run did.
 
 ## Release through CI/CD
 
@@ -699,56 +699,79 @@ After `publish` succeeds, failure to write a tag, changelog, GitHub record, rele
 
 ## Run a distributed release
 
-A root `execution` object with a non-empty `workers` list makes eligible build, test and custom stages
+This guide uses the current `choreographer` command, `execution.choreographers`, repeatable
+`--choreographer` links and `runOnly: choreographer` placement. The removed `worker` command,
+`execution.workers`, `execution.role`, `--worker` and `runOnly: worker` spellings must fail with migration
+guidance. `dispat run worker` still invokes an ordinary script with that name. Check installed help before
+using these settings; a binary from an older release needs its matching guide.
+
+A root `execution` object with a non-empty `choreographers` list makes eligible build, test and custom stages
 available to other nodes. The first node is the orchestrator. It also runs ordinary tasks, and it alone advances
-canonical task, ledger and release refs, publishes artifacts and writes release records. Other workers execute
+canonical task, ledger and release refs, publishes artifacts and writes release records. Other choreographers execute
 eligible tasks, create their own pending/output/failed Git branches and return signed claim and result requests
 over the authenticated non-Git channel. Keep registry and release-write credentials on the orchestrator; peers
 need read access to pinned inputs, Git write access for their own pickup refs, and whatever credentials their own
-build commands require. Protect canonical and release refs from worker credentials at the Git host. Read
+build commands require. Protect canonical and release refs from choreographer credentials at the Git host. Read
 [distributed execution](../../packages/docs/docs/distributed-execution.md) before setup.
 
-Distributed first-node and worker processes currently require Linux or macOS for the persistent weighted
+Distributed first-node and choreographer processes currently require Linux or macOS for the persistent weighted
 node-slot journal. Windows distributed execution is refused before task effects. Windows local execution without
-worker links and without explicit shared node capacity remains available.
+choreographer links and without explicit shared node capacity remains available.
 
 `--distribution-mode=compilation` is the default. In that mode the orchestrator derives the plan and
-graph and initializes one canonical ref for every executable logical task before work starts. Workers verify the
+graph and initializes one canonical ref for every executable logical task before work starts. Choreographers verify the
 signed compiled graph, select compatible ready tasks within their physical capacity, and propose exact claims.
 In `interpretation`, each admitted node independently derives and verifies the same plan and graph from pinned
-inputs before selecting ready tasks. `hybrid` remains unavailable and is refused before task effects. The
+inputs before selecting ready tasks. In `hybrid`, peers pick up compiled nonpush commands while the
+orchestrator interprets first-only preparation and effect decisions after their exact prerequisites settle.
+Provider publication and recording can unlock a later compiled consumer build; there is no global phase barrier.
+Use a mode only when the installed binary advertises it; an unsupported mode must fail before effects. The
 orchestrator validates and persists those claims without substituting another task. A mismatch refuses claims. One authoritative claim state and a functioning
-orchestrator are required for publication.
+orchestrator are required for publication. In hybrid, signed task descriptors bind each segment and its exact
+pinned policy. A task containing a native release, ref or receipt mutation is interpreted as a whole unless
+the fixed graph already separates it. First-only nonpush preparation may also be interpreted conservatively;
+compiling it requires declared write sets and admitted prepared-input identities. Common claim/result/ledger
+transactions do not turn an ordinary compiled command into a native effect.
 
-Set root `runOnly: [worker, orchestrator]` when eligible build and validation stages may use peers while
-publication stays on the orchestrator. Scalar `runOnly: worker` and any worker publish position are
+Keep entry, imported, package and space configuration, including every transitive `$ref` target, inside the
+captured input closure used for distributed planning. An absolute reference to a live checkout or another
+uncaptured path cannot supply pinned policy; move the configuration into a captured repository and reference
+that captured file before retrying. A relative spelling must also resolve inside the captured closure. Different
+entry files at the same source commit can select different native policies, so preserve the exact `--config`
+selection and relevant invocation settings between preview and release. The signed policy identity must bind
+that selection as well as the source snapshots.
+
+Set root `runOnly: [choreographer, orchestrator]` when eligible build and validation stages may use peers while
+publication stays on the orchestrator. Scalar `runOnly: choreographer` and any choreographer publish position are
 refused. The orchestrator also prepares native inputs, checks locks and returned outputs, and runs run-level hooks
 and stages after the records. More nodes help only where the graph has ready work and transport overhead leaves
 room for a gain. See [stage placement](../../packages/docs/docs/distributed-execution.md#where-a-stage-runs).
 
 For a custom coordination repository, a supported self-hosted Git server in the same data center as the nodes can
 reduce latency. Configure each applicable `endpoint` and measure transfer time; the repository holds coordination
-state, not a release record. The orchestrator alone advances canonical refs; workers create only their own
+state, not a release record. The orchestrator alone advances canonical refs; choreographers create only their own
 pending and outcome refs there.
 
 Before a release:
 
-1. Read the entry configuration's `execution.workers` links and any repeatable `--worker name` or
-   `--worker name=endpoint` flags. These add nodes for one invocation and do not change the plan digest.
-2. Start peer nodes with `dispat worker` in CI or a cluster workload. A locally started process executes
+1. Read the entry configuration's `execution.choreographers` links and any repeatable `--choreographer name` or
+   `--choreographer name=endpoint` flags. These add nodes for one invocation and do not change the plan digest.
+2. Start peer nodes with `dispat choreographer` in CI or a cluster workload. A locally started process executes
    authorized tasks with the local machine's credentials.
-   A node named in `execution.workers` with `lateJoin: true` may start after tasks are running; other named
-   workers must pass preflight before effects. Set a finite `execution.timeouts.admission` for worker-only work.
-   In interpretation, `execution.maxAttempts` defaults to one total accepted pickup per delegated task. State a
+   A node named in `execution.choreographers` with `lateJoin: true` may start after tasks are running; other named
+   choreographers must pass preflight before effects. Set a finite `execution.timeouts.admission` for choreographer-only work.
+   In every mode, `execution.maxAttempts` defaults to one total accepted pickup per delegated task. State a
    larger count, up to 64, only when a settled failed command and its hooks may run again safely. A contact-lost
    successor additionally requires `execution.retryAfterUncertainAttempt: true`, which defaults to `false` and
    asserts repeat safety for uncertain external effects. Both settings are signed into the run; neither retries
-   native first-node publication. A contact-lost pickup retains its physical lease and capacity charge.
-3. Supply the signing secret from a secret store without reading, printing or copying its value. Keep Git-push and
-   publication credentials on the orchestrator.
-4. Run `dispat status --distribution-mode=compilation` or `--distribution-mode=interpretation` to inspect the plan
-   before release. Each worker must verify
-   the signed input and graph identities before claims. A late worker needs a signed membership receipt before
+   native first-node publication. An uncertain successor also requires signed cancellation and its reply grace;
+   the old pickup retains its physical lease and capacity charge. Reconcile a lost reply using the same exact
+   pickup identity; a reply retry is not a new physical attempt or permission to repeat a command.
+3. Supply the signing secret from a secret store without reading, printing or copying its value. Keep canonical-ref,
+   native-release and publication credentials on the orchestrator; peer Git credentials allow only its own pickup refs.
+4. Run `dispat status --distribution-mode=<mode>` with the chosen supported `compilation`, `interpretation`
+   or `hybrid` mode to inspect the plan before release. Each choreographer must verify
+   the signed input and graph identities before claims. A late choreographer needs a signed membership receipt before
    it becomes eligible; a missing reply does not prove its command stopped or free its capacity.
 5. Expect `E225` refusal for an unsafe endpoint, absent signing secret, unavailable node, invalid lock bypass or
    unsatisfied platform requirement. Inspect the reported cause; do not bypass the guard.
@@ -762,7 +785,7 @@ Before deletion, verify their current tips still belong to the run's authenticat
 Never write a coordination branch by hand. A task process cannot initiate a nested release (`E226`).
 
 `dispat run` uses the same execution pool without release locks or records. Its declared `runOutputs` are returned
-and merged into the orchestrator's checkout. A run with no worker link executes locally.
+and merged into the orchestrator's checkout. A run with no choreographer link executes locally.
 
 ## Respect the release lock
 
@@ -851,7 +874,7 @@ Do not describe a repository-wide release as rolled back merely because one pack
 - [Partial releases](../../packages/docs/docs/reference/releasing/partial-releases.md)
 - [Release lock](../../packages/docs/docs/reference/releasing/release-lock.md)
 - [Distributed execution](../../packages/docs/docs/distributed-execution.md) and the [`execution` object](../../packages/docs/docs/configuration/execution.md)
-- [The worker command](../../packages/docs/docs/cli/worker.md)
+- [The choreographer command](../../packages/docs/docs/cli/choreographer.md)
 - [Recovery](../../packages/docs/docs/reference/releasing/recovery.md)
 - [Diagnostic codes](../../packages/docs/docs/reference/plan-errors.md)
 - [CCME specification](https://github.com/yohimik/dispat/blob/specs/ccme-spec/v2.0.0/specs/ccme-spec/SPEC.md)

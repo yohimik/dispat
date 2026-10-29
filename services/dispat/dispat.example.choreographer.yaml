@@ -1,5 +1,5 @@
 # One peer node in a distributed release. Start it with:
-#   dispat worker --config dispat.example.worker.yaml
+#   dispat choreographer --config dispat.example.choreographer.yaml
 #
 # The first node is the orchestrator. It also executes ordinary tasks and is
 # the only node that advances canonical task, ledger and release refs,
@@ -12,7 +12,7 @@
 
 execution:
   # Match this identity to one entry of the orchestrator's
-  # execution.workers list.
+  # execution.choreographers list.
   name: build-a
   # Git access to read pinned inputs and create this worker's pickup branches.
   # With no endpoint, start this node in the repository checkout so

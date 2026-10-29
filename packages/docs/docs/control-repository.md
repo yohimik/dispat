@@ -1007,7 +1007,7 @@ The identity lines are not optional. A runner has no git user configured, and th
 
 - [A choreographed fleet](./choreographed-repositories.md) for the same combined graph with no control repository.
 - [Distributed execution](./distributed-execution.md) for running the builds of one release on several machines.
-  Execution links are not fleet links: an `execution.workers` entry names a machine that runs commands, while a
+  Execution links are not fleet links: an `execution.choreographers` entry names a machine that runs commands, while a
   repository link names a history the plan reads. A composed workspace's repositories are read in one plan on the
   orchestrator whatever the pool looks like, and a linked repository's own `execution` object is never consulted.
 - [One repository or many](./monorepo.md) for the underlying decision, and for what changes if you ever do merge the

@@ -254,7 +254,7 @@ packages:
 concurrency: [0, 1]
 # The release's full-suite job adds one worker machine to itself per run and
 # names it on the command line with the exact HTTPS repository endpoint
-# (`--worker <name>=<endpoint>`, scripts/ci-worker.sh), so no link is written
+# (`--choreographer <name>=<endpoint>`, scripts/ci-worker.sh), so no link is written
 # here and a developer's run stays local. The job writes the Git mailbox with
 # its checkout credential; the worker reads it with a token of its own.
 # What is written here is everything a

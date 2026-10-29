@@ -407,10 +407,14 @@ func (m *GitMailbox) ReadChoreographyBootstrap(ctx context.Context, oid string,
 }
 
 func validChoreographyMode(mode string) bool {
-	return mode == bootstrapCompilationModeName || mode == bootstrapInterpretationModeName
+	return mode == bootstrapCompilationModeName || mode == bootstrapInterpretationModeName || mode == bootstrapHybridModeName
 }
 
 func validChoreographyBootstrapAttemptPolicy(bootstrap RunBootstrap) bool {
+	if bootstrap.JoinPolicy.DistributionMode != bootstrapAbsentIdentityText || bootstrap.Mode == bootstrapHybridModeName {
+		return bootstrap.JoinPolicy.DistributionMode == bootstrap.Mode &&
+			validChoreographyAttemptLimit(bootstrap.JoinPolicy.MaxAttempts)
+	}
 	if bootstrap.Mode == bootstrapInterpretationModeName {
 		return validChoreographyAttemptLimit(bootstrap.JoinPolicy.MaxAttempts)
 	}

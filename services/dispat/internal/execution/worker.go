@@ -96,6 +96,8 @@ const (
 // Worker is one serving node: which node it is, what it can take on, and the
 // mailbox it reads its work from.
 type Worker struct {
+	pollWakeOnce sync.Once
+	pollWake     chan struct{}
 	// Node is this node's name, compared byte for byte with what an
 	// assignment says it is addressed to.
 	Node string
@@ -326,6 +328,7 @@ func (w *Worker) rememberTaskReturnFailure(err error) {
 // rather than from whenever a timer was last reset, and a node with work in
 // flight is never idle at all.
 func (w *Worker) poll(ctx context.Context) string {
+	wake := w.pollNotifications()
 	interval := minimumPollInterval
 	next := time.NewTimer(interval)
 	defer next.Stop()
@@ -362,6 +365,9 @@ func (w *Worker) poll(ctx context.Context) string {
 			case <-next.C:
 				w.Log.Trace().Dur("interval", interval).Msg("polling the mailbox")
 				isWaiting = false
+			case <-wake:
+				interval = minimumPollInterval
+				isWaiting = false
 			}
 		}
 	}
@@ -391,9 +397,10 @@ func (w *Worker) beginTask() {
 
 func (w *Worker) endTask() {
 	w.activity.Lock()
-	defer w.activity.Unlock()
 	w.inFlight--
 	w.lastActive = time.Now()
+	w.activity.Unlock()
+	w.notifyPoll()
 }
 
 // resolveIdleRemainder is how much longer this node has to have nothing to do

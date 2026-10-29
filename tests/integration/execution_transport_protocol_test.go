@@ -39,19 +39,16 @@ func TestExecutionMalformedObjectStreamCannotPublish(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := newExecutionFaultOutputs(t)
-			realGit, err := exec.LookPath("git")
-			require.NoError(t, err)
-			shim := t.TempDir()
-			marker := filepath.Join(shim, "matched")
-			script := "#!/bin/sh\ncase \"$*\" in\n*'cat-file --batch')\nIFS= read -r oid || exit 1\nprintf hit >> \"$DISPAT_IT_BATCH_MARKER\"\n" + tc.reply + "\nexit 0;;\nesac\nexec \"$DISPAT_IT_BATCH_GIT\" \"$@\"\n"
-			require.NoError(t, os.WriteFile(filepath.Join(shim, "git"), []byte(script), 0755))
-			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0,
-				"PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
-				"DISPAT_IT_BATCH_GIT="+realGit, "DISPAT_IT_BATCH_MARKER="+marker)
+			// Capturing outputs reads the task checkout. Mailbox verification
+			// reads its bare cache, which must remain intact until this build.
+			outputOID := gitIn(t, rig.repo.Root, "assets 0.1.0 "+executionNode+"\n", "hash-object", "--stdin")
+			env, marker := executionBatchReply(t, "*-C */tasks/*/checkout cat-file --batch", outputOID, tc.reply)
+			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 0, env...)
 			res := rig.release()
 			reply := stopAll(t, []*executionWorker{worker})[0]
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 			require.FileExists(t, marker, "a completed build reached the object protocol")
+			assert.Equal(t, 1, executionBuildCount(rig, "assets"))
 			assert.Contains(t, reply.Stdout+reply.Stderr, tc.want)
 			assert.True(t, harness.IsCodePresent(executionEvents(res), executionIntegrityCode))
 			assert.Empty(t, executionReleasedPackages(res))
@@ -63,6 +60,51 @@ func TestExecutionMalformedObjectStreamCannotPublish(t *testing.T) {
 			}
 		})
 	}
+}
+
+func executionBatchReply(t *testing.T, pattern, firstObject, reply string) ([]string, string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the Git protocol fixture uses a POSIX shell")
+	}
+	realGit, err := exec.LookPath("git")
+	require.NoError(t, err)
+	shim := t.TempDir()
+	marker := filepath.Join(shim, "matched")
+	script := `#!/bin/sh
+case "$*" in
+$DISPAT_IT_BATCH_PATTERN)
+IFS= read -r oid || exit 1
+selected=0
+if [ -n "$DISPAT_IT_BATCH_OBJECT" ]; then
+  [ "$oid" = "$DISPAT_IT_BATCH_OBJECT" ] && selected=1
+else
+  previous=
+  repository=.
+  for argument do
+    if [ "$previous" = -C ]; then repository=$argument; fi
+    previous=$argument
+  done
+  object_type=$(GIT_NO_REPLACE_OBJECTS=1 "$DISPAT_IT_BATCH_GIT" -C "$repository" cat-file -t "$oid") || exit 1
+  [ "$object_type" = blob ] && selected=1
+fi
+if [ "$selected" -eq 0 ]; then
+  { printf '%s\n' "$oid"; cat; } | "$DISPAT_IT_BATCH_GIT" "$@"
+  exit "$?"
+fi
+printf hit >> "$DISPAT_IT_BATCH_MARKER"
+` + reply + `
+exit 0;;
+esac
+exec "$DISPAT_IT_BATCH_GIT" "$@"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(shim, "git"), []byte(script), 0o755))
+	return []string{
+		"PATH=" + shim + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"DISPAT_IT_BATCH_GIT=" + realGit, "DISPAT_IT_BATCH_MARKER=" + marker,
+		"DISPAT_IT_BATCH_PATTERN=" + pattern,
+		"DISPAT_IT_BATCH_OBJECT=" + firstObject,
+	}, marker
 }
 
 // TestExecutionMalformedMailboxListingCannotStartRelease checks that the
@@ -127,9 +169,8 @@ func TestExecutionMalformedTreeStreamCannotPublish(t *testing.T) {
 }
 
 // TestExecutionInvalidMessageSizeCannotStartRelease refuses corrupt size
-// metadata before a mailbox document can be trusted. A smaller advertised
-// length also bounds the subsequent streamed read, rather than trusting the
-// earlier measurement to describe the bytes that actually arrive.
+// metadata before a mailbox document can be trusted. The batch header must
+// bound and frame the exact object bytes that follow it.
 func TestExecutionInvalidMessageSizeCannotStartRelease(t *testing.T) {
 	for _, tc := range []struct{ name, size string }{
 		{"not numeric", "unknown"},
@@ -145,11 +186,12 @@ func TestExecutionInvalidMessageSizeCannotStartRelease(t *testing.T) {
 				cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 5}
 			})
 			worker := startWorker(t, rig.repo, executionWorkerConfig(rig.mailbox), 0)
-			fault := harness.NewGitFault(t, harness.GitFault{Pattern: "*cat-file -s*", Output: tc.size})
-			res := rig.release(fault.Env()...)
+			env, marker := executionBatchReply(t, executionOutputBatchPattern, "",
+				`printf '%s blob `+tc.size+`\n{' "$oid"`)
+			res := rig.release(env...)
 			stopAll(t, []*executionWorker{worker})
 			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-			assert.Positive(t, fault.Matches())
+			require.FileExists(t, marker, "a signed-message read reached the corrupt batch header")
 			assert.True(t, harness.IsCodePresent(executionEvents(res), executionRefusalCode))
 			assert.Zero(t, buildRuns(rig.repo))
 			assert.Empty(t, rig.repo.TagList())

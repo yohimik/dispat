@@ -504,6 +504,9 @@ func load(found ResolvedFile, flags *pflag.FlagSet, cliImports bool) (*File, err
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	if err := refuseRemovedExecutionKeys(t.Root); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
 
 	// The keys a package entry may never hold are refused by name, at every
 	// map that holds entries, before decoding drops them into an unknown-key
@@ -2129,7 +2132,11 @@ func validateDependenciesForPlan(pkgs []*model.Package, declared []DeclaredDepen
 // every space, validated here because the override layers need the folders
 // to exist.
 func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
-	pkgs, declared, excluded, err := discoverPackagesMode(c, root, allowAllFolderInputs)
+	return discoverPackagesWithin(c, root, "")
+}
+
+func discoverPackagesWithin(c *File, root, sourceRoot string) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
+	pkgs, declared, excluded, err := discoverPackagesFromSources(c, root, allowAllFolderInputs, sourceRoot)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -2143,7 +2150,11 @@ func DiscoverPackages(c *File, root string) ([]*model.Package, []DeclaredDepende
 }
 
 func discoverPackagesMode(c *File, root string, folderInputs folderInputPolicy) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
-	d, err := newDiscoveryMode(c, root, folderInputs)
+	return discoverPackagesFromSources(c, root, folderInputs, "")
+}
+
+func discoverPackagesFromSources(c *File, root string, folderInputs folderInputPolicy, sourceRoot string) ([]*model.Package, []DeclaredDependency, []ExcludedDir, error) {
+	d, err := newDiscoveryWithin(c, root, folderInputs, sourceRoot)
 	if err != nil {
 		return nil, nil, nil, err
 	}

@@ -64,6 +64,7 @@ type ChoreographyAuthorizedNode struct {
 // AdmissionDurationSeconds is signed before global hooks. The execution-start
 // ledger event fixes its absolute deadline once command execution is legal.
 type ChoreographyJoinPolicy struct {
+	DistributionMode           string                       `json:"distributionMode,omitempty"`
 	AdmissionDurationSeconds   int                          `json:"admissionDurationSeconds"`
 	MaxAttempts                int                          `json:"maxAttempts,omitempty"`
 	RetryAfterUncertainAttempt bool                         `json:"retryAfterUncertainAttempt,omitempty"`
@@ -71,6 +72,10 @@ type ChoreographyJoinPolicy struct {
 }
 
 func (p ChoreographyJoinPolicy) Validate(canonicalEndpoint string) error {
+	if p.DistributionMode != joinPolicyMissingIdentity &&
+		(!validChoreographyMode(p.DistributionMode) || !validChoreographyAttemptLimit(p.MaxAttempts)) {
+		return fmt.Errorf(joinPolicyAttemptsErrorMessage)
+	}
 	if p.MaxAttempts < choreographyAttemptPolicyLegacyUnspecified ||
 		p.MaxAttempts > models.MaximumExecutionMaxAttempts {
 		return fmt.Errorf(joinPolicyAttemptsErrorMessage)

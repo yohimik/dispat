@@ -1183,6 +1183,10 @@ func githubSpec(gc *GitHubConfig) model.GitHubSpec {
 // spelled as written. An absent file yields an empty path and a nil map, which
 // every caller reads as "this folder says nothing".
 func openFolderConfig(dir string) (map[string]any, string, error) {
+	return openFolderConfigWithin(dir, "")
+}
+
+func openFolderConfigWithin(dir, sourceRoot string) (map[string]any, string, error) {
 	names, err := configCandidates(dir)
 	if err != nil {
 		return nil, "", fmt.Errorf("%s: %w", DispatexcludeName, err)
@@ -1193,6 +1197,12 @@ func openFolderConfig(dir string) (map[string]any, string, error) {
 	p := filepath.Join(dir, names[0])
 	t, err := readTree(p)
 	if err != nil {
+		return nil, p, err
+	}
+	if err := ValidateCapturedSources(sourceRoot, t.Files); err != nil {
+		return nil, p, err
+	}
+	if err := refuseRemovedExecutionKeys(t.Root); err != nil {
 		return nil, p, err
 	}
 	return t.Root, p, nil
@@ -1216,8 +1226,12 @@ func refuseNestedRoot(raw map[string]any, path, role, remedy string, keys ...str
 // loadPackageFile probes a package folder for its in-folder dispat config
 // file and decodes it as a PackageConfig, the file's top-level object.
 func loadPackageFile(dir string) (PackageConfig, string, error) {
+	return loadPackageFileWithin(dir, "")
+}
+
+func loadPackageFileWithin(dir, sourceRoot string) (PackageConfig, string, error) {
 	var pc PackageConfig
-	raw, p, err := openFolderConfig(dir)
+	raw, p, err := openFolderConfigWithin(dir, sourceRoot)
 	if err != nil || raw == nil {
 		return pc, p, err
 	}
@@ -1244,8 +1258,12 @@ func loadPackageFile(dir string) (PackageConfig, string, error) {
 // folder the file sits in already is the space's path — so it is reported by
 // name rather than as a bare unknown key.
 func loadSpaceFile(dir string) (SpaceFile, string, error) {
+	return loadSpaceFileWithin(dir, "")
+}
+
+func loadSpaceFileWithin(dir, sourceRoot string) (SpaceFile, string, error) {
 	var sf SpaceFile
-	raw, p, err := openFolderConfig(dir)
+	raw, p, err := openFolderConfigWithin(dir, sourceRoot)
 	if err != nil || raw == nil {
 		return sf, p, err
 	}

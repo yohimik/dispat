@@ -11,7 +11,7 @@ package config
 // here" has said something about its build as well and silence about half a
 // pair is not a thing the reader could resolve.
 //
-// The public parser refuses worker publication in files. The resolved-space
+// The public parser refuses choreographer publication in files. The resolved-space
 // check below also refuses typed configurations assembled without that parser.
 //
 // Every refusal carries DiagnosticExecution, because what the key describes
@@ -43,12 +43,12 @@ func runOnly(dst **RunOnly) setter {
 }
 
 // checkRunOnlyPublishPlacement refuses a typed configuration whose publication
-// is pinned to a worker, including one constructed without parsing a file.
+// is pinned to a choreographer, including one constructed without parsing a file.
 func checkRunOnlyPublishPlacement(label string, placement *RunOnly) error {
 	if placement.ResolvePublish() != public.RunOnlyWorker {
 		return nil
 	}
 	return WithDiagnostic(DiagnosticExecution, fmt.Errorf(
 		"%s: publication runs on the orchestrator; set publish to orchestrator or both "+
-			"(use [worker, orchestrator] for worker builds)", label))
+			"(use [choreographer, orchestrator] for choreographer builds)", label))
 }

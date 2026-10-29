@@ -200,12 +200,12 @@ class DispatScenarioTest(FixtureTest):
                           env={"EXPERIMENT_EXECUTION_SECRET": secret})
         config = (root / "dispat.yaml").read_text()
         self.assertIn("execution:\n  secretEnv: EXPERIMENT_EXECUTION_SECRET\n"
-                      "  workers:\n    - name: build-a\n"
+                      "  choreographers:\n    - name: build-a\n"
                       "      endpoint: file:///work/dispat-origin.git\n"
                       "  timeouts:\n    preflight: 60\n", config)
-        self.assertIn("runOnly: [worker, orchestrator]\n", config)
+        self.assertIn("runOnly: [choreographer, orchestrator]\n", config)
         self.assertNotIn(secret, config)
-        # The first node pins the worker and its exact mailbox endpoint.
+        # The first node pins the choreographer and its exact mailbox endpoint.
         self.assertEqual(1, config.count("name: build-a"))
 
     def test_only_the_distributed_scenario_configures_execution(self):

@@ -162,8 +162,8 @@ func (c *LocalGitx) ImportObjectClosurePackAsBlob(ctx context.Context,
 	defer func() { _ = tmp.Close(); _ = os.Remove(tmp.Name()) }()
 	bounded := &closurePackWriter{to: tmp, remaining: maxBytes}
 	_, err = source.runStream(ctx, gitStream{stdin: strings.NewReader(revs.String()), stdout: bounded,
-		env: []string{transportDisableReplacementEnvironmentValue}},
-		transportPackObjectsCommandName, transportPackOutputStreamFlag, transportPackRevisionsFlag)
+		env: rawTransportObjectEnvironment()},
+		transportRawShallowFileFlag, os.DevNull, transportPackObjectsCommandName, transportPackOutputStreamFlag, transportPackRevisionsFlag)
 	if bounded.exceeded {
 		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(objectClosureSizeLimitErrorFormat, maxBytes, ErrTransportLimit)
 	}

@@ -117,10 +117,10 @@ func TestRunOnlyRefusals(t *testing.T) {
 	}{
 		"a misspelled value":       {stated: "orchestartor", want: "is not a placement"},
 		"a value of another key":   {stated: "any", want: "is not a placement"},
-		"a list of one":            {stated: []any{"worker"}, want: "states both stages"},
-		"a list of three":          {stated: []any{"worker", "worker", "worker"}, want: "states both stages"},
-		"a misspelled stage value": {stated: []any{"worker", "nowhere"}, want: "is not a placement"},
-		"an object":                {stated: map[string]any{"build": "worker"}, want: "wants"},
+		"a list of one":            {stated: []any{"choreographer"}, want: "states both stages"},
+		"a list of three":          {stated: []any{"choreographer", "choreographer", "choreographer"}, want: "states both stages"},
+		"a misspelled stage value": {stated: []any{"choreographer", "nowhere"}, want: "is not a placement"},
+		"an object":                {stated: map[string]any{"build": "choreographer"}, want: "wants"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := runOnlyRaw(t, row.stated)
@@ -132,18 +132,18 @@ func TestRunOnlyRefusals(t *testing.T) {
 	}
 }
 
-// TestRunOnlyRefusesWorkerPublication: a login cannot make worker publication
+// TestRunOnlyRefusesWorkerPublication: a login cannot make choreographer publication
 // valid, and neither can the absence of a login or a typed model value.
 func TestRunOnlyRefusesWorkerPublication(t *testing.T) {
 	for name, row := range map[string]struct {
 		stated    *RunOnly
 		isRefused bool
 	}{
-		"both stages on a worker":     {stated: placementAt(public.RunOnlyWorker, public.RunOnlyWorker), isRefused: true},
-		"the publish alone":           {stated: placementAt(public.RunOnlyBoth, public.RunOnlyWorker), isRefused: true},
-		"the build alone":             {stated: placementAt(public.RunOnlyWorker, public.RunOnlyOrchestrator)},
-		"a publish on this machine":   {stated: placementAt(public.RunOnlyWorker, public.RunOnlyBoth)},
-		"a publish pinned to us both": {stated: placementAt(public.RunOnlyOrchestrator, public.RunOnlyOrchestrator)},
+		"both stages on a choreographer": {stated: placementAt(public.RunOnlyWorker, public.RunOnlyWorker), isRefused: true},
+		"the publish alone":              {stated: placementAt(public.RunOnlyBoth, public.RunOnlyWorker), isRefused: true},
+		"the build alone":                {stated: placementAt(public.RunOnlyWorker, public.RunOnlyOrchestrator)},
+		"a publish on this machine":      {stated: placementAt(public.RunOnlyWorker, public.RunOnlyBoth)},
+		"a publish pinned to us both":    {stated: placementAt(public.RunOnlyOrchestrator, public.RunOnlyOrchestrator)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := minimalConfig()
@@ -162,7 +162,7 @@ func TestRunOnlyRefusesWorkerPublication(t *testing.T) {
 				return
 			}
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "[worker, orchestrator]")
+			assert.Contains(t, err.Error(), "[choreographer, orchestrator]")
 			assert.Error(t, checkRunOnlyPublishPlacement("libs", row.stated),
 				"typed placement bypassing file parsing is also refused")
 			assert.Equal(t, DiagnosticExecution, DiagnosticCode(err))
@@ -181,8 +181,8 @@ func TestRunOnlyIsNotANodeStartupSetting(t *testing.T) {
 	cfg := runOnlyLadderConfig()
 	root := writeModelRepo(t, cfg, "packages/libs/core", "packages/apps/app", "tools/tool")
 	writeSpaceRaw(t, root, "packages/libs", map[string]any{
-		"runOnly":  []any{"worker", "orchestrator"},
-		"packages": map[string]any{"core": map[string]any{"runOnly": []any{"worker", "both"}}},
+		"runOnly":  []any{"choreographer", "orchestrator"},
+		"packages": map[string]any{"core": map[string]any{"runOnly": []any{"choreographer", "both"}}},
 	})
 
 	loaded, err := Load(filepath.Join(root, "dispat.json"), nil)

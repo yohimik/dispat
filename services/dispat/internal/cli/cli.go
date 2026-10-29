@@ -33,11 +33,11 @@ const (
 	cmdCompute     = "compute"     // derive the graph and the baselines from manifests
 	cmdDiagnostics = "diagnostics" // diagnose one commit message, without repository discovery
 	cmdSemver      = "semver"      // parse or build one semantic version without a workspace
-	// cmdWorker serves the tasks an orchestrator addressed to this node. It
+	// cmdChoreographer serves the tasks an orchestrator addressed to this node. It
 	// is the one command that starts nothing and finishes nothing: it reads
 	// the node-startup settings of the config file, so it needs neither
 	// packages nor a git repository, and it never plans.
-	cmdWorker = "worker"
+	cmdChoreographer = "choreographer"
 
 	// The shell helpers, which run one script rather than sweeping a
 	// selection: a condition picks the script for one, the configuration
@@ -152,6 +152,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		// so an unrecognized flag would otherwise exit 2 in total silence.
 		fmt.Fprintf(stderr, "dispat: %v\n\n", err)
 		fs.Usage()
+		return 2
+	}
+	if positional := fs.Args(); len(positional) > 0 && positional[0] == "worker" {
+		log := newLogger(orDefault(*o.logLevel, "info"), orDefault(*o.logFormat, "pretty"), stderr)
+		log.Error().Msg("dispat worker was removed; use dispat choreographer to serve tasks, or dispat run worker to run a script named worker")
 		return 2
 	}
 	if err := applyNestedWorkspace(fs, o); err != nil {
@@ -540,7 +545,7 @@ func parseInvocation(rest []string, dash int, usage func(string), log zerolog.Lo
 // command line is unusable, already logged.
 func (inv *invocation) readPositionals(rest []string, usage func(string), log zerolog.Logger) (bad bool) {
 	switch inv.cmd {
-	case cmdRelease, cmdStatus, cmdInit, cmdCompute, cmdSelfUpdate, cmdWorker:
+	case cmdRelease, cmdStatus, cmdInit, cmdCompute, cmdSelfUpdate, cmdChoreographer:
 		if len(rest) > 1 {
 			log.Error().Strs("args", rest[1:]).Msg("unexpected arguments")
 			return true

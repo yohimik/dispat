@@ -29,6 +29,9 @@ func (a *App) releaseChoreographyInventory(c *execution.Coordinator,
 	}
 	applyChoreographyRetrySafety(specs, c.JoinPolicy.RetryAfterUncertainAttempt)
 	applyChoreographyAttemptLimit(specs, c.JoinPolicy)
+	if err := bindHybridTaskPolicy(c, specs, compiled.Digest()); err != nil {
+		return nil, nil, nil, choreographyAbsentIdentityText, err
+	}
 	templates, err := compileReleaseChoreographyTemplatesWithInputs(releaseChoreographyTemplateOptions{
 		Compiled:    compiled,
 		Tasks:       specs,
@@ -81,6 +84,9 @@ func (a *App) sweepChoreographyInventory(options sweepChoreographyInventoryOptio
 	}
 	applyChoreographyRetrySafety(specs, c.JoinPolicy.RetryAfterUncertainAttempt)
 	applyChoreographyAttemptLimit(specs, c.JoinPolicy)
+	if err := bindHybridTaskPolicy(c, specs, semanticGraphDigest); err != nil {
+		return nil, nil, nil, choreographyAbsentIdentityText, err
+	}
 	templates, err := compileSweepChoreographyTemplatesWithInputs(sweepChoreographyTemplateOptions{
 		Work:        work,
 		Tasks:       specs,

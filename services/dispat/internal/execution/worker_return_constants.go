@@ -84,6 +84,7 @@ const (
 	workerReturnPageError                    = "execution: capacity settlement event page is not contiguous"
 	workerReturnSequenceError                = "execution: capacity settlement event has a sequence gap"
 	workerReturnReleaseResultError           = "execution: capacity release names a different accepted result"
+	workerReturnRetainedOpenErrorFormat      = "execution: opening retained capacity finality: %w"
 	workerReturnRetainedDecisionErrorFormat  = "execution: retained capacity finality has no exact signed decision: %w"
 
 	workerReturnClaimMissingOIDReason    = "missing task OID"

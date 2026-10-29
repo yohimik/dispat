@@ -1189,3 +1189,90 @@ independence from node count or guaranteeing entropy after arbitrary processing.
 guidance supports keeping the physical source justification separate from the mathematical implication.
 This informative clarification establishes no hardware noise law or measured entropy rate and preserves
 all capture, continuation, authority and recovery requirements.
+
+## 2026-10-29: Hybrid task ownership and mode-independent attempts
+
+Sections 28.2 through 28.4 clarify that the signed attempt limit and repeat-safety/finality rules apply
+to command pickups in every distribution mode. A lost reply retains the existing pickup identity; a
+permitted successor has a distinct persisted identity and cannot discharge edges before logical finality.
+Hybrid binds each task's segment and pinned operation policy in the signed graph. A task mixing preparation
+with a native effect is interpreted as a whole unless the fixed graph already separates those operations.
+First-only nonpush preparation may be interpreted conservatively; compiling it requires the specified
+write-set and prepared-input contract. Lazy effect evaluation retains typed gates and durable intent before
+effects. Vectors 52 and 53 exercise these boundaries. This completes the implementation contract without
+asserting that a particular binary implements hybrid or that one execution mode is faster.
+
+## 2026-10-29: Mathematical audit and convergence limits
+
+The propagation prose now distinguishes channel freshness from source delivery on the bump axis, preserves
+already-published contributions when a source is later held, and limits the tag-position screen to a chosen
+provider tag that actually carries the contribution. Equal baseline tags do not exclude fresh pending work.
+The cycle rationale retains `E200` as an ordering policy without claiming every cyclic declaration is
+unreleaseable. The configured-stage corollaries explicitly require a feasible comparison class and an acyclic
+complete task graph, including plan-specific outcome edges.
+
+G6 now states a finite-debt potential and its progress premises. The former unconditional `n + m` count
+does not cover fixed-counter group rides: one member can publish a new prerelease on every retry while
+another retains fresh work and keeps failing. A disposable two-package Git fixture, using a CLI built from
+`e0cce942a8de50fe3447cc8976d2b1e7a6b9cdd2`, reproduced five such plans at one unchanged source head,
+recording only the first member's hypothetical successes with local tags. This is planner evidence and an
+arbitrarily extendable mathematical counterexample, not an external publication experiment. The corrected
+bound counts first successes and newly discharged source-delivery incidences; unsuccessful attempts and
+fixed-counter rides without that progress have no finite bound from G6.
+
+The distributed cost account separately charges coordination events, which can grow while the task graph
+stays fixed. Hybrid classification excludes its common claim/result bookkeeping, and a sweep generation
+isolates coordination without fencing arbitrary trusted-script effects. These clarifications preserve the
+existing readiness, authority and external-effect recovery obligations.
+
+Proof review covered the propagation and closure calculations, conditional planner costs, graph and
+scheduling results, configured stages, mode simulation, recovery, artifact continuation, clock/entropy and
+reuse accounting. Independent exact finite checks passed for 377,253 one-pool schedules, 125,751 disjoint-pool
+schedules, 22,140 chain-readiness cases and 1,590 small undirected optimum comparisons; 61,440 graph/source
+cases, 4,096 owner closures and 26,704 connected six-vertex graphs; and 45,786 rational reuse and probability
+checks. Their finite domains supplement the proofs and do not establish implementation-wide correctness.
+Wolfram Alpha confirmed selected algebraic identities in the browser. The local Wolfram CLI was unavailable
+because activation failed, so this audit does not report a successful run of `verify-math.wls`.
+Both specification and agent-guide consistency and disposable release-lifecycle suites passed with the
+CLI built from the audited base. No production release or performance measurement is asserted here.
+
+## 2026-10-29: Exact interpreted-policy references
+
+The hybrid descriptor contract permits an indirect digest reference instead of duplicated command bytes,
+while requiring that reference to bind the complete selected pinned policy. Source object identities alone
+can contain several configuration entry files with different native policies; semantic plan and structural
+graph digests need not distinguish those selections. Configuration provenance and relevant nonsecret
+invocation and destination settings are therefore bound too, with bootstrap agreement and an acyclic hash
+construction. Result, output and prepared-input bindings remain separate. This clarifies the existing exact
+policy requirement; it does not certify an implementation's snapshot capture or effect recovery.
+
+## 2026-10-29: Measured experiment inputs and separate formula results
+
+Section 28.7 and the experiment measurement profile separate retained graph/resource inputs, measured task
+and enclosing intervals, and derived bounds/ratios. The additive `executionMeasurement` report contract keeps
+the standard observed-overlap ratio unchanged and distinguishes it from an evidenced task-capacity bound.
+Missing clocks, durations, capacity or model premises remain explicit. An outer two-request LLVM workload
+is separate from its executor graph and inner compiler DAG; Ninja jobs are not outer task slots. Reports
+retain per-task evidence, timing boundaries, topology, repetitions and failures without claiming a measured
+speedup or completed conformance from the new schema. This specifies reporting before its implementation;
+it does not change execution, release authority, recovery or the task-graph formulas.
+
+## 2026-10-29: Clock evidence for cross-host formula reporting
+
+The measurement profile now permits explicitly nominal work/span arithmetic when local monotonic durations
+are available but relative clock-rate error is not calibrated. It separates that descriptive arithmetic
+from reference-clock bounds. Optional causally bracketed endpoints need no constant-rate assumption;
+optional affine probe constraints retain their whole-trial rate assumption rather than treating finite
+probes as proof of no drift. Duration and formula enclosures retain uncertainty and undefined denominators.
+This clarification supplies reporting semantics before multi-host collection; it asserts no GCP measurement,
+hardware calibration, successful full LLVM build or performance improvement.
+
+## 2026-10-29: Formula applicability and modeled interval selection
+
+The measurement profile makes missing evidence distinct from an established model violation, including
+precedence, failed/retried schedules, undefined ratios and unsupported upper-bound calculations. Known
+violations remain visible when other inputs are missing. Modeled task spans and overlap select the graph's
+accepted operation intervals; retaining omitted phases does not extend those quantities. Readers cross-check
+comparable interval evidence against precedence and slot ceilings and preserve structural validation on
+incomplete trials. These reporting clarifications precede producer/validator fixes and assert no completed
+experiment campaign or implementation-wide conformance.

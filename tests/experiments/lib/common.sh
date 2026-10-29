@@ -17,7 +17,13 @@ export EXPERIMENT_BASELINE=1.0.0
 # and per upload, appended by the fixture's build script, the npm shim and the
 # proxy. The wide scenario's packages are the fixture's to name.
 if [ "${EXPERIMENT:-}" = timing ]; then
-  export EXPERIMENT_TIMING=$OUT/timing.jsonl
+  measurement_settings=$(python3 /exp/lib/execution_measurement.py init --output "$OUT" \
+    --tool "$TOOL" --scenario "$SCENARIO" --repetition "${EXPERIMENT_REPETITION:-1}") || exit 1
+  EXPERIMENT_MEASUREMENT_DIR=$(printf '%s' "$measurement_settings" | jq -er .directory)
+  EXPERIMENT_MEASUREMENT_TRIAL_ID=$(printf '%s' "$measurement_settings" | jq -er .trialId)
+  EXPERIMENT_MEASUREMENT_PHASE_FILE=$(printf '%s' "$measurement_settings" | jq -er .phaseFile)
+  EXPERIMENT_TIMING=$(printf '%s' "$measurement_settings" | jq -er .timingFile)
+  export EXPERIMENT_MEASUREMENT_DIR EXPERIMENT_MEASUREMENT_TRIAL_ID EXPERIMENT_MEASUREMENT_PHASE_FILE EXPERIMENT_TIMING
   if [ "${SCENARIO:-}" = wide ]; then
     EXPERIMENT_PACKAGES=$(python3 /exp/lib/fixture.py --packages wide)
   fi
@@ -77,9 +83,21 @@ step() {
       exit 2 ;;
   esac
   say "$name: $*"
+  if [ -n "${EXPERIMENT_MEASUREMENT_DIR:-}" ]; then
+    if [ "$kind" = release ]; then
+      python3 /exp/lib/execution_measurement.py capture --directory "$EXPERIMENT_MEASUREMENT_DIR" \
+        --output "$OUT" --repo "$REPO" --tool "$TOOL" || exit 1
+    fi
+    python3 /exp/lib/execution_measurement.py begin --directory "$EXPERIMENT_MEASUREMENT_DIR" \
+      --step "$name" --kind "$kind" --phase "$PHASE" || exit 1
+  fi
   local rc=0 started=$EPOCHREALTIME
-  "$@" > "$OUT/step-$name.log" 2>&1 || rc=$?
+  EXPERIMENT_MEASUREMENT_STEP="$name" "$@" > "$OUT/step-$name.log" 2>&1 || rc=$?
   local ended=$EPOCHREALTIME
+  if [ -n "${EXPERIMENT_MEASUREMENT_DIR:-}" ]; then
+    python3 /exp/lib/execution_measurement.py end --directory "$EXPERIMENT_MEASUREMENT_DIR" \
+      --step "$name" --exit "$rc" || exit 1
+  fi
   echo "exit=$rc"
   tail -n 12 "$OUT/step-$name.log" | sed 's/^/   | /'
   STEP_RC[$name]=$rc
@@ -442,6 +460,17 @@ measure_timing() {
          "   critical chain: " + (.criticalChain | join(" -> "))' "$OUT/timing.json"
 }
 
+finalize_measurement() {
+  [ -n "${EXPERIMENT_MEASUREMENT_DIR:-}" ] || return 0
+  python3 /exp/lib/execution_measurement.py finalize --directory "$EXPERIMENT_MEASUREMENT_DIR" \
+    --output "$OUT" --exit "$1" || return 1
+  if [ -s "$OUT/execution-measurement.json" ] && [ -s "$OUT/verdict.json" ]; then
+    jq --slurpfile measurement "$OUT/execution-measurement.json" \
+      '. + {executionMeasurement: $measurement[0]}' "$OUT/verdict.json" > "$OUT/verdict-measured.json" || return 1
+    mv "$OUT/verdict-measured.json" "$OUT/verdict.json"
+  fi
+}
+
 # timing_asserts <observation>: one set of sentences for every tool, about the
 # release the plan described. The steps of the release are `run` and
 # `run-<part>`.
@@ -770,6 +799,7 @@ verdict() {
          + (if $recovery == null then {} else {recovery: $recovery} end)
          + (if $plan == null then {} else {plan: $plan} end)
          + (if $timing == null then {} else {timing: $timing} end)' > "$OUT/verdict.json"
+  finalize_measurement 0 || return 1
   if [ -n "$recovery" ]; then
     jq -r '.recovery | "CATCH-UP: \(.runs) run(s), \(.releaseCommands) release and \(.manualCommands) manual command(s), " +
            (if .converged then "converged" else "did not converge" end)' "$OUT/verdict.json"

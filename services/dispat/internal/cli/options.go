@@ -119,13 +119,13 @@ type options struct {
 	// release and status: the CI gate that turns an empty plan into a failure.
 	requireRelease *bool
 
-	// release, run and status: the worker links this invocation adds to the
+	// release, run and status: the choreographer links this invocation adds to the
 	// entry configuration's own, for a machine a pipeline has just created.
-	workers                      *[]string
+	choreographers               *[]string
 	distributionMode             *string
 	returnEndpoint, returnListen *string
 
-	// worker: where the node keeps what it may not lose, and how long it
+	// choreographer: where the node keeps what it may not lose, and how long it
 	// serves with nothing to do.
 	workerStateDir    *string
 	workerIdleTimeout *int
@@ -396,19 +396,19 @@ func (o *options) declareManifestFlags(fs *pflag.FlagSet) {
 }
 
 // declareReleaseFlags declares the flags of release, run, status and
-// worker: the release gate, peer links, mode and return channel.
+// choreographer: the release gate, peer links, mode and return channel.
 func (o *options) declareReleaseFlags(fs *pflag.FlagSet) {
 	o.requireRelease = fs.Bool("require-release", false,
 		"release and status: exit 3 when the plan releases nothing, apart from exit 1's failures, so a CI stage whose point is that this run publishes something fails instead of passing quietly (a held, withheld or unselected package does not count)")
-	o.workers = fs.StringArray(config.WorkerFlag, nil,
+	o.choreographers = fs.StringArray(config.WorkerFlag, nil,
 		linkedWorkerUsageText)
 	o.distributionMode = fs.String(distributionModeFlagName, compiledDistributionModeName, distributionModeUsageText)
 	o.returnEndpoint = fs.String(returnEndpointFlagName, returnAddressDefaultText, returnEndpointUsageText)
 	o.returnListen = fs.String(returnListenFlagName, returnAddressDefaultText, returnListenUsageText)
 	o.workerStateDir = fs.String("state-dir", "",
-		"worker: the folder this node keeps its object cache and its record of answered work in; without it, dispat/worker under the user cache directory")
+		"choreographer: the folder this node keeps its object cache and its record of answered work in; without it, dispat/worker under the user cache directory")
 	o.workerIdleTimeout = fs.Int("idle-timeout", 0,
-		"worker: stop after this many seconds with nothing claimed and nothing in flight (0 serves until the process is signalled)")
+		"choreographer: stop after this many seconds with nothing claimed and nothing in flight (0 serves until the process is signalled)")
 }
 
 // declareHelpFlags declares --version and --help, declared last.

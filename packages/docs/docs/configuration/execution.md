@@ -12,7 +12,7 @@ execution:
   name: orchestrator
   endpoint: git@github.com:acme/project.git
   secretEnv: DISPAT_EXECUTION_SECRET
-  workers:
+  choreographers:
     - name: build-a
     - name: build-b
       lateJoin: true
@@ -30,7 +30,7 @@ execution:
     timeout: 1800
 ```
 
-With the key absent, or with `workers` absent or empty, a release plans and executes on one
+With the key absent, or with `choreographers` absent or empty, a release plans and executes on one
 machine.
 
 Distributed nodes currently require Linux or macOS for the persistent shared node-slot authority. Windows
@@ -41,8 +41,11 @@ explicit shared node capacity remains available.
 descriptor per executable logical task before work starts. With `interpretation`, each admitted node independently
 derives the same plan and graph from the pinned input, verifies their digests, then proposes locally ready work.
 The first node validates each exact proposal and alone advances canonical task, ledger and release refs. A worker
-must confirm its own signed pending branch before command effects. `hybrid` remains unavailable and is refused
-before task effects. The mode is an invocation choice; there is no static node role field.
+must confirm its own signed pending branch before command effects. In `hybrid`, nodes pick up compiled nonpush
+commands, while the first node evaluates native preparation, publication and recording policy after their exact
+prerequisites settle. The signed graph binds each task’s segment and pinned operation policy. Dependencies can
+cross between the segments in either direction; there is no global phase barrier. The mode is an invocation
+choice; there is no static node role field.
 When remote workers participate, `release` and `run` require `--return-endpoint=https://host:port`.
 `--return-listen=host:port` can set a different local bind address. Status accepts the mode but starts no listener.
 
@@ -64,13 +67,13 @@ a transported checkout is never read for authority either.
 | Key           | Type                        | Default           | Description                                                                                          |
 |---------------|-----------------------------|-------------------|------------------------------------------------------------------------------------------------------|
 | `concurrency` | int                         | `1`               | How many claimed command tasks this node runs at once, across runs. Must be at least 1.              |
-| `maxAttempts` | int | `1` in interpretation | Maximum accepted pickups per delegated logical task, counting the first; interpretation only, from 1 through 64. |
+| `maxAttempts` | int | `1` | Maximum accepted pickups per delegated logical task in every mode, counting the first, from 1 through 64. |
 | `retryAfterUncertainAttempt` | boolean | `false` | Assert that delegated commands can safely repeat after an attempt whose external effects are uncertain. |
-| `name`        | string                      | none              | This node's identity when it serves tasks. Required by `dispat worker`.                               |
-| `endpoint`    | string                      | the release remote | The repository this node reads work from and writes its own pickup branches to when it serves tasks. Without it, `dispat worker` uses the release remote of the checkout it runs in. |
-| `secretEnv`   | string                      | none              | The name of the environment variable holding the shared signing secret. Required with `workers`, and required by `dispat worker`. |
+| `name`        | string                      | none              | This node's identity when it serves tasks. Required by `dispat choreographer`.                               |
+| `endpoint`    | string                      | the release remote | The repository this node reads work from and writes its own pickup branches to when it serves tasks. Without it, `dispat choreographer` uses the release remote of the checkout it runs in. |
+| `secretEnv`   | string                      | none              | The name of the environment variable holding the shared signing secret. Required with `choreographers`, and required by `dispat choreographer`. |
 | `identityKeyEnv` | string | none | On a late worker, names the environment variable holding its base64url Ed25519 private seed. |
-| `workers` | array of `{name, endpoint, lateJoin, identityPublicKey}` | empty | Preauthorized peer nodes. `lateJoin: true` requires a pinned independent public key and permits admission after tasks start. |
+| `choreographers` | array of `{name, endpoint, lateJoin, identityPublicKey}` | empty | Preauthorized peer nodes. `lateJoin: true` requires a pinned independent public key and permits admission after tasks start. |
 | `timeouts`    | object                      | see below         | The bounded waits of a distributed run, in seconds.                                                   |
 | `transfer`    | object                      | see below         | What one task's declared build outputs may weigh, and how long moving them may take.                  |
 
@@ -87,7 +90,7 @@ for that capacity. The value must be at least `1`; here, `0` does not mean the n
 ### `retryAfterUncertainAttempt`
 
 This is an explicit assertion by the first node that every delegated command in the run is safe to execute again
-after an earlier pickup whose external effects are uncertain. The default is `false`. In interpretation,
+after an earlier pickup whose external effects are uncertain. The default is `false`. In every mode,
 `maxAttempts` independently bounds sequential pickups after a settled failed Result; a value greater than one
 does not imply this safety assertion. When enabled, the signed
 bootstrap and logical task graph bind the choice; an admitted worker cannot change it. After uncertain contact
@@ -99,13 +102,13 @@ non-idempotent external change.
 
 ### `maxAttempts`
 
-In interpretation, this is the total number of accepted physical pickups allowed for one delegated logical task.
+In every distribution mode, this is the total number of accepted physical pickups allowed for one delegated logical task.
 Omission means one, including the initial pickup; `2` permits at most one successor. The value must be from 1
 through 64. A settled failed Result, after its required package hooks have settled, can lead to a sequential
 successor while attempts remain. A timeout or lost contact also needs `retryAfterUncertainAttempt: true` and
 signed Cancel and reply-grace evidence. Neither setting repeats first-node publication or other native effects.
-The resolved count is signed into the run bootstrap and task graph. Compiled mode retains its existing bounded
-placement policy.
+The resolved count is signed into the run bootstrap and task graph. Replaying the same exact proposal keeps its
+pickup identity and consumes no new attempt. A new accepted pickup has a new persisted identity.
 
 ### `name`
 
@@ -132,7 +135,7 @@ committed. A refused endpoint is redacted in the message.
 
 A worker that states no `endpoint` resolves the coordination repository from the checkout it is started in: the push URL of its release
 remote, `commit.remote` or `origin`, which is what an orchestrator's link with no `endpoint` reaches. The resolution is
-strict. `dispat worker` is refused with `E225` when the folder `--root` names is not a Git repository, when the remote
+strict. `dispat choreographer` is refused with `E225` when the folder `--root` names is not a Git repository, when the remote
 is not configured or pushes to more than one URL, and when its push URL breaks a rule above, a credential in it above
 all; each refusal names both remedies, stating `endpoint`, or starting the worker in a checkout of the repository the
 orchestrator's link names.
@@ -142,9 +145,9 @@ orchestrator's link names.
 Name the environment variable that holds the shared signing secret. dispat signs every coordination message with it.
 Store only the variable name in the configuration, just as you would for a webhook's `secretEnv`.
 
-It is required with a non-empty `workers` list, and required by `dispat worker`. Whether the variable is actually
+It is required with a non-empty `choreographers` list, and required by `dispat choreographer`. Whether the variable is actually
 set is a question for the run: a release that would dispatch with the variable unset or empty is refused with
-`E225`, and so is a `dispat worker` that cannot authenticate what it reads.
+`E225`, and so is a `dispat choreographer` that cannot authenticate what it reads.
 
 The secret is shared and symmetric: every node holding it can sign any message. See
 [the security section](../distributed-execution.md#security-what-distributed-execution-exposes-and-how-to-contain-it)
@@ -154,12 +157,12 @@ before one secret spans machines of different trust levels.
 
 For a worker authorized with `lateJoin: true`, name the environment variable holding its canonical unpadded
 base64url Ed25519 private seed (32 bytes before encoding). The matching public key is pinned on the
-orchestrator's `workers` entry. The seed value stays in the worker's secret store and is never written to
+orchestrator's `choreographers` entry. The seed value stays in the worker's secret store and is never written to
 configuration, Git coordination objects or logs. A shared `secretEnv` value or matching node name alone cannot
 authenticate a late join or add capacity. An initially required worker can omit this key and uses strict signed
 preflight; such a keyless worker cannot later register new capacity through the join route.
 
-### `workers`
+### `choreographers`
 
 The execution links of one run: each entry is a node `name`, optionally the `endpoint` it reads, and optionally
 `lateJoin: true`. The list is the run's preauthorized membership policy. An entry without `lateJoin: true` must
@@ -187,14 +190,14 @@ An empty or absent list preserves local execution, and a present but empty list 
 
 #### Links named on the command line
 
-`--worker name` or `--worker name=endpoint`, repeatable on `dispat release`, `dispat run` and `dispat status`, adds one
+`--choreographer name` or `--choreographer name=endpoint`, repeatable on `dispat release`, `dispat run` and `dispat status`, adds one
 required-at-start link to this list for one invocation, after the ones the file states. Configure `lateJoin: true`
-in `execution.workers` for a node that may arrive after tasks begin. A name alone reaches the repository being
+in `execution.choreographers` for a node that may arrive after tasks begin. A name alone reaches the repository being
 released, as a configured link with no `endpoint` does. The flag exists for the machine a pipeline creates a minute
 before the run, which a committed file cannot know about:
 
 ```sh
-dispat release --worker ci-worker-1
+dispat release --choreographer ci-worker-1
 ```
 
 A file that states only `secretEnv` and the waits is enough for it. The link is added before the file is validated, so
@@ -203,7 +206,7 @@ and the `secretEnv` the file has to name, each refused with `E225` and a message
 was given, with any credential in the endpoint redacted. A value that is neither a node name alone nor `name=endpoint`
 with both halves stated is a usage error, and it is never echoed. A process running under a task's authority
 refuses the flag with `E226`; a task cannot expand the run's node set. The links are no
-part of the plan digest, and `dispat status --worker` prints that digest, resolves no remote and reaches no node.
+part of the plan digest, and `dispat status --choreographer` prints that digest, resolves no remote and reaches no node.
 
 ### `timeouts`
 
@@ -239,6 +242,10 @@ ordinary tasks from running.
 `maxPackBytes` is separate from `maxBytes`: Git pack framing and metadata add bytes beyond the output files.
 The worker and first node enforce the same signed pack ceiling on the return channel.
 
+Exact transport commit reads also have fixed parser limits: 64 KiB per header line and 16 MiB for the complete
+header section. Exceeding either limit refuses the object with a transport-limit error before dependent effects;
+it never accepts a truncated parent chain. Commit message bodies are streamed and do not count toward these limits.
+
 `timeout` covers fetching and installing task inputs, and returning a result with build outputs. Allow enough time for
 the largest output set your packages produce. A result with no outputs uses a fixed 30-second reporting limit.
 
@@ -250,7 +257,7 @@ rather than having a node silently truncate what it was asked to move.
 Every refusal below carries `E225` and the `execution-configuration` category, and none of them lets a command run.
 The refusals of the object's own values happen when the configuration loads, and the refusals of a run that would
 dispatch (a lock bypass, `commit.verify`, the signing secret, the release remote a link reaches) happen when it starts,
-before any lock. The two that depend on the plan, a stage pinned to `worker` with no worker links and a
+before any lock. The two that depend on the plan, a stage pinned to `choreographer` with no worker links and a
 `buildPlatforms` no node satisfies, happen once the plan is fixed, which for a release is after it has taken its locks,
 and still before any hook, stage or record; a release then gives its locks back. A node that fails preflight is
 refused at the same point:
@@ -259,14 +266,14 @@ refused at the same point:
 - a `name` or a worker `name` that is not a node name, or two links whose names fold together;
 - an `endpoint` git could not safely be pointed at, including the release remote's push URL that a link with no
   endpoint would reach;
-- a link named with `--worker` that breaks any rule a configured link is held to;
-- `workers` with no `secretEnv`, or a `secretEnv` naming a variable that is unset or empty in the environment of a
+- a link named with `--choreographer` that breaks any rule a configured link is held to;
+- `choreographers` with no `secretEnv`, or a `secretEnv` naming a variable that is unset or empty in the environment of a
   run that would dispatch;
-- `workers` beside any release-lock bypass: `unsafeDisableLock`, a per-repository bypass, or
+- `choreographers` beside any release-lock bypass: `unsafeDisableLock`, a per-repository bypass, or
   `DISPAT_UNSAFE_DISABLE_LOCK`;
-- `workers` on a release where any participating repository sets `commit.verify: false`, because such a release
+- `choreographers` on a release where any participating repository sets `commit.verify: false`, because such a release
   reads its lock back before task activation and publication (a sweep, which takes no lock, is not refused for it);
-- a package whose build is pinned to `worker` while the run has no worker links, once the plan is fixed;
+- a package whose build is pinned to `choreographer` while the run has no worker links, once the plan is fixed;
 - a package whose `buildPlatforms` no configured worker satisfies, once the nodes have answered;
 - two packages whose `buildOutputs` claim one folder, or a declared root holding another package's folder, which
   `dispat status` reports as well;
@@ -293,10 +300,10 @@ object is. See [running scripts on workers](../distributed-execution.md#running-
 - [Distributed execution](../distributed-execution.md) for the arrangement, the transport and the recovery, and
   [the coordination repository](../distributed-execution.md#the-coordination-repository) for what travels through the repository
   being released and how to protect its release refs.
-- [The worker command](../cli/worker.md) for the node that reads this object and serves tasks.
+- [The worker command](../cli/choreographer.md) for the node that reads this object and serves tasks.
 - Annotated example files:
   [`dispat.example.orchestrator.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.orchestrator.yaml)
   and
-  [`dispat.example.worker.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.worker.yaml).
+  [`dispat.example.choreographer.yaml`](https://github.com/yohimik/dispat/blob/main/services/dispat/dispat.example.choreographer.yaml).
 - [Configuration file reference](./README.md) for every other top-level key.
 - [models](../go/models.md) for the Go shapes of this object.

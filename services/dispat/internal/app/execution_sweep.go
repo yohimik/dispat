@@ -124,6 +124,7 @@ func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchReques
 	if err := setChoreographyCoordinatorMode(coordinator, request.mode, a.cfg.Execution); err != nil {
 		return coordinator, a.reportSweepRefusal(err)
 	}
+	coordinator.PinnedInputs = request.pinnedInputs
 	_, _, _, completeGraphDigest, err := a.sweepChoreographyInventory(sweepChoreographyInventoryOptions{
 		Coordinator:         coordinator,
 		Work:                work,
@@ -144,7 +145,6 @@ func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchReques
 	coordinator.ReturnEndpoint = returnChannel.endpoint
 	coordinator.ReturnCertSHA256 = returnChannel.certPin
 	coordinator.PinnedSources = request.pinnedSources
-	coordinator.PinnedInputs = request.pinnedInputs
 	if err := a.prepareRunChoreographyBootstrap(ctx, coordinator); err != nil {
 		return coordinator, a.reportSweepRefusal(err)
 	}
@@ -170,6 +170,9 @@ func (a *App) openSweepDispatch(ctx context.Context, request sweepDispatchReques
 		}
 		applyChoreographyRetrySafety(specs, coordinator.JoinPolicy.RetryAfterUncertainAttempt)
 		applyChoreographyAttemptLimit(specs, coordinator.JoinPolicy)
+		if err := bindHybridTaskPolicy(coordinator, specs, graphDigest); err != nil {
+			return coordinator, a.reportSweepRefusal(err)
+		}
 		templates, err := compileSweepChoreographyTemplates(coordinator, work, specs)
 		if err != nil {
 			return coordinator, a.reportSweepRefusal(err)

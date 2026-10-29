@@ -261,7 +261,7 @@ func (r *runner) validateFlags() (int, bool) {
 	if code, done := r.validateWorkerLinks(); done {
 		return code, true
 	}
-	if mode := public.DistributionMode(*r.o.distributionMode); mode != public.DistributionModeCompilation && mode != public.DistributionModeInterpretation {
+	if mode := public.DistributionMode(*r.o.distributionMode); mode != public.DistributionModeCompilation && mode != public.DistributionModeInterpretation && mode != public.DistributionModeHybrid {
 		r.boot.Error().Str(distributionModeFlagName, *r.o.distributionMode).
 			Msg(unsupportedDistributionModeErrorText)
 		return invalidInvocationExitCode, invocationValidationCompleteState
@@ -740,7 +740,7 @@ func (r *runner) runDiagnostics() int {
 	return 0
 }
 
-// runWorker performs `dispat worker`: it loads the node's configuration and
+// runWorker performs `dispat choreographer`: it loads the node's configuration and
 // serves until the process is signalled or the node goes idle.
 //
 // The configuration is loaded as a node's rather than as a release's, so a
@@ -1011,7 +1011,7 @@ func (r *runner) runConfigured() int {
 		r.boot.Error().Err(err).Msg("config file not found")
 		return 1
 	}
-	if r.inv.cmd == cmdWorker {
+	if r.inv.cmd == cmdChoreographer {
 		// A serving node reads the node-startup settings of this file and
 		// nothing else: it plans nothing, so it composes no workspace, needs
 		// no package and needs no git repository at the root. It stops here
@@ -1193,7 +1193,7 @@ func (r *runner) dispatch(ctx context.Context, command configuredCommand) int {
 			LogFormat: *o.logFormat, LogFormatSet: r.fs.Changed(planningLogFormatFlagName),
 			Polyrepo: *o.polyrepo, PolyrepoSet: r.fs.Changed(planningPolyrepoFlagName),
 			QuietParser: *o.quietParser, QuietParserSet: r.fs.Changed(planningQuietParserFlagName),
-			Workers:         append([]string(nil), (*o.workers)...),
+			Workers:         append([]string(nil), (*o.choreographers)...),
 			ImportedConfigs: append([]string(nil), (*o.configs)...),
 		})
 	}
@@ -1349,25 +1349,25 @@ func (r *runner) dispatchStep(ctx context.Context, a *app.App, cfg *config.File,
 	return 0
 }
 
-// validateWorkerLinks is what the `--worker` values decide before any file is
+// validateWorkerLinks is what the `--choreographer` values decide before any file is
 // read: each is a node name alone or name=endpoint, and a process holding
-// worker authority names none at all.
+// choreographer authority names none at all.
 //
 // The shape is a usage mistake, like every other malformed flag value, and
 // the value is never echoed because it may be an endpoint. The
 // authority is a refusal with its own code rather than a usage mistake: a
 // task executes what its assignment authorized, and a build script that
 // named a pool of its own would be a node dispatching work, which is exactly
-// what a `workers` list in a worker's file is refused for. Everything else a
+// what a `choreographers` list in a choreographer's file is refused for. Everything else a
 // link is held to (the name, the endpoint, the uniqueness, the secret) is
 // the configuration's, and is asked where the entry file is read.
 func (r *runner) validateWorkerLinks() (int, bool) {
-	if len(*r.o.workers) == 0 {
+	if len(*r.o.choreographers) == 0 {
 		return 0, false
 	}
-	for _, value := range *r.o.workers {
+	for _, value := range *r.o.choreographers {
 		if _, err := config.ParseWorkerLink(value); err != nil {
-			r.boot.Error().Err(err).Msg("invalid --worker")
+			r.boot.Error().Err(err).Msg("invalid --choreographer")
 			r.usage(r.inv.cmd)
 			return 2, true
 		}
@@ -1376,16 +1376,16 @@ func (r *runner) validateWorkerLinks() (int, bool) {
 		return 0, false
 	}
 	logConfigError(r.boot, execution.NewDiagnostic(execution.CodeAuthority, execution.CategoryAuthority,
-		"--%s names a node this invocation would dispatch to, and this process runs under worker authority: "+
+		"--%s names a node this invocation would dispatch to, and this process runs under choreographer authority: "+
 			"a task executes what its assignment authorized and dispatches nothing", config.WorkerFlag)).
 		Str("command", r.inv.cmd).Msg("refusing the command")
 	return 1, true
 }
 
-// refuseWorkerAuthority refuses the commands a process holding worker
+// refuseWorkerAuthority refuses the commands a process holding choreographer
 // authority may not run, before the command does anything at all.
 //
-// A worker's task runs real build scripts, and those scripts run dispat: that
+// A choreographer's task runs real build scripts, and those scripts run dispat: that
 // is the point of the helpers. What they may not do is start a second release
 // or write this release's records from inside a task the release authorized,
 // because either one would be a run competing with the run that assigned the
@@ -1396,7 +1396,7 @@ func (r *runner) refuseWorkerAuthority(log zerolog.Logger) (int, bool) {
 		return 0, false
 	}
 	logConfigError(log, execution.NewDiagnostic(execution.CodeAuthority, execution.CategoryAuthority,
-		"%s cannot run under worker authority: a task executes what its assignment authorized and records no release of its own",
+		"%s cannot run under choreographer authority: a task executes what its assignment authorized and records no release of its own",
 		r.inv.cmd)).Str("command", r.inv.cmd).Msg("refusing the command")
 	return 1, true
 }
@@ -1410,17 +1410,17 @@ func (r *runner) refuseWorkerAuthority(log zerolog.Logger) (int, bool) {
 // that started a node serving the same mailbox would give one node two
 // processes racing over what it has already answered. Everything else stays
 // allowed, because a build script legitimately reads the plan, runs a
-// declared script, branches on a condition and edits manifests, and a worker
+// declared script, branches on a condition and edits manifests, and a choreographer
 // that could not do those could not run a build at all.
 //
 // Raising a webhook event is allowed, and is the one word that left this
 // list. It writes no ref and starts no release: it reports what a script is
 // doing, from the stage that is doing it. Refusing it would have made moving
-// a build to a worker a change in what the repository's receivers hear, which
+// a build to a choreographer a change in what the repository's receivers hear, which
 // is exactly what a placement decision must not be.
 func isRefusedUnderWorkerAuthority(command string) bool {
 	switch command {
-	case cmdRelease, cmdCommit, cmdGithub, cmdChangelog, cmdAutoversion, cmdCompute, cmdWorker:
+	case cmdRelease, cmdCommit, cmdGithub, cmdChangelog, cmdAutoversion, cmdCompute, cmdChoreographer:
 		return true
 	}
 	return false

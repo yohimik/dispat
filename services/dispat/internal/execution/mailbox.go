@@ -102,6 +102,8 @@ type GitMailbox struct {
 	// a mutex so that a caller waiting for it leaves when its context ends.
 	refs      chan struct{}
 	fetchSize int
+	documents mailboxObjectCache[mailboxDocumentKey, mailboxSignedDocument]
+	trees     mailboxObjectCache[string, transportTree]
 }
 
 // maxChainDepth bounds how far below a fetched ref's tip an object may sit
@@ -1045,6 +1047,8 @@ func (m *GitMailbox) Forget() {
 	// ref that store held is gone with it.
 	clear(m.quarantined)
 	clear(m.fetched)
+	m.documents.forget()
+	m.trees.forget()
 }
 
 // Inspect resolves an observed tip to the message it carries and to the step
@@ -1073,13 +1077,14 @@ func (m *GitMailbox) readChainTip(ctx context.Context, branch, oid string) (Chai
 	}
 	tip.Kind, tip.document, tip.signature = carried.kind, carried.document, carried.signature
 	tip.isProtocol = carried.isProtocol
-	parent, err := m.remote.ResolveCommit(ctx, oid+"^")
+	parents, err := m.plumbing.CommitParents(ctx, oid)
 	if err != nil {
-		// No first parent: the commit is a root, which is what a probe
-		// assignment is. A parent that cannot be read for any other reason
-		// would have failed the chain resolution above.
+		return ChainTip{}, fmt.Errorf(mailboxParentReadErrorFormat, oid, err)
+	}
+	if len(parents) == mailboxRootParentCount {
 		return tip, nil
 	}
+	parent := parents[mailboxFirstParentIndex]
 	previous, err := m.readTree(ctx, parent)
 	if err != nil {
 		return ChainTip{}, err
@@ -1105,16 +1110,23 @@ func (m *GitMailbox) readChainTip(ctx context.Context, branch, oid string) (Chai
 // it, and the walk is bounded by the same depth a fetched object is resolved
 // within: an attempt is at most assignment, claim, ready, go and result.
 func (m *GitMailbox) InspectChain(ctx context.Context, head gitx.RemoteHead) ([]ChainTip, error) {
+	reader, err := gitx.OpenObjectReader(ctx, m.plumbing)
+	if err != nil {
+		return nil, fmt.Errorf(mailboxParentReadErrorFormat, head.OID, err)
+	}
 	oids := make([]string, 0, m.maxDepth)
 	for oid := head.OID; len(oids) < m.maxDepth; {
-		parent, err := m.remote.ResolveCommit(ctx, oid+"^")
-		if err != nil {
-			// A root commit, or a history that ends before the bound: either
-			// way there is nothing further down to read.
+		var parents []string
+		parents, err = reader.CommitParents(oid)
+		if err != nil || len(parents) == mailboxRootParentCount {
 			break
 		}
+		parent := parents[mailboxFirstParentIndex]
 		oids = append(oids, parent)
 		oid = parent
+	}
+	if err = errors.Join(err, reader.Close()); err != nil {
+		return nil, fmt.Errorf(mailboxParentReadErrorFormat, head.OID, err)
 	}
 	ancestors := make([]ChainTip, 0, len(oids))
 	for index := len(oids) - 1; index >= 0; index-- {
@@ -1174,6 +1186,13 @@ type transportTree struct {
 // the document and its signature. A commit carrying none is the source
 // snapshot an assignment sits on, and answers the empty kind.
 func (m *GitMailbox) readTree(ctx context.Context, oid string) (transportTree, error) {
+	cached, generation, found, err := m.trees.find(ctx, oid)
+	if err != nil {
+		return transportTree{}, err
+	}
+	if found && isMailboxImmutableOID(oid) {
+		return cached, nil
+	}
 	plumbing := gitx.NewPlumbing(m.plumbing)
 	signatures := map[MessageKind]string{}
 	carried := transportTree{}
@@ -1203,6 +1222,7 @@ func (m *GitMailbox) readTree(ctx context.Context, oid string) (transportTree, e
 		return transportTree{isProtocol: carried.isProtocol}, nil
 	}
 	carried.signature = signatures[carried.kind]
+	m.rememberTree(oid, carried, generation)
 	return carried, nil
 }
 
@@ -1217,19 +1237,43 @@ func (m *GitMailbox) Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]
 	if tip.Kind == "" {
 		return nil, &Rejection{Reason: ReasonUnreadable}
 	}
-	plumbing := gitx.NewPlumbing(m.plumbing)
+	key := mailboxDocumentKey{kind: tip.Kind, document: tip.document, signature: tip.signature}
+	cached, generation, found, err := m.documents.find(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		if int64(len(cached.document)) > maxBytes {
+			return nil, &Rejection{Reason: ReasonOversize}
+		}
+		if !m.signer.IsSignatureValid(tip.Kind, cached.document, cached.signature) {
+			return nil, &Rejection{Reason: ReasonSignature}
+		}
+		return bytes.Clone(cached.document), nil
+	}
+	reader, err := gitx.OpenObjectReader(ctx, m.plumbing)
+	if err != nil {
+		return nil, fmt.Errorf(mailboxReadMessageErrorFormat, tip.Kind, tip.Branch, err)
+	}
 	var document, signature bytes.Buffer
-	plumbing.ReadBlob(ctx, tip.document, &document, maxBytes)
-	plumbing.ReadBlob(ctx, tip.signature, &signature, maxSignatureBytes)
-	if err := plumbing.Err(); err != nil {
+	_, err = reader.ReadBlob(tip.document, &document, maxBytes)
+	if err == nil {
+		_, err = reader.ReadBlob(tip.signature, &signature, maxSignatureBytes)
+	}
+	// The pipe belongs only to this read. Reap it even after a size refusal,
+	// and require a clean process exit before accepting its signed bytes.
+	err = errors.Join(err, reader.Close())
+	if err != nil {
 		if errors.Is(err, gitx.ErrTransportLimit) {
 			return nil, &Rejection{Reason: ReasonOversize}
 		}
-		return nil, fmt.Errorf("execution: reading the %s of %s: %w", tip.Kind, tip.Branch, err)
+		return nil, fmt.Errorf(mailboxReadMessageErrorFormat, tip.Kind, tip.Branch, err)
 	}
-	if !m.signer.IsSignatureValid(tip.Kind, document.Bytes(), strings.TrimSpace(signature.String())) {
+	signatureText := strings.TrimSpace(signature.String())
+	if !m.signer.IsSignatureValid(tip.Kind, document.Bytes(), signatureText) {
 		return nil, &Rejection{Reason: ReasonSignature}
 	}
+	m.rememberDocument(key, document.Bytes(), signatureText, generation)
 	return document.Bytes(), nil
 }
 
@@ -1237,6 +1281,11 @@ func (m *GitMailbox) Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]
 // characters and a newline at most, so the ceiling is small enough that a
 // blob claiming to be one and being something else is refused at the read.
 const maxSignatureBytes = 128
+
+const mailboxReadMessageErrorFormat = "execution: reading the %s of %s: %w"
+const mailboxParentReadErrorFormat = "execution: reading parents of transport commit %s: %w"
+const mailboxRootParentCount = 0
+const mailboxFirstParentIndex = 0
 
 // Close removes the coordination branches this party owns, in one push per
 // batch, and takes the fetched refs out of the local store.
