@@ -21,12 +21,26 @@ name: Release
 # credentials, checked in parallel), release, and post release (does what was
 # released install). Nothing is published by a run whose tests never ran.
 #
-# The release experiments are not a job here. They run inside the release, as
+# The standard release experiments run inside the production release, as
 # the docs package's beforeBuild hook, against the image the same run just
 # published, so the figures the site ships are that run's own rather than a
-# courier's. What remains here is keeping their records as an artifact.
+# courier's. The separate llvm-gce dispatch prepares one checkout image and runs
+# cold experiments on isolated GCE workers; its jobs cannot publish a release.
 on:
   workflow_dispatch:
+    inputs:
+      purpose:
+        description: Production release or isolated two-node LLVM experiment
+        required: true
+        default: release
+        type: choice
+        options: [release, llvm-gce]
+      llvm-profile:
+        description: Full LLVM build or explicitly partial smoke validation
+        required: true
+        default: full
+        type: choice
+        options: [full, smoke]
 
 # Read by default; the two jobs that push (the badge branch, the release
 # itself) widen to write on their own. The gate and the install check hold
@@ -55,11 +69,12 @@ env:
 # release lock would refuse the second run, but it would refuse it partway in;
 # queueing here means the second dispatch simply waits.
 concurrency:
-  group: release
+  group: release-${{ inputs.purpose || 'release' }}
   cancel-in-progress: false
 
 jobs:
   plan:
+    if: inputs.purpose == 'release'
     name: Is there anything to release
     runs-on: ubuntu-latest
     outputs:
@@ -144,7 +159,7 @@ jobs:
   ping:
     name: Do the announcement's credentials still work
     needs: plan
-    if: needs.plan.outputs.releasing == 'true'
+    if: inputs.purpose == 'release' && needs.plan.outputs.releasing == 'true'
     runs-on: ubuntu-latest
     # The credentials the announcement will use, checked up front with
     # `crier ping`, which is read-only and posts nothing, so a revoked or
@@ -221,7 +236,7 @@ jobs:
   test-unit:
     name: Test unit
     needs: plan
-    if: needs.plan.outputs.releasing == 'true'
+    if: inputs.purpose == 'release' && needs.plan.outputs.releasing == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write     # the unit lane's coordination branches
@@ -423,7 +438,7 @@ jobs:
   test-lane:
     name: Test ${{ matrix.lane }}
     needs: plan
-    if: needs.plan.outputs.releasing == 'true'
+    if: inputs.purpose == 'release' && needs.plan.outputs.releasing == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -478,7 +493,7 @@ jobs:
   tests:
     name: Full suite
     needs: [plan, test-unit, test-lane]
-    if: ${{ always() && needs.plan.outputs.releasing == 'true' }}
+    if: ${{ always() && inputs.purpose == 'release' && needs.plan.outputs.releasing == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write     # publish the verified coverage badge
@@ -563,6 +578,7 @@ jobs:
         run: dispat exec push-badge
 
   release:
+    if: inputs.purpose == 'release'
     name: Run dispat, publish binaries
     needs: [plan, tests, ping]
     runs-on: ubuntu-latest
@@ -816,7 +832,7 @@ jobs:
     # still published a CLI worth checking — the postPublish hook set
     # cli-released before the failure, and skipping the check here would
     # leave exactly the releases that most need verifying unverified.
-    if: ${{ !cancelled() && needs.release.outputs.cli-released == 'true' }}
+    if: ${{ !cancelled() && inputs.purpose == 'release' && needs.release.outputs.cli-released == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -848,7 +864,7 @@ jobs:
   post-release-npm:
     name: Post release, npm on ${{ matrix.os }}
     needs: release
-    if: ${{ !cancelled() && needs.release.outputs.npm-released == 'true' }}
+    if: ${{ !cancelled() && inputs.purpose == 'release' && needs.release.outputs.npm-released == 'true' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -881,3 +897,122 @@ jobs:
             $1 == "dispat" && $2 == expected { found=1 }
             END { exit found ? 0 : 1 }
           '
+
+  llvm-prepare:
+    name: Prepare one immutable LLVM experiment image
+    if: inputs.purpose == 'llvm-gce'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Build exact checkout binaries and prepared image
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/llvm-bundle"
+          docker run --rm -v "$PWD:/src:ro" -v "$RUNNER_TEMP/llvm-bundle:/out" -w /src \
+            -e CGO_ENABLED=0 golang:1.26.10 \
+            go build -trimpath -ldflags "-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=1.11.0-rc.13-candidate.$SOURCE_SHA" -o /out/dispat ./services/dispat
+          docker run --rm -v "$PWD:/src:ro" -v "$RUNNER_TEMP/llvm-bundle:/out" -w /src \
+            -e CGO_ENABLED=0 golang:1.26.10 go build -trimpath -o /out/llvmcloud ./tools/llvmcloud
+          docker buildx build --builder default --load -f tests/experiments/Dockerfile \
+            --build-context "candidate-binary=$RUNNER_TEMP/llvm-bundle" \
+            --build-context measurement-source=./tools \
+            --build-arg DISPAT_BINARY_SOURCE=candidate-binary \
+            --build-arg "DISPAT_BINARY_ID=1.11.0-rc.13-candidate.$SOURCE_SHA" \
+            -t dispat-experiments:llvm-gce tests/experiments
+          docker buildx build --builder default --load -f tests/experiments/Dockerfile.llvm \
+            --build-arg GO_VERSION=1.26.10 --build-arg EXPERIMENTS_IMAGE=dispat-experiments:llvm-gce \
+            -t dispat-llvm:gce .
+          docker image inspect dispat-llvm:gce > "$RUNNER_TEMP/llvm-bundle/image.json"
+          docker save dispat-llvm:gce | gzip -1 > "$RUNNER_TEMP/llvm-bundle/image.tar.gz"
+          sha256sum "$RUNNER_TEMP/llvm-bundle/"{dispat,llvmcloud,image.tar.gz} > "$RUNNER_TEMP/llvm-bundle/checksums.txt"
+          jq -n --arg source "$SOURCE_SHA" --arg image "$(docker image inspect --format '{{.Id}}' dispat-llvm:gce)" \
+            --arg binary "$(sha256sum "$RUNNER_TEMP/llvm-bundle/dispat" | cut -d ' ' -f1)" \
+            '{source:$source,image:$image,binarySha256:$binary,goVersion:"1.26.10",platform:"linux/amd64"}' \
+            > "$RUNNER_TEMP/llvm-bundle/provenance.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: llvm-gce-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/llvm-bundle
+          retention-days: 7
+          compression-level: 0
+
+  llvm-gce:
+    name: LLVM GCE · ${{ matrix.tool }} ${{ matrix.mode }}
+    if: inputs.purpose == 'llvm-gce'
+    needs: llvm-prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - {tool: dispat, mode: compilation}
+          - {tool: dispat, mode: interpretation}
+          - {tool: dispat, mode: hybrid}
+          - {tool: nx, mode: manual-gcp-split}
+          - {tool: lerna, mode: manual-gcp-split}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: llvm-gce-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/llvm-bundle
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_RELEASER_SA }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+        with:
+          version: 582.0.0
+      - name: Run one cold cell on two matching GCE workers
+        env:
+          GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          LLVM_MODE: ${{ matrix.mode }}
+          LLVM_TOOL: ${{ matrix.tool }}
+          LLVM_PROFILE: ${{ inputs.llvm-profile }}
+          TRIAL_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.tool }}-${{ matrix.mode }}
+        run: |
+          chmod +x "$RUNNER_TEMP/llvm-bundle/llvmcloud"
+          test "$(jq -r .source "$RUNNER_TEMP/llvm-bundle/provenance.json")" = "$GITHUB_SHA"
+          docker load -i "$RUNNER_TEMP/llvm-bundle/image.tar.gz"
+          sudo install -m 0755 "$RUNNER_TEMP/llvm-bundle/llvmcloud" /usr/local/bin/llvmcloud
+          sudo install -d -m 0700 -o "$(id -u)" -g "$(id -g)" /cloud
+          /usr/local/bin/llvmcloud run \
+            --project "$GCP_PROJECT" --id "$TRIAL_ID" --tool "$LLVM_TOOL" --mode "$LLVM_MODE" --profile "$LLVM_PROFILE" \
+            --archive "$RUNNER_TEMP/llvm-bundle/image.tar.gz" \
+            --image "$(jq -r .image "$RUNNER_TEMP/llvm-bundle/provenance.json")" \
+            --source "$(jq -r .source "$RUNNER_TEMP/llvm-bundle/provenance.json")" \
+            --binary-sha256 "$(jq -r .binarySha256 "$RUNNER_TEMP/llvm-bundle/provenance.json")"
+      - name: Verify cleanup of exactly this cell's instances
+        if: always()
+        run: |
+          if sudo test -f /cloud/state.json; then
+            /usr/local/bin/llvmcloud cleanup /cloud
+          fi
+      - name: Make nonsecret evidence readable
+        if: always()
+        run: |
+          if sudo test -d /cloud/results; then
+            sudo cp -a /cloud/results "$RUNNER_TEMP/llvm-results"
+            sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/llvm-results"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: llvm-gce-${{ matrix.tool }}-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/llvm-results
+          retention-days: 30
+          if-no-files-found: error
