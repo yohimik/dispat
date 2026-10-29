@@ -1,4 +1,4 @@
-// llvmcloud runs one isolated, two-VM LLVM experiment. Cloud credentials never
+// llvmcloud runs one isolated, two-VM build experiment. Cloud credentials never
 // enter the coordinator container or either executor.
 package main
 
@@ -60,6 +60,15 @@ const (
 	iceLakePlatformName      = "Intel Ice Lake"
 )
 
+const (
+	defaultWorkloadName    = "llvm"
+	kernelWorkloadName     = "linux-kernel"
+	workloadFlagName       = "workload"
+	workloadFlagArgument   = "--workload"
+	workloadFlagHelp       = "build workload: llvm or linux-kernel"
+	workloadSelectionError = "cloud workload must be llvm or linux-kernel"
+)
+
 var safeName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
 var bootImageIdentity = regexp.MustCompile(bootImageIdentityPattern)
 
@@ -70,6 +79,7 @@ type options struct {
 	CPUPlatform  string `json:"cpuPlatform,omitempty"`
 	ID           string `json:"id"`
 	Tool         string `json:"tool"`
+	Workload     string `json:"workload"`
 	Mode         string `json:"mode"`
 	Profile      string `json:"profile"`
 	Image        string `json:"image"`
@@ -199,6 +209,7 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&value.CPUPlatform, cpuPlatformFlagName, "", cpuPlatformFlagHelp)
 	flags.StringVar(&value.ID, "id", "", "unique run/attempt/cell identifier")
 	flags.StringVar(&value.Tool, "tool", "dispat", "executor tool")
+	flags.StringVar(&value.Workload, workloadFlagName, defaultWorkloadName, workloadFlagHelp)
 	flags.StringVar(&value.Mode, "mode", "compilation", "distribution mode")
 	flags.StringVar(&value.Profile, "profile", "full", "full or smoke")
 	flags.StringVar(&value.Image, "image", "", "exact loaded OCI image ID")
@@ -242,6 +253,9 @@ func parseOptions(args []string) (options, error) {
 	}
 	if value.Profile != "full" && value.Profile != "smoke" {
 		return value, errors.New("cloud profile must be full or smoke")
+	}
+	if value.Workload != defaultWorkloadName && value.Workload != kernelWorkloadName {
+		return value, errors.New(workloadSelectionError)
 	}
 	return value, nil
 }
@@ -361,7 +375,8 @@ func (d *driver) run(ctx context.Context) (result error) {
 	if err != nil {
 		return err
 	}
-	args := []string{"create", "--name", "llvm-coordinator-" + d.settings.ID, "--label", "dispat-trial=" + d.settings.ID, "--network", "host", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--env", "HOME=/cloud/work/home", "--mount", "type=bind,src=" + self + ",dst=/usr/local/bin/llvmcloud,readonly", "--env", "GIT_CONFIG_GLOBAL=" + d.plan.CoordinatorGitConfig, "--env", "GIT_CONFIG_NOSYSTEM=1", "--env", "EXPERIMENTS_DISPAT_SOURCE_REVISION=" + d.settings.Source, "--entrypoint", "llvmexperiment", d.settings.Image, "run", "--tool", d.settings.Tool, "--mode", d.settings.Mode, "--profile", d.settings.Profile, "--trial-id", d.settings.ID, "--repetition", "1", "--timeout", "4h", "--jobs", "2", "--results", "/cloud/results", "--work", "/cloud/work", "--remote-plan", "/cloud/plan.json"}
+	args := []string{"create", "--name", "llvm-coordinator-" + d.settings.ID, "--label", "dispat-trial=" + d.settings.ID, "--network", "host", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--env", "HOME=/cloud/work/home", "--mount", "type=bind,src=" + self + ",dst=/usr/local/bin/llvmcloud,readonly", "--env", "GIT_CONFIG_GLOBAL=" + d.plan.CoordinatorGitConfig, "--env", "GIT_CONFIG_NOSYSTEM=1", "--env", "EXPERIMENTS_DISPAT_SOURCE_REVISION=" + d.settings.Source, "--entrypoint", "llvmexperiment", d.settings.Image}
+	args = append(args, d.formatCoordinatorRunArgs()...)
 	mounts := []string{}
 	for _, entry := range []struct {
 		path     string
@@ -380,4 +395,8 @@ func (d *driver) run(ctx context.Context) (result error) {
 	}
 	_, err = d.runCommand(cellCtx, invocation{Name: "docker", Args: []string{"start", "--attach", d.state.Coordinator}, Output: os.Stdout})
 	return err
+}
+
+func (d *driver) formatCoordinatorRunArgs() []string {
+	return []string{"run", workloadFlagArgument, d.settings.Workload, "--tool", d.settings.Tool, "--mode", d.settings.Mode, "--profile", d.settings.Profile, "--trial-id", d.settings.ID, "--repetition", "1", "--timeout", "4h", "--jobs", "2", "--results", "/cloud/results", "--work", "/cloud/work", "--remote-plan", "/cloud/plan.json"}
 }

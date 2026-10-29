@@ -8,6 +8,13 @@ loads the same image bytes. Workers have no service account or cloud scopes.
 The coordinator runs on the GitHub runner. Each worker container has four CPUs,
 14 GiB memory, one outer task slot and two inner Ninja jobs.
 
+The driver defaults to `--workload llvm`. Use `--workload linux-kernel` to select
+the runner's separate Linux-kernel build profile with the same VM, container,
+task-slot, inner-job and timeout limits. The selector is passed explicitly to
+the coordinator and retained with the requested trial options; it does not
+replace or relabel LLVM results. Both workloads use the same exact OCI archive
+and image-identity contract.
+
 Pass the same `--boot-image` and `--cpu-platform` to every `llvmcloud run` in a
 campaign. The boot-image pin must be the full
 `https://www.googleapis.com/compute/v1/projects/ubuntu-os-cloud/global/images/<image-name>`
