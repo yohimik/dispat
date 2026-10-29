@@ -52,6 +52,7 @@ type verdict struct {
 	Recovery   *Recovery    `json:"recovery"`
 	Timing     *Timing      `json:"timing"`
 	Plan       *verdictPlan `json:"plan"`
+	LLVM       *LLVMBuild   `json:"llvm"`
 }
 
 // observation is one line of observations.jsonl, reduced to the part a report
@@ -141,12 +142,18 @@ func readCell(dir, id string) (*Cell, error) {
 	if err := validateTiming(v.Timing); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := validateLLVM(v.LLVM); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if v.LLVM != nil && v.Passed != (v.LLVM.Status == llvmCompletedStatus) {
+		return nil, fmt.Errorf("%s: LLVM completion status contradicts its verdict", path)
+	}
 	version, platform := parseDispatVersion(v.Dispat)
 	cell := &Cell{
 		ID: id, Experiment: v.Experiment, Scenario: v.Scenario, Tool: v.Tool,
 		Dispat: version, Platform: platform,
 		Steps: v.Steps, Checks: v.Checks, Passed: v.Passed, Recovery: v.Recovery,
-		Timing: v.Timing, Plan: newPlan(v.Plan),
+		Timing: v.Timing, Plan: newPlan(v.Plan), LLVM: v.LLVM,
 	}
 	last, err := readLastObservation(filepath.Join(dir, id, "observations.jsonl"))
 	if err != nil {
@@ -293,7 +300,7 @@ func held(checks []Check) int {
 func holding(cells []Cell) int {
 	n := 0
 	for _, cell := range cells {
-		if cell.Passed {
+		if cell.LLVM == nil && cell.Passed {
 			n++
 		}
 	}
@@ -362,6 +369,9 @@ func counted(n int, noun string) string {
 
 // outcomeOf is the cell's verdict as a phrase: what held, or what did not.
 func outcomeOf(cell Cell) string {
+	if cell.LLVM != nil {
+		return llvmOutcome(cell.LLVM)
+	}
 	if cell.Passed {
 		return "holds"
 	}
@@ -410,12 +420,16 @@ func writeExperimentsMarkdown(w io.Writer, e Experiments) error {
 	fmt.Fprintln(out, "| cell | tool | dispat | steps | checks | catch-up | outcome | final state |")
 	fmt.Fprintln(out, "|---|---|---|---|---|---|---|---|")
 	for _, cell := range e.Cells {
+		if cell.LLVM != nil {
+			continue
+		}
 		fmt.Fprintf(out, "| %s | %s | %s | `%s` | %d/%d | %s | %s | `%s` |\n",
 			escapePipes(cell.ID), escapePipes(cell.Tool), escapePipes(cell.Dispat),
 			escapePipes(stepsOf(cell)), held(cell.Checks), len(cell.Checks),
 			catchUpOf(cell), escapePipes(outcomeOf(cell)), escapePipes(stateOf(cell)))
 	}
 	writeTimingMarkdown(out, e)
+	writeLLVMMarkdown(out, e)
 	return out.Flush()
 }
 
@@ -463,6 +477,10 @@ func writeExperimentsPlain(w io.Writer, e Experiments) error {
 	for _, cell := range e.Cells {
 		fmt.Fprintf(out, "\n%s\n", cell.ID)
 		fmt.Fprintf(out, "  %s  %s\n", cell.Tool, strings.TrimSpace(cell.Dispat+" "+cell.Platform))
+		if cell.LLVM != nil {
+			fmt.Fprintf(out, "  LLVM: %s, %s, %s, %s\n", cell.LLVM.Profile, cell.LLVM.Mode, llvmSeconds(cell.LLVM), llvmOutcome(cell.LLVM))
+			continue
+		}
 		fmt.Fprintf(out, "  steps: %s\n", stepsOf(cell))
 		fmt.Fprintf(out, "  checks: %d/%d  %s\n", held(cell.Checks), len(cell.Checks), outcomeOf(cell))
 		fmt.Fprintf(out, "  catch-up: %s\n", catchUpOf(cell))

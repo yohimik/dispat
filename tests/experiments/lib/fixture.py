@@ -210,21 +210,21 @@ def dispat_packages():
 
 def dispat_execution():
     """The root keys a distributed release adds: the name of the variable the
-    signing secret is read from, never the secret itself, a worker identity
-    pinned to the fixture's exact origin, a preflight wait sized for a worker
-    started beside the run, and every build placed on that worker while every
+    signing secret is read from, never the secret itself, a choreographer identity
+    pinned to the fixture's exact origin, a preflight wait sized for a choreographer
+    started beside the run, and every build placed on that choreographer while every
     publication stays here."""
     if experiment() != "propagation" or scenario() != "build-distributed":
         return ""
     return """\
 execution:
   secretEnv: EXPERIMENT_EXECUTION_SECRET
-  workers:
+  choreographers:
     - name: build-a
       endpoint: file:///work/dispat-origin.git
   timeouts:
     preflight: 60
-runOnly: [worker, orchestrator]
+runOnly: [choreographer, orchestrator]
 """
 
 

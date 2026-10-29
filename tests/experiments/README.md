@@ -94,8 +94,8 @@ tool runs each of them. dispat's protocol is described first; the other tools fo
 through its own nearest mechanism:
 
 - `build-distributed` is the `build` fault with every build on a worker node, `build-a`, started in the container.
-  The fixture sets `runOnly: [worker, orchestrator]`, names the signing secret's variable, and preauthorizes `build-a`
-  in `execution.workers`. The worker reads the fixture's origin as its mailbox, while the first node serves an HTTPS
+  The fixture sets `runOnly: [choreographer, orchestrator]`, names the signing secret's variable, and preauthorizes `build-a`
+  in `execution.choreographers`. The choreographer reads the fixture's origin as its mailbox, while the first node serves an HTTPS
   return endpoint inside the isolated container. The log names `build-a` in the task outcome of `cli`'s build.
 - `deselected` has no fault: the first run is `dispat release --package core,ui,api`, so `cli` sits the provider's
   release out, and the next full run must find what it is owed from the provider's release alone.
@@ -207,6 +207,53 @@ outside the graph or straddle the release's span is not a record and fails. The 
 the dispat cell's plan of the same scenario and records agreement or the differences.
 
 The campaign runs the timing cells after every other cell, one at a time, so no other cell shares the host with one.
+
+### The LLVM distributed build
+
+`dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments` adds six cells to the normal results
+folder: three Dispat modes (`compilation`, `interpretation`, `hybrid`), Nx distribution, Lerna distribution, and
+Changesets' explicit `unsupported` entry. The docs release hook runs it automatically after the release campaign
+and before `summary`; both campaigns are included by the ordinary `testreport experiments` and documentation
+report readers. For standalone use, run those same commands in that order. The commands remain separate because
+a real LLVM build takes substantially longer than the release fixtures.
+
+The default `full` workload configures and builds LLVM core twice, once with X86 and once with AArch64. Each
+configuration builds the default `all` target, including its tools and libraries. Clang and other subprojects,
+runtimes, tests, examples, benchmarks, and documentation are disabled equally. The source is
+[LLVM 20.1.8](https://github.com/llvm/llvm-project/commit/87f0227cb60147a26a1eeb4fb06e3b505e9c7261), pinned by full
+commit and checked again before each task. Both configurations begin with a new build directory. This measures
+two independent complete backend builds, not the subdivision of one Ninja graph into remote compiler invocations.
+
+Two executor processes use independent checkouts on the same host. Each can run one task with two Ninja jobs by
+default. The container's default CPU quota is four; `EXPERIMENTS_LLVM_CPUS` and `EXPERIMENTS_LLVM_JOBS` set those
+budgets for every cell. `EXPERIMENTS_LLVM_TIMEOUT` defaults to four hours per cell. Source checkout and toolchain
+installation happen outside the measurement. The image contains the compiler tools and source; Nx's Cloud client
+is acquired and fingerprinted in all three workspaces before timing. Client versions and SHA-256 fingerprints
+must match, and the verdict records both. Timing includes node startup, registration,
+scheduling, CMake configuration, compilation, output transport, and coordinator verification. Returned manifests
+must identify this run and two distinct executors, and the coordinator checks executable digests, LLVM versions,
+and a demangling result. Full builds return five representative binaries from each configuration rather than
+transferring every library; the work still builds the complete configured target.
+The release workflow caps every cell at 45 minutes, so five runnable entries use at most 225 minutes of its
+six-hour job budget, plus image preparation and the other release stages. Full campaigns can take hours.
+Each verdict records its timeout. A configured executor that fails or exceeds its budget records a failure and
+fails the docs release; blocked and unsupported entries have no duration and do not fail it.
+
+Nx and Lerna use their documented Nx Cloud distribution with two manually started agents. They require
+`NX_CLOUD_ACCESS_TOKEN` and `EXPERIMENTS_NX_CLOUD_ID` in the caller's environment. Without them, the result is
+`blocked`, with no duration and no local substitute. Changesets has no distributed build runner, so it receives
+`unsupported`, also without a duration. Every task's committed input contains a fresh run identity, preventing
+remote-cache reuse between cells while retaining the cache transport Nx Cloud requires for distribution.
+The token is passed through the environment and is not saved in a fixture or result.
+The release workflow reads the optional repository variable `EXPERIMENTS_NX_CLOUD_ID` and secret
+`NX_CLOUD_ACCESS_TOKEN`; leaving them unset retains the blocked entries. Custom Cloud endpoints and encryption
+use the optional `NX_CLOUD_API` variable and `NX_CLOUD_ENCRYPTION_KEY` secret.
+
+`EXPERIMENTS_LLVM_PROFILE=smoke` selects only `llvm-cxxfilt` and `llvm-size` in both configurations. This validates
+the harness with real LLVM compilation but is explicitly labeled a subset in its result and never reported as a
+full build. `tools/llvmexperiment` implements the protocol, and `Dockerfile.llvm` prepares its shared environment.
+Each cell writes `verdict.json`, `observations.jsonl`, and `transcript.txt`; the verdict's `llvm` object records
+availability, workload, source revision, resource budget, executor names, durations, and artifact digests.
 
 ### The catch-up
 

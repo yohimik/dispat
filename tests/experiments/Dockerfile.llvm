@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1
+ARG GO_VERSION=1.26
+ARG EXPERIMENTS_IMAGE=dispat-experiments
+
+FROM golang:${GO_VERSION} AS harness
+WORKDIR /src
+COPY tools/go.mod tools/go.sum ./
+RUN GOWORK=off go mod download gopkg.in/yaml.v3
+COPY tools/llvmexperiment ./llvmexperiment
+RUN CGO_ENABLED=0 GOWORK=off go build -trimpath -o /llvmexperiment ./llvmexperiment
+
+FROM ${EXPERIMENTS_IMAGE} AS runtime
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends cmake ninja-build g++ \
+ && rm -rf /var/lib/apt/lists/*
+
+# Peel llvmorg-20.1.8 once and pin its commit; source acquisition is outside every measured build.
+RUN git init -q /opt/llvm-project \
+ && git -C /opt/llvm-project remote add origin https://github.com/llvm/llvm-project.git \
+ && git -C /opt/llvm-project sparse-checkout init --cone \
+ && git -C /opt/llvm-project sparse-checkout set llvm cmake third-party \
+ && git -C /opt/llvm-project fetch --depth=1 --filter=blob:none origin 87f0227cb60147a26a1eeb4fb06e3b505e9c7261 \
+ && git -C /opt/llvm-project checkout -q --detach FETCH_HEAD \
+ && test "$(git -C /opt/llvm-project rev-parse HEAD)" = 87f0227cb60147a26a1eeb4fb06e3b505e9c7261
+
+COPY --from=harness /llvmexperiment /usr/local/bin/llvmexperiment
+ENTRYPOINT ["llvmexperiment", "run"]

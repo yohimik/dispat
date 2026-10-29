@@ -152,3 +152,44 @@ scripts:
       echo
       cat "$ROOT/coverage/experiments.md"
     } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  llvm-build: |
+    set -eu
+    ROOT=$(git rev-parse --show-toplevel)
+    dispat exec build --for pkg:experiments --in pkg:experiments
+    docker buildx build --file "$ROOT/tests/experiments/Dockerfile.llvm" \
+      --load --tag dispat-experiments-llvm "$ROOT"
+  llvm-cells: |
+    for tool in nx lerna changesets; do
+      echo "$tool distributed"
+    done
+    for mode in compilation interpretation hybrid; do
+      echo "dispat $mode"
+    done
+  llvm-cell: |
+    set -eu
+    : "${TOOL:?TOOL is required}"
+    : "${DISTRIBUTION_MODE:?DISTRIBUTION_MODE is required}"
+    case "$TOOL" in dispat|nx|lerna|changesets) ;; *) exit 2 ;; esac
+    case "$DISTRIBUTION_MODE" in compilation|interpretation|hybrid|distributed) ;; *) exit 2 ;; esac
+    profile=${EXPERIMENTS_LLVM_PROFILE:-full}
+    case "$profile" in full|smoke) ;; *) exit 2 ;; esac
+    ROOT=$(git rev-parse --show-toplevel)
+    RESULTS=${EXPERIMENTS_RESULTS:-$ROOT/coverage/experiments}
+    mkdir -p "$RESULTS"
+    cell=llvm-$profile-$DISTRIBUTION_MODE-$TOOL
+    rm -f "$RESULTS/$cell/verdict.json"
+    rc=0
+    docker run --rm --cpus "${EXPERIMENTS_LLVM_CPUS:-4}" -v "$RESULTS:/results" \
+      -e NX_CLOUD_ACCESS_TOKEN -e EXPERIMENTS_NX_CLOUD_ID -e NX_CLOUD_API -e NX_CLOUD_ENCRYPTION_KEY \
+      dispat-experiments-llvm --tool "$TOOL" --mode "$DISTRIBUTION_MODE" --profile "$profile" \
+      --jobs "${EXPERIMENTS_LLVM_JOBS:-2}" --timeout "${EXPERIMENTS_LLVM_TIMEOUT:-4h}" \
+      > "$RESULTS/$cell.log" 2>&1 || rc=$?
+    cat "$RESULTS/$cell.log"
+    exit "$rc"
+  # Run after the release campaign: its summary reads these six cells from the same results folder.
+  llvm-experiments: |
+    set -eu
+    dispat exec llvm-build --for pkg:experiments --in pkg:experiments
+    dispat exec llvm-cells --for pkg:experiments --in pkg:experiments \
+      | xargs -P 1 -L 1 sh -c \
+        'TOOL=$0 DISTRIBUTION_MODE=$1 dispat exec llvm-cell --for pkg:experiments --in pkg:experiments'

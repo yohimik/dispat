@@ -197,8 +197,9 @@ type Cell struct {
 	Recovery *Recovery `json:"recovery,omitempty"`
 	// Timing and Plan are a timing cell's figures and the plan its tool's own
 	// plan command printed. Nil in every other cell.
-	Timing *Timing `json:"timing,omitempty"`
-	Plan   *Plan   `json:"plan,omitempty"`
+	Timing *Timing    `json:"timing,omitempty"`
+	Plan   *Plan      `json:"plan,omitempty"`
+	LLVM   *LLVMBuild `json:"llvm,omitempty"`
 }
 
 // Timing is one release's figures in the vocabulary of the dispat theorem

@@ -601,6 +601,14 @@ jobs:
       # the plan releases a measured Go module on the stable channel, and none
       # (0) for a prerelease, which publishes its figures without the bar.
       DISPAT_COVERAGE_MINIMUM: ${{ needs.plan.outputs.stable == 'true' && '95' || '0' }}
+      # Optional Nx Cloud connection for the distributed LLVM comparison.
+      # Missing credentials produce explicit blocked rows in the release report.
+      EXPERIMENTS_NX_CLOUD_ID: ${{ vars.EXPERIMENTS_NX_CLOUD_ID }}
+      NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
+      NX_CLOUD_API: ${{ vars.NX_CLOUD_API }}
+      NX_CLOUD_ENCRYPTION_KEY: ${{ secrets.NX_CLOUD_ENCRYPTION_KEY }}
+      # Five executable cells fit a bounded part of the six-hour release job.
+      EXPERIMENTS_LLVM_TIMEOUT: 45m
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
