@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-func verifyKernelELF(path, backend string, isModule bool) error {
+func verifyKernelELF(path, backend string, wantType elf.Type) error {
 	file, err := elf.Open(path)
 	if err != nil {
 		return fmt.Errorf(kernelELFReadError, path, err)
@@ -20,14 +20,23 @@ func verifyKernelELF(path, backend string, isModule bool) error {
 	if backend == "arm64" {
 		machine = elf.EM_AARCH64
 	}
-	wantType := elf.ET_EXEC
-	if isModule {
-		wantType = elf.ET_REL
-	}
 	if file.Class != elf.ELFCLASS64 || file.Machine != machine || file.Type != wantType {
 		return fmt.Errorf(kernelELFIdentityError, path, file.Class, file.Machine, file.Type, machine, wantType)
 	}
 	return nil
+}
+
+func verifyConfiguredKernelELF(path, backend, configurationPath string) error {
+	configuration, err := os.ReadFile(configurationPath)
+	if err != nil {
+		return err
+	}
+	wantType := elf.ET_EXEC
+	if backend == "arm64" && strings.Contains("\n"+string(configuration), "\nCONFIG_RELOCATABLE=y\n") {
+		// Pinned arch/arm64/Makefile links relocatable kernels with -shared.
+		wantType = elf.ET_DYN
+	}
+	return verifyKernelELF(path, backend, wantType)
 }
 
 func verifyKernelBootImage(path, backend string) error {
@@ -60,7 +69,7 @@ func verifyKernelArtifacts(root string, item task, verification *kernelVerificat
 	if verification == nil || !regexp.MustCompile(`^6\.18\.59(?:[-+].*)?$`).MatchString(verification.KernelRelease) {
 		return fmt.Errorf(kernelReleaseError)
 	}
-	if err := verifyKernelELF(filepath.Join(root, "vmlinux.stripped"), item.Backend, false); err != nil {
+	if err := verifyConfiguredKernelELF(filepath.Join(root, "vmlinux.stripped"), item.Backend, filepath.Join(root, ".config")); err != nil {
 		return err
 	}
 	if err := verifyKernelBootImage(filepath.Join(root, "boot-image"), item.Backend); err != nil {
@@ -93,7 +102,7 @@ func verifyKernelArtifacts(root string, item task, verification *kernelVerificat
 	if !verification.AreModulesBuilt || verification.ModuleCount < 1 {
 		return fmt.Errorf(kernelFullModulesError)
 	}
-	if err := verifyKernelELF(filepath.Join(root, "sample-module.ko.stripped"), item.Backend, true); err != nil {
+	if err := verifyKernelELF(filepath.Join(root, "sample-module.ko.stripped"), item.Backend, elf.ET_REL); err != nil {
 		return err
 	}
 	if _, err := describeKernelArtifact(filepath.Join(root, "Module.symvers")); err != nil {

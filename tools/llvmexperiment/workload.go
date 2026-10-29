@@ -67,7 +67,9 @@ func kernelConfiguration(profile string) string {
 
 func kernelOmissions(profile string) []string {
 	values := []string{"Boot/runtime tests, selftests, documentation, userspace tools and device-tree blobs are outside this workload.",
-		"The GCC-only toolchain has no Rust compiler; the retained resolved .config defines enabled features."}
+		"The GCC-only toolchain has no Rust compiler; the retained resolved .config defines enabled features.",
+		"GCC plugin development headers are not installed, so Kconfig disables GCC plugins.",
+		"No 32-bit ARM compatibility compiler is configured, so Kconfig disables the arm64 compatibility vDSO."}
 	if profile == smokeProfile {
 		return append(values, "Smoke uses defconfig and builds no modules; it is not the full allmodconfig workload.", "Returned vmlinux is stripped of debug sections after the build.")
 	}

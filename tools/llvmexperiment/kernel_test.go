@@ -130,6 +130,44 @@ func TestKernelArtifactsVerifyArchitectureAndCompleteModuleInventory(t *testing.
 	}
 }
 
+func TestKernelRelocatableELFMatchesArchitectureAndResolvedConfiguration(t *testing.T) {
+	for _, backend := range []string{"x86_64", "arm64"} {
+		for _, relocatable := range []bool{false, true} {
+			root := t.TempDir()
+			path := filepath.Join(root, "vmlinux")
+			configuration := "# CONFIG_RELOCATABLE is not set\n"
+			if relocatable {
+				configuration = "CONFIG_RELOCATABLE=y\n"
+			}
+			configPath := filepath.Join(root, ".config")
+			if err := os.WriteFile(configPath, []byte(configuration), fileMode); err != nil {
+				t.Fatal(err)
+			}
+			for _, kind := range []elf.Type{elf.ET_EXEC, elf.ET_DYN, elf.ET_REL} {
+				writeFixtureELF(t, path, backend, false)
+				header, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				binary.LittleEndian.PutUint16(header[16:], uint16(kind))
+				if err := os.WriteFile(path, header, fileMode); err != nil {
+					t.Fatal(err)
+				}
+				expected := elf.ET_EXEC
+				if backend == "arm64" && relocatable {
+					expected = elf.ET_DYN
+				}
+				if err := verifyConfiguredKernelELF(path, backend, configPath); (err == nil) != (kind == expected) {
+					t.Fatalf("%s relocatable=%t type=%s expected=%s: %v", backend, relocatable, kind, expected, err)
+				}
+				if kind == elf.ET_DYN && verifyKernelELF(path, backend, elf.ET_REL) == nil {
+					t.Fatal("shared object passed as kernel module")
+				}
+			}
+		}
+	}
+}
+
 func kernelArtifactFixture(t *testing.T, item task) (string, *kernelVerification) {
 	t.Helper()
 	root := t.TempDir()

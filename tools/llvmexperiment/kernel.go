@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"debug/elf"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -183,7 +184,7 @@ func kernelBootPath(item task) string {
 func stageKernelArtifacts(ctx context.Context, request kernelBuild, out string) error {
 	item, root, recording := request.Task, request.Root, request.Recording
 	build := filepath.Join(root, buildDirectory)
-	if err := verifyKernelELF(filepath.Join(build, "vmlinux"), item.Backend, false); err != nil {
+	if err := verifyConfiguredKernelELF(filepath.Join(build, "vmlinux"), item.Backend, filepath.Join(build, ".config")); err != nil {
 		return err
 	}
 	if err := stripKernelDebug(ctx, item, filepath.Join(build, "vmlinux"), filepath.Join(out, "vmlinux.stripped")); err != nil {
@@ -262,7 +263,7 @@ func readKernelModules(root string, item task) ([]artifact, error) {
 	modules := []artifact{}
 	for _, path := range paths {
 		full := filepath.Join(root, path)
-		if err := verifyKernelELF(full, item.Backend, true); err != nil {
+		if err := verifyKernelELF(full, item.Backend, elf.ET_REL); err != nil {
 			return nil, err
 		}
 		entry, err := describeKernelArtifact(full)
