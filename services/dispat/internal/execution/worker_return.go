@@ -749,6 +749,7 @@ type workerFinalityWaitRequest struct {
 
 func (w *Worker) awaitNodeSlotDecisionUntil(ctx context.Context, request workerFinalityWaitRequest) error {
 	task, channel, receipt := request.Task, request.Channel, request.Receipt
+	finalityWake := task.finalityNotifications()
 	cursor := receipt.Cursor
 	var retained *RetainedChoreographyFeed
 	for {
@@ -850,6 +851,7 @@ func (w *Worker) awaitNodeSlotDecisionUntil(ctx context.Context, request workerF
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf(workerReturnCapacityUnsettledErrorFormat, ctx.Err())
+		case <-finalityWake:
 		case <-time.After(minimumPollInterval):
 		}
 	}

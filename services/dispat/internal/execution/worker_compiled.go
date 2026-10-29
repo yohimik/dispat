@@ -509,6 +509,7 @@ func (w *Worker) applyCompiledEventPage(run *workerCompiledRun, page Choreograph
 	if err := run.frontier.ApplyEventPage(page); err != nil {
 		return compiledNoSelectionProgress, err
 	}
+	w.notifyClaimedFinality(run.binding, page.Events)
 	return len(page.Events) != compiledNoSignedEvents, nil
 }
 

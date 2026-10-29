@@ -43,9 +43,11 @@ type claimedTask struct {
 	assignment Assignment
 	// slotLease survives a lost return reply. Only a verified first-node
 	// Result or Ack receipt releases the shared physical-node capacity.
-	slotLease   NodeSlotLease
-	slotMu      sync.Mutex
-	slotSettled bool
+	slotLease        NodeSlotLease
+	slotMu           sync.Mutex
+	slotSettled      bool
+	finalityWakeOnce sync.Once
+	finalityWake     chan struct{}
 	// tip is the assignment's own commit, which every reply of the attempt
 	// names, and claimed is the commit this node wrote to take the work.
 	tip     ChainTip
