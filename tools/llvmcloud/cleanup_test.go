@@ -163,10 +163,12 @@ func TestCleanupSeparatesResourceReleaseFromCollectionFailure(t *testing.T) {
 		name            string
 		collectionError error
 		deleteError     error
+		isAbsent        bool
 	}{
 		{name: "complete"},
 		{name: "collection failed after interrupted setup", collectionError: errors.New("evidence directory is absent")},
 		{name: "deletion failed", deleteError: errors.New("delete permission denied")},
+		{name: "collection failed but deletion reconciled absent", collectionError: errors.New("evidence directory is absent"), deleteError: errors.New("delete outcome is unknown"), isAbsent: true},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			d := cleanupDriver(t)
@@ -175,7 +177,7 @@ func TestCleanupSeparatesResourceReleaseFromCollectionFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			d.state.Instances = []instance{worker}
-			deleted, verifiedAbsent := false, false
+			deleted, reconciledDeletion := false, false
 			d.runCommand = func(_ context.Context, request invocation) ([]byte, error) {
 				if request.Name == "ssh" {
 					return nil, scenario.collectionError
@@ -186,7 +188,10 @@ func TestCleanupSeparatesResourceReleaseFromCollectionFailure(t *testing.T) {
 					return nil, scenario.deleteError
 				}
 				if strings.Contains(command, "id=123") {
-					verifiedAbsent = true
+					reconciledDeletion = true
+					if scenario.deleteError != nil && !scenario.isAbsent {
+						return json.Marshal([]instance{worker})
+					}
 					return []byte("[]"), nil
 				}
 				return json.Marshal([]instance{worker})
@@ -196,13 +201,141 @@ func TestCleanupSeparatesResourceReleaseFromCollectionFailure(t *testing.T) {
 			if readErr := readJSON(filepath.Join(d.settings.Root, "results/cloud/cleanup.json"), &record); readErr != nil {
 				t.Fatal(readErr)
 			}
-			wantComplete := scenario.collectionError == nil && scenario.deleteError == nil
-			wantReleased := scenario.deleteError == nil
-			if (err == nil) != wantComplete || record.Complete != wantComplete || record.ResourcesReleased != wantReleased || !deleted || verifiedAbsent != wantReleased {
-				t.Fatalf("cleanup err=%v record=%+v deleted=%v absence verified=%v", err, record, deleted, verifiedAbsent)
+			wantReleased := scenario.deleteError == nil || scenario.isAbsent
+			wantComplete := scenario.collectionError == nil && wantReleased
+			if (err == nil) != wantComplete || record.Complete != wantComplete || record.ResourcesReleased != wantReleased || !deleted || !reconciledDeletion {
+				t.Fatalf("cleanup err=%v record=%+v deleted=%v deletion reconciled=%v", err, record, deleted, reconciledDeletion)
 			}
 			if (record.CollectionError != "") != (scenario.collectionError != nil) {
 				t.Fatalf("collection failure was lost or invented: %+v", record)
+			}
+		})
+	}
+}
+
+func TestCleanupReconcilesFailedDeletionWithFreshExactAbsence(t *testing.T) {
+	deleteError := errors.New("delete outcome is unknown")
+	lookupError := errors.New("instance lookup is unavailable")
+	var worker instance
+	if err := json.Unmarshal([]byte(`{"name":"vm","id":"123","labels":{"trial":"trial"},"networkInterfaces":[{"accessConfigs":[{"natIP":"127.0.0.1"}]}]}`), &worker); err != nil {
+		t.Fatal(err)
+	}
+	for _, scenario := range []struct {
+		name          string
+		response      string
+		lookupErr     error
+		knownIdentity bool
+		blockEvidence bool
+		wantError     bool
+	}{
+		{name: "fresh exact absence", response: " \n[ ]\n"},
+		{name: "known instance disappears before delete", response: "[]", knownIdentity: true},
+		{name: "lookup unavailable", lookupErr: lookupError, wantError: true},
+		{name: "lookup cancelled", lookupErr: context.Canceled, wantError: true},
+		{name: "still present", response: `[{"name":"vm","id":"123","labels":{"trial":"trial"}}]`, wantError: true},
+		{name: "different identity", response: `[{"name":"vm","id":"456","labels":{"trial":"trial"}}]`, wantError: true},
+		{name: "malformed lookup", response: "invalid JSON", wantError: true},
+		{name: "null lookup is not absence", response: "null", wantError: true},
+		{name: "absence evidence cannot be retained", response: "[]", blockEvidence: true, wantError: true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			d := cleanupDriver(t)
+			d.state.Instances = []instance{{Name: worker.Name, Labels: worker.Labels}}
+			if scenario.knownIdentity {
+				d.state.Instances[0] = worker
+			}
+			if scenario.blockEvidence {
+				if err := os.Mkdir(filepath.Join(d.settings.Root, "results/cloud/vm-cleanup-absence.json"), privateDirectoryMode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			deletions, absenceLookups := 0, 0
+			d.runCommand = func(_ context.Context, request invocation) ([]byte, error) {
+				if request.Name == "ssh" {
+					return nil, nil
+				}
+				command := strings.Join(request.Args, " ")
+				switch command {
+				case "--quiet --project project compute instances list --filter name=vm AND zone:" + defaultZone + " --format=json":
+					if deletions != 0 {
+						t.Fatal("post-delete reconciliation used a mutable name lookup")
+					}
+					return json.Marshal([]instance{worker})
+				case "--quiet --project project compute instances delete vm --zone " + defaultZone:
+					var retained journal
+					if err := readJSON(filepath.Join(d.settings.Root, stateFile), &retained); err != nil {
+						t.Fatal(err)
+					}
+					if len(retained.Instances) != 1 || retained.Instances[0].ID != worker.ID {
+						t.Fatalf("deletion did not retain reconciled identity: %+v", retained)
+					}
+					deletions++
+					return nil, deleteError
+				case "--quiet --project project compute instances list --filter id=123 --format=json":
+					if deletions != 1 {
+						t.Fatal("absence lookup did not follow exactly one deletion attempt")
+					}
+					absenceLookups++
+					return []byte(scenario.response), scenario.lookupErr
+				default:
+					t.Fatalf("unexpected cleanup command %+v", request)
+					return nil, nil
+				}
+			}
+			err := d.cleanup(t.Context())
+			var record cleanupRecord
+			if readErr := readJSON(filepath.Join(d.settings.Root, "results/cloud/cleanup.json"), &record); readErr != nil {
+				t.Fatal(readErr)
+			}
+			if (err != nil) != scenario.wantError || record.Complete == scenario.wantError || record.ResourcesReleased == scenario.wantError || deletions != 1 || absenceLookups != 1 {
+				t.Fatalf("cleanup err=%v record=%+v deletions=%d absence lookups=%d", err, record, deletions, absenceLookups)
+			}
+			if scenario.wantError && !errors.Is(err, deleteError) || scenario.lookupErr != nil && !errors.Is(err, scenario.lookupErr) {
+				t.Fatalf("cleanup lost the unresolved deletion or lookup cause: %v", err)
+			}
+			var evidence cleanupAbsenceEvidence
+			evidenceError := readJSON(filepath.Join(d.settings.Root, "results/cloud/vm-cleanup-absence.json"), &evidence)
+			if scenario.blockEvidence {
+				if evidenceError == nil {
+					t.Fatalf("failed evidence write was accepted: %+v", evidence)
+				}
+				return
+			}
+			if scenario.wantError {
+				if !errors.Is(evidenceError, os.ErrNotExist) {
+					t.Fatalf("unproven absence was retained as evidence: %+v, %v", evidence, evidenceError)
+				}
+				return
+			}
+			if evidenceError != nil || evidence.InstanceName != worker.Name || evidence.InstanceID != worker.ID || evidence.LookupFilter != "id=123" || evidence.RawResponse != scenario.response || evidence.DeletionError != deleteError.Error() {
+				t.Fatalf("cleanup lost exact reconciliation evidence: %+v, %v", evidence, evidenceError)
+			}
+		})
+	}
+}
+
+func TestCleanupRequiresExplicitInitialAbsenceAndRetainsIt(t *testing.T) {
+	for _, response := range []string{"[]\n", "null"} {
+		t.Run(strings.TrimSpace(response), func(t *testing.T) {
+			d := cleanupDriver(t)
+			d.state.Instances = []instance{{Name: "vm", ID: "123", Labels: map[string]string{"trial": "trial"}}}
+			d.runCommand = func(_ context.Context, request invocation) ([]byte, error) {
+				if strings.Join(request.Args, " ") != "--quiet --project project compute instances list --filter name=vm AND zone:"+defaultZone+" --format=json" {
+					t.Fatalf("unexpected cleanup command %+v", request)
+				}
+				return []byte(response), nil
+			}
+			err := d.cleanup(t.Context())
+			var evidence cleanupAbsenceEvidence
+			evidenceError := readJSON(filepath.Join(d.settings.Root, "results/cloud/vm-cleanup-absence.json"), &evidence)
+			if response == "null" {
+				if err == nil || !errors.Is(evidenceError, os.ErrNotExist) {
+					t.Fatalf("null lookup treated as absence: %v, %+v, %v", err, evidence, evidenceError)
+				}
+				return
+			}
+			if err != nil || evidenceError != nil || evidence.InstanceName != "vm" || evidence.InstanceID != "123" || evidence.LookupFilter != "name=vm AND zone:"+defaultZone || evidence.RawResponse != response || evidence.DeletionError != "" {
+				t.Fatalf("initial absence evidence lost: %v, %+v, %v", err, evidence, evidenceError)
 			}
 		})
 	}

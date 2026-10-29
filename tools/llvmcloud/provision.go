@@ -39,6 +39,19 @@ const (
 	c3InterfaceMismatchError   = "instance %s must have one NVME boot disk and one GVNIC network interface"
 )
 
+const (
+	cleanupNullLookupErrorFormat = "cleanup absence lookup returned null for instance %s"
+	cleanupAbsenceFileSuffix     = "-cleanup-absence.json"
+)
+
+type cleanupAbsenceEvidence struct {
+	InstanceName  string `json:"instanceName"`
+	InstanceID    string `json:"instanceId,omitempty"`
+	LookupFilter  string `json:"lookupFilter"`
+	RawResponse   string `json:"rawResponse"`
+	DeletionError string `json:"deletionError,omitempty"`
+}
+
 func (d *driver) provision(ctx context.Context) error {
 	if err := validateMachineProfile(d.settings); err != nil {
 		return err
@@ -375,8 +388,8 @@ func (d *driver) cleanup(ctx context.Context) error {
 	// List is used to distinguish absence from permission/network failure. A
 	// failed describe is never silently treated as successful deletion.
 	for index, expected := range d.state.Instances {
-
-		raw, err := d.gcloud(ctx, "compute", "instances", "list", "--filter", "name="+expected.Name+" AND zone:"+d.settings.Zone, "--format=json")
+		nameFilter := "name=" + expected.Name + " AND zone:" + d.settings.Zone
+		raw, err := d.gcloud(ctx, "compute", "instances", "list", "--filter", nameFilter, "--format=json")
 		if err != nil {
 			failures = append(failures, err)
 			continue
@@ -386,7 +399,12 @@ func (d *driver) cleanup(ctx context.Context) error {
 			failures = append(failures, err)
 			continue
 		}
+		if found == nil {
+			failures = append(failures, fmt.Errorf(cleanupNullLookupErrorFormat, expected.Name))
+			continue
+		}
 		if len(found) == 0 {
+			failures = append(failures, d.recordCleanupAbsence(cleanupAbsenceEvidence{InstanceName: expected.Name, InstanceID: expected.ID, LookupFilter: nameFilter, RawResponse: string(raw)}, nil))
 			continue
 		}
 		if len(found) != 1 {
@@ -411,22 +429,31 @@ func (d *driver) cleanup(ctx context.Context) error {
 			failures = append(failures, err)
 			continue
 		}
-		if _, err := d.gcloud(ctx, "compute", "instances", "delete", expected.Name, "--zone", d.settings.Zone); err != nil {
-			failures = append(failures, err)
-			continue
-		}
+		_, deleteError := d.gcloud(ctx, "compute", "instances", "delete", expected.Name, "--zone", d.settings.Zone)
+		identityFilter := "id=" + found[0].ID
 		for {
-			remaining, err := d.gcloud(ctx, "compute", "instances", "list", "--filter", "id="+found[0].ID, "--format=json")
+			remaining, err := d.gcloud(ctx, "compute", "instances", "list", "--filter", identityFilter, "--format=json")
 			if err != nil {
-				failures = append(failures, err)
+				failures = append(failures, errors.Join(deleteError, err))
 				break
 			}
 			var entries []instance
 			if err := json.Unmarshal(remaining, &entries); err != nil {
-				failures = append(failures, err)
+				failures = append(failures, errors.Join(deleteError, err))
+				break
+			}
+			if entries == nil {
+				failures = append(failures, errors.Join(deleteError, fmt.Errorf(cleanupNullLookupErrorFormat, expected.Name)))
 				break
 			}
 			if len(entries) == 0 {
+				if err := d.recordCleanupAbsence(cleanupAbsenceEvidence{InstanceName: expected.Name, InstanceID: found[0].ID, LookupFilter: identityFilter, RawResponse: string(remaining)}, deleteError); err != nil {
+					failures = append(failures, errors.Join(deleteError, err))
+				}
+				break
+			}
+			if deleteError != nil {
+				failures = append(failures, deleteError)
 				break
 			}
 			if err := waitPoll(ctx); err != nil {
@@ -451,4 +478,11 @@ func (d *driver) cleanup(ctx context.Context) error {
 		record.CollectionError = collectionError.Error()
 	}
 	return errors.Join(err, writeJSON(filepath.Join(d.settings.Root, "results/cloud/cleanup.json"), record))
+}
+
+func (d *driver) recordCleanupAbsence(evidence cleanupAbsenceEvidence, deletionError error) error {
+	if deletionError != nil {
+		evidence.DeletionError = deletionError.Error()
+	}
+	return writeJSON(filepath.Join(d.settings.Root, "results/cloud", evidence.InstanceName+cleanupAbsenceFileSuffix), evidence)
 }

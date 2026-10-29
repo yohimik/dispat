@@ -168,6 +168,9 @@ func TestCleanupRequiresIdentityAndReportsDeleteFailures(t *testing.T) {
 					return nil, scenario.deleteErr
 				}
 				if strings.Contains(text, "id=123") {
+					if scenario.deleteErr != nil {
+						return json.Marshal([]instance{scenario.actual})
+					}
 					return []byte("[]"), nil
 				}
 				return json.Marshal([]instance{scenario.actual})
