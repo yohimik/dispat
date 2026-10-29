@@ -20,14 +20,16 @@ printf '%s\n' "$MOCK_ROOT"
 const dispat = `#!/bin/sh
 set -eu
 [ "$1" = exec ] || exit 2
+printf '%s %s\\n' "$2" "$EXPERIMENTS_DISPAT_VERSION" >> "$MOCK_ROOT/delegated-commands"
 case "$2" in
-  experiments) printf '%s\n' "$EXPERIMENTS_DISPAT_VERSION" > "$MOCK_ROOT/delegated-image-version" ;;
-  summary) ;;
+  experiments) exit "\${MOCK_STANDARD_EXIT:-0}" ;;
+  llvm-experiments) exit "\${MOCK_LLVM_EXIT:-0}" ;;
+  summary) exit "\${MOCK_SUMMARY_EXIT:-0}" ;;
   *) exit 2 ;;
 esac
 `;
 
-test('release experiments select the published image version independently of the CLI version', async (t) => {
+async function prepareFixture(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'docs-release-experiments-'));
   t.after(() => fs.rm(dir, {recursive: true, force: true}));
   await fs.mkdir(path.join(dir, 'bin'));
@@ -43,14 +45,25 @@ test('release experiments select the published image version independently of th
     DISPAT_WORKSPACE_DISPAT_VERSION: '1.11.0-rc.9',
     DISPAT_WORKSPACE_DISPAT_ALPINE_VERSION: '1.11.0-rc.7',
   };
+  return {dir, output, env};
+}
+
+const expectedDelegations = [
+  'experiments 1.11.0-rc.7',
+  'llvm-experiments 1.11.0-rc.7',
+  'summary 1.11.0-rc.7',
+].join('\n') + '\n';
+
+test('release and LLVM experiments select the same published image independently of the CLI version', async (t) => {
+  const {dir, output, env} = await prepareFixture(t);
   const result = spawnSync('sh', ['-c', script], {cwd: dir, env, encoding: 'utf8', timeout: 5000});
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /yohimik\/dispat-alpine:1\.11\.0-rc\.7/);
-  assert.equal(await fs.readFile(path.join(dir, 'delegated-image-version'), 'utf8'), '1.11.0-rc.7\n');
+  assert.equal(await fs.readFile(path.join(dir, 'delegated-commands'), 'utf8'), expectedDelegations);
   assert.match(await fs.readFile(output, 'utf8'), /^REPORT_EXPERIMENTS_VERSION=1\.11\.0-rc\.7$/m);
 
-  await fs.rm(path.join(dir, 'delegated-image-version'));
+  await fs.rm(path.join(dir, 'delegated-commands'));
   const missing = spawnSync('sh', ['-c', script], {
     cwd: dir,
     env: {...env, DISPAT_WORKSPACE_DISPAT_ALPINE_VERSION: ''},
@@ -60,5 +73,31 @@ test('release experiments select the published image version independently of th
   assert.ifError(missing.error);
   assert.notEqual(missing.status, 0);
   assert.match(missing.stderr, /DISPAT_WORKSPACE_DISPAT_ALPINE_VERSION is required/);
-  await assert.rejects(fs.access(path.join(dir, 'delegated-image-version')));
+  await assert.rejects(fs.access(path.join(dir, 'delegated-commands')));
+});
+
+test('release experiment failures preserve the first campaign error and still summarize both campaigns', async (t) => {
+  const scenarios = [
+    {name: 'standard fails', standard: '17', llvm: '0', summary: '0', expected: 17},
+    {name: 'LLVM fails', standard: '0', llvm: '23', summary: '0', expected: 23},
+    {name: 'both campaigns fail', standard: '17', llvm: '23', summary: '0', expected: 17},
+    {name: 'summary fails after successful campaigns', standard: '0', llvm: '0', summary: '29', expected: 0},
+  ];
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async (t) => {
+      const {dir, output, env} = await prepareFixture(t);
+      const result = spawnSync('sh', ['-c', script], {
+        cwd: dir,
+        env: {...env, MOCK_STANDARD_EXIT: scenario.standard, MOCK_LLVM_EXIT: scenario.llvm, MOCK_SUMMARY_EXIT: scenario.summary},
+        encoding: 'utf8',
+        timeout: 5000,
+      });
+      assert.ifError(result.error);
+      assert.equal(result.status, scenario.expected, result.stderr);
+      assert.equal(await fs.readFile(path.join(dir, 'delegated-commands'), 'utf8'), expectedDelegations);
+      const outputs = await fs.readFile(output, 'utf8');
+      assert.match(outputs, /^REPORT_EXPERIMENTS=cell $/m);
+      assert.match(outputs, /^REPORT_EXPERIMENTS_VERSION=1\.11\.0-rc\.7$/m);
+    });
+  }
 });
