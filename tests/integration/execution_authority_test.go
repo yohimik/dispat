@@ -291,10 +291,10 @@ func TestExecutionRefusesUnsafeLockBypass(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, json.Unmarshal(data, &raw))
 		raw["execution"] = map[string]any{
-			"secretEnv": executionSecretEnv,
-			"choreographers":   []any{},
-			"name":      "build-a",
-			"endpoint":  "file://" + mailbox,
+			"secretEnv":      executionSecretEnv,
+			"choreographers": []any{},
+			"name":           "build-a",
+			"endpoint":       "file://" + mailbox,
 		}
 		r.WriteConfigRaw(raw)
 		r.Commit("chore: state an empty worker list")
