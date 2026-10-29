@@ -127,7 +127,9 @@ func TestExecutionUnreadableTaskRefWaitsWithoutDuplicateClaim(t *testing.T) {
 func TestExecutionPeerAcknowledgesWithdrawalWithoutGitPush(t *testing.T) {
 	rig := newExecutionRig(t, func(cfg *models.File) {
 		cfg.RunOnly = placedOn(models.RunOnlyWorker, models.RunOnlyOrchestrator)
-		cfg.Scripts["build"] = models.Script{executionRecordingScript + " && sleep 600"}
+		// Keep this return-channel fixture to one directly reaped process. The
+		// unsettled-process-group scenario separately covers retained descendants.
+		cfg.Scripts["build"] = models.Script{executionRecordingScript + " && exec sleep 600"}
 		cfg.Execution.Timeouts = &models.ExecutionTimeoutsConfig{Preflight: 30, Task: 600, Cancel: 60}
 		cfg.LogLevel = "debug"
 	})
