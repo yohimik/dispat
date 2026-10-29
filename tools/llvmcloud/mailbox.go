@@ -146,6 +146,9 @@ func authorizeReceive(role string, input io.Reader) error {
 		if role == "coordinator" {
 			continue
 		}
+		if fields[0] != strings.Repeat("0", 40) || fields[1] == strings.Repeat("0", 40) {
+			return errors.New("worker pickup refs are create-only and cannot be rewritten or deleted")
+		}
 		if !isWorkerRef(role, fields[2]) {
 			return fmt.Errorf("worker role cannot update canonical ref %s", fields[2])
 		}

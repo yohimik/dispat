@@ -43,15 +43,20 @@ func TestMailboxWorkerCannotWriteCanonicalOrAnotherNodeRefs(t *testing.T) {
 	oid := strings.Repeat("a", 40)
 	for _, kind := range []string{"pending", "output", "completed", "failed"} {
 		ref := "refs/heads/dispat-" + kind + "-" + strings.Repeat("b", 32) + "-" + strings.Repeat("c", 32) + "-" + hash + "-" + strings.Repeat("d", 32)
-		if err := authorizeReceive(role, strings.NewReader(oid+" "+oid+" "+ref+"\n")); err != nil {
+		if err := authorizeReceive(role, strings.NewReader(strings.Repeat("0", 40)+" "+oid+" "+ref+"\n")); err != nil {
 			t.Fatal(err)
+		}
+		for _, update := range []string{oid + " " + oid + " " + ref + "\n", oid + " " + strings.Repeat("0", 40) + " " + ref + "\n"} {
+			if err := authorizeReceive(role, strings.NewReader(update)); err == nil {
+				t.Fatal("worker rewrote/deleted an immutable pickup ref")
+			}
 		}
 		if err := authorizeReceive("llvm-node-2", strings.NewReader(oid+" "+oid+" "+ref+"\n")); err == nil {
 			t.Fatal("another node's pickup accepted")
 		}
 	}
 	for _, ref := range []string{"refs/heads/main", "refs/tags/v1", "refs/heads/dispat-task-x", "refs/heads/dispat-ledger-x", "refs/heads/dispat-slot-x", "refs/heads/dispat-worker-x"} {
-		if err := authorizeReceive(role, strings.NewReader(oid+" "+oid+" "+ref+"\n")); err == nil {
+		if err := authorizeReceive(role, strings.NewReader(strings.Repeat("0", 40)+" "+oid+" "+ref+"\n")); err == nil {
 			t.Fatalf("canonical ref accepted: %s", ref)
 		}
 	}
