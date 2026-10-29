@@ -167,7 +167,10 @@ func (d *driver) provision(ctx context.Context) error {
 		if err := os.WriteFile(filepath.Join(d.settings.Root, "results/cloud/"+name+"-disk.json"), disk, publicFileMode); err != nil {
 			return err
 		}
-		if err := d.awaitSSH(ctx, actual); err != nil {
+	}
+	// Guest package installation must not delay requesting the rest of the pair.
+	for _, item := range d.state.Instances {
+		if err := d.awaitSSH(ctx, item); err != nil {
 			return err
 		}
 	}
