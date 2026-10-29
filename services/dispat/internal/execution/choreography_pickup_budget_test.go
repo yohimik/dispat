@@ -27,17 +27,17 @@ const (
 func pickupBudgetObservationFixture() (*FirstNodeBroker, ChoreographyPickupSuccessor) {
 	binding := ChoreographyRunBinding{Run: "budget-run", Generation: "budget-generation"}
 	return &FirstNodeBroker{binding: binding,
-		budgets: map[string]int{pickupBudgetTestBudget: pickupBudgetTestCapacity},
-		used:    map[string]int{pickupBudgetTestBudget: pickupBudgetTestCapacity},
-		tasks: map[string]*indexedChoreographyTask{pickupBudgetTestTask: {
-			spec: ChoreographyTaskSpec{Task: pickupBudgetTestTask, Budget: pickupBudgetTestBudget,
-				Weight: pickupBudgetTestWeight, MaxAttempts: interpretedContactMaxAttempts},
-			attempt: interpretedContactMaxAttempts,
-			pickups: map[string]*indexedChoreographyPickup{pickupBudgetTestOldPickup: {
-				id: pickupBudgetTestOldPickup, claimOID: pickupBudgetTestOldClaim,
-				attempt: choreographyGitFirstAttempt, contactLost: true}},
-		}}}, ChoreographyPickupSuccessor{ChoreographyRunBinding: binding,
-		Task: pickupBudgetTestTask, ClaimOID: pickupBudgetTestOldClaim, PickupID: pickupBudgetTestOldPickup}
+			budgets: map[string]int{pickupBudgetTestBudget: pickupBudgetTestCapacity},
+			used:    map[string]int{pickupBudgetTestBudget: pickupBudgetTestCapacity},
+			tasks: map[string]*indexedChoreographyTask{pickupBudgetTestTask: {
+				spec: ChoreographyTaskSpec{Task: pickupBudgetTestTask, Budget: pickupBudgetTestBudget,
+					Weight: pickupBudgetTestWeight, MaxAttempts: interpretedContactMaxAttempts},
+				attempt: interpretedContactMaxAttempts,
+				pickups: map[string]*indexedChoreographyPickup{pickupBudgetTestOldPickup: {
+					id: pickupBudgetTestOldPickup, claimOID: pickupBudgetTestOldClaim,
+					attempt: choreographyGitFirstAttempt, contactLost: true}},
+			}}}, ChoreographyPickupSuccessor{ChoreographyRunBinding: binding,
+			Task: pickupBudgetTestTask, ClaimOID: pickupBudgetTestOldClaim, PickupID: pickupBudgetTestOldPickup}
 }
 
 func TestChoreographyPickupSuccessorBudgetRequiresExactRetainedIdentity(t *testing.T) {
