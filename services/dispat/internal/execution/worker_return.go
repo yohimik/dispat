@@ -737,7 +737,7 @@ func (w *Worker) awaitNodeSlotDecision(ctx context.Context, task *claimedTask,
 	if !errors.Is(probeErr, context.Canceled) {
 		return probeErr
 	}
-	return err
+	return errors.Join(err, probeErr)
 }
 
 type workerFinalityWaitRequest struct {
@@ -792,16 +792,20 @@ func (w *Worker) awaitNodeSlotDecisionUntil(ctx context.Context, request workerF
 			if retained == nil && task.slotLease.Intent.Recovery != nil {
 				if mailbox, ok := w.Mailbox.(*GitMailbox); ok {
 					r := task.slotLease.Intent.Recovery
-					retained, _ = w.openRetainedNodeSlotFeed(ctx, mailbox, nodeSlotRunKey{
+					var retainedErr error
+					retained, retainedErr = w.openRetainedNodeSlotFeed(ctx, mailbox, nodeSlotRunKey{
 						Binding: r.Binding, BootstrapOID: r.BootstrapOID,
 						Endpoint: r.CanonicalEndpoint})
 					if retained != nil {
 						continue
 					}
+					if retainedErr != nil {
+						err = errors.Join(err, fmt.Errorf(workerReturnRetainedOpenErrorFormat, retainedErr))
+					}
 				}
 			}
 			if ctx.Err() != nil {
-				return fmt.Errorf(workerReturnCapacityUnsettledErrorFormat, ctx.Err())
+				return fmt.Errorf(workerReturnCapacityUnsettledErrorFormat, errors.Join(ctx.Err(), err))
 			}
 			if request.ProbeOnly {
 				return fmt.Errorf(workerReturnCapacityUnsettledErrorFormat, err)

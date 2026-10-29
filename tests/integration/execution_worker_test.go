@@ -763,6 +763,11 @@ func TestExecutionWorkerGitFaults(t *testing.T) {
 			worker := rig.startWorker(executionWorkerConfig(rig.mailbox), 60, fault.Env()...)
 			defer worker.stop(t)
 			res := rig.sweep(nil)
+			t.Cleanup(func() {
+				if t.Failed() {
+					t.Logf("worker Git fault sweep exit %d:\nstdout:\n%s\nstderr:\n%s", res.Code, res.Stdout, res.Stderr)
+				}
+			})
 			if !tc.mayFail {
 				require.Equal(t, 0, res.Code, "v3 sweep after %s:\n%s\n%s", tc.name, res.Stdout, res.Stderr)
 			}
