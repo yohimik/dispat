@@ -1217,15 +1217,23 @@ func (m *GitMailbox) Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]
 	if tip.Kind == "" {
 		return nil, &Rejection{Reason: ReasonUnreadable}
 	}
-	plumbing := gitx.NewPlumbing(m.plumbing)
+	reader, err := gitx.OpenObjectReader(ctx, m.plumbing)
+	if err != nil {
+		return nil, fmt.Errorf(mailboxReadMessageErrorFormat, tip.Kind, tip.Branch, err)
+	}
 	var document, signature bytes.Buffer
-	plumbing.ReadBlob(ctx, tip.document, &document, maxBytes)
-	plumbing.ReadBlob(ctx, tip.signature, &signature, maxSignatureBytes)
-	if err := plumbing.Err(); err != nil {
+	_, err = reader.ReadBlob(tip.document, &document, maxBytes)
+	if err == nil {
+		_, err = reader.ReadBlob(tip.signature, &signature, maxSignatureBytes)
+	}
+	// The pipe belongs only to this read. Reap it even after a size refusal,
+	// and require a clean process exit before accepting its signed bytes.
+	err = errors.Join(err, reader.Close())
+	if err != nil {
 		if errors.Is(err, gitx.ErrTransportLimit) {
 			return nil, &Rejection{Reason: ReasonOversize}
 		}
-		return nil, fmt.Errorf("execution: reading the %s of %s: %w", tip.Kind, tip.Branch, err)
+		return nil, fmt.Errorf(mailboxReadMessageErrorFormat, tip.Kind, tip.Branch, err)
 	}
 	if !m.signer.IsSignatureValid(tip.Kind, document.Bytes(), strings.TrimSpace(signature.String())) {
 		return nil, &Rejection{Reason: ReasonSignature}
@@ -1237,6 +1245,8 @@ func (m *GitMailbox) Read(ctx context.Context, tip ChainTip, maxBytes int64) ([]
 // characters and a newline at most, so the ceiling is small enough that a
 // blob claiming to be one and being something else is refused at the read.
 const maxSignatureBytes = 128
+
+const mailboxReadMessageErrorFormat = "execution: reading the %s of %s: %w"
 
 // Close removes the coordination branches this party owns, in one push per
 // batch, and takes the fetched refs out of the local store.
