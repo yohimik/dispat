@@ -22,6 +22,11 @@ apt-get install -y -q docker.io git curl
 touch /var/lib/dispat-llvm-ready
 `
 
+const (
+	minimumCPUPlatformFlagName = "--min-cpu-platform"
+	cpuPlatformMismatchError   = "instance %s has CPU platform %q; expected exact platform %q"
+)
+
 func (d *driver) provision(ctx context.Context) error {
 	hardware, err := d.gcloud(ctx, "compute", "machine-types", "describe", machineType, "--zone", d.settings.Zone, "--format=json")
 	if err != nil {
@@ -40,14 +45,11 @@ func (d *driver) provision(ctx context.Context) error {
 	if err := os.WriteFile(filepath.Join(d.settings.Root, "results/cloud/machine-type.json"), hardware, publicFileMode); err != nil {
 		return err
 	}
-	image, err := d.gcloud(ctx, "compute", "images", "describe-from-family", imageFamily, "--image-project", imageProject, "--format=value(selfLink)")
+	image, err := d.resolveBootImage(ctx)
 	if err != nil {
 		return err
 	}
-	d.state.Image = strings.TrimSpace(string(image))
-	if !strings.HasPrefix(d.state.Image, "https://www.googleapis.com/compute/v1/projects/"+imageProject+"/global/images/") {
-		return errors.New("resolved boot image has unexpected identity")
-	}
+	d.state.Image = image
 	if err := d.save(); err != nil {
 		return err
 	}
@@ -86,6 +88,9 @@ func (d *driver) provision(ctx context.Context) error {
 			return err
 		}
 		args := []string{"compute", "instances", "create", name, "--zone", d.settings.Zone, "--machine-type", machineType, "--image", d.state.Image, "--boot-disk-size", "100GB", "--boot-disk-type", "pd-balanced", "--no-service-account", "--no-scopes", "--max-run-duration", vmLifetime, "--instance-termination-action", "DELETE", "--provisioning-model", "STANDARD", "--labels", "dispat-experiment=llvm,trial=" + d.settings.ID, "--metadata", "enable-guest-attributes=TRUE,enable-oslogin=FALSE,block-project-ssh-keys=TRUE", "--metadata-from-file", "startup-script=" + filepath.Join(d.settings.Root, "private/startup.sh") + ",ssh-keys=" + filepath.Join(d.settings.Root, "private/ssh-keys"), "--format=json"}
+		if d.settings.CPUPlatform != "" {
+			args = append(args, minimumCPUPlatformFlagName, d.settings.CPUPlatform)
+		}
 		if _, err := d.gcloud(ctx, args...); err != nil {
 			return fmt.Errorf("create %s (no machine or zone fallback): %w", name, err)
 		}
@@ -98,6 +103,9 @@ func (d *driver) provision(ctx context.Context) error {
 		}
 		if actual.ID == "" || actual.CPUPlatform == "" || actual.MachineType != "https://www.googleapis.com/compute/v1/projects/"+d.settings.Project+"/zones/"+d.settings.Zone+"/machineTypes/"+machineType || len(actual.ServiceAccounts) != 0 || len(actual.Disks) != 1 {
 			return fmt.Errorf("instance %s does not have the required identity/type/no-service-account configuration", name)
+		}
+		if d.settings.CPUPlatform != "" && actual.CPUPlatform != d.settings.CPUPlatform {
+			return fmt.Errorf(cpuPlatformMismatchError, name, actual.CPUPlatform, d.settings.CPUPlatform)
 		}
 		if index > 0 && actual.CPUPlatform != d.state.Instances[0].CPUPlatform {
 			return errors.New("GCE CPU platforms differ; refusing an unequal worker pair")
@@ -130,6 +138,21 @@ func (d *driver) provision(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (d *driver) resolveBootImage(ctx context.Context) (string, error) {
+	if d.settings.BootImage != "" {
+		return d.settings.BootImage, nil
+	}
+	resolved, err := d.gcloud(ctx, "compute", "images", "describe-from-family", imageFamily, "--image-project", imageProject, "--format=value(selfLink)")
+	if err != nil {
+		return "", err
+	}
+	image := strings.TrimSpace(string(resolved))
+	if !bootImageIdentity.MatchString(image) {
+		return "", errors.New(bootImageIdentityError)
+	}
+	return image, nil
 }
 
 func (d *driver) describe(ctx context.Context, name string) (instance, []byte, error) {

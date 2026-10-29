@@ -8,6 +8,19 @@ loads the same image bytes. Workers have no service account or cloud scopes.
 The coordinator runs on the GitHub runner. Each worker container has four CPUs,
 14 GiB memory, one outer task slot and two inner Ninja jobs.
 
+Pass the same `--boot-image` and `--cpu-platform` to every `llvmcloud run` in a
+campaign. The boot-image pin must be the full
+`https://www.googleapis.com/compute/v1/projects/ubuntu-os-cloud/global/images/<image-name>`
+selfLink; the driver uses it directly without resolving an image family again.
+The CPU pin accepts `Intel Cascade Lake` or `Intel Ice Lake`. It supplies
+`--min-cpu-platform` at creation and then requires each VM's actual platform to
+equal the pin exactly, including the first VM. A newer platform does not silently
+satisfy an older pin. Invalid pins fail before provisioning, and a mismatch
+fails the cell without fallback. Requested pins remain in the private journal
+and the retained trial/provenance evidence. Without these optional pins, the
+standalone driver resolves its image family once per cell and checks that the
+two actual platforms match; that does not establish equality across cells.
+
 The three Dispat cells use compilation, interpretation and hybrid modes. The Nx
 and Lerna cells explicitly use `manual-gcp-split`: the experiment driver assigns
 one LLVM backend to each VM and invokes the tool there. That is custom

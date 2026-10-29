@@ -48,11 +48,26 @@ const (
 	maximumRequestBytes        = 1 << 20
 )
 
+const (
+	bootImageFlagName        = "boot-image"
+	cpuPlatformFlagName      = "cpu-platform"
+	bootImageFlagHelp        = "exact ubuntu-os-cloud image selfLink; skips family resolution"
+	cpuPlatformFlagHelp      = "exact expected N2 CPU platform; no platform fallback"
+	bootImageIdentityPattern = `^https://www\.googleapis\.com/compute/v1/projects/ubuntu-os-cloud/global/images/[a-z]([-a-z0-9]{0,61}[a-z0-9])?$`
+	bootImageIdentityError   = "boot image must be an exact ubuntu-os-cloud image selfLink, not a family or relative image name"
+	cpuPlatformIdentityError = "CPU platform must be exactly Intel Cascade Lake or Intel Ice Lake for n2-standard-4"
+	cascadeLakePlatformName  = "Intel Cascade Lake"
+	iceLakePlatformName      = "Intel Ice Lake"
+)
+
 var safeName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
+var bootImageIdentity = regexp.MustCompile(bootImageIdentityPattern)
 
 type options struct {
 	Project      string `json:"project"`
 	Zone         string `json:"zone"`
+	BootImage    string `json:"bootImage,omitempty"`
+	CPUPlatform  string `json:"cpuPlatform,omitempty"`
 	ID           string `json:"id"`
 	Tool         string `json:"tool"`
 	Mode         string `json:"mode"`
@@ -180,6 +195,8 @@ func parseOptions(args []string) (options, error) {
 	flags := flag.NewFlagSet("llvmcloud run", flag.ContinueOnError)
 	flags.StringVar(&value.Project, "project", "", "GCP project")
 	flags.StringVar(&value.Zone, "zone", defaultZone, "one fixed GCE zone; no fallback")
+	flags.StringVar(&value.BootImage, bootImageFlagName, "", bootImageFlagHelp)
+	flags.StringVar(&value.CPUPlatform, cpuPlatformFlagName, "", cpuPlatformFlagHelp)
 	flags.StringVar(&value.ID, "id", "", "unique run/attempt/cell identifier")
 	flags.StringVar(&value.Tool, "tool", "dispat", "executor tool")
 	flags.StringVar(&value.Mode, "mode", "compilation", "distribution mode")
@@ -191,6 +208,22 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&value.Root, "root", cloudRoot, "private state directory (must be /cloud)")
 	if err := flags.Parse(args); err != nil {
 		return value, err
+	}
+	var pinError error
+	flags.Visit(func(option *flag.Flag) {
+		switch option.Name {
+		case bootImageFlagName:
+			if !bootImageIdentity.MatchString(value.BootImage) {
+				pinError = errors.Join(pinError, errors.New(bootImageIdentityError))
+			}
+		case cpuPlatformFlagName:
+			if value.CPUPlatform != cascadeLakePlatformName && value.CPUPlatform != iceLakePlatformName {
+				pinError = errors.Join(pinError, errors.New(cpuPlatformIdentityError))
+			}
+		}
+	})
+	if pinError != nil {
+		return value, pinError
 	}
 	if flags.NArg() != 0 || value.Root != cloudRoot || !safeName.MatchString(value.ID) || !safeName.MatchString(value.Project) || !safeName.MatchString(value.Zone) || value.Archive == "" || !isDigest(value.Image, "sha256:", 64) || !isDigest(value.Source, "", 40) || !isDigest(value.BinarySHA256, "", 64) {
 		return value, errors.New("cloud options require /cloud, safe project/zone/run names, exact image/source/binary identities and an archive")
