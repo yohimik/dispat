@@ -936,6 +936,24 @@ jobs:
             --arg binary "$(sha256sum "$RUNNER_TEMP/llvm-bundle/dispat" | cut -d ' ' -f1)" \
             '{source:$source,image:$image,binarySha256:$binary,goVersion:"1.26.10",platform:"linux/amd64"}' \
             > "$RUNNER_TEMP/llvm-bundle/provenance.json"
+      - name: Record unsupported Changesets cell from the same image
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          LLVM_PROFILE: ${{ inputs.llvm-profile }}
+          TRIAL_ID: ${{ github.run_id }}-${{ github.run_attempt }}-changesets-distributed
+        run: |
+          mkdir -p "$RUNNER_TEMP/llvm-unsupported"
+          docker run --rm --user "$(id -u):$(id -g)" \
+            --mount "type=bind,src=$RUNNER_TEMP/llvm-unsupported,dst=/results" \
+            --env "EXPERIMENTS_DISPAT_SOURCE_REVISION=$SOURCE_SHA" \
+            "$(jq -r .image "$RUNNER_TEMP/llvm-bundle/provenance.json")" \
+            --tool changesets --mode distributed --profile "$LLVM_PROFILE" --trial-id "$TRIAL_ID" --repetition 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: llvm-gce-changesets-distributed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/llvm-unsupported
+          retention-days: 30
+          if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: llvm-gce-prepared-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1015,5 +1033,78 @@ jobs:
         with:
           name: llvm-gce-${{ matrix.tool }}-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/llvm-results
+          retention-days: 30
+          if-no-files-found: error
+
+  llvm-report:
+    name: Validate and collect all six LLVM campaign records
+    if: ${{ always() && inputs.purpose == 'llvm-gce' && needs.llvm-prepare.result == 'success' }}
+    needs: [llvm-prepare, llvm-gce]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Build report tools with the campaign Go version
+        run: |
+          mkdir -p "$RUNNER_TEMP/llvm-report-tools"
+          docker run --rm -v "$PWD:/src:ro" -v "$RUNNER_TEMP/llvm-report-tools:/out" -w /src/tools \
+            -e GOWORK=off golang:1.26.10 go build -trimpath -buildvcs=false -o /out/ ./llvmexperiment ./testreport
+      # Exact artifact names exclude the large prepared OCI archive and retain
+      # each failed cell independently; missing artifacts fail collection below.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: llvm-gce-dispat-compilation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/llvm-incoming/dispat-compilation
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: llvm-gce-dispat-interpretation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/llvm-incoming/dispat-interpretation
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: llvm-gce-dispat-hybrid-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/llvm-incoming/dispat-hybrid
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: llvm-gce-nx-manual-gcp-split-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/llvm-incoming/nx-manual-gcp-split
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: llvm-gce-lerna-manual-gcp-split-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/llvm-incoming/lerna-manual-gcp-split
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: llvm-gce-changesets-distributed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/llvm-incoming/changesets-distributed
+      - name: Check source, binary, workload, topology and retained formulas
+        env:
+          LLVM_PROFILE: ${{ inputs.llvm-profile }}
+        run: |
+          "$RUNNER_TEMP/llvm-report-tools/llvmexperiment" collect --input "$RUNNER_TEMP/llvm-incoming" \
+            --output "$RUNNER_TEMP/llvm-report" --source "$GITHUB_SHA" --profile "$LLVM_PROFILE"
+      - name: Render available observations and missing-cell diagnostics
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/llvm-report/campaign.json"; then
+            jq -r '.cells[] | "- \(.tool) / \(.mode): \(.status)\(if .reason then " — " + .reason else "" end)"' \
+              "$RUNNER_TEMP/llvm-report/campaign.json" >> "$GITHUB_STEP_SUMMARY"
+            "$RUNNER_TEMP/llvm-report-tools/testreport" experiments -markdown "$RUNNER_TEMP/llvm-report/cells" \
+              > "$RUNNER_TEMP/llvm-report/experiments.md"
+            cat "$RUNNER_TEMP/llvm-report/experiments.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: llvm-gce-report-${{ inputs.llvm-profile }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/llvm-report
           retention-days: 30
           if-no-files-found: error

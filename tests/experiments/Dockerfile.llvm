@@ -7,6 +7,7 @@ WORKDIR /src
 COPY tools/go.mod tools/go.sum ./
 RUN GOWORK=off go mod download gopkg.in/yaml.v3
 COPY tools/llvmexperiment ./llvmexperiment
+COPY tools/internal/executionmeasurement ./internal/executionmeasurement
 RUN CGO_ENABLED=0 GOWORK=off go build -trimpath -o /llvmexperiment ./llvmexperiment
 
 FROM golang:${GO_VERSION} AS llvm-source

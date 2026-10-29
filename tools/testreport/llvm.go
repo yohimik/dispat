@@ -78,7 +78,7 @@ func validateLLVM(result *LLVMBuild) error {
 			return fmt.Errorf("full LLVM build must name the all target")
 		}
 	}
-	if result.Mode != "compilation" && result.Mode != "interpretation" && result.Mode != "hybrid" && result.Mode != "distributed" {
+	if result.Mode != "compilation" && result.Mode != "interpretation" && result.Mode != "hybrid" && result.Mode != "distributed" && result.Mode != "manual-gcp-split" {
 		return fmt.Errorf("LLVM distribution mode %q is invalid", result.Mode)
 	}
 	switch result.Status {

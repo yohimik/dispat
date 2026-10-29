@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	measurement "github.com/yohimik/dispat/tools/internal/executionmeasurement"
 )
 
 const (
@@ -35,11 +37,19 @@ type artifact struct {
 }
 
 type taskManifest struct {
-	Task      task       `json:"task"`
-	Node      string     `json:"node"`
-	Started   time.Time  `json:"started"`
-	Seconds   float64    `json:"seconds"`
-	Artifacts []artifact `json:"artifacts"`
+	Task               task                     `json:"task"`
+	Node               string                   `json:"node"`
+	Started            time.Time                `json:"started"`
+	Seconds            float64                  `json:"seconds"`
+	Artifacts          []artifact               `json:"artifacts"`
+	Status             string                   `json:"status"`
+	Reason             string                   `json:"reason,omitempty"`
+	AttemptID          string                   `json:"attemptId"`
+	StartedClockKind   string                   `json:"startedClockKind"`
+	Host               hostIdentity             `json:"host"`
+	Interval           measurement.TaskInterval `json:"interval"`
+	ConfigureArguments []string                 `json:"configureArguments"`
+	BuildArguments     []string                 `json:"buildArguments"`
 }
 
 func buildTargets(profile string) []string {
@@ -56,7 +66,7 @@ func outputTools(profile string) []string {
 	return []string{llvmDemangleTool, llvmSizeTool}
 }
 
-func buildTask(ctx context.Context) error {
+func buildTask(ctx context.Context) (resultError error) {
 	content, err := os.ReadFile(taskFileName)
 	if err != nil {
 		return err
@@ -68,49 +78,62 @@ func buildTask(ctx context.Context) error {
 	if err := validateTask(item); err != nil {
 		return err
 	}
-	if err := verifySource(ctx, item.Source); err != nil {
-		return err
-	}
 	root, err := os.Getwd()
 	if err != nil {
+		return err
+	}
+	recording, err := beginTaskRecording(ctx, item, root)
+	if err != nil {
+		return err
+	}
+	defer func() { resultError = errors.Join(resultError, recording.finish(resultError)) }()
+	if err := verifySource(ctx, item.Source); err != nil {
 		return err
 	}
 	if err := os.Mkdir(filepath.Join(root, buildDirectory), directoryMode); err != nil {
 		return fmt.Errorf("LLVM build directory must be new and empty: %w", err)
 	}
-	started := time.Now()
-	configure := []string{"-S", filepath.Join(item.Source, "llvm"), "-B", buildDirectory, "-G", "Ninja",
-		"-DCMAKE_BUILD_TYPE=Release", "-DLLVM_TARGETS_TO_BUILD=" + item.Backend,
-		"-DLLVM_ENABLE_PROJECTS=", "-DLLVM_ENABLE_RUNTIMES=", "-DLLVM_INCLUDE_TESTS=OFF",
-		"-DLLVM_INCLUDE_EXAMPLES=OFF", "-DLLVM_INCLUDE_BENCHMARKS=OFF", "-DLLVM_INCLUDE_DOCS=OFF",
-		"-DLLVM_ENABLE_ASSERTIONS=OFF", "-DLLVM_ENABLE_ZLIB=OFF", "-DLLVM_ENABLE_ZSTD=OFF",
-		"-DLLVM_ENABLE_LIBXML2=OFF", "-DLLVM_ENABLE_TERMINFO=OFF", "-DLLVM_PARALLEL_LINK_JOBS=1",
-		"-DCMAKE_C_COMPILER_LAUNCHER=", "-DCMAKE_CXX_COMPILER_LAUNCHER="}
+	recording.beginOperation()
+	configure := configureArguments(item)
 	if err := runCommand(ctx, command{Dir: root, Name: "cmake", Args: configure, Output: os.Stdout}); err != nil {
 		return err
 	}
-	build := []string{"--build", buildDirectory, "--parallel", strconv.Itoa(item.Jobs), "--target"}
-	build = append(build, buildTargets(item.Profile)...)
-	if err := runCommand(ctx, command{Dir: root, Name: "cmake", Args: build, Output: os.Stdout}); err != nil {
+	if err := runCommand(ctx, command{Dir: root, Name: "cmake", Args: buildArguments(item), Output: os.Stdout}); err != nil {
 		return err
 	}
 	out := filepath.Clean(filepath.Join(root, "..", "..", artifactsDirectory, item.Name))
 	if err := os.MkdirAll(out, directoryMode); err != nil {
 		return err
 	}
-	manifest := taskManifest{Task: item, Started: started, Seconds: time.Since(started).Seconds(), Node: taskNode()}
+	recording.endOperation()
 	for _, name := range outputTools(item.Profile) {
 		entry, err := copyArtifact(filepath.Join(root, buildDirectory, "bin", name), filepath.Join(out, name))
 		if err != nil {
 			return err
 		}
 		entry.Package, entry.Path = item.Name, name
-		manifest.Artifacts = append(manifest.Artifacts, entry)
+		recording.Manifest.Artifacts = append(recording.Manifest.Artifacts, entry)
 	}
 	if err := verifyBinaries(ctx, out, item); err != nil {
 		return err
 	}
-	return writeJSON(filepath.Join(out, manifestFileName), manifest)
+	recording.OutputPath = filepath.Join(out, manifestFileName)
+	return nil
+}
+
+func configureArguments(item task) []string {
+	return []string{"-S", filepath.Join(item.Source, "llvm"), "-B", buildDirectory, "-G", "Ninja",
+		"-DCMAKE_BUILD_TYPE=Release", "-DLLVM_TARGETS_TO_BUILD=" + item.Backend,
+		"-DLLVM_ENABLE_PROJECTS=", "-DLLVM_ENABLE_RUNTIMES=", "-DLLVM_INCLUDE_TESTS=OFF",
+		"-DLLVM_INCLUDE_EXAMPLES=OFF", "-DLLVM_INCLUDE_BENCHMARKS=OFF", "-DLLVM_INCLUDE_DOCS=OFF",
+		"-DLLVM_ENABLE_ASSERTIONS=OFF", "-DLLVM_ENABLE_ZLIB=OFF", "-DLLVM_ENABLE_ZSTD=OFF",
+		"-DLLVM_ENABLE_LIBXML2=OFF", "-DLLVM_ENABLE_TERMINFO=OFF", "-DLLVM_PARALLEL_LINK_JOBS=1",
+		"-DCMAKE_C_COMPILER_LAUNCHER=", "-DCMAKE_CXX_COMPILER_LAUNCHER="}
+}
+
+func buildArguments(item task) []string {
+	build := []string{"--build", buildDirectory, "--parallel", strconv.Itoa(item.Jobs), "--target"}
+	return append(build, buildTargets(item.Profile)...)
 }
 
 func validateTask(item task) error {
@@ -137,7 +160,7 @@ func verifySource(ctx context.Context, source string) error {
 		{Args: []string{"-C", source, "rev-parse", "HEAD"}, Want: llvmRevision},
 		{Args: []string{"-C", source, "status", "--porcelain", "--untracked-files=normal"}},
 	} {
-		value, err := exec.CommandContext(ctx, "git", query.Args...).Output()
+		value, err := exec.CommandContext(ctx, "git", append([]string{"-c", "safe.directory=" + source}, query.Args...)...).Output()
 		if err != nil {
 			return fmt.Errorf("LLVM source checkout %s cannot be verified: %w", source, err)
 		}

@@ -108,32 +108,41 @@ type transferConfiguration struct {
 }
 
 type fixture struct {
-	Root   string
-	Origin string
-	Run    string
-	Tasks  []task
-	Nodes  []nodeFixture
+	Root      string
+	Origin    string
+	OriginURL string
+	Run       string
+	Tasks     []task
+	Nodes     []nodeFixture
 }
 
 type nodeFixture struct {
-	Name  string
-	Root  string
-	State string
+	Name        string
+	Root        string
+	State       string
+	EvidenceDir string
+	Remote      *remoteNode
 }
 
 func prepareFixture(ctx context.Context, settings options, work string, output io.Writer) (fixture, error) {
-	identity, err := newIdentity()
-	if err != nil {
-		return fixture{}, err
+	identity := settings.TrialID
+	if identity == "" {
+		generated, err := newIdentity()
+		if err != nil {
+			return fixture{}, err
+		}
+		identity = generated
 	}
 	result := fixture{Root: filepath.Join(work, "coordinator"), Origin: filepath.Join(work, "origin.git"), Run: identity}
+	result.OriginURL = "file://" + result.Origin
+	if settings.Remote != nil {
+		result.Origin, result.OriginURL = settings.Remote.MailboxPath, settings.Remote.MailboxURL
+	}
 	if err := os.MkdirAll(result.Root, directoryMode); err != nil {
 		return result, err
 	}
 	for _, backend := range []string{"X86", "AArch64"} {
-		name := "llvm-" + strings.ToLower(backend)
-		item := task{Name: name, Backend: backend, Profile: settings.Profile, Source: settings.Source,
-			Revision: llvmRevision, Run: identity, Jobs: settings.Jobs}
+		item := taskForBackend(settings, identity, backend)
 		if err := writePackage(result.Root, item); err != nil {
 			return result, err
 		}
@@ -141,22 +150,37 @@ func prepareFixture(ctx context.Context, settings options, work string, output i
 	}
 	for i := range executorCount {
 		name := nodeNamePrefix + strconv.Itoa(i+1)
-		result.Nodes = append(result.Nodes, nodeFixture{Name: name, Root: filepath.Join(work, name), State: filepath.Join(work, name+"-state")})
+		node := nodeFixture{Name: name, Root: filepath.Join(work, name), State: filepath.Join(work, name+"-state"), EvidenceDir: filepath.Join(work, name+"-evidence")}
+		if settings.Remote != nil {
+			remote := settings.Remote.Nodes[i]
+			node = nodeFixture{Name: remote.Name, Root: remote.Root, State: remote.State, EvidenceDir: remote.EvidenceDir, Remote: &remote}
+		}
+		result.Nodes = append(result.Nodes, node)
 	}
 	if err := writeFixtureConfiguration(result, settings); err != nil {
 		return result, err
 	}
-	for _, args := range [][]string{
+	commands := [][]string{
 		{"init", "-q", "--initial-branch=main"},
 		{"config", "user.name", "LLVM experiment"},
 		{"config", "user.email", "experiments@dispat.dev"},
 		{"add", "."},
 		{"commit", "-qm", fixtureCommitMessage},
-		{"clone", "--bare", result.Root, result.Origin},
-		{"remote", "add", "origin", result.Origin},
-		{"fetch", "-q", "origin"},
-	} {
-		if err := runCommand(ctx, command{Dir: result.Root, Name: "git", Args: args, Output: output}); err != nil {
+	}
+	if settings.Remote == nil {
+		commands = append(commands, []string{"clone", "--bare", result.Root, result.Origin})
+	} else {
+		if err := requireEmptyMailbox(ctx, result.Origin); err != nil {
+			return result, err
+		}
+	}
+	commands = append(commands, []string{"remote", "add", "origin", result.OriginURL})
+	if settings.Remote != nil {
+		commands = append(commands, []string{"push", "-q", "origin", "HEAD:refs/heads/main"})
+	}
+	commands = append(commands, []string{"fetch", "-q", "origin"})
+	for _, args := range commands {
+		if err := runCommand(ctx, command{Dir: result.Root, Name: "git", Args: args, Env: coordinatorEnvironment(settings), Output: output}); err != nil {
 			return result, err
 		}
 	}
@@ -164,7 +188,7 @@ func prepareFixture(ctx context.Context, settings options, work string, output i
 		return result, prepareDispatNodes(result)
 	}
 	for _, node := range result.Nodes {
-		if err := runCommand(ctx, command{Dir: work, Name: "git", Args: []string{"clone", "-q", result.Origin, node.Root}, Output: output}); err != nil {
+		if err := runCommand(ctx, command{Dir: work, Name: "git", Args: []string{"clone", "-q", result.OriginURL, node.Root}, Env: coordinatorEnvironment(settings), Output: output}); err != nil {
 			return result, err
 		}
 		if err := os.Symlink(settings.Tools, filepath.Join(node.Root, "node_modules")); err != nil {
@@ -172,6 +196,11 @@ func prepareFixture(ctx context.Context, settings options, work string, output i
 		}
 	}
 	return result, os.Symlink(settings.Tools, filepath.Join(result.Root, "node_modules"))
+}
+
+func taskForBackend(settings options, identity, backend string) task {
+	return task{Name: "llvm-" + strings.ToLower(backend), Backend: backend, Profile: settings.Profile, Source: settings.Source,
+		Revision: llvmRevision, Run: identity, Jobs: settings.Jobs}
 }
 
 func writePackage(root string, item task) error {
@@ -225,7 +254,7 @@ func writeFixtureConfiguration(data fixture, settings options) error {
 		config.Packages[item.Name] = dispatPackage{Path: "packages/" + item.Name, Scripts: map[string]string{buildScriptName: buildScript}}
 	}
 	for _, node := range data.Nodes {
-		config.Execution.Choreographers = append(config.Execution.Choreographers, nodeConfiguration{Name: node.Name, Endpoint: "file://" + data.Origin})
+		config.Execution.Choreographers = append(config.Execution.Choreographers, nodeConfiguration{Name: node.Name, Endpoint: data.OriginURL})
 	}
 	return writeYAML(filepath.Join(data.Root, "dispat.yaml"), config)
 }
@@ -236,7 +265,7 @@ func prepareDispatNodes(data fixture) error {
 			return err
 		}
 		config := dispatConfiguration{Concurrency: 1, LogFormat: "json", Execution: executionConfiguration{
-			Name: node.Name, Endpoint: "file://" + data.Origin, Concurrency: 1, SecretEnv: secretEnvironmentName,
+			Name: node.Name, Endpoint: data.OriginURL, Concurrency: 1, SecretEnv: secretEnvironmentName,
 		}}
 		if err := writeYAML(filepath.Join(node.Root, "dispat.yaml"), config); err != nil {
 			return err

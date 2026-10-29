@@ -53,14 +53,14 @@ func TestMissingCloudAndUnsupportedNeverAcquireTiming(t *testing.T) {
 	t.Setenv(cloudIDEnvironmentName, "")
 	for _, tool := range []string{nxTool, lernaTool, changesetsTool} {
 		t.Run(tool, func(t *testing.T) {
-			settings, err := parseOptions([]string{"--tool", tool, "--mode", distributedMode, "--results", t.TempDir()})
+			settings, err := parseOptions([]string{"--tool", tool, "--mode", distributedMode, "--results", t.TempDir(), "--trial-id", "availability"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if err := runExperiment(context.Background(), settings); err != nil {
 				t.Fatal(err)
 			}
-			content, err := os.ReadFile(filepath.Join(settings.Results, "llvm-full-distributed-"+tool, "verdict.json"))
+			content, err := os.ReadFile(filepath.Join(settings.Results, "llvm-full-distributed-"+tool+"-availability-r1", "verdict.json"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -86,14 +86,14 @@ func TestConfiguredExecutorFailuresFailTheCampaignAndRetainEvidence(t *testing.T
 		if tool == dispatTool {
 			mode = hybridMode
 		}
-		settings, err := parseOptions([]string{"--tool", tool, "--mode", mode, "--source", t.TempDir(), "--results", t.TempDir()})
+		settings, err := parseOptions([]string{"--tool", tool, "--mode", mode, "--source", t.TempDir(), "--results", t.TempDir(), "--trial-id", "failure"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if err := runExperiment(context.Background(), settings); err == nil {
 			t.Fatalf("configured %s failure did not fail the campaign", tool)
 		}
-		content, err := os.ReadFile(filepath.Join(settings.Results, "llvm-full-"+mode+"-"+tool, "verdict.json"))
+		content, err := os.ReadFile(filepath.Join(settings.Results, "llvm-full-"+mode+"-"+tool+"-failure-r1", "verdict.json"))
 		if err != nil {
 			t.Fatal(err)
 		}

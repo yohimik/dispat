@@ -14,10 +14,13 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
 	"time"
+
+	measurement "github.com/yohimik/dispat/tools/internal/executionmeasurement"
 )
 
 const (
@@ -30,6 +33,7 @@ const (
 	lernaTool                 = "lerna"
 	changesetsTool            = "changesets"
 	distributedMode           = "distributed"
+	manualGCPMode             = "manual-gcp-split"
 	compilationMode           = "compilation"
 	interpretationMode        = "interpretation"
 	hybridMode                = "hybrid"
@@ -60,19 +64,27 @@ const (
 	secretEnvironmentName     = "EXPERIMENT_LLVM_SECRET"
 	cloudTokenEnvironmentName = "NX_CLOUD_ACCESS_TOKEN"
 	cloudIDEnvironmentName    = "EXPERIMENTS_NX_CLOUD_ID"
+	dispatSourceEnvironment   = "EXPERIMENTS_DISPAT_SOURCE_REVISION"
 	coordinatorName           = "llvm-coordinator"
+	trialRepetitionDefault    = 1
+	remoteTopology            = "two independently identified GCE executor VMs with a separate coordinator"
 )
 
 type options struct {
-	Tool    string
-	Mode    string
-	Profile string
-	Source  string
-	Results string
-	Tools   string
-	Work    string
-	Jobs    int
-	Timeout time.Duration
+	Tool           string
+	Mode           string
+	Profile        string
+	Source         string
+	Results        string
+	Tools          string
+	Work           string
+	Jobs           int
+	Timeout        time.Duration
+	TrialID        string
+	Repetition     int
+	RemotePlanPath string
+	Remote         *remotePlan
+	Output         string
 }
 
 type buildResult struct {
@@ -99,14 +111,15 @@ type buildResult struct {
 }
 
 type verdict struct {
-	Experiment string       `json:"experiment"`
-	Tool       string       `json:"tool"`
-	Scenario   string       `json:"scenario"`
-	Dispat     string       `json:"dispat"`
-	Steps      []step       `json:"steps"`
-	Checks     []check      `json:"checks"`
-	Passed     bool         `json:"passed"`
-	LLVM       *buildResult `json:"llvm"`
+	Experiment           string                   `json:"experiment"`
+	Tool                 string                   `json:"tool"`
+	Scenario             string                   `json:"scenario"`
+	Dispat               string                   `json:"dispat"`
+	Steps                []step                   `json:"steps"`
+	Checks               []check                  `json:"checks"`
+	Passed               bool                     `json:"passed"`
+	LLVM                 *buildResult             `json:"llvm"`
+	ExecutionMeasurement *measurement.Measurement `json:"executionMeasurement,omitempty"`
 }
 
 type step struct {
@@ -126,6 +139,7 @@ type command struct {
 	Args   []string
 	Env    []string
 	Output io.Writer
+	Input  io.Reader
 }
 
 func main() {
@@ -144,6 +158,9 @@ func run(ctx context.Context, args []string) error {
 	if args[0] == "build" {
 		return buildTask(ctx)
 	}
+	if args[0] == "collect" {
+		return collectCampaign(args[1:])
+	}
 	if args[0] != "run" {
 		return fmt.Errorf("LLVM experiment command %q is invalid; expected run or build", args[0])
 	}
@@ -158,7 +175,7 @@ func parseOptions(args []string) (options, error) {
 	var settings options
 	flags := flag.NewFlagSet("llvmexperiment run", flag.ContinueOnError)
 	flags.StringVar(&settings.Tool, "tool", dispatTool, "dispat, nx, lerna, or changesets")
-	flags.StringVar(&settings.Mode, "mode", compilationMode, "compilation, interpretation, hybrid, or distributed")
+	flags.StringVar(&settings.Mode, "mode", compilationMode, "compilation, interpretation, hybrid, distributed, or manual-gcp-split")
 	flags.StringVar(&settings.Profile, "profile", fullProfile, "full LLVM build, or explicitly partial smoke build")
 	flags.StringVar(&settings.Source, "source", defaultSourcePath, "prepared immutable LLVM source checkout")
 	flags.StringVar(&settings.Results, "results", defaultResultsPath, "campaign results directory")
@@ -166,6 +183,9 @@ func parseOptions(args []string) (options, error) {
 	flags.StringVar(&settings.Work, "work", os.TempDir(), "parent for a fresh disposable workspace")
 	flags.IntVar(&settings.Jobs, "jobs", defaultJobsCount, "Ninja parallelism on each of two executor processes")
 	flags.DurationVar(&settings.Timeout, "timeout", defaultTimeout, "maximum elapsed time for one cell")
+	flags.StringVar(&settings.TrialID, "trial-id", "", "unique trial identity; generated when omitted")
+	flags.IntVar(&settings.Repetition, "repetition", trialRepetitionDefault, "positive repetition identity")
+	flags.StringVar(&settings.RemotePlanPath, "remote-plan", "", "real-VM execution adapter plan")
 	if err := flags.Parse(args); err != nil {
 		return settings, err
 	}
@@ -175,17 +195,34 @@ func parseOptions(args []string) (options, error) {
 	if settings.Profile != fullProfile && settings.Profile != smokeProfile {
 		return settings, fmt.Errorf("LLVM profile %q is invalid; expected full or smoke", settings.Profile)
 	}
+	if settings.Repetition < trialRepetitionDefault || settings.TrialID != "" && !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`).MatchString(settings.TrialID) {
+		return settings, errors.New("LLVM trial identity must be a safe path component and repetition must be positive")
+	}
+	if settings.RemotePlanPath != "" {
+		remote, err := readRemotePlan(settings.RemotePlanPath)
+		if err != nil {
+			return settings, err
+		}
+		settings.Remote = remote
+	}
 	switch settings.Tool {
 	case dispatTool:
 		if settings.Mode != compilationMode && settings.Mode != interpretationMode && settings.Mode != hybridMode {
 			return settings, fmt.Errorf("Dispat distribution mode %q is invalid", settings.Mode)
 		}
-	case nxTool, lernaTool, changesetsTool:
+	case nxTool, lernaTool:
+		if settings.Mode != distributedMode && settings.Mode != manualGCPMode {
+			return settings, fmt.Errorf("%s requires distributed or manual-gcp-split mode, got %q", settings.Tool, settings.Mode)
+		}
+	case changesetsTool:
 		if settings.Mode != distributedMode {
-			return settings, fmt.Errorf("%s requires mode distributed, got %q", settings.Tool, settings.Mode)
+			return settings, fmt.Errorf("Changesets unsupported entry requires mode distributed")
 		}
 	default:
 		return settings, fmt.Errorf("LLVM experiment tool %q is invalid", settings.Tool)
+	}
+	if settings.Remote != nil && (settings.Mode == manualGCPMode) != (settings.Remote.Orchestration == manualGCPMode) {
+		return settings, errors.New("LLVM remote orchestration does not match the selected execution mode")
 	}
 	return settings, nil
 }
@@ -209,7 +246,10 @@ func availability(settings options) (string, string) {
 	if settings.Tool == changesetsTool {
 		return unsupportedStatus, "Changesets has no build task executor or distributed build mode"
 	}
-	if settings.Tool != dispatTool && (os.Getenv(cloudTokenEnvironmentName) == "" || os.Getenv(cloudIDEnvironmentName) == "") {
+	if settings.Mode == manualGCPMode && settings.Remote == nil {
+		return blockedStatus, "manual-gcp-split requires two independently identified GCE executor VMs; no local substitute was run"
+	}
+	if settings.Tool != dispatTool && settings.Mode != manualGCPMode && (os.Getenv(cloudTokenEnvironmentName) == "" || os.Getenv(cloudIDEnvironmentName) == "") {
 		return blockedStatus, "Nx Cloud distribution requires NX_CLOUD_ACCESS_TOKEN and EXPERIMENTS_NX_CLOUD_ID; no local fallback was run"
 	}
 	return "", ""
@@ -218,20 +258,31 @@ func availability(settings options) (string, string) {
 func runExperiment(parent context.Context, settings options) error {
 	ctx, cancel := context.WithTimeout(parent, settings.Timeout)
 	defer cancel()
-	cell := strings.Join([]string{experimentName, settings.Profile, settings.Mode, settings.Tool}, "-")
+	if settings.TrialID == "" {
+		identity, err := newIdentity()
+		if err != nil {
+			return err
+		}
+		settings.TrialID = identity
+	}
+	cell := strings.Join([]string{experimentName, settings.Profile, settings.Mode, settings.Tool, settings.TrialID, fmt.Sprintf("r%d", settings.Repetition)}, "-")
 	output := filepath.Join(settings.Results, cell)
-	if err := os.MkdirAll(output, directoryMode); err != nil {
+	if err := os.MkdirAll(settings.Results, directoryMode); err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(output, "verdict.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+	if err := os.Mkdir(output, directoryMode); err != nil {
+		return fmt.Errorf("LLVM trial output must be new; previous repetitions are immutable: %w", err)
 	}
+	settings.Output = output
 	log, err := os.Create(filepath.Join(output, "transcript.txt"))
 	if err != nil {
 		return err
 	}
 	defer log.Close()
 	result := initialResult(settings)
+	if settings.Remote != nil {
+		result.Topology = remoteTopology
+	}
 	record := verdict{Experiment: experimentName, Tool: settings.Tool, Scenario: settings.Profile + "-" + settings.Mode,
 		LLVM: &result, Steps: []step{}, Checks: []check{}}
 	version, versionErr := exec.CommandContext(ctx, dispatTool, "--version").Output()
@@ -239,6 +290,11 @@ func runExperiment(parent context.Context, settings options) error {
 		record.Dispat = dispatVersionLine(string(version))
 	}
 	result.BinarySHA256 = binaryDigest(dispatTool)
+	result.ToolVersions = captureToolVersions(ctx, settings)
+	record.ExecutionMeasurement, err = initializeMeasurement(settings, &result)
+	if err != nil {
+		return err
+	}
 	status, reason := availability(settings)
 	if status != "" {
 		result.Status, result.Reason = status, reason
@@ -252,6 +308,10 @@ func runExperiment(parent context.Context, settings options) error {
 		err = executeExperiment(ctx, settings, work, log, &record)
 	}
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			record.ExecutionMeasurement.Trial.Status = timeoutStatus
+		}
+		record.Passed, result.Status, result.Seconds = false, failedStatus, nil
 		result.Reason = err.Error()
 		fmt.Fprintln(log, err)
 		record.Checks = append(record.Checks, check{Name: result.Reason})
@@ -293,6 +353,15 @@ func binaryDigest(name string) string {
 }
 
 func writeResult(output string, record verdict) error {
+	if record.ExecutionMeasurement != nil {
+		if record.ExecutionMeasurement.Trial.Status != timeoutStatus {
+			record.ExecutionMeasurement.Trial.Status = record.LLVM.Status
+		}
+		attachDurationInputs(record.ExecutionMeasurement)
+		if err := measurement.Derive(record.ExecutionMeasurement); err != nil {
+			return err
+		}
+	}
 	if err := writeJSON(filepath.Join(output, "verdict.json"), record); err != nil {
 		return err
 	}
@@ -331,6 +400,7 @@ func makeCommand(ctx context.Context, request command) *exec.Cmd {
 	process.Dir = request.Dir
 	process.Env = append(os.Environ(), request.Env...)
 	process.Stdout, process.Stderr = request.Output, request.Output
+	process.Stdin = request.Input
 	process.WaitDelay = commandWaitDelay
 	configureProcess(process)
 	return process
