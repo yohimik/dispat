@@ -82,6 +82,8 @@ test('kernel completion rejects partial builds, profile drift and inconsistent c
     {...result('smoke'), moduleCounts: {x86_64: 1, arm64: 0}}, {...kernel, status: 'failed', reason: 'failure'},
     {...kernel, llvmVersion: null}, {...kernel, LLVMVersion: '20.1.8'}, {...kernel, omissions: ['']},
     {...result('smoke'), omissions: []},
+    {...kernel, artifacts: kernel.artifacts.map((artifact) => ({...artifact, bytes: 1.5}))},
+    {...kernel, status: 'failed', reason: 'partial failure', seconds: undefined, artifacts: [kernel.artifacts[0], kernel.artifacts[0]]},
   ]) assert.throws(() => validateReport(report(invalid)), /linuxKernel/);
   assert.throws(() => validateReport(report(kernel, false)), /passed/);
   const wrongNamespace = report(kernel);

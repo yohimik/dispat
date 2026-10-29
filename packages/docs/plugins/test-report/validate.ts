@@ -576,12 +576,15 @@ function experimentBuild(options: ExperimentFieldOptions): ExperimentBuild {
         sha256: string(artifact.sha256, `${at}.artifacts[${index}].sha256`),
         bytes: number(artifact.bytes, `${at}.artifacts[${index}].bytes`),
       };
-      if (!parsed.package || !parsed.path || !/^[a-f0-9]{64}$/.test(parsed.sha256) || parsed.bytes <= 0) {
+      if (!parsed.package || !parsed.path || !/^[a-f0-9]{64}$/.test(parsed.sha256) || !Number.isSafeInteger(parsed.bytes) || parsed.bytes <= 0) {
         throw new ReportError(`${at}.artifacts[${index}]`, 'an identified artifact with positive size and SHA-256', item);
       }
       return parsed;
     }),
   };
+  if (new Set(result.artifacts.map((artifact) => JSON.stringify([artifact.package, artifact.path]))).size !== result.artifacts.length) {
+    throw new ReportError(`${at}.artifacts`, 'unique package and artifact path pairs', value);
+  }
   if (!/^[a-f0-9]{40}$/.test(result.sourceRevision) || !result.topology || !result.cache ||
       result.executorCount !== 2 || !Number.isInteger(result.jobsPerExecutor) || result.jobsPerExecutor < 1 ||
       result.buildTargets.length === 0 || result.backends.length !== 2) {
