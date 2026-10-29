@@ -48,6 +48,8 @@ test('JSON pointer escaping resolves exact own fields and rejects malformed or i
 
 const missingDuration = 'a: required operation has no complete successful duration';
 const invalidSchedule = 'failed or repeated attempts do not establish a failure-free modeled schedule';
+const missingSchedule = 'successful completion of the modeled schedule is not established';
+const missingContainment = 'no named enclosing interval with complete task-containment evidence';
 const nonMonotonic = 'nominal duration arithmetic requires local monotonic elapsed measurements';
 const violatedPrecedence = 'retained modeled precedence is violated';
 const missingPrecedence = 'modeled precedence has not been verified';
@@ -70,6 +72,120 @@ const publishTimeline = ({measurement, span, overlap}) => {
   Object.assign(measurement.timeWindows[1], {seconds: span, clockDomain: 'coordinator:monotonic', evidence: fixture.graph.evidence});
   Object.assign(measurement.observedPeakOverlap, {value: overlap, evidence: fixture.graph.evidence});
 };
+
+test('zero-attempt trials distinguish missing completion from known failed or timed-out schedules', async (t) => {
+  const missingDurations = [missingDuration, 'b: required operation has no complete successful duration'];
+  for (const [trialStatus, scheduleStatus, scheduleReasons, upperReasons] of [
+    ['completed', 'unavailable', [...missingDurations, missingSchedule], [...fixture.analysis[4].reasons, missingSchedule]],
+    ['blocked', 'unavailable', [...missingDurations, missingSchedule], [...fixture.analysis[4].reasons, missingSchedule]],
+    ['unsupported', 'unavailable', [...missingDurations, missingSchedule], [...fixture.analysis[4].reasons, missingSchedule]],
+    ['failed', 'inapplicable', [invalidSchedule, ...missingDurations], [invalidSchedule, ...fixture.analysis[4].reasons]],
+    ['timeout', 'inapplicable', [invalidSchedule, ...missingDurations], [invalidSchedule, ...fixture.analysis[4].reasons]],
+  ]) {
+    await t.test(trialStatus, () => {
+      const measurement = structuredClone(fixture);
+      Object.assign(measurement.trial, {status: trialStatus, tool: 'changesets', mode: 'distributed', profile: 'full'});
+      measurement.taskIntervals = [];
+      for (const vertex of measurement.graph.vertices) vertex.durationInputs = [];
+      measurement.graph.counts.timedVertices = 0;
+      Object.assign(measurement.timeWindows[0], {seconds: null, reason: 'no workload was executed'});
+      delete measurement.analysis[3].inputs.T_enclosing;
+      for (const index of [0, 1]) unavailableCalculation({measurement, index, status: 'unavailable', reasons: missingDurations});
+      unavailableCalculation({measurement, index: 2, status: scheduleStatus, reasons: scheduleReasons});
+      unavailableCalculation({measurement, index: 3, status: scheduleStatus, reasons: [...scheduleReasons, missingContainment]});
+      unavailableCalculation({measurement, index: 4, status: scheduleStatus, reasons: upperReasons});
+      assert.deepEqual(validate(measurement), measurement);
+      assert.deepEqual(measurement.taskIntervals, []);
+      assert.ok(measurement.analysis.every((calculation) => calculation.value === null));
+      const misclassified = structuredClone(measurement);
+      misclassified.analysis[2].status = scheduleStatus === 'unavailable' ? 'inapplicable' : 'unavailable';
+      assert.throws(() => validate(misclassified), /executionMeasurement/);
+      const inventedWork = structuredClone(measurement);
+      Object.assign(inventedWork.analysis[0], {value: 0, status: 'computed', reasons: []});
+      assert.throws(() => validate(inventedWork), /executionMeasurement/);
+      const danglingInput = structuredClone(measurement);
+      danglingInput.graph.vertices[0].durationInputs.push({source: 'measurement', pointer: '/taskIntervals/0/durationSeconds'});
+      assert.throws(() => validate(danglingInput), /executionMeasurement/);
+    });
+  }
+});
+
+test('numeric durations do not establish successful completion of a noncompleted trial', async (t) => {
+  for (const [trialStatus, scheduleStatus, reason] of [
+    ['blocked', 'unavailable', missingSchedule],
+    ['unsupported', 'unavailable', missingSchedule],
+    ['failed', 'inapplicable', invalidSchedule],
+    ['timeout', 'inapplicable', invalidSchedule],
+  ]) {
+    await t.test(trialStatus, () => {
+      const measurement = structuredClone(fixture);
+      measurement.trial.status = trialStatus;
+      for (const index of [2, 3]) unavailableCalculation({measurement, index, status: scheduleStatus, reasons: [reason]});
+      const upperReasons = scheduleStatus === 'inapplicable' ? [reason, ...fixture.analysis[4].reasons] : [...fixture.analysis[4].reasons, reason];
+      unavailableCalculation({measurement, index: 4, status: scheduleStatus, reasons: upperReasons});
+      assert.deepEqual(validate(measurement).analysis.slice(0, 2).map((calculation) => calculation.value), [6, 4]);
+      const fabricatedSchedule = structuredClone(measurement);
+      fabricatedSchedule.analysis[2] = structuredClone(fixture.analysis[2]);
+      fabricatedSchedule.analysis[3] = structuredClone(fixture.analysis[3]);
+      assert.throws(() => validate(fabricatedSchedule), /executionMeasurement/);
+    });
+  }
+});
+
+test('attempt outcomes distinguish known failure from open or undocumented statuses', async (t) => {
+  for (const intervalStatus of ['failed', 'timeout', 'running', 'unknown', 'cancelled', 'canceled', 'aborted', 'custom-status']) {
+    await t.test(intervalStatus, () => {
+      const measurement = structuredClone(fixture);
+      measurement.taskIntervals[0].status = intervalStatus;
+      measurement.graph.counts.timedVertices = 1;
+      for (const index of [0, 1]) unavailableCalculation({measurement, index, status: 'unavailable', reasons: [missingDuration]});
+      const isKnownFailure = ['failed', 'timeout'].includes(intervalStatus);
+      const status = isKnownFailure ? 'inapplicable' : 'unavailable';
+      const reasons = isKnownFailure ? [invalidSchedule, missingDuration] : [missingDuration, missingSchedule];
+      for (const index of [2, 3]) unavailableCalculation({measurement, index, status, reasons});
+      const upperReasons = isKnownFailure ? [invalidSchedule, ...fixture.analysis[4].reasons] : [...fixture.analysis[4].reasons, missingSchedule];
+      unavailableCalculation({measurement, index: 4, status, reasons: upperReasons});
+      assert.deepEqual(validate(measurement), measurement);
+      const misclassified = structuredClone(measurement);
+      misclassified.analysis[2].status = isKnownFailure ? 'unavailable' : 'inapplicable';
+      assert.throws(() => validate(misclassified), /executionMeasurement/);
+      if (isKnownFailure) {
+        measurement.trial.status = 'unsupported';
+        assert.equal(validate(measurement).analysis[2].status, 'inapplicable');
+      }
+    });
+  }
+  const retry = structuredClone(fixture);
+  retry.taskIntervals.push({...retry.taskIntervals[0], attemptId: 'attempt-2'});
+  knownViolation({measurement: retry, reasons: [invalidSchedule]});
+  assert.deepEqual(validate(retry).analysis.slice(0, 2).map((calculation) => calculation.value), [6, 4]);
+  retry.trial.status = 'blocked';
+  assert.equal(validate(retry).analysis[2].status, 'inapplicable');
+  const openPhase = structuredClone(fixture);
+  openPhase.taskIntervals.push({...openPhase.taskIntervals[0], operation: 'verification', status: 'running'});
+  for (const index of [2, 3]) unavailableCalculation({measurement: openPhase, index, status: 'unavailable', reasons: [missingSchedule]});
+  unavailableCalculation({measurement: openPhase, index: 4, status: 'unavailable', reasons: [...fixture.analysis[4].reasons, missingSchedule]});
+  assert.deepEqual(validate(openPhase).analysis.slice(0, 2).map((calculation) => calculation.value), [6, 4]);
+});
+
+test('known capacity and precedence violations dominate unestablished completion', () => {
+  for (const violation of [capacityViolation, violatedPrecedence]) {
+    const measurement = structuredClone(fixture);
+    measurement.trial.status = 'unsupported';
+    if (violation === capacityViolation) {
+      scheduleCoordinates({measurement, coordinates: [[0, 4], [0, 2]]});
+      measurement.resources.taskSlotLimit.value = 1;
+    } else {
+      measurement.premises.precedenceValid = false;
+      measurement.premises.precedenceReason = 'retained precedence is contradicted';
+    }
+    for (const index of [2, 3]) unavailableCalculation({measurement, index, status: 'inapplicable', reasons: [violation, missingSchedule]});
+    unavailableCalculation({measurement, index: 4, status: 'inapplicable', reasons: [violation, ...fixture.analysis[4].reasons, missingSchedule]});
+    assert.equal(validate(measurement).analysis[2].status, 'inapplicable');
+    measurement.analysis[2].status = 'unavailable';
+    assert.throws(() => validate(measurement), /executionMeasurement/);
+  }
+});
 
 test('known violations dominate missing inputs while retaining both exact reasons', () => {
   const measurement = structuredClone(fixture);
@@ -201,7 +317,9 @@ test('empty or zero-duration modeled work has no positive overlap and a zero den
   const incomplete = structuredClone(fixture);
   Object.assign(incomplete.taskIntervals[0], {durationSeconds: null, reason: 'missing'});
   incomplete.graph.counts.timedVertices = 1;
-  for (const index of [0, 1, 2, 3]) unavailableCalculation({measurement: incomplete, index, status: 'unavailable', reasons: [missingDuration]});
+  for (const index of [0, 1]) unavailableCalculation({measurement: incomplete, index, status: 'unavailable', reasons: [missingDuration]});
+  for (const index of [2, 3]) unavailableCalculation({measurement: incomplete, index, status: 'unavailable', reasons: [missingDuration, missingSchedule]});
+  unavailableCalculation({measurement: incomplete, index: 4, status: 'unavailable', reasons: [...fixture.analysis[4].reasons, missingSchedule]});
   Object.assign(incomplete.observedPeakOverlap, {value: 0, evidence: fixture.graph.evidence});
   assert.throws(() => validate(incomplete), /executionMeasurement/);
 });
@@ -254,14 +372,16 @@ test('overlapping phases make aggregation inapplicable without inventing extra t
   measurement.graph.counts.timedVertices = 1;
   measurement.resources.taskSlotLimit.value = 1;
   const violation = 'a: sum-disjoint duration inputs contain overlapping selected phases';
-  for (const index of [0, 1, 2, 3]) unavailableCalculation({measurement, index, status: 'inapplicable', reasons: [violation, 'a: duration aggregation lacks comparable, disjoint phase intervals']});
-  unavailableCalculation({measurement, index: 4, status: 'inapplicable', reasons: [violation, ...fixture.analysis[4].reasons]});
+  for (const index of [0, 1]) unavailableCalculation({measurement, index, status: 'inapplicable', reasons: [violation, 'a: duration aggregation lacks comparable, disjoint phase intervals']});
+  for (const index of [2, 3]) unavailableCalculation({measurement, index, status: 'inapplicable', reasons: [violation, 'a: duration aggregation lacks comparable, disjoint phase intervals', missingSchedule]});
+  unavailableCalculation({measurement, index: 4, status: 'inapplicable', reasons: [violation, ...fixture.analysis[4].reasons, missingSchedule]});
   assert.equal(validate(measurement).analysis[2].status, 'inapplicable');
   measurement.taskIntervals.push({...measurement.taskIntervals[0], operation: 'missing-phase', durationSeconds: null, reason: 'not observed'});
   delete measurement.taskIntervals[3].startSeconds;
   delete measurement.taskIntervals[3].endSeconds;
   measurement.graph.vertices[0].durationInputs.push({source: 'measurement', pointer: '/taskIntervals/3/durationSeconds'});
-  for (const index of [0, 1, 2, 3]) measurement.analysis[index].reasons = [violation, missingDuration];
+  for (const index of [0, 1]) measurement.analysis[index].reasons = [violation, missingDuration];
+  for (const index of [2, 3]) measurement.analysis[index].reasons = [violation, missingDuration, missingSchedule];
   assert.equal(validate(measurement).analysis[0].status, 'inapplicable');
 });
 

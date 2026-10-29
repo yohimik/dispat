@@ -97,6 +97,12 @@ const COMPARISON_TOLERANCE = 1e-9;
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const INTERVAL_POINTER_PATTERN = /^\/taskIntervals\/(0|[1-9][0-9]*)\/durationSeconds$/;
 const SUCCESS_STATUSES = ['completed', 'success'];
+const FAILED_SCHEDULE_STATUSES = ['failed', 'timeout'];
+const COMPLETED_TRIAL_STATUS = 'completed';
+const ELIGIBLE_SCHEDULE_STATUS = 'eligible';
+const MISSING_SCHEDULE_STATUS = 'missing';
+const VIOLATED_SCHEDULE_STATUS = 'violated';
+const FAILURE_FREE_ATTEMPT_COUNT = 1;
 const CLOCK_KINDS = ['monotonic', 'wall', 'bounded-mapping'];
 const TRIAL_STATUSES = ['completed', 'failed', 'timeout', 'blocked', 'unsupported'];
 const GRAPH_SCOPES = ['native-task-graph', 'analysis-projection', 'fixture-workload'];
@@ -198,12 +204,14 @@ interface SelectedGraph {
   work: number;
   critical: number;
   path: string[];
-  isFailureFree: boolean;
+  schedulePremise: SchedulePremise;
 }
+type SchedulePremise = typeof ELIGIBLE_SCHEDULE_STATUS | typeof MISSING_SCHEDULE_STATUS | typeof VIOLATED_SCHEDULE_STATUS;
 const MISSING_DURATION_REASON = 'required operation has no complete successful duration';
 const PHASE_OVERLAP_REASON = 'sum-disjoint duration inputs contain overlapping selected phases';
 const DISCONNECTED_DURATION_REASON = 'duration aggregation lacks comparable, disjoint phase intervals';
 const INVALID_SCHEDULE_REASON = 'failed or repeated attempts do not establish a failure-free modeled schedule';
+const MISSING_SCHEDULE_REASON = 'successful completion of the modeled schedule is not established';
 const NON_MONOTONIC_REASON = 'nominal duration arithmetic requires local monotonic elapsed measurements';
 const MISSING_PRECEDENCE_REASON = 'modeled precedence has not been verified';
 const VIOLATED_PRECEDENCE_REASON = 'retained modeled precedence is violated';
@@ -214,6 +222,23 @@ const ZERO_DENOMINATOR_REASON = 'the selected bound is zero; division is undefin
 const CAPACITY_VIOLATION_REASON = 'comparable retained intervals exceed the declared task-slot ceiling';
 const PRECEDENCE_VIOLATION_REASON = 'comparable retained intervals violate modeled precedence, including virtual-relay paths';
 const UPPER_REASONS = ['one-pool upper-bound evaluation is unsupported by this nominal reporting profile', 'fixed available interchangeable slots and all CCME §13.11 clause 2 premises are not established'];
+
+interface SchedulePremiseOptions {measurement: ExecutionMeasurement; hasCompleteDurations: boolean}
+function classifySchedulePremise(options: SchedulePremiseOptions): SchedulePremise {
+  const {measurement, hasCompleteDurations} = options;
+  const {trial, taskIntervals} = measurement;
+  if (FAILED_SCHEDULE_STATUSES.includes(trial.status)) return VIOLATED_SCHEDULE_STATUS;
+  const attempts = new Map<string, Set<string>>();
+  for (const interval of taskIntervals) {
+    if (FAILED_SCHEDULE_STATUSES.includes(interval.status)) return VIOLATED_SCHEDULE_STATUS;
+    const identities = attempts.get(interval.taskId) ?? new Set<string>();
+    identities.add(interval.attemptId);
+    attempts.set(interval.taskId, identities);
+    if (identities.size > FAILURE_FREE_ATTEMPT_COUNT) return VIOLATED_SCHEDULE_STATUS;
+  }
+  if (trial.status !== COMPLETED_TRIAL_STATUS || !hasCompleteDurations || taskIntervals.some((interval) => !SUCCESS_STATUSES.includes(interval.status))) return MISSING_SCHEDULE_STATUS;
+  return ELIGIBLE_SCHEDULE_STATUS;
+}
 
 function selectGraph(options: CalculationValidationOptions): SelectedGraph {
   const {measurement, at} = options;
@@ -259,7 +284,8 @@ function selectGraph(options: CalculationValidationOptions): SelectedGraph {
     const isOverlapping = intervals.some((interval, index) => intervals.slice(0, index).some((previous) => previous.clockDomain === interval.clockDomain && previous.clockKind === interval.clockKind && previous.endSeconds! > previous.startSeconds! && interval.endSeconds! > interval.startSeconds! && previous.startSeconds! < interval.endSeconds! && interval.startSeconds! < previous.endSeconds!));
     return isOverlapping ? [`${vertex.id}: ${PHASE_OVERLAP_REASON}`] : [];
   });
-  const result: SelectedGraph = {selected, durations, order, reasons, violations: durationViolations, work: 0, critical: 0, path: [], isFailureFree: measurement.trial.status === 'completed' && taskIntervals.every((interval) => SUCCESS_STATUSES.includes(interval.status) && new Set(taskIntervals.filter((candidate) => candidate.taskId === interval.taskId).map((candidate) => candidate.attemptId)).size === 1)};
+  const schedulePremise = classifySchedulePremise({measurement, hasCompleteDurations: durations.size === vertices.size});
+  const result: SelectedGraph = {selected, durations, order, reasons, violations: durationViolations, work: 0, critical: 0, path: [], schedulePremise};
   const counts = graph.counts;
   requireMeasurement({condition: counts && counts.vertices === vertices.size && counts.edges === graph.edges.length && counts.virtualVertices === graph.vertices.filter((vertex) => vertex.isVirtual).length && counts.timedVertices === graph.vertices.filter((vertex) => !vertex.isVirtual && durations.has(vertex.id)).length, at, reason: 'counts differ from retained graph/coverage'});
   if (reasons.length) return result;
@@ -302,7 +328,8 @@ function validateCalculations(options: DerivedValidationOptions): void {
   const missing: string[] = [];
   if (work.status === 'inapplicable') violations.push(...work.reasons);
   else if (work.value === null) missing.push(...work.reasons);
-  if (!graph.isFailureFree) violations.push(INVALID_SCHEDULE_REASON);
+  if (graph.schedulePremise === VIOLATED_SCHEDULE_STATUS) violations.push(INVALID_SCHEDULE_REASON);
+  else if (graph.schedulePremise === MISSING_SCHEDULE_STATUS) missing.push(MISSING_SCHEDULE_REASON);
   if (measurement.premises.precedenceValid === false) violations.push(VIOLATED_PRECEDENCE_REASON);
   else if (measurement.premises.precedenceValid !== true || !measurement.premises.evidence?.length) missing.push(MISSING_PRECEDENCE_REASON);
   if (resources.taskSlotLimit.value === null) missing.push(MISSING_CAPACITY_REASON);
@@ -314,8 +341,9 @@ function validateCalculations(options: DerivedValidationOptions): void {
   if (window && window.clockKind !== 'monotonic') { ratio.status = 'inapplicable'; ratio.reasons.push(NON_MONOTONIC_REASON); }
   if (window && contradictsContainment({graph, window})) { ratio.status = 'inapplicable'; ratio.reasons.push(CONTAINMENT_VIOLATION_REASON); }
   if (!ratio.reasons.length) { ratio.value = window!.seconds! / slot.value!; ratio.status = 'computed'; }
-  const upperViolations = [...graph.violations, ...(!graph.isFailureFree ? [INVALID_SCHEDULE_REASON] : []), ...(!hasMonotonicDurations ? [NON_MONOTONIC_REASON] : []), ...findScheduleViolations(options), ...(measurement.premises.precedenceValid === false ? [VIOLATED_PRECEDENCE_REASON] : [])];
-  const expected = [work, critical, slot, ratio, {value: null, status: upperViolations.length ? 'inapplicable' : 'unavailable', reasons: [...upperViolations, ...UPPER_REASONS]}];
+  const upperViolations = [...graph.violations, ...(graph.schedulePremise === VIOLATED_SCHEDULE_STATUS ? [INVALID_SCHEDULE_REASON] : []), ...(!hasMonotonicDurations ? [NON_MONOTONIC_REASON] : []), ...findScheduleViolations(options), ...(measurement.premises.precedenceValid === false ? [VIOLATED_PRECEDENCE_REASON] : [])];
+  const upperMissing = [...UPPER_REASONS, ...(graph.schedulePremise === MISSING_SCHEDULE_STATUS ? [MISSING_SCHEDULE_REASON] : [])];
+  const expected = [work, critical, slot, ratio, {value: null, status: upperViolations.length ? 'inapplicable' : 'unavailable', reasons: [...upperViolations, ...upperMissing]}];
   const identities = ['nominal-work', 'nominal-critical-path', 'nominal-slot-bound', 'nominal-enclosing-ratio', 'one-pool-upper-bound'];
   const formulas = ['W_nom = sum_i d_i', 'F_i = d_i + max_{j -> i} F_j; L_nom = max_i F_i', 'B_nom = max(L_nom, W_nom / s)', 'R_nom = T_enclosing / B_nom', 'U = W/s + (1 - 1/s)*L'];
   const internal = (pointer: string): MeasurementReference => ({source: 'measurement', pointer});

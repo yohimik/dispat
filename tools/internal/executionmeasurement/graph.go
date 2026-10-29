@@ -26,19 +26,19 @@ const (
 )
 
 type graphValues struct {
-	counts        GraphCounts
-	durations     map[string]float64
-	order         []string
-	work          float64
-	criticalPath  float64
-	path          []string
-	reasons       []string
-	violations    []string
-	isFailureFree bool
+	counts          GraphCounts
+	durations       map[string]float64
+	order           []string
+	work            float64
+	criticalPath    float64
+	path            []string
+	reasons         []string
+	violations      []string
+	schedulePremise schedulePremise
 }
 
 func deriveGraph(measurement *Measurement) (graphValues, error) {
-	result := graphValues{durations: map[string]float64{}, isFailureFree: measurement.Trial.Status == completedStatus}
+	result := graphValues{durations: map[string]float64{}}
 	vertices := map[string]Vertex{}
 	indegrees := map[string]int{}
 	successors := map[string][]string{}
@@ -106,22 +106,7 @@ func deriveGraph(measurement *Measurement) (graphValues, error) {
 			return result, fmt.Errorf(vertexErrorFormat, interval.TaskID, invalidDurationReferenceReason)
 		}
 	}
-	attempts := map[string]map[string]bool{}
-	for _, interval := range measurement.TaskIntervals {
-		if _, exists := vertices[interval.TaskID]; !exists {
-			return result, fmt.Errorf(vertexErrorFormat, interval.TaskID, invalidDurationReferenceReason)
-		}
-		if interval.Status != completedStatus && interval.Status != successfulStatus {
-			result.isFailureFree = false
-		}
-		if attempts[interval.TaskID] == nil {
-			attempts[interval.TaskID] = map[string]bool{}
-		}
-		attempts[interval.TaskID][interval.AttemptID] = true
-		if len(attempts[interval.TaskID]) > 1 {
-			result.isFailureFree = false
-		}
-	}
+	result.schedulePremise = classifySchedulePremise(measurement, len(result.durations) == len(vertices))
 	if len(result.reasons) != 0 {
 		return result, nil
 	}

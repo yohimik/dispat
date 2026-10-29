@@ -27,6 +27,7 @@ const (
 	upperFormula                    = "U = W/s + (1 - 1/s)*L"
 	missingCapacityReason           = "no evidenced unit-task concurrency upper bound"
 	invalidScheduleReason           = "failed or repeated attempts do not establish a failure-free modeled schedule"
+	missingScheduleReason           = "successful completion of the modeled schedule is not established"
 	missingPrecedenceReason         = "modeled precedence has not been verified"
 	violatedPrecedenceReason        = "retained modeled precedence is violated"
 	nonMonotonicDurationReason      = "nominal duration arithmetic requires local monotonic elapsed measurements"
@@ -77,8 +78,11 @@ func Derive(measurement *Measurement) error {
 	deriveRatio(&ratio, measurement, slot)
 	upper := newCalculation(upperBoundID, upperFormula, map[string]Reference{"W": measurementReference("/analysis/0/value"), "L": measurementReference("/analysis/1/value"), "s": measurementReference("/resources/usableOnePoolSlots/value")})
 	upper.Status, upper.Reasons = unavailableStatus, []string{nominalOnlyUpperReason, missingOnePoolReason}
+	if graph.schedulePremise == scheduleMissing {
+		upper.Reasons = append(upper.Reasons, missingScheduleReason)
+	}
 	knownViolations := slices.Clone(graph.violations)
-	if !graph.isFailureFree {
+	if graph.schedulePremise == scheduleViolated {
 		knownViolations = append(knownViolations, invalidScheduleReason)
 	}
 	if !hasMonotonicDurations(measurement) {
@@ -116,8 +120,11 @@ func deriveSlot(slot *Calculation, measurement *Measurement, graph graphValues, 
 	} else if work.Value == nil {
 		missing = append(missing, work.Reasons...)
 	}
-	if !graph.isFailureFree {
+	switch graph.schedulePremise {
+	case scheduleViolated:
 		violations = append(violations, invalidScheduleReason)
+	case scheduleMissing:
+		missing = append(missing, missingScheduleReason)
 	}
 	switch checkPrecedenceEvidence(measurement) {
 	case inapplicableStatus:
