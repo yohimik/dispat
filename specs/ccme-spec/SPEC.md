@@ -10052,8 +10052,8 @@ and when effect decisions are evaluated:
 * In `hybrid`, the orchestrator compiles known nonpush command paths for eligible node pickup and interprets
   first-only effect decisions after exact prerequisites settle.
 
-`--distribution-mode=hybrid` is specified here for a later implementation. A binary MUST reject a mode it does
-not implement; it MUST NOT silently execute it as compilation. An implementation's dated conformance status
+A binary MUST reject a distribution mode it does not implement; it MUST NOT silently execute hybrid as
+compilation. An implementation's dated conformance status
 belongs in DESIGN-HISTORY.md, not in the normative meaning of these values. No mode changes which packages or versions
 `Plan(input)` selects. Execution links are independent of the history-selection modes in §27 and MUST NOT
 change source ownership, repository discovery or release scope.
@@ -10069,7 +10069,7 @@ positive cross-run command capacity, and `runOnly: choreographer` for a task eli
 policy cannot change node capacity or the first node's authority. Node names identify execution endpoints,
 not repository peers.
 
-For interpretation, `execution.maxAttempts` is the positive maximum number of accepted physical pickups
+In every distribution mode, `execution.maxAttempts` is the positive maximum number of accepted physical pickups
 of one delegated logical task, including its first pickup. Omission means one total attempt; the accepted range
 is 1 through 64, and values outside it are refused before effects. The resolved value is signed into
 the bootstrap and complete task graph, and every node verifies the same value. First-only native effects
@@ -10246,6 +10246,9 @@ Git-push effect.
 Delegable preparation, test, build and user stages are in that
 segment. Version, sign, syncLock and shared-file preparation may be compiled there only when their
 engine-managed effects are nonpush; they retain required first-node placement and file/owner lanes.
+An implementation MAY conservatively interpret those first-only preparation tasks instead. It fixes that
+choice in each signed descriptor before execution; first-node placement alone does not grant a peer
+authority or permit a native effect inside a compiled command.
 Login and publish hooks, publication, native release commits/tags/ref pushes, peer settlement, receipt
 reconciliation, recording and postrecord hooks belong to the first-only interpreted effect segment.
 An engine-managed native release, VCS ref or receipt mutation in an earlier preparing stage also belongs
@@ -10255,7 +10258,17 @@ prepared-state OID gates consumers. It cannot perform a release, ref or receipt 
 as a file edit.
 This is an authority classification, not a claim that arbitrary trusted shell commands are sandboxed.
 Virtual relay vertices are graph gates rather than separately executable tasks. Every executable task has
-exactly one policy owner. Signed exact outcome and effective-input gates cross the partition in both directions:
+exactly one policy owner. If one executable task contains both ordinary preparation and an interpreted
+effect, the whole task belongs to the first-only interpreted segment. Splitting it is permitted only when
+the fixed graph already contains the separate vertices and preserves their hook, failure, input and
+ordering semantics; execution MUST NOT invent vertices or reclassify a task after dispatch.
+The signed semantic descriptor and `GraphDigest` bind this segment classification and the exact pinned
+operation or command policy. An effect descriptor MAY refer to that pinned policy instead of duplicating
+command bytes, but a missing command body alone neither identifies an effect nor authorizes it. A lazy
+effect callback still waits for its typed gates and records the signed first-only claim or effect intent
+of §28.4 before the first possible effect. Hybrid command pickups use the same signed attempt limit,
+repeat-safety policy, exact pickup identity and cancellation/finality rules as the other modes.
+Signed exact outcome and effective-input gates cross the partition in both directions:
 a build can unlock publication, and a settled provider publication/record can unlock a later consumer build.
 These alternations may recur along one dependency chain; hybrid is not a global two-phase barrier.
 The same fixed graph and failure semantics apply throughout. The orchestrator interprets effect decisions only
@@ -10390,14 +10403,14 @@ tasks do not invite a peer claim, but they use the same exact branch identity an
 The canonical task branch is the sole logical winner authority. A Claim atomically advances that branch and
 names one unique pickup ID. The worker creates its pending ref from the accepted Claim tip and an outcome
 ref from that exact pending commit; each ref is create-only and unique to the run, task, node and
-pickup. In interpretation the pickup ref name includes its creation time and a separately generated,
-persisted random pickup identity; equal timestamps cannot collide, and a timestamp is never claim authority,
-readiness evidence, or a reason to free capacity. An interpretation success uses a completed ref; a failure
-or cancellation uses a failed ref, both direct children of that pickup's pending commit. A successful task
+pickup. Every mode uses a separately generated, persisted random pickup identity; a ref name MAY also
+include its creation time, but equal timestamps MUST NOT collapse distinct pickups. A timestamp is never
+claim authority, readiness evidence, or a reason to free capacity. A success uses an output (completed)
+ref; a failure or cancellation uses a failed ref, both direct children of that pickup's pending commit. A successful task
 with no declared output still retains the signed completed commit and canonical terminal marker. A signed Result
 or Ack may be admitted as pickup evidence on the ledger without advancing the
 canonical task tip while a successor pickup is active. The first node selects at most one verified successful
-Result as the canonical terminal winner before installing its outputs. In interpretation, a durably settled
+Result as the canonical terminal winner before installing its outputs. In every mode, a durably settled
 failed Result, including the required package-hook outcome, may reopen the task for a sequential successor
 only while its signed `execution.maxAttempts` total has not been exhausted. The default total of one gives
 an accepted failure terminal finality. A failed attempt alone discharges no logical successor edge.
@@ -10825,6 +10838,17 @@ is not applicable, while that mode's invocation must fail before effects. Every 
 51. Skew node clocks so one deadline expires and a heartbeat or reply is lost while the accepted attempt still
     runs. Signed attempt and epoch order remains authoritative; timeout or clock skew alone neither frees
     physical capacity nor proves cancellation finality or permits a conflicting publication.
+52. In each mode, omit `execution.maxAttempts` and settle a failed command: the one accepted attempt is
+    terminal. With a signed limit of two, a settled failed first attempt may yield one sequential successor
+    with a distinct persisted pickup identity; neither failure nor a lost receipt discharges dependency edges
+    before logical finality. Reply loss for an existing pickup reuses its exact identity and does not consume
+    a new attempt. Exhausting the limit never enables another pickup. Uncertain contact loss additionally
+    requires vector 43's repeat-safety and cancellation fence, with old capacity retained.
+53. In hybrid, one fixed task contains a prepared-file edit and an engine-managed receipt or ref mutation:
+    classify the whole task as interpreted first-only. A first-only nonpush preparation may also be
+    interpreted conservatively. Changing either signed segment classification invalidates the graph identity;
+    supplying no command bytes does not bypass its pinned policy or first-only effect intent. A peer never
+    executes an interpreted descriptor, and no callback runs before the exact signed prerequisites settle.
 
 ### 28.9 Operational diagnostics
 

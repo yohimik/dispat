@@ -1189,3 +1189,15 @@ independence from node count or guaranteeing entropy after arbitrary processing.
 guidance supports keeping the physical source justification separate from the mathematical implication.
 This informative clarification establishes no hardware noise law or measured entropy rate and preserves
 all capture, continuation, authority and recovery requirements.
+
+## 2026-10-29: Hybrid task ownership and mode-independent attempts
+
+Sections 28.2 through 28.4 clarify that the signed attempt limit and repeat-safety/finality rules apply
+to command pickups in every distribution mode. A lost reply retains the existing pickup identity; a
+permitted successor has a distinct persisted identity and cannot discharge edges before logical finality.
+Hybrid binds each task's segment and pinned operation policy in the signed graph. A task mixing preparation
+with a native effect is interpreted as a whole unless the fixed graph already separates those operations.
+First-only nonpush preparation may be interpreted conservatively; compiling it requires the specified
+write-set and prepared-input contract. Lazy effect evaluation retains typed gates and durable intent before
+effects. Vectors 52 and 53 exercise these boundaries. This completes the implementation contract without
+asserting that a particular binary implements hybrid or that one execution mode is faster.
