@@ -46,8 +46,7 @@ on:
         description: One fixed zone for every cell in this build campaign
         required: true
         default: us-central1-b
-        type: choice
-        options: [us-central1-a, us-central1-b, us-central1-c, us-central1-f]
+        type: string
       cloud-cpu-platform:
         description: Exact CPU platform (Sapphire Rapids requires C3; Cascade/Ice Lake require N2)
         required: true
