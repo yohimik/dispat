@@ -23,13 +23,14 @@ type campaignImportOptions struct {
 }
 
 type importedCampaign struct {
-	Workload       string            `json:"workload"`
-	Run            string            `json:"run"`
-	Attempt        string            `json:"attempt"`
-	ManifestSHA256 string            `json:"manifestSha256"`
-	Cells          map[string]string `json:"verdictSha256"`
-	Evidence       map[string]string `json:"retainedEnvironmentSha256"`
-	root           string
+	Workload         string            `json:"workload"`
+	Run              string            `json:"run"`
+	Attempt          string            `json:"attempt"`
+	ManifestSHA256   string            `json:"manifestSha256"`
+	Cells            map[string]string `json:"verdictSha256"`
+	Evidence         map[string]string `json:"retainedEnvironmentSha256"`
+	root             string
+	optionalEvidence map[string]string
 }
 
 type campaignImport struct {
@@ -227,7 +228,8 @@ func validateImportedCampaign(ctx context.Context, selected *importedCampaign, r
 		result.cells[name] = root
 	}
 	selected.ManifestSHA256 = importDigest(content)
-	return nil
+	selected.optionalEvidence, err = snapshotImportedCleanupEvidence(selected.root)
+	return err
 }
 
 func importDigest(content []byte) string {

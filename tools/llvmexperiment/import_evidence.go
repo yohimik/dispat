@@ -9,8 +9,14 @@ import (
 func retainImportedEnvironment(root string, imported *campaignImport) error {
 	for index := range imported.Campaigns {
 		selected := &imported.Campaigns[index]
+		if err := verifyImportedCleanupSnapshot(selected.root, selected.optionalEvidence); err != nil {
+			return err
+		}
 		selected.Evidence = map[string]string{}
 		paths := []string{"campaign.json"}
+		for relative := range selected.optionalEvidence {
+			paths = append(paths, relative)
+		}
 		for _, cell := range campaignCells() {
 			if cell.Tool == changesetsTool {
 				continue
@@ -39,6 +45,9 @@ func retainImportedEnvironment(root string, imported *campaignImport) error {
 				return err
 			}
 			digest := importDigest(content)
+			if expected, optional := selected.optionalEvidence[relative]; optional && digest != expected {
+				return fmt.Errorf(importCleanupSourceChangedError)
+			}
 			if relative == "campaign.json" && digest != selected.ManifestSHA256 {
 				return fmt.Errorf("campaign manifest changed during import")
 			}
@@ -53,6 +62,9 @@ func retainImportedEnvironment(root string, imported *campaignImport) error {
 		}
 		// Verify allocation against the retained bytes used by the report.
 		retained := filepath.Join(root, importedEvidenceDirectory, selected.Workload)
+		if err := verifyImportedCleanupSnapshot(retained, selected.optionalEvidence); err != nil {
+			return err
+		}
 		for _, cell := range campaignCells() {
 			if cell.Tool == changesetsTool {
 				continue
