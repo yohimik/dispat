@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const sshConnectionAttemptsOption = "ConnectionAttempts=3"
+
 const startupScript = `#!/bin/sh
 set -eu
 export DEBIAN_FRONTEND=noninteractive
@@ -237,7 +239,7 @@ func (d *driver) sshArgs(item instance) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []string{"-i", filepath.Join(d.settings.Root, "private/key"), "-o", "IdentitiesOnly=yes", "-o", "UserKnownHostsFile=" + filepath.Join(d.settings.Root, "private/known_hosts"), "-o", "StrictHostKeyChecking=yes", "-o", "ForwardAgent=no", "-o", "ConnectTimeout=15", "-o", "BatchMode=yes", sshUser + "@" + ip}, nil
+	return []string{"-i", filepath.Join(d.settings.Root, "private/key"), "-o", "IdentitiesOnly=yes", "-o", "UserKnownHostsFile=" + filepath.Join(d.settings.Root, "private/known_hosts"), "-o", "StrictHostKeyChecking=yes", "-o", "ForwardAgent=no", "-o", "ConnectTimeout=15", "-o", sshConnectionAttemptsOption, "-o", "BatchMode=yes", sshUser + "@" + ip}, nil
 }
 
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'" }
