@@ -10311,8 +10311,16 @@ the fixed graph already contains the separate vertices and preserves their hook,
 ordering semantics; execution MUST NOT invent vertices or reclassify a task after dispatch.
 The signed semantic descriptor and `GraphDigest` bind this segment classification and the exact pinned
 operation or command policy. An effect descriptor MAY refer to that pinned policy instead of duplicating
-command bytes, but a missing command body alone neither identifies an effect nor authorizes it. A lazy
-effect callback still waits for its typed gates and records the signed first-only claim or effect intent
+command bytes, but a missing command body alone neither identifies an effect nor authorizes it.
+The policy reference MAY use a digest of the complete selected pinned policy envelope. It MUST bind
+the source/configuration object identities, selected configuration paths and import provenance, and all
+nonsecret invocation and destination settings that select or change the operation. A semantic plan or
+structural graph digest alone suffices only if it already binds every such policy input: two configuration
+entry files in one source commit can select different native policies while producing the same semantic
+plan. The bootstrap's pinned selection MUST agree with the descriptor's reference. Compute this input
+identity before the final graph/carrier hashes; it MUST NOT depend circularly on those final hashes.
+Runtime Result, output and prepared-input holes retain their separate exact bindings.
+A lazy effect callback still waits for its typed gates and records the signed first-only claim or effect intent
 of §28.4 before the first possible effect. Hybrid command pickups use the same signed attempt limit,
 repeat-safety policy, exact pickup identity and cancellation/finality rules as the other modes.
 Signed exact outcome and effective-input gates cross the partition in both directions:

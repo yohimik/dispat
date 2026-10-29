@@ -1235,3 +1235,13 @@ Wolfram Alpha confirmed selected algebraic identities in the browser. The local 
 because activation failed, so this audit does not report a successful run of `verify-math.wls`.
 Both specification and agent-guide consistency and disposable release-lifecycle suites passed with the
 CLI built from the audited base. No production release or performance measurement is asserted here.
+
+## 2026-10-29: Exact interpreted-policy references
+
+The hybrid descriptor contract permits an indirect digest reference instead of duplicated command bytes,
+while requiring that reference to bind the complete selected pinned policy. Source object identities alone
+can contain several configuration entry files with different native policies; semantic plan and structural
+graph digests need not distinguish those selections. Configuration provenance and relevant nonsecret
+invocation and destination settings are therefore bound too, with bootstrap agreement and an acyclic hash
+construction. Result, output and prepared-input bindings remain separate. This clarifies the existing exact
+policy requirement; it does not certify an implementation's snapshot capture or effect recovery.
