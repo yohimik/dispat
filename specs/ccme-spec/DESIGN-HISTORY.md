@@ -1266,3 +1266,13 @@ optional affine probe constraints retain their whole-trial rate assumption rathe
 probes as proof of no drift. Duration and formula enclosures retain uncertainty and undefined denominators.
 This clarification supplies reporting semantics before multi-host collection; it asserts no GCP measurement,
 hardware calibration, successful full LLVM build or performance improvement.
+
+## 2026-10-29: Formula applicability and modeled interval selection
+
+The measurement profile makes missing evidence distinct from an established model violation, including
+precedence, failed/retried schedules, undefined ratios and unsupported upper-bound calculations. Known
+violations remain visible when other inputs are missing. Modeled task spans and overlap select the graph's
+accepted operation intervals; retaining omitted phases does not extend those quantities. Readers cross-check
+comparable interval evidence against precedence and slot ceilings and preserve structural validation on
+incomplete trials. These reporting clarifications precede producer/validator fixes and assert no completed
+experiment campaign or implementation-wide conformance.

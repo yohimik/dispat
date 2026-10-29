@@ -38,7 +38,7 @@ fields may carry more evidence without changing these meanings.
 | `resources.nested` | Per-task inner build parameters, such as Ninja job limit, link pool, target backend and host architecture. Inner jobs, vCPUs and outer task slots are different units. |
 | `taskIntervals` | One record per measured physical attempt/phase: `taskId`, `attemptId`, `nodeId`, `status`, `operation`, `durationSeconds`, `clockDomain`, `clockKind`, optional `startSeconds`/`endSeconds`, and `evidence`. Clock kind is `monotonic`, `wall` or `bounded-mapping`. These coordinates must use the stated duration clock; optional wall timestamps are separately labelled metadata. State the exact operation endpoints. Count attempts separately from graph vertices. |
 | `timeWindows` | Named `{id, boundary, seconds, clockDomain, clockKind, evidence}` records for release-command span, modeled-task span, coordinator interval, setup, teardown or other phases. A `step-sum` also specifies included step IDs/phase/kind and aggregation convention. Do not label a sum of disjoint commands as end-to-end elapsed. |
-| `observedPeakOverlap` | `{value, evidence, reason}` for the maximum simultaneous measured intervals on a comparable timeline, or null. It is an observation, never a substitute for `taskSlotLimit`. |
+| `observedPeakOverlap` | `{value, evidence, reason}` for the maximum simultaneous modeled task attempts on a comparable timeline, using the operation selection described in §3, or null. It is an observation, never a substitute for `taskSlotLimit`. |
 | `analysis` | Records `{id, formula, inputs, value, unit, status, reasons, model}`. Inputs reference this block's fields/evidence or earlier calculations. Status is `computed`, `unavailable` or `inapplicable`; the latter two require null value and reasons. Model distinguishes `descriptive`, `observed-cap-diagnostic`, `fixed-duration-lower-bound` and `one-pool-upper-bound`. |
 | `clockCompatibility` | `{referenceDomain, domains, method, assumptions, uncertainty, evidence}`. Method is `common-domain`, `nominal-seconds`, `causal-brackets`, `conditional-affine` or `unavailable`. `domains` lists the participating clock identities; `referenceDomain` names the comparison clock or is null with a reason. A nominal scale assumption is not a measured rate bound. A report mixing methods identifies `clockMethod` and any `clockMappingIds` in each affected analysis record. |
 | `clockMappings` | Optional records `{id, workerDomain, referenceDomain, model, scope, status, probes, uncertainty, assumptions}` for the methods in §3.1. Retain raw probe/end-point evidence and units. Status is `compatible`, `inconsistent` or `insufficient`; compatible means consistent with the declared model, not proof of that model. |
@@ -83,6 +83,28 @@ coordination, transport and verification. A reported step sum is `sum_j(end_j - 
 steps; gaps and unselected setup are excluded. Do not sum overlapping phase durations and call the sum a
 wall interval. New derived values use unrounded inputs and round once for display. Legacy sums of rounded
 step values may remain, identified as such; do not silently change their aggregation convention.
+
+The modeled task span and `observedPeakOverlap` select the physical intervals referenced by the graph's
+accepted `durationInputs`, with complete coverage of its nonvirtual operations. Merely retaining a phase
+under the same task/attempt does not include it: an omitted verification, transfer or setup phase MUST NOT
+extend that span or increase that overlap. For an explicit disjoint-phase aggregation, use the selected
+phase endpoints for the span and count an attempt only while one of its selected phases is active; do not
+count idle gaps or nested phase records as extra occupied slots. Additional all-attempt/all-phase diagnostics
+use separately named windows or quantities and declare their selection. An evidenced empty modeled set
+has overlap zero but no task span; unknown coverage is not an empty set. A zero-duration interval consumes
+no positive-time overlap. Coincident end/start events use the half-open interval convention.
+
+When modeled endpoint coordinates are comparable, readers MUST cross-check them against the retained
+precedence graph and the declared unit-task slot ceiling, within declared measurement uncertainty. This
+includes precedence through virtual relays. A true premise flag or a nonempty evidence-reference list
+cannot override a contradiction in the retained intervals. Check these constraints even when no span or
+overlap scalar is displayed; comparable subsets can already demonstrate a violation. Unmapped coordinates
+cannot be subtracted to invent a violation or establish a cross-host span. Any emitted span identifies the
+domain in which it was calculated. Structural identity/reference checks run independently of duration
+completeness: a missing duration cannot excuse an orphan interval or inconsistent attempt identity.
+Endpoint ordering uses declared absolute timestamp uncertainty/numerical error, not a relative tolerance
+scaled by an arbitrary clock origin. Merely adding a common offset to otherwise equally precise endpoint
+coordinates must not turn a precedence violation into an accepted schedule.
 
 An enclosing coordinator interval can contain every modeled operation without cross-node timestamp
 subtraction; the dispatch/result protocol and local endpoints must establish that containment. Its excess
@@ -245,6 +267,24 @@ availability may supply a looser constant bound only when the chosen capacity is
 throughout that interval. Observed peak use or minimum observed free capacity is not that evidence.
 Do not display `T/B` as speedup. Cross-tool or before/after speedup is `T_reference/T_candidate` only with
 matching declared timing boundaries and a disclosed comparable workload, result, resource and cache policy.
+
+Applicability is a three-way decision, not a success/failure boolean. Missing inputs or unverified premises
+produce `unavailable`; an established violated premise or undefined formula produces `inapplicable`;
+otherwise a supported calculation is `computed`. A known violation takes priority over missing evidence
+for the same calculation, with both reasons retained. Thus a failed/retried schedule remains inapplicable
+to a successful failure-free bound/ratio even if some durations are missing. A known zero denominator makes
+the ratio inapplicable because division is undefined; a missing denominator makes it unavailable. Work and
+path arithmetic can remain descriptive when their own inputs are complete, without reviving a disabled
+schedule claim. No status permits unsupported numeric substitution.
+
+For an optional evidence-bearing `premises.precedenceValid` field, `true` requires retained supporting
+evidence, `false` records an established violation with a reason, and absent/null means unverified. A true
+flag without supporting evidence also leaves the premise unverified; a malformed nonboolean value is not
+a verdict. The same distinction applies to upper-bound premises: unknown interchangeability/availability
+or an unsupported clock/calculation method makes the upper bound unavailable, while evidenced incompatible
+placement or another violated premise makes it inapplicable. The presence of the nominal method alone
+does not establish a physical scheduling violation. Implementations may leave unsupported formulas
+unavailable with a reason rather than pretending to evaluate them.
 
 ## 5. Standard release timing mapping
 
