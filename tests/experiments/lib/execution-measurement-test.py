@@ -138,6 +138,14 @@ class MeasurementTest(unittest.TestCase):
         self.assertEqual((self.directory / "timing.jsonl").read_text(), "retained first trial")
         self.assertEqual(measurement.read_json(pathlib.Path(second["directory"]) / "trial.json")["repetition"], 2)
 
+    def test_legacy_raw_links_remain_readable_when_results_move_out_of_container(self):
+        (self.directory / "timing.jsonl").write_text("retained timing record")
+        destination = self.root / "downloaded-results"
+        shutil.move(str(self.output.parent), destination)
+        relocated = destination / self.output.name / "timing.jsonl"
+        self.assertFalse(os.path.isabs(os.readlink(relocated)))
+        self.assertEqual(relocated.read_text(), "retained timing record")
+
     def test_coordinator_duration_uses_monotonic_samples_when_wall_clock_moves_backwards(self):
         samples = [{"nanoseconds": "1000000000", "wallSeconds": 5}, {"nanoseconds": "1500000007", "wallSeconds": 4}]
         with mock.patch.object(measurement, "monotonic_sample", side_effect=samples):

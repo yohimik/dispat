@@ -105,7 +105,7 @@ def initialize(output, tool, scenario, repetition):
         if legacy.exists() and legacy.stat().st_size:
             raise ValueError("measurement initialization cannot replace existing records: " + str(legacy))
         legacy.unlink(missing_ok=True)
-        legacy.symlink_to(directory / name)
+        legacy.symlink_to(os.path.relpath(directory / name, output))
     return {"directory": str(directory), "trialId": trial_id, "phaseFile": str(directory / "active-step.json"),
             "timingFile": str(directory / "timing.jsonl"), "hostId": host_id}
 
