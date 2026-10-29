@@ -317,16 +317,7 @@ func (d *driver) prepareWorkers(ctx context.Context) error {
 
 func (d *driver) cleanup(ctx context.Context) error {
 	var failures []error
-	if d.state.Coordinator != "" {
-		if !isDigest(d.state.Coordinator, "", 64) {
-			failures = append(failures, errors.New("cleanup coordinator identity is not an exact container ID"))
-		} else if _, err := d.runCommand(ctx, invocation{Name: "docker", Args: []string{"rm", "--force", d.state.Coordinator}}); err != nil {
-			failures = append(failures, err)
-		} else {
-			d.state.Coordinator = ""
-			failures = append(failures, d.save())
-		}
-	}
+	failures = append(failures, d.cleanupCoordinator(ctx))
 	// List is used to distinguish absence from permission/network failure. A
 	// failed describe is never silently treated as successful deletion.
 	for index, expected := range d.state.Instances {
@@ -390,6 +381,11 @@ func (d *driver) cleanup(ctx context.Context) error {
 			}
 		}
 	}
+	// Local forwarding processes must be settled even if collection failed,
+	// the VM vanished, or the cloud cleanup exhausted its own deadline.
+	masterCtx, cancelMasters := context.WithTimeout(context.Background(), 30*time.Second)
+	failures = append(failures, d.closeSSHMasters(masterCtx))
+	cancelMasters()
 	err := errors.Join(failures...)
 	record := struct {
 		Complete bool   `json:"complete"`

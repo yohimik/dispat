@@ -353,11 +353,6 @@ func (d *driver) collectNode(ctx context.Context, item instance) error {
 			failures = append(failures, err)
 			os.WriteFile(filepath.Join(d.settings.Root, "results/cloud/"+name+"-collection-error.txt"), []byte(err.Error()), publicFileMode)
 		}
-		args, _ := d.sshArgs(item)
-		if len(args) > 0 {
-			stop := append(append([]string{}, args[:len(args)-1]...), "-S", filepath.Join(d.settings.Root, "private/"+name+".sock"), "-O", "exit", args[len(args)-1])
-			d.runCommand(collectCtx, invocation{Name: "ssh", Args: stop, Output: io.Discard})
-		}
 		cancel()
 	}
 	return errors.Join(failures...)

@@ -113,11 +113,12 @@ type instance struct {
 }
 
 type journal struct {
-	Options     options           `json:"options"`
-	Image       string            `json:"bootImage"`
-	Instances   []instance        `json:"instances"`
-	Processes   map[string]string `json:"processes,omitempty"`
-	Coordinator string            `json:"coordinator,omitempty"`
+	Options         options           `json:"options"`
+	Image           string            `json:"bootImage"`
+	Instances       []instance        `json:"instances"`
+	Processes       map[string]string `json:"processes,omitempty"`
+	Coordinator     string            `json:"coordinator,omitempty"`
+	CoordinatorName string            `json:"coordinatorName,omitempty"`
 }
 
 type driver struct {
@@ -327,7 +328,7 @@ func (d *driver) run(ctx context.Context) (result error) {
 	if err != nil {
 		return err
 	}
-	args := []string{"create", "--name", "llvm-coordinator-" + d.settings.ID, "--label", "dispat-trial=" + d.settings.ID, "--network", "host", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--env", "HOME=/cloud/work/home", "--mount", "type=bind,src=" + self + ",dst=/usr/local/bin/llvmcloud,readonly", "--env", "GIT_CONFIG_GLOBAL=" + d.plan.CoordinatorGitConfig, "--env", "GIT_CONFIG_NOSYSTEM=1", "--entrypoint", "llvmexperiment", d.settings.Image, "run", "--tool", d.settings.Tool, "--mode", d.settings.Mode, "--profile", d.settings.Profile, "--trial-id", d.settings.ID, "--repetition", "1", "--timeout", "4h", "--jobs", "2", "--results", "/cloud/results", "--work", "/cloud/work", "--remote-plan", "/cloud/plan.json"}
+	args := []string{"create", "--name", "llvm-coordinator-" + d.settings.ID, "--label", "dispat-trial=" + d.settings.ID, "--network", "host", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--env", "HOME=/cloud/work/home", "--mount", "type=bind,src=" + self + ",dst=/usr/local/bin/llvmcloud,readonly", "--env", "GIT_CONFIG_GLOBAL=" + d.plan.CoordinatorGitConfig, "--env", "GIT_CONFIG_NOSYSTEM=1", "--env", "EXPERIMENTS_DISPAT_SOURCE_REVISION=" + d.settings.Source, "--entrypoint", "llvmexperiment", d.settings.Image, "run", "--tool", d.settings.Tool, "--mode", d.settings.Mode, "--profile", d.settings.Profile, "--trial-id", d.settings.ID, "--repetition", "1", "--timeout", "4h", "--jobs", "2", "--results", "/cloud/results", "--work", "/cloud/work", "--remote-plan", "/cloud/plan.json"}
 	mounts := []string{}
 	for _, entry := range []struct {
 		path     string
@@ -341,15 +342,7 @@ func (d *driver) run(ctx context.Context) (result error) {
 		mounts = append(mounts, "--mount", value)
 	}
 	args = append(append([]string{args[0]}, mounts...), args[1:]...)
-	created, err := d.runCommand(cellCtx, invocation{Name: "docker", Args: args})
-	if err != nil {
-		return err
-	}
-	d.state.Coordinator = strings.TrimSpace(string(created))
-	if !isDigest(d.state.Coordinator, "", 64) {
-		return errors.New("Docker returned no exact coordinator container identity")
-	}
-	if err := d.save(); err != nil {
+	if err := d.createCoordinator(cellCtx, args); err != nil {
 		return err
 	}
 	_, err = d.runCommand(cellCtx, invocation{Name: "docker", Args: []string{"start", "--attach", d.state.Coordinator}, Output: os.Stdout})
