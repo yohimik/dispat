@@ -423,17 +423,15 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 						return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, lossErr
 					}
 				} else {
-					c.choreographyBroker.mu.Lock()
-					indexed := c.choreographyBroker.tasks[taskID]
-					successorClaimed := indexed != nil && indexed.claim != compiledStageAbsentIdentity &&
-						indexed.claim != claimOID
-					c.choreographyBroker.mu.Unlock()
-					if !successorClaimed {
-						if capacityErr := c.choreographyBroker.CheckPickupSuccessorBudget(taskID); capacityErr != nil {
-							return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, capacityErr
-						}
+					if capacityErr := c.choreographyBroker.CheckPickupSuccessorBudget(ChoreographyPickupSuccessor{
+						ChoreographyRunBinding: c.choreographyBroker.binding,
+						Task:                   taskID, ClaimOID: claimOID, PickupID: claimedPickupID,
+					}); capacityErr != nil && !errors.Is(capacityErr, ErrChoreographyPickupCapacityHeld) {
+						return release.StageOutcome{UnresolvedOffer: compiledStageUnresolvedFinality}, capacityErr
 					}
 				}
+				// Saturation waits for signed progress; only AcceptClaim may
+				// charge a successor after the retained capacity becomes free.
 				deadline = time.Time{}
 				continue
 			}
