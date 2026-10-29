@@ -813,7 +813,8 @@ func (c *LocalGitx) runStream(ctx context.Context, stream gitStream, args ...str
 	// for the C locale.
 	cmd.Env = append(append(os.Environ(), "LC_ALL=C", "LANG=C"), stream.env...)
 	var out, stderr bytes.Buffer
-	cmd.Stdin = stream.stdin
+	stdin, input := newGitCommandInput(stream.stdin)
+	cmd.Stdin = stdin
 	cmd.Stdout = &out
 	written := &countingWriter{to: stream.stdout}
 	if stream.stdout != nil {
@@ -829,6 +830,9 @@ func (c *LocalGitx) runStream(ctx context.Context, stream gitStream, args ...str
 	cmd.WaitDelay = 10 * time.Second
 	started := time.Now()
 	err := cmd.Run()
+	if input != nil && input.err != nil && !errors.Is(err, input.err) {
+		err = errors.Join(err, input.err)
+	}
 	// Wait prefers a process failure over a stdout-copy failure. Git may
 	// receive SIGPIPE after a bounded writer refuses its output, so retain
 	// that causal error without discarding the process failure.
