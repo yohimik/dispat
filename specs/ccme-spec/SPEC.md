@@ -4080,7 +4080,42 @@ observation is identical while the source occurrence order is reversed. Authenti
 does not remove this timing ambiguity. Local program order and matching send-before-receive edges still
 define a causal partial order; causally unrelated events need not have an inferable physical ordering.
 
-**Clock uncertainty and entropy.** The preceding indistinguishability result does not supply a
+**Ideal clocks, energy conservation and determinism (informative).** In an abstract model with a declared
+reference time `t`, grant every node the exact reading `C_i(t) = t`. Zero clock skew, zero message latency,
+and zero charged time or energy for reading or synchronizing a clock are separate premises. A common-time
+oracle changes the preceding unknown-offset model; it does not refute that model's impossibility result.
+Conversely, that impossibility result does not establish a thermodynamic law or a universal impossibility
+of synchronization. Neither perfect clock readings nor uncertain readings imply energy creation or the
+presence or absence of random inputs.
+
+For an explicit energy account, let `E_k` be all stored energy inside a declared system boundary, and let
+`I_k, O_k >= 0` be total energy entering and leaving during step `k`, in the same units. Assume the separate
+[first-law conservation premise](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/first-law-internal-energy/)
+`E_(k+1) - E_k = I_k - O_k`. Include clock/control power, communication, reset costs, fuel and batteries,
+heat, radiation and any matter-carried energy consistently in the boundary and transfers. Summing gives
+`sum_(k<n)(O_k - I_k) = E_0 - E_n`. A repeatable cycle restoring all accounted internal resources has
+`E_n = E_0`, hence zero net energy export; with zero input, its output is zero. More generally,
+`E_n >= E_min` bounds net export by `E_0 - E_min`. Thus a first-kind perpetual-motion device delivering
+positive work without energy input and without resource depletion contradicts this energy premise.
+Restoring only a logical program state does not restore depleted energy stores. Continued motion without extracted work,
+or operation supplied with external energy, is not such a device. Clock accuracy and synchronization
+latency do not occur in the proof. Ideal clock labels attached to an energy-conserving system with no
+energy-producing transition are already a countermodel to the proposed implication from perfect clocks
+to energy creation; this is an abstract model, not a physical clock construction.
+
+Exact clocks likewise do not determine task outcomes. As a stochastic countermodel, at the common time
+`t = 1` a node emits an independently supplied bit `B`, with `P(B=0) = P(B=1) = 1/2`. Both outcomes have
+identical clock readings but different outputs, with one bit of entropy absent side information. This
+assumes a random-input model; it does not establish a physical entropy source. Conversely, fixed complete
+initial state `s_0`, deterministic transitions `F` and a complete fixed input/choice sequence `u_k` give
+one indexed trace `s_(k+1) = F(s_k, u_k)` by induction. Fix outcome-relevant event order and tie-breaking;
+a timestamped trace additionally needs event times fixed or determined. This conditional determinacy
+requires no perfect clock. Fixing realized random inputs determines their replay without removing
+randomness from the unconditioned model. Deterministic pseudorandom outputs also remain possible, as
+described under recorded state below. These separation results assert no zero-cost physical oracle,
+energy-free computer, universal predictor or change to CCME's measurement and authority contracts.
+
+**Clock uncertainty and entropy.** The physical-clock indistinguishability result above does not supply a
 probability law or guarantee random noise. Consider three concurrent nodes with clocks
 `C_i(t) = t + b_i`, where the distinct offsets `b_i` are fixed. Two nodes record events at fixed
 periodic local times and deliver their records with fixed positive delays; the third applies a
@@ -5778,6 +5813,43 @@ closed finite-generation premise excludes this productive infinite stream. In CC
 still requires a new pinned plan and admission epoch; composing finite runs into a service never silently
 widens a completed run, reuses an old receipt as current authority, or makes a cyclic hard-prerequisite
 graph executable. No infinite runtime execution, hardware measurement or new scheduler is claimed.
+
+*Persistent two-node service ("perfect mobile," informal terminology).* Here "perfect mobile" names an
+ideal persistent computation service, not a thermodynamic machine or a claim of optimality. Under the
+productive-stream and execution-level non-Zeno premises above, every finite prefix completes in finite
+time and the prefix-completion times are unbounded. There is no final batch completing the infinite
+service. This is a direct corollary of the batch induction, not a claim that arbitrary tasks terminate.
+All necessary energy, state, inputs, capacity, authority and retention remain supplied for each prefix.
+
+An ideal model witnessing this behavior keeps two authorized compatible nodes available, processes
+successive finite batches and their checked handoffs, and allows at least one reference-time unit between
+successive batch starts. Each batch has finitely many modeled events and finishes in finite time under
+the stated premises; sequential service therefore satisfies non-Zeno behavior. The batches may compute
+a deterministic sequence, so fresh randomness and exact cross-node clock synchronization are unnecessary.
+Resource supply over every finite prefix is an assumption, not a construction from finite free resources
+for all time. This externally supplied ideal execution is consistent with energy conservation above.
+
+Continuous two-node availability is a stronger, separate deployment condition. Let `N(s)` count distinct
+eligible available execution nodes, rather than busy processors or all recovery actors in `A(s)`. The
+condition `N(s) >= 2` throughout an open service is not implied by the per-handoff two-node gate. One
+crash from exactly two nodes leaves one survivor and refutes an unconditional continuous-two-node promise.
+Planned departure can require an overlapping eligible replacement; unplanned losses need an explicit
+fault restriction or sufficient redundancy and recovery guarantees. Changing logical membership or
+declaring a logical shutdown does not make separated machines stop simultaneously.
+
+The only-total-loss corollary above describes permanent cessation only under its additional policy and
+closed-system assumptions: every continuation in which `A` never becomes empty preserves all
+productive-stream and non-Zeno premises, and empty `A` admits no independent restart or autonomous late
+effect. Under those premises, permanent cessation implies that `A` becomes empty at some finite time;
+once empty, no later modeled work, restoration or computation-relevant effect occurs. This is an
+eventual-cessation equivalence, not a claim that the last batch completion and total node loss have the
+same timestamp. It accounts for every capable work/recovery actor, not only workers;
+it neither promises that every prefix finishes before a finite total-loss event nor turns stranded work
+into successful completion. Individual tasks can finish while the service and its nodes continue.
+More nodes alone imply neither more entropy nor faster task completion: a serial critical path can
+leave elapsed time unchanged, and additional coordination can add cost. Any scaling claim retains the
+declared work, dependency, capacity and cost premises of the earlier bounds. This terminology adds no
+runtime liveness guarantee, continuous replication requirement or perpetual-motion claim.
 
 **Two-node durable completion handoff (informative).** The per-artifact policy above includes intermediate
 outputs; the following stronger finalization policy additionally establishes global settlement. A deployment
