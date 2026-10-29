@@ -21,6 +21,7 @@ package integration
 // three has to say that `assets` is exactly where it was.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -469,25 +470,70 @@ func TestExecutionRegistryEdgeStillWaitsForPublication(t *testing.T) {
 // consumers nothing to follow, so they are never placed on any node at all and
 // are reported blocked rather than failed.
 func TestExecutionRegistryEdgeWithdrawsAConsumerWhosePublicationFailed(t *testing.T) {
-	rig := newExecutionRegistryEdgeWorkspace(t, "echo publishing", "exit 4")
-	rig.commitTo("everything moved", "assets", "docs", "ui")
-	workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
+	for _, mode := range []string{"compilation", "interpretation", "hybrid"} {
+		t.Run(mode, func(t *testing.T) {
+			rig := newExecutionRegistryEdgeWorkspace(t, "echo publishing", "exit 4")
+			rig.commitTo("everything moved", "assets", "docs", "ui")
+			workers := rig.startWorkers([]string{executionNode, executionSecondNode}, 2)
 
-	res := rig.release()
+			res := rig.repo.CommandEnv(rig.env(), "release", "--distribution-mode", mode, "--return-endpoint", rig.returnURL)
 
-	require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
-	for _, name := range []string{"ui", "docs"} {
-		assert.Truef(t, harness.IsCodePresentForPackage(executionEvents(res), "W194", name),
-			"%s was reported blocked\nstdout:\n%s", name, res.Stdout)
-		assert.Emptyf(t, executionPlacements(res, name+":build"),
-			"and its build was never placed anywhere: %v", rig.runs())
-		assert.Equalf(t, 0, executionBuildCount(rig, name),
-			"nor did it run anywhere: %v", rig.runs())
+			require.Equal(t, 1, res.Code, "stdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
+			for _, message := range []string{"first-only task finality could not be persisted", "task graph stalled", "first-node run identity remains for reconciliation"} {
+				require.NotContains(t, res.Stdout, message, "the expected provider failure must settle every denied task")
+			}
+			for _, name := range []string{"ui", "docs"} {
+				diagnostics := 0
+				for _, event := range executionEvents(res) {
+					if event.Package() == name && event.Str("code") == "W194" && event.Str("message") == "skipped" {
+						diagnostics++
+						assert.Contains(t, event.Str("reason"), "provider assets")
+					}
+				}
+				assert.Equal(t, 1, diagnostics, "%s was reported blocked once\nstdout:\n%s", name, res.Stdout)
+				assert.Emptyf(t, executionPlacements(res, name+":build"),
+					"and its build was never placed anywhere: %v", rig.runs())
+				assert.Equalf(t, 0, executionBuildCount(rig, name),
+					"nor did it run anywhere: %v", rig.runs())
+				assertExecutionRegistryBlockedTerminals(t, rig.mailbox, name)
+			}
+			assert.False(t, rig.repo.IsTagged("assets@1.1.0"), "the provider published nothing")
+			assert.False(t, rig.repo.IsTagged("ui@1.1.0"))
+			assert.False(t, rig.repo.IsTagged("docs@1.1.0"))
+			assertLockCleared(t, rig.repo, rig.origin)
+			stopAll(t, workers)
+		})
+
 	}
-	assert.False(t, rig.repo.IsTagged("assets@1.1.0"), "the provider published nothing")
-	assert.False(t, rig.repo.IsTagged("ui@1.1.0"))
-	assert.False(t, rig.repo.IsTagged("docs@1.1.0"))
-	stopAll(t, workers)
+}
+
+func assertExecutionRegistryBlockedTerminals(t *testing.T, mailbox, pkg string) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, event := range executionLateJoinLedgerEvents(t, mailbox) {
+		if event.Kind != "blocked" || event.Package != pkg {
+			continue
+		}
+		document := []byte(bareGit(t, mailbox, "show", event.TaskOID+":dispat/choreography-blocked.json"))
+		signature := strings.TrimSpace(bareGit(t, mailbox, "show", event.TaskOID+":dispat/choreography-blocked.sig"))
+		require.Equal(t, executionSign("choreography-blocked", executionSecret, document), signature)
+		var blocked struct{ Task, Package, BlockedBy, PackageOutcome, ExpectedOID string }
+		require.NoError(t, json.Unmarshal(document, &blocked))
+		require.Equal(t, event.Task, blocked.Task)
+		require.Equal(t, event.Package, blocked.Package)
+		require.Equal(t, event.PackageOutcome, blocked.PackageOutcome)
+		require.Equal(t, event.PriorTaskOID, blocked.ExpectedOID)
+		if event.PackageOutcome == "skipped" {
+			require.Equal(t, "assets", blocked.BlockedBy, "the causal skip names its actual provider")
+		} else {
+			require.Empty(t, event.PackageOutcome, "later blocked tasks do not resettle the package")
+			require.Equal(t, pkg, blocked.BlockedBy, "a later denied task names its already-settled package")
+			require.True(t, seen[pkg+":1:"], "the causal build terminal precedes its denied publication")
+		}
+		seen[event.Task] = true
+	}
+	require.True(t, seen[pkg+":1:"], "the denied build has an exact signed terminal and ledger event")
+	require.True(t, seen[pkg+":2:"], "the later denied publication also has its own signed terminal and ledger event")
 }
 
 // executionPlacements are the lines saying one task was placed somewhere, on a
