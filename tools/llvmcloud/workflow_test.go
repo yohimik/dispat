@@ -1,12 +1,81 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestExperimentDockerStoreIsInitializedBeforeImageUse(t *testing.T) {
+	content, err := os.ReadFile("../../.github/workflows/release.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Run, Uses string
+				With      map[string]string `yaml:"with"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(content, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	stores := map[string]bool{}
+	for name, job := range workflow.Jobs {
+		configured := false
+		for _, step := range job.Steps {
+			if strings.HasPrefix(step.Uses, "docker/setup-docker-action@") {
+				if configured {
+					t.Fatalf("%s configures the Docker store more than once", name)
+				}
+				var daemon struct {
+					Driver   string          `json:"storage-driver"`
+					Features map[string]bool `json:"features"`
+				}
+				if err := json.Unmarshal([]byte(step.With["daemon-config"]), &daemon); err != nil {
+					t.Fatalf("%s daemon configuration: %v", name, err)
+				}
+				containerd, explicit := daemon.Features["containerd-snapshotter"]
+				switch name {
+				case "llvm-prepare", "llvm-gce":
+					if daemon.Driver != "overlay2" || !explicit || containerd {
+						t.Fatalf("%s does not explicitly use classic overlay2", name)
+					}
+				case "release":
+					if !explicit || !containerd {
+						t.Fatal("production multiarchitecture release lost its containerd image store")
+					}
+				default:
+					t.Fatalf("unexpected Docker store override in %s", name)
+				}
+				configured, stores[name] = true, true
+			}
+			imageUse := strings.HasPrefix(step.Uses, "docker/setup-buildx-action@") || strings.Contains(step.Run, "docker build") || strings.Contains(step.Run, "docker run") || strings.Contains(step.Run, "docker load")
+			if name == "llvm-gce" && strings.HasPrefix(step.Uses, "actions/download-artifact@") {
+				imageUse = true
+			}
+			if (name == "llvm-prepare" || name == "llvm-gce" || name == "release") && imageUse && !configured {
+				t.Fatalf("%s uses images before selecting its Docker store", name)
+			}
+			if name == "llvm-prepare" && strings.Contains(step.Run, "docker buildx build") {
+				proof, build := strings.Index(step.Run, dockerInfoFormat), strings.Index(step.Run, "docker run")
+				if proof < 0 || build < 0 || proof >= build || !strings.Contains(step.Run, "prepare-docker-info.json > checksums.txt") {
+					t.Fatal("preparation must retain sanitized store evidence before image use and checksum it")
+				}
+			}
+		}
+	}
+	for _, name := range []string{"llvm-prepare", "llvm-gce", "release"} {
+		if !stores[name] {
+			t.Fatalf("%s has no explicit Docker store configuration", name)
+		}
+	}
+}
 
 func TestDocsCampaignEvidenceIsPinnedAndValidatedBeforePublication(t *testing.T) {
 	content, err := os.ReadFile("../../.github/workflows/release.yml")
