@@ -44,18 +44,19 @@ const baselineState = "baseline"
 // decode straight into the report's own types, because the harness's field
 // names are where those names came from.
 type verdict struct {
-	Experiment           string          `json:"experiment"`
-	Tool                 string          `json:"tool"`
-	Scenario             string          `json:"scenario"`
-	Dispat               string          `json:"dispat"`
-	Steps                []Step          `json:"steps"`
-	Checks               []Check         `json:"checks"`
-	Passed               bool            `json:"passed"`
-	Recovery             *Recovery       `json:"recovery"`
-	Timing               *Timing         `json:"timing"`
-	Plan                 *verdictPlan    `json:"plan"`
-	LLVM                 *LLVMBuild      `json:"llvm"`
-	ExecutionMeasurement json.RawMessage `json:"executionMeasurement"`
+	Experiment           string            `json:"experiment"`
+	Tool                 string            `json:"tool"`
+	Scenario             string            `json:"scenario"`
+	Dispat               string            `json:"dispat"`
+	Steps                []Step            `json:"steps"`
+	Checks               []Check           `json:"checks"`
+	Passed               bool              `json:"passed"`
+	Recovery             *Recovery         `json:"recovery"`
+	Timing               *Timing           `json:"timing"`
+	Plan                 *verdictPlan      `json:"plan"`
+	LLVM                 *LLVMBuild        `json:"llvm"`
+	LinuxKernel          *LinuxKernelBuild `json:"linuxKernel"`
+	ExecutionMeasurement json.RawMessage   `json:"executionMeasurement"`
 }
 
 // observation is one line of observations.jsonl, reduced to the part a report
@@ -148,20 +149,29 @@ func readCell(dir, id string) (*Cell, error) {
 	if err := validateLLVM(v.LLVM); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if v.LinuxKernel != nil && (v.LLVM != nil || v.Experiment != kernelExperimentName) || v.Experiment == kernelExperimentName && v.LinuxKernel == nil {
+		return nil, fmt.Errorf("%s: Linux kernel experiment requires its own linuxKernel result and no llvm result", path)
+	}
+	if err := validateLinuxKernel(v.LinuxKernel); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	if len(v.ExecutionMeasurement) != 0 {
 		if err := executionmeasurement.Validate(v.ExecutionMeasurement); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 	}
-	if v.LLVM != nil && v.Passed != (v.LLVM.Status == llvmCompletedStatus) {
+	if v.LLVM != nil && v.Passed != (v.LLVM.Status == buildCompletedStatus) {
 		return nil, fmt.Errorf("%s: LLVM completion status contradicts its verdict", path)
+	}
+	if v.LinuxKernel != nil && v.Passed != (v.LinuxKernel.Status == buildCompletedStatus) {
+		return nil, fmt.Errorf("%s: Linux kernel completion status contradicts its verdict", path)
 	}
 	version, platform := parseDispatVersion(v.Dispat)
 	cell := &Cell{
 		ID: id, Experiment: v.Experiment, Scenario: v.Scenario, Tool: v.Tool,
 		Dispat: version, Platform: platform,
 		Steps: v.Steps, Checks: v.Checks, Passed: v.Passed, Recovery: v.Recovery,
-		Timing: v.Timing, Plan: newPlan(v.Plan), LLVM: v.LLVM,
+		Timing: v.Timing, Plan: newPlan(v.Plan), LLVM: v.LLVM, LinuxKernel: v.LinuxKernel,
 		ExecutionMeasurement: v.ExecutionMeasurement,
 	}
 	last, err := readLastObservation(filepath.Join(dir, id, "observations.jsonl"))
@@ -309,7 +319,7 @@ func held(checks []Check) int {
 func holding(cells []Cell) int {
 	n := 0
 	for _, cell := range cells {
-		if cell.LLVM == nil && cell.Passed {
+		if cell.LLVM == nil && cell.LinuxKernel == nil && cell.Passed {
 			n++
 		}
 	}
@@ -378,6 +388,9 @@ func counted(n int, noun string) string {
 
 // outcomeOf is the cell's verdict as a phrase: what held, or what did not.
 func outcomeOf(cell Cell) string {
+	if cell.LinuxKernel != nil {
+		return buildOutcome(&cell.LinuxKernel.DistributedBuild)
+	}
 	if cell.LLVM != nil {
 		return llvmOutcome(cell.LLVM)
 	}
@@ -429,7 +442,7 @@ func writeExperimentsMarkdown(w io.Writer, e Experiments) error {
 	fmt.Fprintln(out, "| cell | tool | dispat | steps | checks | catch-up | outcome | final state |")
 	fmt.Fprintln(out, "|---|---|---|---|---|---|---|---|")
 	for _, cell := range e.Cells {
-		if cell.LLVM != nil {
+		if cell.LLVM != nil || cell.LinuxKernel != nil {
 			continue
 		}
 		fmt.Fprintf(out, "| %s | %s | %s | `%s` | %d/%d | %s | %s | `%s` |\n",
@@ -439,6 +452,7 @@ func writeExperimentsMarkdown(w io.Writer, e Experiments) error {
 	}
 	writeTimingMarkdown(out, e)
 	writeLLVMMarkdown(out, e)
+	writeLinuxKernelMarkdown(out, e)
 	writeMeasurementMarkdown(out, e)
 	return out.Flush()
 }
@@ -489,6 +503,10 @@ func writeExperimentsPlain(w io.Writer, e Experiments) error {
 		fmt.Fprintf(out, "  %s  %s\n", cell.Tool, strings.TrimSpace(cell.Dispat+" "+cell.Platform))
 		if cell.LLVM != nil {
 			fmt.Fprintf(out, "  LLVM: %s, %s, %s, %s\n", cell.LLVM.Profile, cell.LLVM.Mode, llvmSeconds(cell.LLVM), llvmOutcome(cell.LLVM))
+			continue
+		}
+		if result := cell.LinuxKernel; result != nil {
+			fmt.Fprintf(out, "  Linux kernel %s: %s / %s, %s, %s, %s\n", result.KernelVersion, result.Profile, result.Configuration, result.Mode, buildSeconds(&result.DistributedBuild), buildOutcome(&result.DistributedBuild))
 			continue
 		}
 		fmt.Fprintf(out, "  steps: %s\n", stepsOf(cell))

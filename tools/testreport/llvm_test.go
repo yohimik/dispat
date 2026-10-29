@@ -8,8 +8,8 @@ import (
 
 func llvmFixture() *LLVMBuild {
 	seconds := 123.456
-	return &LLVMBuild{
-		Status: llvmCompletedStatus, Mode: "hybrid", Profile: "full", LLVMVersion: "20.1.8",
+	return &LLVMBuild{LLVMVersion: "20.1.8", DistributedBuild: DistributedBuild{
+		Status: buildCompletedStatus, Mode: "hybrid", Profile: "full",
 		SourceRevision: strings.Repeat("a", 40), Topology: "two executor processes, one host", Cache: "cold",
 		ExecutorCount: 2, JobsPerExecutor: 2, BuildTargets: []string{"all"}, Backends: []string{"X86", "AArch64"},
 		Seconds: &seconds, Nodes: []string{"node-1", "node-2"},
@@ -25,7 +25,7 @@ func llvmFixture() *LLVMBuild {
 			{Package: "arm", Path: "opt", SHA256: strings.Repeat("b", 64), Bytes: 123},
 			{Package: "arm", Path: "llvm-config", SHA256: strings.Repeat("b", 64), Bytes: 123},
 		},
-	}
+	}}
 }
 
 func TestLLVMMeasurementRequiresDistributedEvidence(t *testing.T) {
@@ -38,7 +38,7 @@ func TestLLVMMeasurementRequiresDistributedEvidence(t *testing.T) {
 		func(record *LLVMBuild) { record.Artifacts = nil },
 		func(record *LLVMBuild) { record.SourceRevision = "main" },
 		func(record *LLVMBuild) { record.Artifacts[0].SHA256 = "not-a-digest" },
-		func(record *LLVMBuild) { record.Status = llvmBlockedStatus; record.Reason = "missing credentials" },
+		func(record *LLVMBuild) { record.Status = buildBlockedStatus; record.Reason = "missing credentials" },
 	} {
 		record := llvmFixture()
 		mutate(record)
@@ -50,7 +50,7 @@ func TestLLVMMeasurementRequiresDistributedEvidence(t *testing.T) {
 
 func TestLLVMBlockedRowsNeverRenderZeroTimeOrSuccess(t *testing.T) {
 	blocked := llvmFixture()
-	blocked.Status, blocked.Reason, blocked.Seconds, blocked.Nodes, blocked.Artifacts = llvmBlockedStatus, "missing cloud credentials", nil, nil, nil
+	blocked.Status, blocked.Reason, blocked.Seconds, blocked.Nodes, blocked.Artifacts = buildBlockedStatus, "missing cloud credentials", nil, nil, nil
 	if err := validateLLVM(blocked); err != nil {
 		t.Fatal(err)
 	}
