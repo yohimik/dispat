@@ -37,7 +37,7 @@ func collectManualArtifacts(ctx context.Context, settings options, data fixture,
 		if err := os.MkdirAll(to, directoryMode); err != nil {
 			return err
 		}
-		for _, name := range outputTools(item.Profile) {
+		for _, name := range workloadOutputs(item.Workload, item.Profile) {
 			if _, err := copyArtifact(filepath.Join(from, name), filepath.Join(to, name)); err != nil {
 				return err
 			}

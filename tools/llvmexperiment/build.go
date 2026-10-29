@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,19 +38,23 @@ type artifact struct {
 }
 
 type taskManifest struct {
-	Task               task                     `json:"task"`
-	Node               string                   `json:"node"`
-	Started            time.Time                `json:"started"`
-	Seconds            float64                  `json:"seconds"`
-	Artifacts          []artifact               `json:"artifacts"`
-	Status             string                   `json:"status"`
-	Reason             string                   `json:"reason,omitempty"`
-	AttemptID          string                   `json:"attemptId"`
-	StartedClockKind   string                   `json:"startedClockKind"`
-	Host               hostIdentity             `json:"host"`
-	Interval           measurement.TaskInterval `json:"interval"`
-	ConfigureArguments []string                 `json:"configureArguments"`
-	BuildArguments     []string                 `json:"buildArguments"`
+	Task               task                       `json:"task"`
+	Node               string                     `json:"node"`
+	Started            time.Time                  `json:"started"`
+	Seconds            float64                    `json:"seconds"`
+	Artifacts          []artifact                 `json:"artifacts"`
+	Status             string                     `json:"status"`
+	Reason             string                     `json:"reason,omitempty"`
+	AttemptID          string                     `json:"attemptId"`
+	StartedClockKind   string                     `json:"startedClockKind"`
+	Host               hostIdentity               `json:"host"`
+	Interval           measurement.TaskInterval   `json:"interval"`
+	ConfigureArguments []string                   `json:"configureArguments"`
+	BuildArguments     []string                   `json:"buildArguments"`
+	BuildEnvironment   []string                   `json:"buildEnvironment,omitempty"`
+	WorkingDirectory   string                     `json:"workingDirectory"`
+	Kernel             *kernelVerification        `json:"kernel,omitempty"`
+	Diagnostics        []measurement.TaskInterval `json:"diagnostics,omitempty"`
 }
 
 func buildTargets(profile string) []string {
@@ -87,11 +92,14 @@ func buildTask(ctx context.Context) (resultError error) {
 		return err
 	}
 	defer func() { resultError = errors.Join(resultError, recording.finish(resultError)) }()
-	if err := verifySource(ctx, item.Source); err != nil {
+	if err := verifyWorkloadSource(ctx, item.Source, item.Revision); err != nil {
 		return err
 	}
 	if err := os.Mkdir(filepath.Join(root, buildDirectory), directoryMode); err != nil {
 		return fmt.Errorf("LLVM build directory must be new and empty: %w", err)
+	}
+	if item.Workload == kernelWorkload {
+		return runKernelBuild(ctx, kernelBuild{Task: item, Root: root, Recording: recording})
 	}
 	recording.beginOperation()
 	configure := configureArguments(item)
@@ -122,6 +130,9 @@ func buildTask(ctx context.Context) (resultError error) {
 }
 
 func configureArguments(item task) []string {
+	if item.Workload == kernelWorkload {
+		return kernelMakeArguments(item, []string{kernelConfiguration(item.Profile)})
+	}
 	return []string{"-S", filepath.Join(item.Source, "llvm"), "-B", buildDirectory, "-G", "Ninja",
 		"-DCMAKE_BUILD_TYPE=Release", "-DLLVM_TARGETS_TO_BUILD=" + item.Backend,
 		"-DLLVM_ENABLE_PROJECTS=", "-DLLVM_ENABLE_RUNTIMES=", "-DLLVM_INCLUDE_TESTS=OFF",
@@ -132,32 +143,43 @@ func configureArguments(item task) []string {
 }
 
 func buildArguments(item task) []string {
+	if item.Workload == kernelWorkload {
+		return kernelMakeArguments(item, kernelMakeTargets(item))
+	}
 	build := []string{"--build", buildDirectory, "--parallel", strconv.Itoa(item.Jobs), "--target"}
 	return append(build, buildTargets(item.Profile)...)
 }
 
 func validateTask(item task) error {
-	if item.Revision != llvmRevision || item.Run == "" || item.Jobs < 1 || item.Jobs > maximumJobsCount {
+	descriptor := describeWorkload(item.Workload)
+	if item.Workload != "" && item.Workload != llvmWorkload && item.Workload != kernelWorkload {
+		return fmt.Errorf("unknown task workload %q", item.Workload)
+	}
+	if item.Revision != descriptor.Revision || item.Run == "" || item.Jobs < 1 || item.Jobs > maximumJobsCount {
 		return errors.New("LLVM task has an invalid pinned revision, run identity, or Ninja job count")
 	}
 	if item.Profile != fullProfile && item.Profile != smokeProfile {
 		return fmt.Errorf("LLVM task profile %q is invalid", item.Profile)
 	}
-	if item.Backend != "X86" && item.Backend != "AArch64" {
+	if !slices.Contains(descriptor.Backends, item.Backend) {
 		return fmt.Errorf("LLVM backend %q is invalid", item.Backend)
 	}
-	if item.Name != "llvm-"+strings.ToLower(item.Backend) || !filepath.IsAbs(item.Source) {
+	if item.Name != taskName(item.Workload, item.Backend) || !filepath.IsAbs(item.Source) {
 		return errors.New("LLVM task package name or absolute source path is invalid")
 	}
 	return nil
 }
 
 func verifySource(ctx context.Context, source string) error {
+	return verifyWorkloadSource(ctx, source, llvmRevision)
+}
+
+func verifyWorkloadSource(ctx context.Context, source, revision string) error {
 	for _, query := range []struct {
 		Args []string
 		Want string
 	}{
-		{Args: []string{"-C", source, "rev-parse", "HEAD"}, Want: llvmRevision},
+		{Args: []string{"-C", source, "rev-parse", "HEAD"}, Want: revision},
 		{Args: []string{"-C", source, "status", "--porcelain", "--untracked-files=normal"}},
 	} {
 		value, err := exec.CommandContext(ctx, "git", append([]string{"-c", "safe.directory=" + source}, query.Args...)...).Output()
@@ -165,7 +187,7 @@ func verifySource(ctx context.Context, source string) error {
 			return fmt.Errorf("LLVM source checkout %s cannot be verified: %w", source, err)
 		}
 		if strings.TrimSpace(string(value)) != query.Want {
-			return fmt.Errorf("LLVM source checkout %s is not the clean pinned revision %s", source, llvmRevision)
+			return fmt.Errorf("workload source checkout %s is not the clean pinned revision %s", source, revision)
 		}
 	}
 	return nil

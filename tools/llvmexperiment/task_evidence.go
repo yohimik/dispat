@@ -68,15 +68,22 @@ func beginTaskRecording(ctx context.Context, item task, root string) (*taskRecor
 		return nil, err
 	}
 	host := readHostIdentity(ctx)
+	descriptor := describeWorkload(item.Workload)
 	recording := &taskRecording{Directory: directory, Manifest: taskManifest{
 		Task: item, Node: taskNode(), Status: taskRunningStatus, AttemptID: identity,
+		WorkingDirectory:   root,
 		ConfigureArguments: configureArguments(item), BuildArguments: buildArguments(item),
 		Host: host, Artifacts: []artifact{}, StartedClockKind: wallClockKind,
 		Interval: measurement.TaskInterval{TaskID: item.Name, AttemptID: identity, NodeID: taskNode(),
-			Status: taskRunningStatus, Operation: taskOperation, Boundary: taskOperationBoundary,
+			Status: taskRunningStatus, Operation: descriptor.Operation, Boundary: descriptor.Boundary,
 			ClockDomain: host.ID + ":process-attempt:" + identity, ClockKind: monotonicClockKind,
 			Evidence: []measurement.Reference{}, Reason: "modeled operation has not started"},
 	}}
+	if item.Workload == kernelWorkload {
+		recording.Manifest.BuildEnvironment = kernelBuildEnvironment()
+		recording.Manifest.ConfigureArguments = kernelCommand(item, root, []string{kernelConfiguration(item.Profile)}).Args
+		recording.Manifest.BuildArguments = kernelCommand(item, root, kernelMakeTargets(item)).Args
+	}
 	if err := writeExclusiveJSON(filepath.Join(directory, taskStartedFile), recording.Manifest); err != nil {
 		return nil, err
 	}
@@ -101,6 +108,22 @@ func (recording *taskRecording) endOperation() {
 	recording.Manifest.Interval.StartSeconds = &zero
 	recording.Manifest.Interval.EndSeconds = &seconds
 	recording.Manifest.Interval.Reason = ""
+}
+
+func (recording *taskRecording) measurePhase(operation, boundary string, execute func() error) error {
+	started := time.Now()
+	err := execute()
+	seconds := time.Since(started).Seconds()
+	start := started.Sub(recording.Started).Seconds()
+	end := start + seconds
+	interval := measurement.TaskInterval{TaskID: recording.Manifest.Task.Name, AttemptID: recording.Manifest.AttemptID, NodeID: recording.Manifest.Node,
+		Status: completedStatus, Operation: operation, Boundary: boundary, DurationSeconds: &seconds, StartSeconds: &start, EndSeconds: &end,
+		ClockDomain: recording.Manifest.Interval.ClockDomain, ClockKind: monotonicClockKind, Evidence: []measurement.Reference{}}
+	if err != nil {
+		interval.Status, interval.Reason = failedStatus, err.Error()
+	}
+	recording.Manifest.Diagnostics = append(recording.Manifest.Diagnostics, interval)
+	return err
 }
 
 func (recording *taskRecording) finish(taskError error) error {

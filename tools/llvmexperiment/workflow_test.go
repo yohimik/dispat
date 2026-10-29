@@ -35,7 +35,7 @@ func TestCloudReportCollectsSixExactArtifactsWithoutPreparedImage(t *testing.T) 
 		}
 	}
 	for _, cell := range campaignCells() {
-		name := "llvm-gce-" + cell.Tool + "-" + cell.Mode + "-${{ github.run_id }}-${{ github.run_attempt }}"
+		name := "${{ inputs.purpose }}-" + cell.Tool + "-" + cell.Mode + "-${{ github.run_id }}-${{ github.run_attempt }}"
 		if !names[name] {
 			t.Fatalf("cloud report omits %s", name)
 		}

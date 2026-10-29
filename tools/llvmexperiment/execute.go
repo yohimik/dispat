@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,7 +30,7 @@ type peerProcesses struct {
 }
 
 func executeExperiment(ctx context.Context, settings options, work string, output io.Writer, record *verdict) (resultError error) {
-	if err := verifySource(ctx, settings.Source); err != nil {
+	if err := verifyWorkloadSource(ctx, settings.Source, describeWorkload(settings.Workload).Revision); err != nil {
 		return err
 	}
 	data, err := prepareFixture(ctx, settings, work, output)
@@ -55,7 +56,7 @@ func executeExperiment(ctx context.Context, settings options, work string, outpu
 		environment = append(environment, "NX_NO_CLOUD=true", "NX_SKIP_NX_CACHE=true", "NX_CLOUD_DISTRIBUTED_EXECUTION=false")
 	}
 	if settings.Tool != dispatTool && settings.Mode != manualGCPMode {
-		if err := prepareCloudClients(ctx, data, environment, output, record.LLVM.ToolVersions); err != nil {
+		if err := prepareCloudClients(ctx, data, environment, output, record.buildResult().ToolVersions); err != nil {
 			return err
 		}
 	}
@@ -101,19 +102,36 @@ func executeExperiment(ctx context.Context, settings options, work string, outpu
 	if err != nil {
 		return err
 	}
-	if err := collectArtifacts(ctx, data, record.LLVM); err != nil {
+	if err := collectArtifacts(ctx, data, record.buildResult()); err != nil {
 		return err
 	}
 	seconds := time.Since(started).Seconds()
-	record.LLVM.Status, record.LLVM.Seconds = completedStatus, &seconds
+	record.buildResult().Status, record.buildResult().Seconds = completedStatus, &seconds
 	completed = true
 	record.Passed = true
-	record.Checks = append(record.Checks, check{Name: "both cold LLVM builds completed on distinct executors and returned verified runnable artifacts", OK: true})
+	record.Checks = append(record.Checks, check{Name: "both " + describeWorkload(settings.Workload).Name + " builds used fresh output directories on distinct executors and returned verified artifacts", OK: true})
 	return nil
 }
 
 func captureToolVersions(ctx context.Context, settings options) map[string]string {
-	versions := map[string]string{"llvmexperiment-protocol": llvmProtocolRevision}
+	versions := map[string]string{"llvmexperiment-protocol": workloadProtocol(settings.Workload)}
+	if settings.Workload == kernelWorkload {
+		for _, name := range []string{"make", "gcc-12", "x86_64-linux-gnu-gcc-12", "aarch64-linux-gnu-gcc-12", "x86_64-linux-gnu-ld", "aarch64-linux-gnu-ld", "pahole", "openssl", "bison", "flex", "bc"} {
+			argument := "--version"
+			if name == "openssl" {
+				argument = "version"
+			}
+			content, err := exec.CommandContext(ctx, name, argument).CombinedOutput()
+			if err == nil {
+				first, _, _ := strings.Cut(strings.TrimSpace(string(content)), "\n")
+				versions[name] = first
+			}
+		}
+		if content, err := os.ReadFile("/etc/dispat-kernel-toolchain.tsv"); err == nil {
+			digest := sha256.Sum256(content)
+			versions["kernel-package-manifest-sha256"] = hex.EncodeToString(digest[:])
+		}
+	}
 	for _, name := range []string{dispatTool, "cmake", "ninja", "c++", "node"} {
 		content, err := exec.CommandContext(ctx, name, "--version").Output()
 		if err == nil {
@@ -279,12 +297,12 @@ func collectArtifacts(ctx context.Context, data fixture, result *buildResult) er
 				return fmt.Errorf("LLVM artifact task %s has a different physical host identity from its admitted GCE executor", expected.Name)
 			}
 		}
-		if len(manifest.Artifacts) != len(outputTools(expected.Profile)) {
+		if len(manifest.Artifacts) != len(workloadOutputs(expected.Workload, expected.Profile)) {
 			return fmt.Errorf("LLVM task %s returned an incomplete artifact manifest", expected.Name)
 		}
 		seen := map[string]bool{}
 		for _, entry := range manifest.Artifacts {
-			if entry.Package != expected.Name || !isExpectedTool(expected.Profile, entry.Path) || seen[entry.Path] {
+			if entry.Package != expected.Name || !slices.Contains(workloadOutputs(expected.Workload, expected.Profile), entry.Path) || seen[entry.Path] {
 				return fmt.Errorf("LLVM artifact %q in %s is unexpected or duplicated", entry.Path, expected.Name)
 			}
 			seen[entry.Path] = true
@@ -293,7 +311,12 @@ func collectArtifacts(ctx context.Context, data fixture, result *buildResult) er
 			}
 			result.Artifacts = append(result.Artifacts, entry)
 		}
-		if err := verifyBinaries(ctx, root, expected); err != nil {
+		if expected.Workload == kernelWorkload {
+			if err := verifyKernelArtifacts(root, expected, manifest.Kernel); err != nil {
+				return err
+			}
+			result.ConfigDigests[expected.Backend], result.ModuleCounts[expected.Backend] = manifest.Kernel.ConfigSHA256, manifest.Kernel.ModuleCount
+		} else if err := verifyBinaries(ctx, root, expected); err != nil {
 			return err
 		}
 		nodes[manifest.Node] = true
@@ -332,8 +355,8 @@ func verifyArtifact(root string, entry artifact) error {
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Size() != entry.Bytes || info.Mode().Perm()&0111 == 0 {
-		return fmt.Errorf("LLVM artifact %s has an invalid type, size or executable mode", path)
+	if !info.Mode().IsRegular() || info.Size() != entry.Bytes {
+		return fmt.Errorf("build artifact %s has an invalid type or size", path)
 	}
 	input, err := os.Open(path)
 	if err != nil {

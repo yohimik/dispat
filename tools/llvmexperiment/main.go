@@ -71,6 +71,7 @@ const (
 )
 
 type options struct {
+	Workload       string
 	Tool           string
 	Mode           string
 	Profile        string
@@ -92,7 +93,12 @@ type buildResult struct {
 	Reason          string            `json:"reason,omitempty"`
 	Mode            string            `json:"mode"`
 	Profile         string            `json:"profile"`
-	LLVMVersion     string            `json:"llvmVersion"`
+	LLVMVersion     string            `json:"llvmVersion,omitempty"`
+	KernelVersion   string            `json:"kernelVersion,omitempty"`
+	Configuration   string            `json:"configuration,omitempty"`
+	Omissions       []string          `json:"omissions,omitempty"`
+	ConfigDigests   map[string]string `json:"configDigests,omitempty"`
+	ModuleCounts    map[string]int    `json:"moduleCounts,omitempty"`
 	SourceRevision  string            `json:"sourceRevision"`
 	Topology        string            `json:"topology"`
 	ExecutorCount   int               `json:"executorCount"`
@@ -110,6 +116,18 @@ type buildResult struct {
 	BinarySHA256    string            `json:"binarySha256,omitempty"`
 }
 
+func (result buildResult) MarshalJSON() ([]byte, error) {
+	type plainBuildResult buildResult
+	if result.KernelVersion == "" {
+		return json.Marshal(plainBuildResult(result))
+	}
+	return json.Marshal(struct {
+		plainBuildResult
+		ConfigDigests map[string]string `json:"configDigests"`
+		ModuleCounts  map[string]int    `json:"moduleCounts"`
+	}{plainBuildResult(result), result.ConfigDigests, result.ModuleCounts})
+}
+
 type verdict struct {
 	Experiment           string                   `json:"experiment"`
 	Tool                 string                   `json:"tool"`
@@ -118,7 +136,8 @@ type verdict struct {
 	Steps                []step                   `json:"steps"`
 	Checks               []check                  `json:"checks"`
 	Passed               bool                     `json:"passed"`
-	LLVM                 *buildResult             `json:"llvm"`
+	LLVM                 *buildResult             `json:"llvm,omitempty"`
+	LinuxKernel          *buildResult             `json:"linuxKernel,omitempty"`
 	ExecutionMeasurement *measurement.Measurement `json:"executionMeasurement,omitempty"`
 }
 
@@ -174,6 +193,7 @@ func run(ctx context.Context, args []string) error {
 func parseOptions(args []string) (options, error) {
 	var settings options
 	flags := flag.NewFlagSet("llvmexperiment run", flag.ContinueOnError)
+	flags.StringVar(&settings.Workload, "workload", llvmWorkload, "llvm or linux-kernel workload")
 	flags.StringVar(&settings.Tool, "tool", dispatTool, "dispat, nx, lerna, or changesets")
 	flags.StringVar(&settings.Mode, "mode", compilationMode, "compilation, interpretation, hybrid, distributed, or manual-gcp-split")
 	flags.StringVar(&settings.Profile, "profile", fullProfile, "full LLVM build, or explicitly partial smoke build")
@@ -191,6 +211,12 @@ func parseOptions(args []string) (options, error) {
 	}
 	if flags.NArg() != 0 || settings.Jobs < 1 || settings.Jobs > maximumJobsCount || settings.Timeout <= 0 {
 		return settings, errors.New("LLVM arguments require no positional values, 1..64 Ninja jobs, and a positive timeout")
+	}
+	if settings.Workload != llvmWorkload && settings.Workload != kernelWorkload {
+		return settings, fmt.Errorf("unknown build workload %q", settings.Workload)
+	}
+	if settings.Workload == kernelWorkload && settings.Source == defaultSourcePath {
+		settings.Source = kernelSourcePath
 	}
 	if settings.Profile != fullProfile && settings.Profile != smokeProfile {
 		return settings, fmt.Errorf("LLVM profile %q is invalid; expected full or smoke", settings.Profile)
@@ -228,18 +254,25 @@ func parseOptions(args []string) (options, error) {
 }
 
 func initialResult(settings options) buildResult {
-	return buildResult{
+	descriptor := describeWorkload(settings.Workload)
+	result := buildResult{
 		Status: failedStatus, Mode: settings.Mode, Profile: settings.Profile,
-		LLVMVersion: llvmVersion, SourceRevision: llvmRevision,
+		LLVMVersion: llvmVersion, SourceRevision: descriptor.Revision,
 		Topology:      "two executor processes, isolated checkouts, one host",
 		ExecutorCount: executorCount, JobsPerExecutor: settings.Jobs,
 		TimeoutSeconds: settings.Timeout.Seconds(),
-		BuildTargets:   buildTargets(settings.Profile), Backends: []string{"X86", "AArch64"},
+		BuildTargets:   workloadTargets(settings.Workload, settings.Profile), Backends: descriptor.Backends,
 		Cache: "cold build directories; unique committed run input; source and toolchains prepared before timing",
 		Nodes: []string{}, Artifacts: []artifact{},
 		Platform:     runtime.GOOS + "/" + runtime.GOARCH,
 		ToolVersions: map[string]string{}, BinaryID: os.Getenv("EXPERIMENTS_DISPAT_BINARY_ID"),
 	}
+	if settings.Workload == kernelWorkload {
+		result.LLVMVersion, result.KernelVersion, result.Configuration = "", kernelVersion, kernelConfiguration(settings.Profile)
+		result.ConfigDigests, result.ModuleCounts, result.Omissions = map[string]string{}, map[string]int{}, kernelOmissions(settings.Profile)
+		result.Cache = "fresh output directories; unique committed trial input; source and toolchains prepared before timing; host page caches are not flushed"
+	}
+	return result
 }
 
 func availability(settings options) (string, string) {
@@ -265,7 +298,7 @@ func runExperiment(parent context.Context, settings options) error {
 		}
 		settings.TrialID = identity
 	}
-	cell := strings.Join([]string{experimentName, settings.Profile, settings.Mode, settings.Tool, settings.TrialID, fmt.Sprintf("r%d", settings.Repetition)}, "-")
+	cell := strings.Join([]string{describeWorkload(settings.Workload).Name, settings.Profile, settings.Mode, settings.Tool, settings.TrialID, fmt.Sprintf("r%d", settings.Repetition)}, "-")
 	output := filepath.Join(settings.Results, cell)
 	if err := os.MkdirAll(settings.Results, directoryMode); err != nil {
 		return err
@@ -283,8 +316,11 @@ func runExperiment(parent context.Context, settings options) error {
 	if settings.Remote != nil {
 		result.Topology = remoteTopology
 	}
-	record := verdict{Experiment: experimentName, Tool: settings.Tool, Scenario: settings.Profile + "-" + settings.Mode,
+	record := verdict{Experiment: describeWorkload(settings.Workload).Name, Tool: settings.Tool, Scenario: settings.Profile + "-" + settings.Mode,
 		LLVM: &result, Steps: []step{}, Checks: []check{}}
+	if settings.Workload == kernelWorkload {
+		record.LLVM, record.LinuxKernel = nil, &result
+	}
 	version, versionErr := exec.CommandContext(ctx, dispatTool, "--version").Output()
 	if versionErr == nil {
 		record.Dispat = dispatVersionLine(string(version))
@@ -355,7 +391,7 @@ func binaryDigest(name string) string {
 func writeResult(output string, record verdict) error {
 	if record.ExecutionMeasurement != nil {
 		if record.ExecutionMeasurement.Trial.Status != timeoutStatus {
-			record.ExecutionMeasurement.Trial.Status = record.LLVM.Status
+			record.ExecutionMeasurement.Trial.Status = record.buildResult().Status
 		}
 		attachDurationInputs(record.ExecutionMeasurement)
 		if err := measurement.Derive(record.ExecutionMeasurement); err != nil {
@@ -368,7 +404,7 @@ func writeResult(output string, record verdict) error {
 	return writeJSON(filepath.Join(output, "observations.jsonl"), struct {
 		Label    string         `json:"label"`
 		Packages map[string]any `json:"packages"`
-	}{Label: record.LLVM.Status, Packages: map[string]any{}})
+	}{Label: record.buildResult().Status, Packages: map[string]any{}})
 }
 
 func writeJSON(path string, value any) error {

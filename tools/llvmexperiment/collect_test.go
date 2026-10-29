@@ -131,6 +131,9 @@ func writeCampaignFixture(t *testing.T, settings campaignOptions, cell campaignC
 	if err := os.WriteFile(filepath.Join(root, "fixture.json"), fixture, fileMode); err != nil {
 		t.Fatal(err)
 	}
+	if cell.Tool != changesetsTool {
+		writeFixtureObservations(t, root, &record)
+	}
 	writeFixtureHardware(t, root, &record, &build, defaultFixtureHardware())
 	if err := measurement.Derive(&record); err != nil {
 		t.Fatal(err)
@@ -139,4 +142,28 @@ func writeCampaignFixture(t *testing.T, settings campaignOptions, cell campaignC
 		t.Fatal(err)
 	}
 	return root
+}
+
+func writeFixtureObservations(t *testing.T, root string, record *measurement.Measurement) {
+	t.Helper()
+	for index := range record.TaskIntervals {
+		interval := record.TaskIntervals[index]
+		interval.Evidence = []measurement.Reference{}
+		manifest := taskManifest{Task: task{Name: interval.TaskID, Run: record.Trial.ID}, Node: interval.NodeID, AttemptID: interval.AttemptID, Status: completedStatus, Interval: interval}
+		reference, err := retainJSON(root, record, "terminal-"+interval.TaskID, filepath.Join("attempts", interval.TaskID, taskFinishedFile), manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record.TaskIntervals[index].Evidence = []measurement.Reference{reference}
+	}
+	window := &record.TimeWindows[0]
+	window.ID = coordinatorWindowID
+	record.Premises["enclosingWindowId"] = coordinatorWindowID
+	raw := map[string]any{"seconds": window.Seconds, "clockKind": window.ClockKind, "clockDomain": window.ClockDomain,
+		"boundary": window.Boundary, "containsTasks": window.ContainsTasks, "startedBeforePeerLaunch": true, "allArtifactsVerifiedBeforeEnd": true}
+	reference, err := retainJSON(root, record, "coordinator-window", "coordinator-window.json", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	window.Evidence, window.ContainmentProof = []measurement.Reference{reference}, []measurement.Reference{reference}
 }

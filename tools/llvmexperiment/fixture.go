@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -32,6 +31,7 @@ const (
 )
 
 type task struct {
+	Workload string `json:"workload,omitempty"`
 	Name     string `json:"name"`
 	Backend  string `json:"backend"`
 	Profile  string `json:"profile"`
@@ -141,7 +141,7 @@ func prepareFixture(ctx context.Context, settings options, work string, output i
 	if err := os.MkdirAll(result.Root, directoryMode); err != nil {
 		return result, err
 	}
-	for _, backend := range []string{"X86", "AArch64"} {
+	for _, backend := range describeWorkload(settings.Workload).Backends {
 		item := taskForBackend(settings, identity, backend)
 		if err := writePackage(result.Root, item); err != nil {
 			return result, err
@@ -199,8 +199,12 @@ func prepareFixture(ctx context.Context, settings options, work string, output i
 }
 
 func taskForBackend(settings options, identity, backend string) task {
-	return task{Name: "llvm-" + strings.ToLower(backend), Backend: backend, Profile: settings.Profile, Source: settings.Source,
-		Revision: llvmRevision, Run: identity, Jobs: settings.Jobs}
+	item := task{Name: taskName(settings.Workload, backend), Backend: backend, Profile: settings.Profile, Source: settings.Source,
+		Revision: describeWorkload(settings.Workload).Revision, Run: identity, Jobs: settings.Jobs}
+	if settings.Workload == kernelWorkload {
+		item.Workload = kernelWorkload
+	}
+	return item
 }
 
 func writePackage(root string, item task) error {

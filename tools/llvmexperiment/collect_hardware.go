@@ -19,8 +19,10 @@ type campaignHardware struct {
 	OuterSlots          int    `json:"outerTaskSlots"`
 	ConfiguredNodeSlots int    `json:"configuredNodeSlots"`
 	AdmittedNodeSlots   int    `json:"admittedNodeSlots"`
-	NinjaJobs           int    `json:"ninjaJobsPerTask"`
+	NinjaJobs           int    `json:"ninjaJobsPerTask,omitempty"`
 	LinkPool            int    `json:"linkPoolPerTask"`
+	MakeJobs            int    `json:"makeJobsPerTask,omitempty"`
+	LinkPoolReason      string `json:"linkPoolReason,omitempty"`
 }
 
 type hardwareInstance struct {
@@ -153,6 +155,9 @@ func bindNodeHardware(hardware *campaignHardware, record verdict, identity strin
 }
 
 func bindNestedHardware(hardware *campaignHardware, record verdict) error {
+	if record.Experiment == kernelWorkload {
+		return bindKernelNestedHardware(hardware, record)
+	}
 	vertices := map[string]bool{}
 	for _, vertex := range record.ExecutionMeasurement.Graph.Vertices {
 		if !vertex.IsVirtual {
@@ -208,6 +213,7 @@ func compareCampaignHardware(expected, actual campaignHardware) error {
 		{"memory.max", expected.MemoryBytes, actual.MemoryBytes}, {"outerTaskSlots", expected.OuterSlots, actual.OuterSlots},
 		{"configuredNodeSlots", expected.ConfiguredNodeSlots, actual.ConfiguredNodeSlots}, {"admittedNodeSlots", expected.AdmittedNodeSlots, actual.AdmittedNodeSlots},
 		{"ninjaJobs", expected.NinjaJobs, actual.NinjaJobs}, {"linkPool", expected.LinkPool, actual.LinkPool},
+		{"makeJobs", expected.MakeJobs, actual.MakeJobs}, {"linkPoolReason", expected.LinkPoolReason, actual.LinkPoolReason},
 	} {
 		if field.Expected != field.Actual {
 			return fmt.Errorf("%s: expected %v, observed %v", field.Name, field.Expected, field.Actual)

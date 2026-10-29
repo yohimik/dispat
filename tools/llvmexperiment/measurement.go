@@ -29,20 +29,21 @@ const (
 
 func initializeMeasurement(settings options, result *buildResult) (*measurement.Measurement, error) {
 	domain := "coordinator:" + settings.TrialID + ":monotonic"
+	descriptor := describeWorkload(settings.Workload)
 	record := &measurement.Measurement{
 		Schema: measurement.Schema,
 		Trial: measurement.Trial{ID: settings.TrialID, Repetition: settings.Repetition, Status: failedStatus, Tool: settings.Tool,
-			Mode: settings.Mode, Profile: settings.Profile, Workload: "two independent LLVM core configurations enabling X86 and AArch64",
-			SourceRevision: llvmRevision, BinarySHA256: result.BinarySHA256, ProtocolRevision: llvmProtocolRevision,
+			Mode: settings.Mode, Profile: settings.Profile, Workload: descriptor.Description,
+			SourceRevision: descriptor.Revision, BinarySHA256: result.BinarySHA256, ProtocolRevision: workloadProtocol(settings.Workload),
 			Toolchain: result.ToolVersions, Evidence: []measurement.Evidence{}},
-		Graph: measurement.Graph{ID: "llvm-outer:" + settings.TrialID, Scope: "analysis-projection",
+		Graph: measurement.Graph{ID: descriptor.Name + "-outer:" + settings.TrialID, Scope: "analysis-projection",
 			Provenance: "generated before execution from the retained two-request fixture; duration annotations attach afterward",
 			Vertices:   []measurement.Vertex{}, Edges: []measurement.Edge{},
-			OmittedWork: []string{"source/tool/VM preparation", "artifact copy and executable checks", "transport and coordination", "native executor graph and internal Ninja DAG are not exported as this graph"}},
+			OmittedWork: []string{"source/tool/VM preparation", "artifact staging, packing, copying and verification", "transport and coordination", "native executor and inner build graphs are not exported as this graph"}},
 		Resources: measurement.Resources{Nodes: []map[string]any{}, Pools: []map[string]any{}, Nested: []map[string]any{},
 			TaskSlotLimit:      measurement.Quantity{Reason: "executor admission and fixture configuration have not been retained"},
 			UsableOnePoolSlots: measurement.Quantity{Reason: "fixed interchangeable zero-overhead slots are not established; placement, transport and setup remain binding"}},
-		TaskIntervals: []measurement.TaskInterval{}, TimeWindows: []measurement.TimeWindow{{ID: "modeled-task-span", Boundary: taskOperationBoundary,
+		TaskIntervals: []measurement.TaskInterval{}, TimeWindows: []measurement.TimeWindow{{ID: "modeled-task-span", Boundary: descriptor.Boundary,
 			ClockDomain: "unmapped-task-domains:" + settings.TrialID, ClockKind: monotonicClockKind, Reason: unalignedClockReason}},
 		ObservedPeakOverlap: measurement.Quantity{Reason: unalignedClockReason}, Analysis: []measurement.Calculation{},
 		ClockCompatibility: map[string]any{"referenceDomain": domain, "domains": []string{domain}, "method": "nominal-seconds",
@@ -50,16 +51,19 @@ func initializeMeasurement(settings options, result *buildResult) (*measurement.
 		Premises: map[string]any{"precedenceValid": true, "enclosingWindowId": coordinatorWindowID},
 	}
 	configuration := map[string]any{"tool": settings.Tool, "mode": settings.Mode, "profile": settings.Profile,
-		"source": settings.Source, "sourceRevision": llvmRevision, "jobsPerExecutor": settings.Jobs,
+		"source": settings.Source, "sourceRevision": descriptor.Revision, "workload": descriptor.Name, "jobsPerExecutor": settings.Jobs,
 		"timeoutSeconds": settings.Timeout.Seconds(), "timeoutBoundary": "run command entry before fixture/source/client preparation through completion; cleanup is separately bounded",
-		"buildTargets": buildTargets(settings.Profile), "returnedTools": outputTools(settings.Profile), "remotePlan": settings.Remote}
-	configuration["sourceIdentityMeaning"] = "trial.sourceRevision pins the LLVM workload; tested Dispat source and binary identities are recorded separately"
+		"buildTargets": workloadTargets(settings.Workload, settings.Profile), "returnedTools": workloadOutputs(settings.Workload, settings.Profile), "remotePlan": settings.Remote}
+	configuration["sourceIdentityMeaning"] = "trial.sourceRevision pins the selected build workload; tested Dispat source and binary identities are recorded separately"
 	configuration["dispat"] = map[string]any{"version": result.ToolVersions[dispatTool], "sourceRevision": result.ToolVersions["dispat-source-revision"],
 		"binaryId": result.BinaryID, "binarySha256": result.BinarySHA256}
 	requests := []map[string]any{}
-	for _, backend := range []string{"X86", "AArch64"} {
+	for _, backend := range descriptor.Backends {
 		item := taskForBackend(settings, settings.TrialID, backend)
-		requests = append(requests, map[string]any{"task": item, "cmakeArguments": configureArguments(item), "buildArguments": buildArguments(item)})
+		requests = append(requests, map[string]any{"task": item, "configureArguments": configureArguments(item), "buildArguments": buildArguments(item)})
+	}
+	if settings.Workload == kernelWorkload {
+		configuration["configuration"], configuration["omissions"], configuration["buildEnvironment"] = kernelConfiguration(settings.Profile), kernelOmissions(settings.Profile), kernelBuildEnvironment()
 	}
 	configuration["requests"] = requests
 	config, err := retainJSON(settings.Output, record, "configuration", "configuration.json", configuration)
@@ -67,11 +71,25 @@ func initializeMeasurement(settings options, result *buildResult) (*measurement.
 		return nil, err
 	}
 	record.Trial.ConfigurationSHA256 = record.Trial.Evidence[len(record.Trial.Evidence)-1].SHA256
-	for _, backend := range []string{"X86", "AArch64"} {
+	if settings.Workload == kernelWorkload {
+		if _, err := os.Stat("/etc/dispat-kernel-toolchain.tsv"); err == nil {
+			if _, err := retainFile(settings.Output, record, "kernel-toolchain", "kernel-toolchain.tsv", "/etc/dispat-kernel-toolchain.tsv"); err != nil {
+				return nil, err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
+	for _, backend := range descriptor.Backends {
 		item := taskForBackend(settings, settings.TrialID, backend)
-		record.Graph.Vertices = append(record.Graph.Vertices, measurement.Vertex{ID: item.Name, Operation: taskOperation, DurationInputs: []measurement.Reference{}})
-		record.Resources.Nested = append(record.Resources.Nested, map[string]any{"taskId": item.Name, "backend": backend,
-			"ninjaJobs": settings.Jobs, "linkPool": 1, "unit": "inner-build-job", "evidence": []measurement.Reference{config}})
+		record.Graph.Vertices = append(record.Graph.Vertices, measurement.Vertex{ID: item.Name, Operation: descriptor.Operation, DurationInputs: []measurement.Reference{}})
+		nested := map[string]any{"taskId": item.Name, "backend": backend, "unit": "inner-build-job", "evidence": []measurement.Reference{config}}
+		if settings.Workload == kernelWorkload {
+			nested["makeJobs"], nested["linkPool"], nested["linkPoolReason"] = settings.Jobs, nil, "link recipes share the configured GNU make job budget; no independent link pool"
+		} else {
+			nested["ninjaJobs"], nested["linkPool"] = settings.Jobs, 1
+		}
+		record.Resources.Nested = append(record.Resources.Nested, nested)
 	}
 	record.Graph.Counts.Vertices = len(record.Graph.Vertices)
 	graph, err := retainJSON(settings.Output, record, "graph-before", "graph-before.json", record.Graph)
@@ -84,6 +102,7 @@ func initializeMeasurement(settings options, result *buildResult) (*measurement.
 }
 
 func retainFixture(settings options, data fixture, record *measurement.Measurement) error {
+	descriptor := describeWorkload(settings.Workload)
 	files := map[string]string{}
 	for _, name := range []string{"dispat.yaml", "nx.json", "lerna.json", "package.json"} {
 		content, err := os.ReadFile(filepath.Join(data.Root, name))
@@ -103,13 +122,13 @@ func retainFixture(settings options, data fixture, record *measurement.Measureme
 		}
 	}
 	reference, err := retainJSON(settings.Output, record, "fixture", "fixture.json", map[string]any{"tasks": data.Tasks, "files": files,
-		"outerTaskLimit": executorCount, "perNodeTaskLimit": 1, "operation": taskOperation, "boundary": taskOperationBoundary})
+		"outerTaskLimit": executorCount, "perNodeTaskLimit": 1, "operation": descriptor.Operation, "boundary": descriptor.Boundary})
 	if err != nil {
 		return err
 	}
 	record.Graph.Evidence = append(record.Graph.Evidence, reference)
 	capacity := float64(executorCount)
-	record.Resources.TaskSlotLimit = measurement.Quantity{Value: &capacity, Evidence: []measurement.Reference{reference}, Reason: "two admitted executor processes, each capped at one outer build task; Ninja jobs are nested"}
+	record.Resources.TaskSlotLimit = measurement.Quantity{Value: &capacity, Evidence: []measurement.Reference{reference}, Reason: "two admitted executor processes, each capped at one outer build task; inner build jobs are separate"}
 	record.Resources.Pools = append(record.Resources.Pools, map[string]any{"id": "outer-tasks", "unit": "outer-task-slot", "configuredCapacity": executorCount,
 		"capacityUpperBound": executorCount, "tasks": []string{data.Tasks[0].Name, data.Tasks[1].Name}, "weights": []int{1, 1}, "evidence": []measurement.Reference{reference}})
 	for index, node := range data.Nodes {
@@ -142,13 +161,17 @@ func retainCoordinatorWindow(settings options, record *measurement.Measurement, 
 			contains = append(contains, vertex.ID)
 		}
 	}
+	boundary := coordinatorWindowBoundary
+	if settings.Workload == kernelWorkload {
+		boundary = "before executor startup through coordinator verification of returned kernel ELF, architecture boot image, resolved configuration and complete module manifest; excludes provisioning, fixture/source/tool preparation and peer shutdown"
+	}
 	raw := map[string]any{"seconds": seconds, "clockKind": monotonicClockKind, "clockDomain": record.ClockCompatibility["referenceDomain"],
-		"boundary": coordinatorWindowBoundary, "startedBeforePeerLaunch": true, "allArtifactsVerifiedBeforeEnd": completed, "containsTasks": contains}
+		"boundary": boundary, "startedBeforePeerLaunch": true, "allArtifactsVerifiedBeforeEnd": completed, "containsTasks": contains}
 	reference, err := retainJSON(settings.Output, record, "coordinator-window", "coordinator-window.json", raw)
 	if err != nil {
 		return err
 	}
-	window := measurement.TimeWindow{ID: coordinatorWindowID, Boundary: coordinatorWindowBoundary, Seconds: &seconds,
+	window := measurement.TimeWindow{ID: coordinatorWindowID, Boundary: boundary, Seconds: &seconds,
 		ClockDomain: record.ClockCompatibility["referenceDomain"].(string), ClockKind: monotonicClockKind, Evidence: []measurement.Reference{reference}, ContainsTasks: contains}
 	if completed {
 		window.ContainmentProof = []measurement.Reference{reference}
@@ -207,6 +230,7 @@ func retainAttempt(output string, record *measurement.Measurement, node nodeFixt
 		if err != nil {
 			return err
 		}
+		manifest = taskManifest{}
 		if err := json.Unmarshal(content, &manifest); err != nil {
 			return err
 		}
@@ -227,12 +251,30 @@ func retainAttempt(output string, record *measurement.Measurement, node nodeFixt
 	if manifest.Node != node.Name || manifest.Task.Run != record.Trial.ID || node.Remote != nil && manifest.Host.ID != node.Remote.HostID {
 		return fmt.Errorf("LLVM attempt %s has inconsistent trial, node or independently evidenced host identity", manifest.AttemptID)
 	}
+	for _, name := range []string{kernelConfiguredConfig, kernelResolvedConfig, kernelModulesManifest, kernelModulesOrder} {
+		path := filepath.Join(directory, name)
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if _, err := retainFile(output, record, "attempt-"+node.Name+"-"+manifest.AttemptID+"-"+name, filepath.Join("attempts", node.Name, manifest.AttemptID, name), path); err != nil {
+			return err
+		}
+	}
 	interval := manifest.Interval
 	if !isFinished {
 		interval.Status, interval.Reason = failedStatus, "attempt has no terminal record; process may have been killed"
 	}
 	interval.Evidence = []measurement.Reference{terminal}
 	record.TaskIntervals = append(record.TaskIntervals, interval)
+	for _, diagnostic := range manifest.Diagnostics {
+		if diagnostic.TaskID != manifest.Task.Name || diagnostic.AttemptID != manifest.AttemptID || diagnostic.NodeID != node.Name || diagnostic.ClockDomain != interval.ClockDomain {
+			return fmt.Errorf("task diagnostic has inconsistent identity or clock")
+		}
+		diagnostic.Evidence = []measurement.Reference{terminal}
+		record.TaskIntervals = append(record.TaskIntervals, diagnostic)
+	}
 	domains := record.ClockCompatibility["domains"].([]string)
 	if !slices.Contains(domains, interval.ClockDomain) {
 		record.ClockCompatibility["domains"] = append(domains, interval.ClockDomain)
@@ -249,7 +291,7 @@ func attachDurationInputs(record *measurement.Measurement) {
 	for vertex := range record.Graph.Vertices {
 		inputs := []measurement.Reference{}
 		for index, interval := range record.TaskIntervals {
-			if interval.TaskID == record.Graph.Vertices[vertex].ID && interval.Status == completedStatus {
+			if interval.TaskID == record.Graph.Vertices[vertex].ID && interval.Operation == record.Graph.Vertices[vertex].Operation && interval.Status == completedStatus {
 				inputs = append(inputs, measurement.Reference{Source: "measurement", Pointer: "/taskIntervals/" + strconv.Itoa(index) + "/durationSeconds"})
 			}
 		}

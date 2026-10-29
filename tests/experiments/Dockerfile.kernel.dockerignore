@@ -1,0 +1,9 @@
+*
+!tools
+tools/*
+!tools/go.mod
+!tools/go.sum
+!tools/llvmexperiment
+!tools/internal
+tools/internal/*
+!tools/internal/executionmeasurement
