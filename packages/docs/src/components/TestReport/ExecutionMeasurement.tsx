@@ -46,7 +46,7 @@ export const ExecutionMeasurement: FC<ExecutionMeasurementProps> = (props) => {
       <thead><tr><th>Formula</th><th>Selected inputs</th><th>Calculated value / unit</th><th>Model / applicability</th></tr></thead>
       <tbody>{analysis.map((calculation) => <tr key={calculation.id}>
         <td><code>{calculation.formula}</code></td>
-        <td>{Object.entries(calculation.inputs).map(([symbol, reference]) => <div key={symbol}><code>{symbol} = {reference.evidenceId ?? ''}{reference.pointer}</code></div>)}</td>
+        <td><details><summary>Input references ({Object.keys(calculation.inputs).length})</summary>{Object.entries(calculation.inputs).map(([symbol, reference]) => <div key={symbol}><code>{symbol} = {reference.evidenceId ?? ''}{reference.pointer}</code></div>)}</details></td>
         <td>{formatValue({value: calculation.value})} {calculation.unit}</td>
         <td>{calculation.model} / {calculation.status}. {calculation.reasons.join('; ')}{calculation.criticalPath?.length ? <div>Attaining path: {calculation.criticalPath.join(' → ')}</div> : null}</td>
       </tr>)}</tbody>
