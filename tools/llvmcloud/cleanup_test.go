@@ -157,3 +157,53 @@ func TestSSHMastersCloseDespiteAbsentVMOrCollectionFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestCleanupSeparatesResourceReleaseFromCollectionFailure(t *testing.T) {
+	for _, scenario := range []struct {
+		name            string
+		collectionError error
+		deleteError     error
+	}{
+		{name: "complete"},
+		{name: "collection failed after interrupted setup", collectionError: errors.New("evidence directory is absent")},
+		{name: "deletion failed", deleteError: errors.New("delete permission denied")},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			d := cleanupDriver(t)
+			var worker instance
+			if err := json.Unmarshal([]byte(`{"name":"vm","id":"123","labels":{"trial":"trial"},"networkInterfaces":[{"accessConfigs":[{"natIP":"127.0.0.1"}]}]}`), &worker); err != nil {
+				t.Fatal(err)
+			}
+			d.state.Instances = []instance{worker}
+			deleted, verifiedAbsent := false, false
+			d.runCommand = func(_ context.Context, request invocation) ([]byte, error) {
+				if request.Name == "ssh" {
+					return nil, scenario.collectionError
+				}
+				command := strings.Join(request.Args, " ")
+				if strings.Contains(command, "instances delete") {
+					deleted = true
+					return nil, scenario.deleteError
+				}
+				if strings.Contains(command, "id=123") {
+					verifiedAbsent = true
+					return []byte("[]"), nil
+				}
+				return json.Marshal([]instance{worker})
+			}
+			err := d.cleanup(t.Context())
+			var record cleanupRecord
+			if readErr := readJSON(filepath.Join(d.settings.Root, "results/cloud/cleanup.json"), &record); readErr != nil {
+				t.Fatal(readErr)
+			}
+			wantComplete := scenario.collectionError == nil && scenario.deleteError == nil
+			wantReleased := scenario.deleteError == nil
+			if (err == nil) != wantComplete || record.Complete != wantComplete || record.ResourcesReleased != wantReleased || !deleted || verifiedAbsent != wantReleased {
+				t.Fatalf("cleanup err=%v record=%+v deleted=%v absence verified=%v", err, record, deleted, verifiedAbsent)
+			}
+			if (record.CollectionError != "") != (scenario.collectionError != nil) {
+				t.Fatalf("collection failure was lost or invented: %+v", record)
+			}
+		})
+	}
+}

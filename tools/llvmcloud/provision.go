@@ -340,6 +340,7 @@ func (d *driver) prepareWorkers(ctx context.Context) error {
 
 func (d *driver) cleanup(ctx context.Context) error {
 	var failures []error
+	var collectionFailures []error
 	failures = append(failures, d.cleanupCoordinator(ctx))
 	// List is used to distinguish absence from permission/network failure. A
 	// failed describe is never silently treated as successful deletion.
@@ -367,7 +368,7 @@ func (d *driver) cleanup(ctx context.Context) error {
 			continue
 		}
 		if expected.ID != "" {
-			failures = append(failures, d.collectNode(ctx, expected))
+			collectionFailures = append(collectionFailures, d.collectNode(ctx, expected))
 		}
 		// Persist a reconciled ID after a create with an uncertain outcome, then
 		// use exactly that ID as the pre-delete identity on subsequent retries.
@@ -409,13 +410,15 @@ func (d *driver) cleanup(ctx context.Context) error {
 	masterCtx, cancelMasters := context.WithTimeout(context.Background(), 30*time.Second)
 	failures = append(failures, d.closeSSHMasters(masterCtx))
 	cancelMasters()
-	err := errors.Join(failures...)
-	record := struct {
-		Complete bool   `json:"complete"`
-		Error    string `json:"error,omitempty"`
-	}{Complete: err == nil}
+	resourceError := errors.Join(failures...)
+	collectionError := errors.Join(collectionFailures...)
+	err := errors.Join(resourceError, collectionError)
+	record := cleanupRecord{Complete: err == nil, ResourcesReleased: resourceError == nil}
 	if err != nil {
 		record.Error = err.Error()
+	}
+	if collectionError != nil {
+		record.CollectionError = collectionError.Error()
 	}
 	return errors.Join(err, writeJSON(filepath.Join(d.settings.Root, "results/cloud/cleanup.json"), record))
 }

@@ -14,6 +14,13 @@ import (
 
 const coordinatorNamePrefix = "llvm-coordinator-"
 
+type cleanupRecord struct {
+	Complete          bool   `json:"complete"`
+	ResourcesReleased bool   `json:"resourcesReleased"`
+	Error             string `json:"error,omitempty"`
+	CollectionError   string `json:"collectionError,omitempty"`
+}
+
 type coordinatorContainer struct {
 	ID     string `json:"Id"`
 	Name   string `json:"Name"`
