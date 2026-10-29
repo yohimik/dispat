@@ -917,9 +917,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/llvm-bundle"
           docker run --rm -v "$PWD:/src:ro" -v "$RUNNER_TEMP/llvm-bundle:/out" -w /src \
             -e CGO_ENABLED=0 golang:1.26.10 \
-            go build -trimpath -ldflags "-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=1.11.0-rc.13-candidate.$SOURCE_SHA" -o /out/dispat ./services/dispat
+            go build -trimpath -buildvcs=false -ldflags "-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=1.11.0-rc.13-candidate.$SOURCE_SHA" -o /out/dispat ./services/dispat
           docker run --rm -v "$PWD:/src:ro" -v "$RUNNER_TEMP/llvm-bundle:/out" -w /src \
-            -e CGO_ENABLED=0 golang:1.26.10 go build -trimpath -o /out/llvmcloud ./tools/llvmcloud
+            -e CGO_ENABLED=0 golang:1.26.10 go build -trimpath -buildvcs=false -o /out/llvmcloud ./tools/llvmcloud
           docker buildx build --builder default --load -f tests/experiments/Dockerfile \
             --build-context "candidate-binary=$RUNNER_TEMP/llvm-bundle" \
             --build-context measurement-source=./tools \
