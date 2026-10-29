@@ -88,13 +88,17 @@ type treeEntry struct {
 // treeEntriesAtPaths reads the named paths of one tree without descending into
 // them, so a caller learns both what is there and what kind of thing it is.
 func (c *LocalGitx) treeEntriesAtPaths(ctx context.Context, revision string, paths []string) (map[string]treeEntry, error) {
+	return c.treeEntriesAtPathsEnv(ctx, revision, paths, nil)
+}
+
+func (c *LocalGitx) treeEntriesAtPathsEnv(ctx context.Context, revision string, paths, env []string) (map[string]treeEntry, error) {
 	if len(paths) == 0 {
 		return map[string]treeEntry{}, nil
 	}
 	if revision == "" {
 		revision = "HEAD"
 	}
-	out, err := c.run(ctx, append([]string{"ls-tree", "-z", revision, "--"}, paths...)...)
+	out, err := c.runEnv(ctx, env, append([]string{"ls-tree", "-z", revision, "--"}, paths...)...)
 	if err != nil {
 		return nil, err
 	}

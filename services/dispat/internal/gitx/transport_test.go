@@ -704,7 +704,7 @@ func TestObjectReaderRefusesAShortRequest(t *testing.T) {
 	reader := &ObjectReader{
 		stdin: shortRequestPipe{}, stdout: bufio.NewReader(strings.NewReader("unexpected\n")),
 	}
-	size, err := reader.request(strings.Repeat("a", 40))
+	size, err := reader.request(strings.Repeat("a", 40), transportBlobObjectTypeName)
 	assert.Zero(t, size)
 	assert.ErrorIs(t, err, io.ErrShortWrite)
 	assert.True(t, reader.isBroken, "a partial request cannot share the next response")

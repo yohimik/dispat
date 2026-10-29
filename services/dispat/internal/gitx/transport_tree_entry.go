@@ -13,7 +13,7 @@ func (p *Plumbing) TreeEntryAtPath(ctx context.Context, revision, path string) (
 	if p.err != nil {
 		return TreeEntry{}, treeEntryAtPathMissing
 	}
-	entries, err := p.git.treeEntriesAtPaths(ctx, revision, []string{path})
+	entries, err := p.git.treeEntriesAtPathsEnv(ctx, revision, []string{path}, []string{transportDisableReplacementEnvironmentValue})
 	if err != nil {
 		p.fail(err)
 		return TreeEntry{}, treeEntryAtPathMissing

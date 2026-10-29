@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -44,7 +45,7 @@ func (c *LocalGitx) ExportCommitPackSince(ctx context.Context, options CommitPac
 	if !transportOID(options.BaseOID) {
 		return fmt.Errorf(resultPackInvalidBaseErrorText)
 	}
-	isAncestor, err := c.mergeBaseIsAncestor(ctx, options.BaseOID, options.CommitOID)
+	isAncestor, err := c.isRawAncestor(ctx, options.BaseOID, options.CommitOID)
 	if err != nil {
 		return fmt.Errorf(resultPackBaseUnavailableErrorFormat, err)
 	}
@@ -59,16 +60,16 @@ func (c *LocalGitx) exportCommitPack(ctx context.Context, options CommitPackDelt
 	if !transportOID(oid) {
 		return fmt.Errorf(invalidResultCommitIDErrorText)
 	}
-	resolved, err := c.ResolveCommit(ctx, oid)
-	if err != nil || resolved != oid {
+	kind, err := c.ObjectType(ctx, oid)
+	if err != nil || kind != transportCommitObjectTypeName {
 		return fmt.Errorf(resultCommitUnavailableErrorFormat, ErrCommitNotOnRef)
 	}
 	revisions := oid + transportObjectLineSeparatorText
 	if options.BaseOID != resultPackNoBaseOID {
 		revisions += resultPackExcludeRevisionPrefix + options.BaseOID + transportObjectLineSeparatorText
 	}
-	_, err = c.runStream(ctx, gitStream{stdin: strings.NewReader(revisions), stdout: to},
-		transportPackObjectsCommandName, transportPackOutputStreamFlag, transportPackRevisionsFlag)
+	_, err = c.runStream(ctx, gitStream{stdin: strings.NewReader(revisions), stdout: to, env: rawTransportObjectEnvironment()},
+		transportRawShallowFileFlag, os.DevNull, transportPackObjectsCommandName, transportPackOutputStreamFlag, transportPackRevisionsFlag)
 	if err != nil {
 		return fmt.Errorf(resultCommitExportErrorFormat, oid, err)
 	}
@@ -90,8 +91,8 @@ func (c *LocalGitx) ImportCommitPack(ctx context.Context, oid string, from io.Re
 	if bounded.exceeded {
 		return fmt.Errorf(resultPackSizeLimitErrorFormat, maxBytes, ErrTransportLimit)
 	}
-	resolved, err := c.ResolveCommit(ctx, oid)
-	if err != nil || resolved != oid {
+	kind, err := c.ObjectType(ctx, oid)
+	if err != nil || kind != transportCommitObjectTypeName {
 		return fmt.Errorf(resultPackMissingCommitErrorFormat, oid, ErrCommitNotOnRef)
 	}
 	return nil

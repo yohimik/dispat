@@ -242,6 +242,10 @@ ordinary tasks from running.
 `maxPackBytes` is separate from `maxBytes`: Git pack framing and metadata add bytes beyond the output files.
 The worker and first node enforce the same signed pack ceiling on the return channel.
 
+Exact transport commit reads also have fixed parser limits: 64 KiB per header line and 16 MiB for the complete
+header section. Exceeding either limit refuses the object with a transport-limit error before dependent effects;
+it never accepts a truncated parent chain. Commit message bodies are streamed and do not count toward these limits.
+
 `timeout` covers fetching and installing task inputs, and returning a result with build outputs. Allow enough time for
 the largest output set your packages produce. A result with no outputs uses a fixed 30-second reporting limit.
 

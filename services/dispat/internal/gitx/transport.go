@@ -327,17 +327,9 @@ func transportOID(oid string) bool {
 // not follow a ref or infer ancestry from an object merely present locally.
 func (c *LocalGitx) CommitParents(ctx context.Context, oid string) ([]string, error) {
 	if !transportOID(oid) {
-		return nil, fmt.Errorf("gitx: invalid commit object id")
+		return nil, fmt.Errorf(invalidSnapshotCommitIDErrorText)
 	}
-	out, err := c.run(ctx, "rev-list", "--parents", "--max-count=1", oid)
-	if err != nil {
-		return nil, fmt.Errorf("gitx: reading parents of %s: %w", oid, err)
-	}
-	fields := strings.Fields(out)
-	if len(fields) == 0 || fields[0] != oid {
-		return nil, fmt.Errorf("gitx: %s did not resolve to itself as a commit", oid)
-	}
-	return fields[1:], nil
+	return c.rawCommitParents(ctx, oid)
 }
 
 // ImportTagAsBlobFrom copies one exact annotated tag object's raw bytes from
@@ -351,14 +343,14 @@ func (c *LocalGitx) ImportTagAsBlobFrom(ctx context.Context, sourceDir, tagOID s
 		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(invalidAnnotatedTagImportErrorText)
 	}
 	source := &LocalGitx{Dir: sourceDir, Log: c.Log}
-	kind, err := source.run(ctx, transportReadObjectCommandName, transportObjectTypeFlag, tagOID)
+	kind, err := source.runEnv(ctx, []string{transportDisableReplacementEnvironmentValue}, transportReadObjectCommandName, transportObjectTypeFlag, tagOID)
 	if err != nil {
 		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedTagUnavailableErrorFormat, tagOID, err)
 	}
 	if strings.TrimSpace(kind) != transportTagObjectTypeName {
 		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedObjectNotTagErrorFormat, tagOID)
 	}
-	sizeText, err := source.run(ctx, transportReadObjectCommandName, transportObjectSizeFlag, tagOID)
+	sizeText, err := source.runEnv(ctx, []string{transportDisableReplacementEnvironmentValue}, transportReadObjectCommandName, transportObjectSizeFlag, tagOID)
 	if err != nil {
 		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedTagSizeReadErrorFormat, tagOID, err)
 	}
@@ -375,7 +367,7 @@ func (c *LocalGitx) ImportTagAsBlobFrom(ctx context.Context, sourceDir, tagOID s
 	}
 	defer func() { _ = tmp.Close(); _ = os.Remove(tmp.Name()) }()
 	bounded := &blobWriter{to: tmp, remaining: size}
-	if _, err := source.runStream(ctx, gitStream{stdout: bounded}, transportReadObjectCommandName, transportTagObjectTypeName, tagOID); err != nil {
+	if _, err := source.runStream(ctx, gitStream{stdout: bounded, env: []string{transportDisableReplacementEnvironmentValue}}, transportReadObjectCommandName, transportTagObjectTypeName, tagOID); err != nil {
 		return transportAbsentObjectText, transportNoObjectBytesCount, fmt.Errorf(pinnedTagReadErrorFormat, err)
 	}
 	if bounded.remaining != transportNoObjectBytesCount {
@@ -434,11 +426,12 @@ func (c *LocalGitx) RestoreTagFromBlob(ctx context.Context, options TagBlobResto
 	if strings.TrimSpace(actual) != tagOID {
 		return transportNoObjectBytesCount, fmt.Errorf(restoredTagIdentityMismatchErrorText)
 	}
-	resolved, err := c.ResolveCommit(ctx, tagOID)
+	resolved, err := c.runEnv(ctx, []string{transportDisableReplacementEnvironmentValue}, transportResolveRevisionCommandName,
+		transportVerifyRevisionFlag, transportEndOptionsFlag, tagOID+transportRawCommitPeelSuffix)
 	if err != nil {
 		return transportNoObjectBytesCount, fmt.Errorf(restoredTagTargetUnavailableErrorFormat, err)
 	}
-	if resolved != peeledOID {
+	if strings.TrimSpace(resolved) != peeledOID {
 		return transportNoObjectBytesCount, fmt.Errorf(restoredTagTargetMismatchErrorText)
 	}
 	return info.Size(), nil
@@ -451,49 +444,9 @@ func (c *LocalGitx) FirstParentOIDs(ctx context.Context, tip, after string) ([]s
 	if !transportOID(tip) || !transportOID(after) {
 		return nil, fmt.Errorf(invalidFirstParentReplayErrorText)
 	}
-	collector := &firstParentOIDCollector{}
-	_, err := c.runStream(ctx, gitStream{stdout: collector},
-		transportRevisionListCommandName, transportFirstParentFlag, transportOldestFirstFlag, tip, objectClosureExclusionRevisionPrefix+after)
-	if err != nil {
-		return nil, fmt.Errorf(firstParentReplayErrorFormat, err)
-	}
-	if len(collector.pending) != transportNoObjectBytesCount {
-		return nil, fmt.Errorf(truncatedFirstParentReplayErrorText)
-	}
-	return collector.oids, nil
+	return c.rawFirstParentOIDs(ctx, tip, after)
 }
 
-type firstParentOIDCollector struct {
-	pending []byte
-	oids    []string
-}
-
-func (c *firstParentOIDCollector) Write(content []byte) (int, error) {
-	consumed := len(content)
-	for len(content) > transportNoObjectBytesCount {
-		end := bytes.IndexByte(content, transportObjectHeaderLineDelimiterByte)
-		if end < transportNoObjectBytesCount {
-			c.pending = append(c.pending, content...)
-			if len(c.pending) > transportObjectIDMaximumBytes {
-				return transportNoObjectBytesCount, fmt.Errorf(oversizedReplayCommitIDErrorText)
-			}
-			break
-		}
-		c.pending = append(c.pending, content[:end]...)
-		oid := string(c.pending)
-		if !transportOID(oid) {
-			return transportNoObjectBytesCount, fmt.Errorf(invalidReplayCommitIDErrorText)
-		}
-		c.oids = append(c.oids, oid)
-		c.pending = c.pending[:transportNoObjectBytesCount]
-		content = content[end+transportObjectLineDelimiterBytes:]
-	}
-	return consumed, nil
-}
-
-// pushLeased is one compare-and-swap push, answered as one of the three
-// outcomes the transport distinguishes: applied (nil), never applied
-// (ErrLeaseRejected or ErrRemoteRefused) and unknown (ErrPushUnknown).
 func (c *LocalGitx) pushLeased(ctx context.Context, remote, oid, branch, expectedOld string) error {
 	ref, err := transportBranchRef(branch)
 	if err != nil {
@@ -761,20 +714,7 @@ func (c *LocalGitx) requireBareStore(ctx context.Context, operation string) erro
 // some unrelated reason, which on a shared checkout is every object of every
 // other branch. A depth below one admits nothing at all, not even the tip.
 func (c *LocalGitx) ResolveFetchedCommit(ctx context.Context, localRef, wantOID string, maxDepth int) error {
-	if _, err := c.run(ctx, "cat-file", "-e", wantOID+"^{commit}"); err != nil {
-		return fmt.Errorf("gitx: %s was not fetched as a commit: %w", wantOID, ErrCommitNotOnRef)
-	}
-	out, err := c.run(ctx, "rev-list", "--first-parent", "--max-count="+strconv.Itoa(maxDepth), localRef)
-	if err != nil {
-		return fmt.Errorf("gitx: reading the first-parent chain of %s: %w", localRef, err)
-	}
-	for line := range strings.Lines(out) {
-		if strings.TrimSpace(line) == wantOID {
-			return nil
-		}
-	}
-	return fmt.Errorf("gitx: %s is not within %d first-parent steps of %s: %w",
-		wantOID, maxDepth, localRef, ErrCommitNotOnRef)
+	return c.rawFetchedCommit(ctx, localRef, wantOID, maxDepth)
 }
 
 // InitBareStore makes this handle's folder a bare repository, leaves one that
@@ -1323,7 +1263,7 @@ func (r *oidLineReader) Read(p []byte) (int, error) {
 func (c *LocalGitx) validateTransportCommitObjects(ctx context.Context, tree string, parents []string) error {
 	requests := io.MultiReader(strings.NewReader(tree+"\n"), &oidLineReader{oids: parents})
 	checker := &transportObjectChecker{tree: tree, parents: parents}
-	_, err := c.runStream(ctx, gitStream{stdin: requests, stdout: checker}, "cat-file", "--batch-check")
+	_, err := c.runStream(ctx, gitStream{stdin: requests, stdout: checker, env: []string{transportDisableReplacementEnvironmentValue}}, "cat-file", "--batch-check")
 	if checker.err != nil {
 		return checker.err
 	}
@@ -1647,7 +1587,7 @@ func (p *Plumbing) ReadBlob(ctx context.Context, oid string, to io.Writer, maxBy
 	if p.err != nil {
 		return
 	}
-	out, err := p.git.run(ctx, "cat-file", "-s", oid)
+	out, err := p.git.runEnv(ctx, []string{transportDisableReplacementEnvironmentValue}, "cat-file", "-s", oid)
 	if err != nil {
 		p.fail(fmt.Errorf("gitx: sizing the transport blob %s: %w", oid, err))
 		return
@@ -1667,7 +1607,7 @@ func (p *Plumbing) ReadBlob(ctx context.Context, oid string, to io.Writer, maxBy
 		return
 	}
 	bounded := &blobWriter{to: to, remaining: size}
-	if _, err := p.git.runStream(ctx, gitStream{stdout: bounded}, "cat-file", "blob", oid); err != nil {
+	if _, err := p.git.runStream(ctx, gitStream{stdout: bounded, env: []string{transportDisableReplacementEnvironmentValue}}, "cat-file", "blob", oid); err != nil {
 		p.fail(fmt.Errorf("gitx: reading the transport blob %s: %w", oid, err))
 		return
 	}
@@ -1732,7 +1672,7 @@ func OpenObjectReader(ctx context.Context, git *LocalGitx) (*ObjectReader, error
 	gitInvocations.Add(1)
 	running, stop := context.WithCancel(ctx)
 	cmd := git.newCommand(running, "cat-file", "--batch")
-	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C", transportDisableReplacementEnvironmentValue)
 	cmd.WaitDelay = 10 * time.Second
 	script.SetProcessGroup(cmd)
 	stdin, err := cmd.StdinPipe()
@@ -1761,10 +1701,21 @@ func OpenObjectReader(ctx context.Context, git *LocalGitx) (*ObjectReader, error
 // batch answers, so the ceiling is applied to the real length rather than to
 // however much arrived.
 func (r *ObjectReader) ReadBlob(oid string, to io.Writer, maxBytes int64) (int64, error) {
+	return r.readObject(transportObjectRead{oid: oid, objectType: transportBlobObjectTypeName, to: to, maxBytes: maxBytes})
+}
+
+type transportObjectRead struct {
+	oid, objectType string
+	to              io.Writer
+	maxBytes        int64
+}
+
+func (r *ObjectReader) readObject(request transportObjectRead) (int64, error) {
+	oid, objectType, to, maxBytes := request.oid, request.objectType, request.to, request.maxBytes
 	if r.isBroken {
 		return 0, fmt.Errorf("gitx: the object reader stopped at an earlier object: %w", ErrTransportLimit)
 	}
-	size, err := r.request(oid)
+	size, err := r.request(oid, objectType)
 	if err != nil {
 		return 0, err
 	}
@@ -1792,7 +1743,7 @@ func (r *ObjectReader) ReadBlob(oid string, to io.Writer, maxBytes int64) (int64
 }
 
 // request asks for one object and answers the length the header promised.
-func (r *ObjectReader) request(oid string) (int64, error) {
+func (r *ObjectReader) request(oid, objectType string) (int64, error) {
 	request := oid + "\n"
 	n, err := io.WriteString(r.stdin, request)
 	if err == nil && n != len(request) {
@@ -1819,10 +1770,10 @@ func (r *ObjectReader) request(oid string) (int64, error) {
 	if len(fields) == 2 && fields[1] == "missing" {
 		return 0, fmt.Errorf("gitx: %s: %w", oid, ErrObjectMissing)
 	}
-	if len(fields) != 3 || fields[1] != "blob" {
+	if len(fields) != 3 || fields[1] != objectType {
 		r.isBroken = true
-		return 0, fmt.Errorf("gitx: the object reader answered %q about %s, which is not a blob header",
-			strings.TrimSpace(string(header)), oid)
+		return 0, fmt.Errorf("gitx: the object reader answered %q about %s, which is not a %s header",
+			strings.TrimSpace(string(header)), oid, objectType)
 	}
 	size, err := strconv.ParseInt(fields[2], 10, 64)
 	if err != nil {
@@ -1877,7 +1828,7 @@ func (p *Plumbing) ResolveSubtree(ctx context.Context, tree, path string) string
 	if path == "" || path == "." {
 		return tree
 	}
-	out, err := p.git.run(ctx, "rev-parse", "--verify", "--end-of-options", tree+":"+path)
+	out, err := p.git.runEnv(ctx, []string{transportDisableReplacementEnvironmentValue}, "rev-parse", "--verify", "--end-of-options", tree+":"+path)
 	if err != nil {
 		p.fail(fmt.Errorf("gitx: resolving %s inside the tree %s: %w", path, tree, err))
 		return ""
@@ -1898,7 +1849,7 @@ func (p *Plumbing) ListTree(ctx context.Context, tree string, visit func(TreeEnt
 		return
 	}
 	scanner := &treeScanner{visit: visit}
-	if _, err := p.git.runStream(ctx, gitStream{stdout: scanner}, "ls-tree", "-r", "-l", "-z", tree); err != nil {
+	if _, err := p.git.runStream(ctx, gitStream{stdout: scanner, env: []string{transportDisableReplacementEnvironmentValue}}, "ls-tree", "-r", "-l", "-z", tree); err != nil {
 		p.fail(fmt.Errorf("gitx: listing the transport tree %s: %w", tree, err))
 		return
 	}
@@ -1918,7 +1869,7 @@ func (p *Plumbing) WorktreeAdd(ctx context.Context, dir, oid string) {
 	if p.err != nil {
 		return
 	}
-	if _, err := p.git.run(ctx, "worktree", "add", "--detach", "--", dir, oid); err != nil {
+	if _, err := p.git.runEnv(ctx, []string{transportDisableReplacementEnvironmentValue}, "worktree", "add", "--detach", "--", dir, oid); err != nil {
 		p.fail(fmt.Errorf("gitx: adding the transport worktree: %w", err))
 	}
 }
