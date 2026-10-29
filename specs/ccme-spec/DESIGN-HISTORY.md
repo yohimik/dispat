@@ -1245,3 +1245,14 @@ graph digests need not distinguish those selections. Configuration provenance an
 invocation and destination settings are therefore bound too, with bootstrap agreement and an acyclic hash
 construction. Result, output and prepared-input bindings remain separate. This clarifies the existing exact
 policy requirement; it does not certify an implementation's snapshot capture or effect recovery.
+
+## 2026-10-29: Measured experiment inputs and separate formula results
+
+Section 28.7 and the experiment measurement profile separate retained graph/resource inputs, measured task
+and enclosing intervals, and derived bounds/ratios. The additive `executionMeasurement` report contract keeps
+the standard observed-overlap ratio unchanged and distinguishes it from an evidenced task-capacity bound.
+Missing clocks, durations, capacity or model premises remain explicit. An outer two-request LLVM workload
+is separate from its executor graph and inner compiler DAG; Ninja jobs are not outer task slots. Reports
+retain per-task evidence, timing boundaries, topology, repetitions and failures without claiming a measured
+speedup or completed conformance from the new schema. This specifies reporting before its implementation;
+it does not change execution, release authority, recovery or the task-graph formulas.

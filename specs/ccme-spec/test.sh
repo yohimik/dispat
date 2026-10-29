@@ -34,7 +34,7 @@ fixture() {
   dir=$1
   version=$2
   mkdir -p "$dir"
-  cp "$here/verify.sh" "$here/LICENSE" "$here/dispat.yaml" "$here/VCS-PROTOCOL.md" "$here/ROLLBACK.md" "$here/DESIGN-HISTORY.md" "$dir/"
+  cp "$here/verify.sh" "$here/LICENSE" "$here/dispat.yaml" "$here/VCS-PROTOCOL.md" "$here/ROLLBACK.md" "$here/DESIGN-HISTORY.md" "$here/EXPERIMENT-MEASUREMENTS.md" "$dir/"
   printf '%s\n' "$version" > "$dir/VERSION"
   cat > "$dir/SPEC.md" <<EOF
 **Version:** $version **Status:** Normative
@@ -50,6 +50,8 @@ Example version 1.0.0 is not a normative declaration.
 ### 27.11 Linked peer topology
 repository-qualified revision identity
 [Design history](./DESIGN-HISTORY.md)
+
+[Experiment measurements](./EXPERIMENT-MEASUREMENTS.md)
 EOF
 }
 

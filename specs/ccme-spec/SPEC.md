@@ -10716,6 +10716,16 @@ Reported elapsed intervals use readings of the same monotonic clock. Subtracting
 different nodes is not exact latency without an explicit bounded-uncertainty model; signed event order alone
 does not measure duration.
 
+**Experiment inputs and formula results.** A report applying the task-graph formulas MUST identify the actual
+graph and timed operations, retain the measured inputs and resource evidence, and display them separately from
+the derived bounds and ratios. Package counts, executor counts, inner build-tool jobs and observed overlap are
+different quantities. A projected workload graph MUST NOT be described as the complete executor or compiler
+graph. Configured capacity MUST NOT be inferred from observed overlap. Missing inputs or unsatisfied theorem
+premises MUST remain explicit; a failed or unsupported trial is not a zero-duration success. The normative
+[experiment measurement profile](./EXPERIMENT-MEASUREMENTS.md) defines the additive report fields, formula
+semantics, clock and capacity conditions, and the standard-release and nested-build mappings. It changes no
+execution, admission, release or recovery rule and does not retroactively supply missing historical evidence.
+
 For an already supplied explicit graph of `n` vertices and `e` edges, one adjacency-list construction and
 one logical-terminal readiness drain inspect `Theta(n + e)` required records and do `O(n + e)` work.
 With one initialization on each of `q` nodes, graph indexing and that drain cost `O(q(n + e))` in aggregate.
