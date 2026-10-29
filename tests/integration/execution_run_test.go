@@ -314,10 +314,10 @@ func TestExecutionRunWorkerFlagRefusals(t *testing.T) {
 			diagnosis: "E225"},
 		"no signing secret named": {
 			flag: "w=file:///srv/mailbox", code: 1, want: "secretEnv is required", diagnosis: "E225"},
-		"a process under worker authority": {
+		"a process under choreographer authority": {
 			execution: &models.ExecutionConfig{SecretEnv: executionSecretEnv},
 			flag:      "w=file:///srv/mailbox", env: executionWorkerMarker, code: 1,
-			want: "worker authority", diagnosis: executionAuthorityCode},
+			want: "choreographer authority", diagnosis: executionAuthorityCode},
 		"the lock bypass beside a link": {
 			execution: &models.ExecutionConfig{SecretEnv: executionSecretEnv},
 			flag:      "w=file:///srv/mailbox", isBypass: true, code: 1,
