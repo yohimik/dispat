@@ -67,6 +67,11 @@ func TestExperimentDockerStoreIsInitializedBeforeImageUse(t *testing.T) {
 				if proof < 0 || build < 0 || proof >= build || !strings.Contains(step.Run, "prepare-docker-info.json > checksums.txt") {
 					t.Fatal("preparation must retain sanitized store evidence before image use and checksum it")
 				}
+				if !strings.Contains(step.Run, `experiment_builder="$(docker context show)"`) ||
+					!strings.Contains(step.Run, `docker buildx inspect "$experiment_builder" | awk '$1 == "Driver:" && $2 == "docker" && NF == 2 { found=1 } END { exit found ? 0 : 1 }'`) ||
+					strings.Count(step.Run, `docker buildx build --builder "$experiment_builder"`) != 2 || strings.Contains(step.Run, "--builder default") {
+					t.Fatal("both experiment images must use the selected context's native builder so local base images resolve in the pinned daemon")
+				}
 			}
 		}
 	}

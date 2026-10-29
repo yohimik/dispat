@@ -1071,18 +1071,20 @@ jobs:
             > "$RUNNER_TEMP/llvm-bundle/prepare-docker-info.json"
           jq -e '.Driver == "overlay2" and (.ServerVersion | length > 0) and (all(.DriverStatus[]?; . != ["driver-type", "io.containerd.snapshotter.v1"]))' \
             "$RUNNER_TEMP/llvm-bundle/prepare-docker-info.json"
+          experiment_builder="$(docker context show)"
+          docker buildx inspect "$experiment_builder" | awk '$1 == "Driver:" && $2 == "docker" && NF == 2 { found=1 } END { exit found ? 0 : 1 }'
           docker run --rm -v "$PWD:/src:ro" -v "$RUNNER_TEMP/llvm-bundle:/out" -w /src \
             -e CGO_ENABLED=0 golang:1.26.10 \
             go build -trimpath -buildvcs=false -ldflags "-s -w -X github.com/yohimik/dispat/services/dispat/internal/cli.Version=1.11.0-rc.13-candidate.$SOURCE_SHA" -o /out/dispat ./services/dispat
           docker run --rm -v "$PWD:/src:ro" -v "$RUNNER_TEMP/llvm-bundle:/out" -w /src \
             -e CGO_ENABLED=0 golang:1.26.10 go build -trimpath -buildvcs=false -o /out/llvmcloud ./tools/llvmcloud
-          docker buildx build --builder default --load -f tests/experiments/Dockerfile \
+          docker buildx build --builder "$experiment_builder" --load -f tests/experiments/Dockerfile \
             --build-context "candidate-binary=$RUNNER_TEMP/llvm-bundle" \
             --build-context measurement-source=./tools \
             --build-arg DISPAT_BINARY_SOURCE=candidate-binary \
             --build-arg "DISPAT_BINARY_ID=1.11.0-rc.13-candidate.$SOURCE_SHA" \
             -t dispat-experiments:llvm-gce tests/experiments
-          docker buildx build --builder default --load -f "$BUILD_DOCKERFILE" \
+          docker buildx build --builder "$experiment_builder" --load -f "$BUILD_DOCKERFILE" \
             --build-arg GO_VERSION=1.26.10 --build-arg EXPERIMENTS_IMAGE=dispat-experiments:llvm-gce \
             -t dispat-build:gce .
           docker image inspect dispat-build:gce > "$RUNNER_TEMP/llvm-bundle/image.json"
