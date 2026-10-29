@@ -3,7 +3,10 @@
 
 package execution
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 type compiledClaimSettlement uint8
 
@@ -20,6 +23,24 @@ const (
 
 type compiledClaimRefresh struct {
 	fence ChoreographyEventCursor
+}
+
+func (w *Worker) pickCompiledTasksWithRefresh(ctx context.Context, run *workerCompiledRun) (bool, error) {
+	previous := run.claimRefresh
+	progress, err := w.pickCompiledTasks(ctx, run)
+	if err != nil || run.claimRefresh == nil || run.claimRefresh == previous {
+		return progress, err
+	}
+	// A newly verified stale refusal is a hint to read the signed feed now.
+	// One refresh and one selection pass are the entire immediate budget;
+	// an unchanged feed or a second refusal returns to the ordinary timer.
+	changed, err := w.pollCompiledEvents(ctx, run)
+	progress = progress || changed
+	if err != nil || w.compiledRuns[run.binding.Run] != run || run.claimRefresh != nil {
+		return progress, err
+	}
+	claimed, err := w.pickCompiledTasks(ctx, run)
+	return progress || claimed, err
 }
 
 func (run *workerCompiledRun) requeueStaleClaim(taskID string) error {

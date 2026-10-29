@@ -377,7 +377,7 @@ func (w *Worker) pollCompiledRuns(ctx context.Context) (bool, error) {
 			}
 		}
 		if run.frontier != nil && run.membershipEpoch != compiledMissingIdentity {
-			claimed, claimErr := w.pickCompiledTasks(ctx, run)
+			claimed, claimErr := w.pickCompiledTasksWithRefresh(ctx, run)
 			if claimErr != nil {
 				return progress, claimErr
 			}
