@@ -24,13 +24,14 @@ name: Release
 # The standard release experiments run inside the production release, as
 # the docs package's beforeBuild hook, against the image the same run just
 # published, so the figures the site ships are that run's own rather than a
-# courier's. The separate llvm-gce dispatch prepares one checkout image and runs
-# cold experiments on isolated GCE workers; its jobs cannot publish a release.
+# courier's. Separate build campaigns use fresh output trees on isolated GCE
+# workers. Docs imports explicit, source-bound campaign artifacts; those jobs
+# cannot publish a release.
 on:
   workflow_dispatch:
     inputs:
       purpose:
-        description: Production release or isolated two-node LLVM experiment
+        description: Production release or isolated two-node build experiment
         required: true
         default: release
         type: choice
@@ -48,11 +49,39 @@ on:
         type: choice
         options: [us-central1-a, us-central1-b, us-central1-c, us-central1-f]
       cloud-cpu-platform:
-        description: One exact N2 CPU platform for every cell in this campaign
+        description: Exact CPU platform (Sapphire Rapids requires C3; Cascade/Ice Lake require N2)
         required: true
         default: Intel Cascade Lake
         type: choice
-        options: [Intel Cascade Lake, Intel Ice Lake]
+        options: [Intel Cascade Lake, Intel Ice Lake, Intel Sapphire Rapids]
+      cloud-machine-type:
+        description: One fixed four-CPU, sixteen-GiB machine type for every cell
+        required: true
+        default: n2-standard-4
+        type: choice
+        options: [n2-standard-4, c3-standard-4]
+      llvm-campaign-run:
+        description: Successful full LLVM workflow run ID required when releasing docs
+        required: false
+        type: string
+      llvm-campaign-attempt:
+        description: Exact full LLVM workflow attempt
+        required: false
+        default: '1'
+        type: string
+      kernel-campaign-run:
+        description: Successful full kernel workflow run ID required when releasing docs
+        required: false
+        type: string
+      kernel-campaign-attempt:
+        description: Exact full kernel workflow attempt
+        required: false
+        default: '1'
+        type: string
+      campaign-binary-sha256:
+        description: Exact measured Dispat binary SHA256 shared by both full campaigns
+        required: false
+        type: string
 
 # Read by default; the two jobs that push (the badge branch, the release
 # itself) widen to write on their own. The gate and the install check hold
@@ -89,9 +118,13 @@ jobs:
     if: inputs.purpose == 'release'
     name: Is there anything to release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       releasing: ${{ steps.status.outputs.releasing }}
       stable: ${{ steps.status.outputs.stable }}
+      docs: ${{ steps.status.outputs.docs }}
     steps:
       - name: Require main for production releases
         if: github.ref != 'refs/heads/main'
@@ -158,6 +191,8 @@ jobs:
                 end
               ' "$RUNNER_TEMP/release-plan.jsonl")
               echo "stable=$stable" >> "$GITHUB_OUTPUT"
+              docs=$(jq -ser 'any(.[]; (.message == "● changed" or .message == "↻ catch-up" or .message == "◈ channel-only") and .package == "docs") | tostring' "$RUNNER_TEMP/release-plan.jsonl")
+              echo "docs=$docs" >> "$GITHUB_OUTPUT"
               ;;
             3)
               echo "releasing=false" >> "$GITHUB_OUTPUT"
@@ -167,6 +202,27 @@ jobs:
               ;;
             *) exit "$rc" ;;
           esac
+
+      - name: Verify selected build campaign attempts before release gates
+        if: steps.status.outputs.docs == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LLVM_RUN: ${{ inputs.llvm-campaign-run }}
+          LLVM_ATTEMPT: ${{ inputs.llvm-campaign-attempt }}
+          KERNEL_RUN: ${{ inputs.kernel-campaign-run }}
+          KERNEL_ATTEMPT: ${{ inputs.kernel-campaign-attempt }}
+          BINARY_SHA256: ${{ inputs.campaign-binary-sha256 }}
+        run: |
+          [[ "$BINARY_SHA256" =~ ^[a-f0-9]{64}$ ]] || { echo "A docs release requires the exact campaign Dispat binary SHA256." >&2; exit 1; }
+          for selection in "$LLVM_RUN:$LLVM_ATTEMPT" "$KERNEL_RUN:$KERNEL_ATTEMPT"; do
+            [[ "$selection" =~ ^[1-9][0-9]*:[1-9][0-9]*$ ]] || { echo "A docs release requires explicit positive LLVM and kernel run/attempt IDs." >&2; exit 1; }
+            run=${selection%:*}
+            attempt=${selection#*:}
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/attempts/$attempt" \
+              | jq -e --arg source "$GITHUB_SHA" --argjson run "$run" --argjson attempt "$attempt" \
+                '.id == $run and .run_attempt == $attempt and .head_sha == $source and .event == "workflow_dispatch" and .path == ".github/workflows/release.yml" and .status == "completed" and .conclusion == "success"' \
+              || { echo "Campaign $run attempt $attempt must be a successful Release workflow at $GITHUB_SHA." >&2; exit 1; }
+          done
 
   ping:
     name: Do the announcement's credentials still work
@@ -597,6 +653,7 @@ jobs:
     permissions:
       contents: write     # commits, tags, GitHub releases
       id-token: write     # the OIDC token Workload Identity Federation trades
+      actions: read       # exact selected build campaign artifacts
     outputs:
       cli-released: ${{ steps.dispat.outputs.cli-released }}
       cli-version: ${{ steps.dispat.outputs.cli-version }}
@@ -629,14 +686,14 @@ jobs:
       # the plan releases a measured Go module on the stable channel, and none
       # (0) for a prerelease, which publishes its figures without the bar.
       DISPAT_COVERAGE_MINIMUM: ${{ needs.plan.outputs.stable == 'true' && '95' || '0' }}
-      # Optional Nx Cloud connection for the distributed LLVM comparison.
-      # Missing credentials produce explicit blocked rows in the release report.
-      EXPERIMENTS_NX_CLOUD_ID: ${{ vars.EXPERIMENTS_NX_CLOUD_ID }}
-      NX_CLOUD_ACCESS_TOKEN: ${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
-      NX_CLOUD_API: ${{ vars.NX_CLOUD_API }}
-      NX_CLOUD_ENCRYPTION_KEY: ${{ secrets.NX_CLOUD_ENCRYPTION_KEY }}
-      # Five executable cells fit a bounded part of the six-hour release job.
-      EXPERIMENTS_LLVM_TIMEOUT: 45m
+      EXPERIMENTS_LLVM_CAMPAIGN_DIR: ${{ github.workspace }}/coverage/build-campaign-input/llvm
+      EXPERIMENTS_KERNEL_CAMPAIGN_DIR: ${{ github.workspace }}/coverage/build-campaign-input/kernel
+      EXPERIMENTS_BUILD_SOURCE_REVISION: ${{ github.sha }}
+      EXPERIMENTS_BUILD_BINARY_SHA256: ${{ inputs.campaign-binary-sha256 }}
+      EXPERIMENTS_LLVM_RUN_ID: ${{ inputs.llvm-campaign-run }}
+      EXPERIMENTS_LLVM_RUN_ATTEMPT: ${{ inputs.llvm-campaign-attempt }}
+      EXPERIMENTS_KERNEL_RUN_ID: ${{ inputs.kernel-campaign-run }}
+      EXPERIMENTS_KERNEL_RUN_ATTEMPT: ${{ inputs.kernel-campaign-attempt }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -654,6 +711,23 @@ jobs:
           key: experiments-${{ hashFiles('tests/experiments/**', 'tests/experiments/dispat.yaml') }}-${{ github.run_id }}
           restore-keys: |
             experiments-${{ hashFiles('tests/experiments/**', 'tests/experiments/dispat.yaml') }}-
+
+      - name: Download the exact full LLVM campaign
+        if: needs.plan.outputs.docs == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.llvm-campaign-run }}
+          name: llvm-gce-report-full-${{ inputs.llvm-campaign-run }}-${{ inputs.llvm-campaign-attempt }}
+          path: coverage/build-campaign-input/llvm
+      - name: Download the exact full kernel campaign
+        if: needs.plan.outputs.docs == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.kernel-campaign-run }}
+          name: kernel-gce-report-full-${{ inputs.kernel-campaign-run }}-${{ inputs.kernel-campaign-attempt }}
+          path: coverage/build-campaign-input/kernel
 
       # The docker space builds two architectures per image, so the arm64 legs
       # run emulated. The containerd image store is what lets a multi-platform
@@ -780,6 +854,12 @@ jobs:
           sudo apt-get update -qq >/dev/null
           sudo apt-get install -y -qq ffmpeg >/dev/null
           ffmpeg -version | head -1
+
+      - name: Validate imported build evidence before any publication
+        if: needs.plan.outputs.docs == 'true'
+        env:
+          EXPERIMENTS_BUILD_VALIDATE_ONLY: '1'
+        run: dispat exec import-build-campaigns --for pkg:experiments --in pkg:experiments
 
       - name: Run the release
         id: dispat
@@ -938,17 +1018,42 @@ jobs:
           GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
           CLOUD_ZONE: ${{ inputs.cloud-zone }}
           CLOUD_CPU_PLATFORM: ${{ inputs.cloud-cpu-platform }}
+          CLOUD_MACHINE_TYPE: ${{ inputs.cloud-machine-type }}
         run: |
           mkdir -p "$RUNNER_TEMP/llvm-bundle"
+          case "$CLOUD_MACHINE_TYPE:$CLOUD_CPU_PLATFORM" in
+            'n2-standard-4:Intel Cascade Lake'|'n2-standard-4:Intel Ice Lake') ;;
+            'c3-standard-4:Intel Sapphire Rapids') ;;
+            *) echo "Machine type and CPU platform must be a supported fixed pair." >&2; exit 1 ;;
+          esac
           gcloud compute zones describe "$CLOUD_ZONE" --project "$GCP_PROJECT" --format=json \
             > "$RUNNER_TEMP/llvm-bundle/zone.json"
           jq -e --arg platform "$CLOUD_CPU_PLATFORM" '.availableCpuPlatforms | index($platform) != null' "$RUNNER_TEMP/llvm-bundle/zone.json"
+          gcloud compute regions describe "$(jq -r '.region | split("/") | last' "$RUNNER_TEMP/llvm-bundle/zone.json")" \
+            --project "$GCP_PROJECT" --format=json > "$RUNNER_TEMP/llvm-bundle/region.json"
+          if [ "$CLOUD_MACHINE_TYPE" = c3-standard-4 ]; then
+            jq '.quotas[] | select(.metric == "C3_CPUS") | {metric, limit, usage}' "$RUNNER_TEMP/llvm-bundle/region.json"
+            jq -e 'any(.quotas[]; .metric == "C3_CPUS" and (.limit - .usage) >= 8)' "$RUNNER_TEMP/llvm-bundle/region.json" \
+              || { echo "A two-worker C3 cell requires eight available regional C3 CPUs." >&2; exit 1; }
+          fi
           gcloud compute images describe-from-family ubuntu-2404-lts-amd64 --project ubuntu-os-cloud \
             --format=json > "$RUNNER_TEMP/llvm-bundle/boot-image.json"
           jq -n --arg bootImage "$(jq -r .selfLink "$RUNNER_TEMP/llvm-bundle/boot-image.json")" \
-            --arg zone "$CLOUD_ZONE" --arg platform "$CLOUD_CPU_PLATFORM" \
-            '{bootImage:$bootImage,cpuPlatform:$platform,zone:$zone,machineType:"n2-standard-4"}' \
+            --arg zone "$CLOUD_ZONE" --arg platform "$CLOUD_CPU_PLATFORM" --arg machine "$CLOUD_MACHINE_TYPE" \
+            '{bootImage:$bootImage,cpuPlatform:$platform,zone:$zone,machineType:$machine}' \
             > "$RUNNER_TEMP/llvm-bundle/cloud-profile.json"
+      - name: Retain hardware selection and quota evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ inputs.purpose }}-hardware-selection-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/llvm-bundle/zone.json
+            ${{ runner.temp }}/llvm-bundle/region.json
+            ${{ runner.temp }}/llvm-bundle/boot-image.json
+            ${{ runner.temp }}/llvm-bundle/cloud-profile.json
+          retention-days: 30
+          if-no-files-found: warn
       - name: Build exact checkout binaries and prepared image
         env:
           SOURCE_SHA: ${{ github.sha }}
@@ -970,7 +1075,7 @@ jobs:
             -t dispat-build:gce .
           docker image inspect dispat-build:gce > "$RUNNER_TEMP/llvm-bundle/image.json"
           docker save dispat-build:gce | gzip -1 > "$RUNNER_TEMP/llvm-bundle/image.tar.gz"
-          (cd "$RUNNER_TEMP/llvm-bundle" && sha256sum dispat llvmcloud image.tar.gz cloud-profile.json boot-image.json zone.json > checksums.txt)
+          (cd "$RUNNER_TEMP/llvm-bundle" && sha256sum dispat llvmcloud image.tar.gz cloud-profile.json boot-image.json zone.json region.json > checksums.txt)
           jq -n --arg source "$SOURCE_SHA" --arg image "$(docker image inspect --format '{{.Id}}' dispat-build:gce)" \
             --arg binary "$(sha256sum "$RUNNER_TEMP/llvm-bundle/dispat" | cut -d ' ' -f1)" \
             '{source:$source,image:$image,binarySha256:$binary,goVersion:"1.26.10",platform:"linux/amd64"}' \
@@ -1036,7 +1141,7 @@ jobs:
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
         with:
           version: 582.0.0
-      - name: Run one cold cell on two matching GCE workers
+      - name: Run one cell with fresh outputs on two matching GCE workers
         env:
           GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
           LLVM_MODE: ${{ matrix.mode }}
@@ -1053,6 +1158,7 @@ jobs:
           /usr/local/bin/llvmcloud run \
             --workload "$BUILD_WORKLOAD" --project "$GCP_PROJECT" --id "$TRIAL_ID" --tool "$LLVM_TOOL" --mode "$LLVM_MODE" --profile "$LLVM_PROFILE" \
             --zone "$(jq -r .zone "$RUNNER_TEMP/llvm-bundle/cloud-profile.json")" \
+            --machine-type "$(jq -r .machineType "$RUNNER_TEMP/llvm-bundle/cloud-profile.json")" \
             --boot-image "$(jq -r .bootImage "$RUNNER_TEMP/llvm-bundle/cloud-profile.json")" \
             --cpu-platform "$(jq -r .cpuPlatform "$RUNNER_TEMP/llvm-bundle/cloud-profile.json")" \
             --archive "$RUNNER_TEMP/llvm-bundle/image.tar.gz" \

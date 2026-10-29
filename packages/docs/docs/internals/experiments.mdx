@@ -345,7 +345,10 @@ This is two complete backend configurations, not a single LLVM build split at in
 Clang, other LLVM subprojects, runtimes, tests, benchmarks, examples, and documentation are excluded identically.
 The optional `smoke` profile builds only `llvm-cxxfilt` and `llvm-size`; its records explicitly identify that subset.
 
-Each cloud cell creates a fresh pair of `n2-standard-4` VMs with one boot image and CPU platform pinned for the whole campaign.
+Each cloud cell creates a fresh pair of VMs with one machine type, boot image and CPU platform pinned for the whole campaign.
+The selectable `n2-standard-4` and `c3-standard-4` profiles both allocate four CPUs and 16 GiB per VM;
+C3 requires Sapphire Rapids, while N2 pins Cascade Lake or Ice Lake. A campaign never changes machine type
+or CPU platform between competitors.
 Each executor has a four-CPU, 14-GiB container limit, one outer task slot and Ninja `-j2` with one concurrent
 link. VM instance IDs, observed container limits, tool versions, image and binary hashes are retained.
 Two inner jobs per task are not two extra outer task slots. Older standalone records use two executor
@@ -355,17 +358,23 @@ same client version on every participant before timing. The clock starts
 before executor startup and coordination, and stops after the coordinator
 verifies returned executable digests, LLVM versions, and a demangling result. The full profile returns five
 representative executables for these checks, while building the complete configured target. Every task contains a
-fresh committed run identity, preventing another cell's cached output from satisfying a cold-build measurement.
+fresh committed run identity, preventing another cell's cached build output from satisfying the measurement.
+Fresh output directories do not establish a cold operating-system page cache.
 
 Dispatch the `Release` workflow with `purpose=llvm-gce` and `llvm-profile=full` for the two-VM campaign.
 This purpose runs only experiment jobs. Each cell has a four-hour execution limit and bounded setup and
 cleanup; the VMs have a five-hour maximum lifetime. The final artifact contains all six results, raw evidence
 and a validated report. `llvm-profile=smoke` checks the harness with the smaller target list.
 
-The existing `dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments` command and docs release
-hook remain standalone, one-host campaigns. They do not provision GCE. Standalone cells default to four hours;
-the release hook applies a 45-minute cap, recorded separately from measured completion time. Native Nx Cloud
-cells read `NX_CLOUD_ACCESS_TOKEN` and `EXPERIMENTS_NX_CLOUD_ID`; credentials are not retained in evidence.
+The documentation release imports successful full LLVM and kernel campaigns selected by the
+`llvm-campaign-run`, `llvm-campaign-attempt`, `kernel-campaign-run`, and `kernel-campaign-attempt` workflow inputs.
+`campaign-binary-sha256` pins their shared measured Dispat binary. Both selected runs must belong to this
+repository's Release workflow at the original checkout revision. Evidence is validated before publication
+and again when imported after the standard experiment campaign; missing, partial or mismatched inputs fail.
+
+The existing `dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments` command remains an optional
+standalone, one-host diagnostic campaign. It does not provision GCE. Standalone cells default to four hours.
+Native Nx Cloud cells read `NX_CLOUD_ACCESS_TOKEN` and `EXPERIMENTS_NX_CLOUD_ID`; credentials are not retained in evidence.
 
 ## Linux kernel distributed build
 
@@ -377,7 +386,7 @@ for `x86_64` and `arm64` in separate fresh output trees. The `full` profile uses
 that it is the largest possible kernel. The `smoke` profile uses `defconfig`, builds the kernel and boot image,
 and explicitly omits modules.
 
-Every executable competitor receives the same two-node budget as LLVM: two `n2-standard-4` VMs, four CPUs and
+Every executable competitor receives the same two-node budget and selected machine profile as LLVM: four CPUs and
 14 GiB per worker container, one outer task per worker, and two inner build jobs. The kernel uses GNU Make `-j2`;
 link commands share those jobs and have no independently configured link pool. Both target architectures build
 on the same host architecture. Dispat runs in compilation, interpretation and hybrid modes; Nx and Lerna use
