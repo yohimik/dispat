@@ -76,10 +76,12 @@ scheduling packages within the job:
 The jobs have separate checkouts and link brackets, and explicitly use `--distribution-mode=interpretation` to
 exercise independent task planning. Only the release's unit job adds the cloud worker. Each job
 collects a fragment with `dispat exec test-fragment-collect`, using `DISPAT_TEST_LANE` to identify its job and
-`DISPAT_TEST_REQUIRE_ALL=true` for a release. The aggregate runs `dispat exec test-fragment-merge` after all four jobs
-succeed. It requires matching source revisions and complete, disjoint inventories, verifies file hashes, and rejects
-failed or incomplete test logs before admitting files into `coverage/`. A release also checks the full coverage
-denominator and commit stamps, including prereleases whose coverage minimum is zero.
+`DISPAT_TEST_REQUIRE_ALL=true` for a release. Normal CI combines fragments in its aggregate job. The release job
+depends directly on all four parallel lanes and the credential ping, then runs `dispat exec test-fragment-merge`
+before publication. The merge requires matching source revisions and complete, disjoint inventories, verifies file
+hashes, and rejects failed or incomplete test logs before admitting files into `coverage/`. A release also checks
+the full coverage denominator and commit stamps, including prereleases whose coverage minimum is zero. Stable releases of
+the measured Go modules retain both coverage minimums and the freshness gate before publishing.
 
 `dispat run tests --since all` remains the local convenience command for all four sets of checks. Its commands within
 one package run sequentially; CI obtains concurrency between the four sets by running the named commands in separate

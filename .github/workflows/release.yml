@@ -17,9 +17,9 @@ name: Release
 # package installation; Go and Terraform remain inside their images.
 #
 # The run has four stages, each a gate on the next: plan (is there anything
-# to release), tests and pings (the whole suite and the announcement's
-# credentials, checked in parallel), release, and post release (does what was
-# released install). Nothing is published by a run whose tests never ran.
+# to release), parallel test lanes and credential pings, release (including
+# source-bound test evidence and coverage gates), and post release (does what
+# was released install). Publication requires every test lane to succeed.
 #
 # The standard release experiments run inside the production release, as
 # the docs package's beforeBuild hook, against the image the same run just
@@ -82,8 +82,8 @@ on:
         required: false
         type: string
 
-# Read by default; the two jobs that push (the badge branch, the release
-# itself) widen to write on their own. The gate and the install check hold
+# Read by default; the unit lane widens access for coordination branches,
+# and the release job widens it for badges and publication. Other jobs hold
 # no more than they use.
 permissions:
   contents: read
@@ -436,7 +436,7 @@ jobs:
           fi
 
       # --since all, not a window: every package's unit tests run whether or
-      # not it changed. The aggregate job requires the other three lanes too.
+      # not it changed. The release job requires the other three lanes too.
       # The release candidate exercises the interpreted task graph on both
       # the orchestrator and its worker; the default mode is unchanged.
       - name: Run every package's unit tests
@@ -557,97 +557,10 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-  tests:
-    name: Full suite
-    needs: [plan, test-unit, test-lane]
-    if: ${{ always() && inputs.purpose == 'release' && needs.plan.outputs.releasing == 'true' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write     # publish the verified coverage badge
-    steps:
-      - name: Require the release test lanes to succeed
-        env:
-          PLAN_RESULT: ${{ needs.plan.result }}
-          UNIT_RESULT: ${{ needs['test-unit'].result }}
-          TEST_LANE_RESULT: ${{ needs['test-lane'].result }}
-        run: |
-          if [ "$PLAN_RESULT" != success ] || [ "$UNIT_RESULT" != success ] || [ "$TEST_LANE_RESULT" != success ]; then
-            printf 'Release test prerequisites ended plan=%s unit=%s lanes=%s; Full suite requires success.\n' \
-              "$PLAN_RESULT" "$UNIT_RESULT" "$TEST_LANE_RESULT" >&2
-            exit 1
-          fi
-
-      - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          fetch-depth: 0
-
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
-
-      - name: Set up dispat
-        uses: ./
-
-      - name: Build dispat from the checkout
-        run: |
-          # shellcheck disable=SC2046
-          docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
-            $(sh scripts/buildx-cache.sh bootstrap) \
-            --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
-          echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
-
-      - name: Gather the four test fragments
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: test-fragment-*
-          path: coverage-fragments
-
-      - name: Verify and merge the complete source-bound suite
-        env:
-          DISPAT_TEST_REQUIRE_ALL: 'true'
-        run: dispat exec test-fragment-merge
-
-      # Every release runs the full suite. The coverage minimums and the badge
-      # gate only a run that publishes one of the measured Go modules on the
-      # stable channel (the plan job's `stable`); a prerelease is not held to
-      # them.
-      - name: Verify coverage freshness gate
-        if: needs.plan.outputs.stable == 'true'
-        run: sh scripts/badge-cache-test.sh
-
-      # The two steps below run through `dispat exec` so the release logic
-      # they carry is dispat.yaml's, and this workflow stays plumbing: what
-      # remains here is checkouts and Docker plumbing.
-      #
-      # The site's report used to be built here as well and handed to the
-      # release job as an artifact. It is the release run's own now — the docs
-      # package measures it in a beforeBuild hook, from the same buildx stages
-      # this job just built, so the numbers the site ships are the release's
-      # rather than a courier's. This job stays the gate it always was.
-      - name: Compute coverage totals
-        if: needs.plan.outputs.stable == 'true'
-        run: dispat exec coverage-badge
-
-      - name: Upload merged coverage
-        if: needs.plan.outputs.stable == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: coverage
-          path: |
-            coverage/coverage.out
-            coverage/coverage.json
-          retention-days: 7
-
-      - name: Push badge JSON to the badges branch
-        if: needs.plan.outputs.stable == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: dispat exec push-badge
-
   release:
-    if: inputs.purpose == 'release'
+    if: inputs.purpose == 'release' && needs.plan.outputs.releasing == 'true'
     name: Run dispat, publish binaries
-    needs: [plan, tests, ping]
+    needs: [plan, test-unit, test-lane, ping]
     runs-on: ubuntu-latest
     permissions:
       contents: write     # commits, tags, GitHub releases
@@ -694,6 +607,19 @@ jobs:
       EXPERIMENTS_KERNEL_RUN_ID: ${{ inputs.kernel-campaign-run }}
       EXPERIMENTS_KERNEL_RUN_ATTEMPT: ${{ inputs.kernel-campaign-attempt }}
     steps:
+      - name: Require every release prerequisite to succeed
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          UNIT_RESULT: ${{ needs['test-unit'].result }}
+          TEST_LANE_RESULT: ${{ needs['test-lane'].result }}
+          PING_RESULT: ${{ needs.ping.result }}
+        run: |
+          if [ "$PLAN_RESULT" != success ] || [ "$UNIT_RESULT" != success ] || [ "$TEST_LANE_RESULT" != success ] || [ "$PING_RESULT" != success ]; then
+            printf 'Release prerequisites ended plan=%s unit=%s lanes=%s ping=%s; all must succeed.\n' \
+              "$PLAN_RESULT" "$UNIT_RESULT" "$TEST_LANE_RESULT" "$PING_RESULT" >&2
+            exit 1
+          fi
+
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -781,6 +707,46 @@ jobs:
             $(sh scripts/buildx-cache.sh bootstrap) \
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
+
+      - name: Gather the four test fragments
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-fragment-*
+          path: coverage-fragments
+
+      - name: Verify and merge the complete source-bound suite
+        env:
+          DISPAT_TEST_REQUIRE_ALL: 'true'
+        run: dispat exec test-fragment-merge
+
+      # All four parallel lanes are required for every release. Coverage
+      # minimums and badge publication apply when a measured Go module ships
+      # on the stable channel; prereleases still require complete evidence.
+      - name: Verify coverage freshness gate
+        if: needs.plan.outputs.stable == 'true'
+        run: sh scripts/badge-cache-test.sh
+
+      # Keep coverage policy in the configured dispat scripts. The docs
+      # package measures its release report separately in beforeBuild.
+      - name: Compute coverage totals
+        if: needs.plan.outputs.stable == 'true'
+        run: dispat exec coverage-badge
+
+      - name: Upload merged coverage
+        if: needs.plan.outputs.stable == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage
+          path: |
+            coverage/coverage.out
+            coverage/coverage.json
+          retention-days: 7
+
+      - name: Push badge JSON to the badges branch
+        if: needs.plan.outputs.stable == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: dispat exec push-badge
 
       # Bootstrap the Aqua version tools/bootstrap.yaml pins, through dispat,
       # then install the pinned Crier executable. TinyGo is installed by Aqua
