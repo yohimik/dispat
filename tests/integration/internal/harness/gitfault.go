@@ -295,6 +295,32 @@ pass_through() {
 	fi
 	exec "$DISPAT_IT_GIT_REAL" "$@"
 }
+drain_changed_files_input() {
+	# LocalGitx sends this finite listing request before reading the reply.
+	# A successful replacement must consume it or an early exit can produce
+	# EPIPE instead of the malformed reply the scenario meant to test. Skip
+	# only the global options LocalGitx prepends, inspecting verb and option
+	# tokens rather than matching words inside paths or configuration values.
+	# Other protocols, notably interactive cat-file --batch, must not wait
+	# for EOF. After already let the real command consume its own request.
+	[ "$DISPAT_IT_GIT_FAULT_AFTER" -eq 0 ] || return 0
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+		-c|-C)
+			[ "$#" -ge 2 ] || return 0
+			shift 2
+			;;
+		log)
+			if [ "$#" -ge 3 ] && [ "$2" = "--no-walk=unsorted" ] && [ "$3" = "--stdin" ]; then
+				cat >/dev/null
+				return "$?"
+			fi
+			return 0
+			;;
+		*) return 0 ;;
+		esac
+	done
+}
 if [ -n "$DISPAT_IT_GIT_FAULT_ARM" ] && [ ! -f "$DISPAT_IT_GIT_FAULT_HOLD_DIR/armed" ]; then
 	case "$*" in
 	$DISPAT_IT_GIT_FAULT_ARM) : > "$DISPAT_IT_GIT_FAULT_HOLD_DIR/armed" ;;
@@ -365,10 +391,12 @@ $DISPAT_IT_GIT_FAULT_PATTERN)
 			fi
 		fi
 		if [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT_FILE" ]; then
+			drain_changed_files_input "$@" || exit "$?"
 			cat "$DISPAT_IT_GIT_FAULT_OUTPUT_FILE"
 			exit 0
 		fi
 		if [ -n "$DISPAT_IT_GIT_FAULT_OUTPUT" ]; then
+			drain_changed_files_input "$@" || exit "$?"
 			printf '%s' "$DISPAT_IT_GIT_FAULT_OUTPUT"
 			exit 0
 		fi

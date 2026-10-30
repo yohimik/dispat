@@ -2,7 +2,9 @@ package harness
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,88 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGitFaultChangedFilesReplyConsumesItsRequest(t *testing.T) {
+	// Larger than the pipe buffer: a successful early reply cannot hide the
+	// writer's broken pipe behind scheduling that happens to accept a tiny query.
+	input := strings.Repeat(strings.Repeat("a", 40)+"\n", 32768)
+	for name, tc := range map[string]struct{ output, firstInputLine string }{
+		"text":                {output: " "},
+		"framed bytes":        {output: "\x1einvalid\x1f\x00"},
+		"selected first line": {output: " ", firstInputLine: strings.Repeat("a", 40)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fault := NewGitFault(t, GitFault{Pattern: "*log --no-walk=unsorted --stdin*", Output: tc.output,
+				FirstInputLine: tc.firstInputLine})
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "sh", "-c", `exec git "$@"`, "sh",
+				"-c", "maintenance.autoDetach=false", "-C", t.TempDir(), "log", "--no-walk=unsorted", "--stdin")
+			cmd.WaitDelay = time.Second
+			cmd.Env = append(os.Environ(), fault.Env()...)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			stdin, err := cmd.StdinPipe()
+			require.NoError(t, err)
+			require.NoError(t, cmd.Start())
+			// Observe the write itself: os/exec may ignore an EPIPE from its
+			// own stdin copier, whereas LocalGitx retains that causal error.
+			written, writeErr := io.WriteString(stdin, input)
+			closeErr := stdin.Close()
+			waitErr := cmd.Wait()
+			assert.NoError(t, writeErr, "the canned reply must consume the request before exiting")
+			assert.Equal(t, len(input), written)
+			assert.NoError(t, closeErr)
+			require.NoError(t, waitErr)
+			assert.Equal(t, tc.output, stdout.String(), "the caller receives the exact malformed reply")
+			assert.Empty(t, stderr.String())
+			assert.Equal(t, 1, fault.Matches())
+		})
+	}
+}
+
+func TestGitFaultRepliesDoNotWaitForUnrelatedInput(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args      []string
+		isFailure bool
+	}{
+		"no stdin":             {args: []string{"--version"}},
+		"interactive batch":    {args: []string{"cat-file", "--batch"}},
+		"path names an option": {args: []string{"log", "--", "--stdin"}},
+		"directory names log":  {args: []string{"-C", "log", "cat-file", "--batch"}},
+		"config names log":     {args: []string{"-c", "log", "cat-file", "--batch"}},
+		"failed listing":       {args: []string{"log", "--no-walk=unsorted", "--stdin"}, isFailure: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			injected := GitFault{Pattern: "*", Output: "replacement"}
+			if tc.isFailure {
+				injected.Output, injected.Code = "", 7
+			}
+			fault := NewGitFault(t, injected)
+			read, write, err := os.Pipe()
+			require.NoError(t, err)
+			defer read.Close()
+			defer write.Close() // Stay open until after the command answers.
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, "sh", "-c", `exec git "$@"`, "sh")
+			cmd.WaitDelay = time.Second
+			cmd.Args = append(cmd.Args, tc.args...)
+			cmd.Env = append(os.Environ(), fault.Env()...)
+			cmd.Stdin = read
+			output, err := cmd.CombinedOutput()
+			if tc.isFailure {
+				var exitErr *exec.ExitError
+				require.ErrorAs(t, err, &exitErr)
+				assert.Equal(t, injected.Code, exitErr.ExitCode(), "a failed read must retain its immediate failure")
+				assert.Contains(t, string(output), GitFaultMarker)
+				return
+			}
+			require.NoError(t, err, "the replacement must not wait for EOF: %s", output)
+			assert.Equal(t, "replacement", string(output))
+		})
+	}
+}
 
 // runThroughFault invokes `git` the way the process under test does: by name,
 // through a shell that resolves it from the PATH the fault hands out. Naming
