@@ -382,7 +382,11 @@ identity and the executable's computed SHA-256 in every verdict; shipped-image m
 results folder, `EXPERIMENTS_JOBS` sets how many cells run at once (four), and `EXPERIMENTS_EXPECT=0` records a dispat
 cell without gating on its verdict.
 
-The release workflow restores the newest records for the current harness. The docs package's `beforeBuild` hook
+The release's parallel test matrix runs the standard campaign against the checkout binary before publication.
+Its artifact retains the source revision, workflow run and attempt, binary identity and SHA-256, declared cells, recorded results and image metadata. A failed candidate campaign blocks publication. These candidate records stay separate from
+the published-image records used by the docs hook.
+
+The release workflow restores the newest published-image records for the current harness. The docs package's `beforeBuild` hook
 reuses them only when the experiments image id is identical, the manifest names the exact current cell list, every
 verdict and observation stream parses, and every dispat verdict passed. The image id covers the published native
 binary, pinned comparison tools and harness. A version or protocol change therefore reruns every cell, as does

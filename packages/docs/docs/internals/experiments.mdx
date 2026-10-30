@@ -369,7 +369,7 @@ and a validated report. `llvm-profile=smoke` checks the harness with the smaller
 The documentation release selects successful full LLVM and kernel campaigns automatically, with no manual
 Release inputs. It selects the highest successful run ID with a full report for each workload at the original
 checkout revision in this repository's `Build experiments` workflow. It freezes the run, attempt and artifact IDs
-in the plan and retains the selection receipt. Expired or ambiguous full reports fail selection; missing evidence
+in `Run dispat` before publication and retains the selection receipt. Expired or ambiguous full reports fail selection; missing evidence
 never starts another campaign or substitutes another source revision.
 
 The two downloaded manifests must name the same valid Dispat binary SHA256. Complete source, trial, raw-evidence,

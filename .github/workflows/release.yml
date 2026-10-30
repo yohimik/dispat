@@ -17,11 +17,12 @@ name: Release
 # package installation; Go and Terraform remain inside their images.
 #
 # The run has four stages, each a gate on the next: plan (is there anything
-# to release), parallel test lanes and credential pings, release (including
-# source-bound test evidence and coverage gates), and post release (does what
+# to release), one test matrix and the announcement credential check,
+# release (including source-bound test evidence and coverage gates), and post release (does what
 # was released install). Publication requires every test lane to succeed.
 #
-# The standard release experiments run inside the production release, as
+# The matrix tests the checkout candidate in its own experiment lane.
+# The published-image experiments run inside the production release, as
 # the docs package's beforeBuild hook, against the image the same run just
 # published, so the figures the site ships are that run's own rather than a
 # courier's. Separate build campaigns use fresh output trees on isolated GCE
@@ -30,7 +31,7 @@ name: Release
 on:
   workflow_dispatch:
 
-# Read by default; the unit lane widens access for coordination branches,
+# Read by default; the test matrix widens access for unit-worker coordination,
 # and the release job widens it for badges and publication. Other jobs hold
 # no more than they use.
 permissions:
@@ -64,19 +65,8 @@ jobs:
   plan:
     name: Is there anything to release
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
     outputs:
       releasing: ${{ steps.status.outputs.releasing }}
-      stable: ${{ steps.status.outputs.stable }}
-      docs: ${{ steps.status.outputs.docs }}
-      llvm-run: ${{ steps.campaigns.outputs.llvm-run }}
-      llvm-attempt: ${{ steps.campaigns.outputs.llvm-attempt }}
-      llvm-artifact: ${{ steps.campaigns.outputs.llvm-artifact }}
-      kernel-run: ${{ steps.campaigns.outputs.kernel-run }}
-      kernel-attempt: ${{ steps.campaigns.outputs.kernel-attempt }}
-      kernel-artifact: ${{ steps.campaigns.outputs.kernel-artifact }}
     steps:
       - name: Require main for production releases
         if: github.ref != 'refs/heads/main'
@@ -111,65 +101,17 @@ jobs:
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
-      # `status` computes the plan and prints it without building, tagging or
-      # writing anything. --require-release answers with exit 3 when the plan
-      # releases nothing — the whole answer this job exists for — and exit 1
-      # when something is wrong, so the mapping is a `case` rather than an
-      # `if`: an `if` would read a broken configuration as "nothing to
-      # release" and skip the release instead of failing.
-      - name: Compute the plan
+      - name: Check whether anything needs releasing
         id: status
-        shell: bash
         run: |
+          set -eu
           rc=0
-          dispat status --require-release --log-format json 2>&1 | tee "$RUNNER_TEMP/release-plan.jsonl" || rc=$?
+          dispat status --require-release || rc=$?
           case "$rc" in
-            0)
-              echo "releasing=true" >> "$GITHUB_OUTPUT"
-              # Inspect only packages actually releasing, and among them only
-              # the seven Go modules the coverage figures measure: the 95%
-              # minimums hold a stable release of that code and nothing else.
-              # A stable catch-up, graduation or mixed stable/RC run of one of
-              # them keeps the gate; a candidate that ships beside a stable
-              # infra, image or spec release does not acquire it.
-              stable=$(jq -ser '
-                ["ccme", "config", "manifest", "models", "scanner", "writer", "dispat"] as $measured |
-                [.[] | select(.message == "release plan ready")] as $summaries |
-                [.[] | select(.message == "● changed" or .message == "↻ catch-up" or .message == "◈ channel-only")] as $releases |
-                if ($summaries | length) != 1 or ($releases | length) != $summaries[0].releasing or
-                   ($releases | length) == 0 or any($releases[]; (.channel | type) != "string")
-                then error("Cannot classify release channels from the plan")
-                else any($releases[]; (.package | IN($measured[])) and (.channel | split(" -> ") | last) == "stable") | tostring
-                end
-              ' "$RUNNER_TEMP/release-plan.jsonl")
-              echo "stable=$stable" >> "$GITHUB_OUTPUT"
-              docs=$(jq -ser 'any(.[]; (.message == "● changed" or .message == "↻ catch-up" or .message == "◈ channel-only") and .package == "docs") | tostring' "$RUNNER_TEMP/release-plan.jsonl")
-              echo "docs=$docs" >> "$GITHUB_OUTPUT"
-              ;;
-            3)
-              echo "releasing=false" >> "$GITHUB_OUTPUT"
-              echo "### Nothing to release" >> "$GITHUB_STEP_SUMMARY"
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-              echo "No package has commits since its last tag. The release was not attempted." >> "$GITHUB_STEP_SUMMARY"
-              ;;
+            0) echo "releasing=true" >> "$GITHUB_OUTPUT" ;;
+            3) echo "releasing=false" >> "$GITHUB_OUTPUT" ;;
             *) exit "$rc" ;;
           esac
-
-      - name: Select full build campaigns for this checkout
-        id: campaigns
-        if: steps.status.outputs.docs == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: dispat exec select-build-campaigns --for pkg:experiments --in pkg:experiments
-
-      - name: Keep the selected build campaign identities
-        if: steps.status.outputs.docs == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: build-campaign-selection
-          path: ${{ runner.temp }}/dispat-build-campaign-selection.json
-          retention-days: 30
-          if-no-files-found: error
 
   ping:
     name: Do the announcement's credentials still work
@@ -248,11 +190,15 @@ jobs:
         if: env.ANNOUNCE == ''
         run: echo "announcements disabled or no platform secrets; the release will skip the announcement"
 
-  test-unit:
-    name: Test unit
+  test-lane:
+    name: Test ${{ matrix.lane }}
     needs: plan
     if: needs.plan.outputs.releasing == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [unit, integration, race, checks, experiments]
     permissions:
       contents: write     # the unit lane's coordination branches
       id-token: write     # Workload Identity Federation, for the worker machine
@@ -261,7 +207,7 @@ jobs:
       # credential of its own is configured: its client id as a repository
       # variable and its private key as a secret. Without them the suite runs
       # on this runner alone.
-      CI_WORKER: ${{ (vars.CI_WORKER_APP_CLIENT_ID != '' && secrets.CI_WORKER_APP_PRIVATE_KEY != '') && 'true' || '' }}
+      CI_WORKER: ${{ (matrix.lane == 'unit' && vars.CI_WORKER_APP_CLIENT_ID != '' && secrets.CI_WORKER_APP_PRIVATE_KEY != '') && 'true' || '' }}
       # The node's name, this run's own, so the coordination branches of one
       # run are never mistaken for another's.
       DISPAT_CI_WORKER_NODE: ci-worker-${{ github.run_id }}-${{ github.run_attempt }}-unit
@@ -353,7 +299,7 @@ jobs:
         run: sh scripts/ci-worker.sh start "$RUNNER_TEMP/dispat-fresh/dispat"
 
       - name: No worker machine
-        if: env.CI_WORKER == ''
+        if: matrix.lane == 'unit' && env.CI_WORKER == ''
         run: echo "::warning::CI_WORKER_APP_CLIENT_ID or CI_WORKER_APP_PRIVATE_KEY is not configured; unit tests run on this runner alone"
 
       # The bracket the release binary build puts around itself, put around the
@@ -367,6 +313,7 @@ jobs:
       # `link` and `unlink` are the scripts in services/dispat/dispat.yaml, so
       # the gate and the release cannot disagree about what the bracket is.
       - name: Link the workspace dependencies
+        if: matrix.lane != 'experiments'
         run: dispat run link --since all -p dispat
 
       # A snapshot of this checkout travels to the worker through the
@@ -383,18 +330,18 @@ jobs:
             exit 1
           fi
 
-      # --since all, not a window: every package's unit tests run whether or
-      # not it changed. The release job requires the other three lanes too.
+      # Every test lane covers all packages, regardless of the release window.
       # The release candidate exercises the interpreted task graph on both
       # the orchestrator and its worker; the default mode is unchanged.
-      - name: Run every package's unit tests
+      - name: Run every package's ${{ matrix.lane }} tests
+        if: matrix.lane != 'experiments'
         run: |
           if [ -n "$CI_WORKER" ]; then
-            dispat run test:unit --distribution-mode=interpretation --since all --choreographer "$DISPAT_CI_WORKER_NODE=$DISPAT_CI_WORKER_REPOSITORY" \
+            dispat run "test:${{ matrix.lane }}" --distribution-mode=interpretation --since all --choreographer "$DISPAT_CI_WORKER_NODE=$DISPAT_CI_WORKER_REPOSITORY" \
               --return-endpoint "https://127.0.0.1:$DISPAT_CI_RETURN_PORT" \
               --return-listen "127.0.0.1:$DISPAT_CI_RETURN_PORT"
           else
-            dispat run test:unit --distribution-mode=interpretation --since all
+            dispat run "test:${{ matrix.lane }}" --distribution-mode=interpretation --since all
           fi
 
       # always(): the redirects must not outlive the job whatever the suite
@@ -403,7 +350,7 @@ jobs:
       # replace directive, and the go.sum entries anything that reconciles the
       # workspace drops while the links are in place.
       - name: Unlink the workspace dependencies
-        if: always()
+        if: always() && matrix.lane != 'experiments'
         run: |
           dispat run unlink --since all -p dispat
           dispat run verify-unlinked --since all -p dispat
@@ -436,68 +383,15 @@ jobs:
           sh scripts/ci-worker.sh prune || status=$?
           exit "$status"
 
-      - name: Collect the unit test fragment
-        env:
-          DISPAT_TEST_LANE: unit
-          DISPAT_TEST_REQUIRE_ALL: 'true'
-        run: dispat exec test-fragment-collect
-
-      - name: Keep the unit test fragment
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: test-fragment-unit
-          path: coverage-fragment/
-          retention-days: 7
-          if-no-files-found: error
-
-  test-lane:
-    name: Test ${{ matrix.lane }}
-    needs: plan
-    if: needs.plan.outputs.releasing == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        lane: [integration, race, checks]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          fetch-depth: 0
-
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
-      - uses: crazy-max/ghaction-github-runtime@3cb05d89e1f492524af3d41a1c98c83bc3025124 # v3.1.0
-
-      - name: Set up dispat
-        uses: ./
-
-      - name: Build dispat from the checkout
-        run: |
-          # shellcheck disable=SC2046
-          docker buildx build --file services/dispat/Dockerfile --target bootstrap-export \
-            $(sh scripts/buildx-cache.sh bootstrap) \
-            --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
-          echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
-
-      - name: Link the workspace dependencies
-        run: dispat run link --since all -p dispat
-
-      - name: Run every package's ${{ matrix.lane }} tests
-        run: dispat run "test:${{ matrix.lane }}" --distribution-mode=interpretation --since all
-
-      - name: Unlink the workspace dependencies
-        if: always()
-        run: |
-          dispat run unlink --since all -p dispat
-          dispat run verify-unlinked --since all -p dispat
-
       - name: Collect the ${{ matrix.lane }} test fragment
+        if: matrix.lane != 'experiments'
         env:
           DISPAT_TEST_LANE: ${{ matrix.lane }}
           DISPAT_TEST_REQUIRE_ALL: 'true'
         run: dispat exec test-fragment-collect
 
       - name: Keep the ${{ matrix.lane }} test fragment
+        if: matrix.lane != 'experiments'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-fragment-${{ matrix.lane }}
@@ -505,10 +399,44 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
+      - name: Run candidate experiments
+        if: matrix.lane == 'experiments'
+        env:
+          EXPERIMENTS_DISPAT_ARTIFACT: ${{ runner.temp }}/dispat-fresh/dispat
+          EXPERIMENTS_DISPAT_ID: candidate.${{ github.sha }}.linux-amd64
+          EXPERIMENTS_RESULTS: ${{ runner.temp }}/candidate-experiments
+        run: |
+          set -eu
+          jq -n --arg source "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg binary "$(sha256sum "$EXPERIMENTS_DISPAT_ARTIFACT" | cut -d ' ' -f1)" \
+            --arg identity "$EXPERIMENTS_DISPAT_ID" \
+            '{sourceRevision:$source,runId:$run,runAttempt:$attempt,binarySha256:$binary,binaryIdentity:$identity,platform:"linux/amd64"}' \
+            > "$RUNNER_TEMP/experiment-candidate.json"
+          dispat exec cells --for pkg:experiments --in pkg:experiments > "$RUNNER_TEMP/experiment-cells.txt"
+          dispat exec experiments --for pkg:experiments --in pkg:experiments
+
+      - name: Record the candidate experiment image
+        if: always() && matrix.lane == 'experiments'
+        run: docker image inspect dispat-experiments > "$RUNNER_TEMP/experiment-image.json"
+
+      - name: Keep candidate experiment evidence
+        if: always() && matrix.lane == 'experiments'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: candidate-experiments-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/candidate-experiments
+            ${{ runner.temp }}/experiment-candidate.json
+            ${{ runner.temp }}/experiment-cells.txt
+            ${{ runner.temp }}/experiment-image.json
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
+
   release:
     if: needs.plan.outputs.releasing == 'true'
     name: Run dispat
-    needs: [plan, test-unit, test-lane, ping]
+    needs: [plan, test-lane, ping]
     runs-on: ubuntu-latest
     permissions:
       contents: write     # commits, tags, GitHub releases
@@ -541,29 +469,19 @@ jobs:
       NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
       CRIER_STAGE_MODE: ${{ vars.CRIER_STAGE_MODE || 'server' }}
       CRIER_STAGE_SERVER_TUNNEL_MODE: ngrok
-      # The coverage minimum the docs package's report stage requires
-      # (packages/docs/dispat.yaml, Dockerfile.gotest target measured): 95 when
-      # the plan releases a measured Go module on the stable channel, and none
-      # (0) for a prerelease, which publishes its figures without the bar.
-      DISPAT_COVERAGE_MINIMUM: ${{ needs.plan.outputs.stable == 'true' && '95' || '0' }}
       EXPERIMENTS_LLVM_CAMPAIGN_DIR: ${{ github.workspace }}/coverage/build-campaign-input/llvm
       EXPERIMENTS_KERNEL_CAMPAIGN_DIR: ${{ github.workspace }}/coverage/build-campaign-input/kernel
       EXPERIMENTS_BUILD_SOURCE_REVISION: ${{ github.sha }}
-      EXPERIMENTS_LLVM_RUN_ID: ${{ needs.plan.outputs.llvm-run }}
-      EXPERIMENTS_LLVM_RUN_ATTEMPT: ${{ needs.plan.outputs.llvm-attempt }}
-      EXPERIMENTS_KERNEL_RUN_ID: ${{ needs.plan.outputs.kernel-run }}
-      EXPERIMENTS_KERNEL_RUN_ATTEMPT: ${{ needs.plan.outputs.kernel-attempt }}
     steps:
       - name: Require every release prerequisite to succeed
         env:
           PLAN_RESULT: ${{ needs.plan.result }}
-          UNIT_RESULT: ${{ needs['test-unit'].result }}
           TEST_LANE_RESULT: ${{ needs['test-lane'].result }}
           PING_RESULT: ${{ needs.ping.result }}
         run: |
-          if [ "$PLAN_RESULT" != success ] || [ "$UNIT_RESULT" != success ] || [ "$TEST_LANE_RESULT" != success ] || [ "$PING_RESULT" != success ]; then
-            printf 'Release prerequisites ended plan=%s unit=%s lanes=%s ping=%s; all must succeed.\n' \
-              "$PLAN_RESULT" "$UNIT_RESULT" "$TEST_LANE_RESULT" "$PING_RESULT" >&2
+          if [ "$PLAN_RESULT" != success ] || [ "$TEST_LANE_RESULT" != success ] || [ "$PING_RESULT" != success ]; then
+            printf 'Release prerequisites ended plan=%s matrix=%s ping=%s; all must succeed.\n' \
+              "$PLAN_RESULT" "$TEST_LANE_RESULT" "$PING_RESULT" >&2
             exit 1
           fi
 
@@ -583,35 +501,6 @@ jobs:
           key: experiments-${{ hashFiles('tests/experiments/**', 'tests/experiments/dispat.yaml') }}-${{ github.run_id }}
           restore-keys: |
             experiments-${{ hashFiles('tests/experiments/**', 'tests/experiments/dispat.yaml') }}-
-
-      - name: Download the exact full LLVM campaign
-        if: needs.plan.outputs.docs == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          github-token: ${{ github.token }}
-          run-id: ${{ needs.plan.outputs.llvm-run }}
-          artifact-ids: ${{ needs.plan.outputs.llvm-artifact }}
-          path: coverage/build-campaign-input/llvm
-      - name: Download the exact full kernel campaign
-        if: needs.plan.outputs.docs == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          github-token: ${{ github.token }}
-          run-id: ${{ needs.plan.outputs.kernel-run }}
-          artifact-ids: ${{ needs.plan.outputs.kernel-artifact }}
-          path: coverage/build-campaign-input/kernel
-
-      - name: Verify the campaigns measured the same binary
-        id: campaign-binary
-        if: needs.plan.outputs.docs == 'true'
-        run: |
-          BINARY_SHA256_PATTERN='^[a-f0-9]{64}$'
-          binary=$(jq -er -s --arg pattern "$BINARY_SHA256_PATTERN" '
-            .[0].binarySha256 as $binary |
-            select(length == 2 and .[1].binarySha256 == $binary) |
-            $binary | select(type == "string" and test($pattern))
-          ' "$EXPERIMENTS_LLVM_CAMPAIGN_DIR/campaign.json" "$EXPERIMENTS_KERNEL_CAMPAIGN_DIR/campaign.json")
-          printf 'EXPERIMENTS_BUILD_BINARY_SHA256=%s\n' "$binary" >> "$GITHUB_ENV"
 
       # The docker space builds two architectures per image, so the arm64 legs
       # run emulated. The containerd image store is what lets a multi-platform
@@ -667,6 +556,86 @@ jobs:
             --output "type=local,dest=$RUNNER_TEMP/dispat-fresh" .
           echo "$RUNNER_TEMP/dispat-fresh" >> "$GITHUB_PATH"
 
+      - name: Classify release coverage and documentation requirements
+        id: status
+        run: |
+          set -eu
+          dispat status --require-release --log-format json > "$RUNNER_TEMP/release-plan.jsonl" 2>&1
+          cat "$RUNNER_TEMP/release-plan.jsonl"
+          stable=$(jq -ser '
+            ["ccme", "config", "manifest", "models", "scanner", "writer", "dispat"] as $measured |
+            [.[] | select(.message == "release plan ready")] as $summaries |
+            [.[] | select(.message == "● changed" or .message == "↻ catch-up" or .message == "◈ channel-only")] as $releases |
+            if ($summaries | length) != 1 or ($releases | length) != $summaries[0].releasing or
+               ($releases | length) == 0 or any($releases[]; (.channel | type) != "string")
+            then error("Cannot classify release channels from the plan")
+            else any($releases[]; (.package | IN($measured[])) and (.channel | split(" -> ") | last) == "stable") | tostring
+            end
+          ' "$RUNNER_TEMP/release-plan.jsonl")
+          docs=$(jq -ser 'any(.[]; (.message == "● changed" or .message == "↻ catch-up" or .message == "◈ channel-only") and .package == "docs") | tostring' "$RUNNER_TEMP/release-plan.jsonl")
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+          echo "docs=$docs" >> "$GITHUB_OUTPUT"
+          if [ "$stable" = true ]; then
+            echo "DISPAT_COVERAGE_MINIMUM=95" >> "$GITHUB_ENV"
+          else
+            echo "DISPAT_COVERAGE_MINIMUM=0" >> "$GITHUB_ENV"
+          fi
+
+      - name: Select full build campaigns for this checkout
+        id: campaigns
+        if: steps.status.outputs.docs == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: dispat exec select-build-campaigns --for pkg:experiments --in pkg:experiments
+
+      - name: Keep the selected build campaign identities
+        if: steps.status.outputs.docs == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build-campaign-selection
+          path: ${{ runner.temp }}/dispat-build-campaign-selection.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Download the exact full LLVM campaign
+        if: steps.status.outputs.docs == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.campaigns.outputs.llvm-run }}
+          artifact-ids: ${{ steps.campaigns.outputs.llvm-artifact }}
+          path: coverage/build-campaign-input/llvm
+      - name: Download the exact full kernel campaign
+        if: steps.status.outputs.docs == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.campaigns.outputs.kernel-run }}
+          artifact-ids: ${{ steps.campaigns.outputs.kernel-artifact }}
+          path: coverage/build-campaign-input/kernel
+
+      - name: Verify the campaigns measured the same binary
+        id: campaign-binary
+        if: steps.status.outputs.docs == 'true'
+        run: |
+          BINARY_SHA256_PATTERN='^[a-f0-9]{64}$'
+          binary=$(jq -er -s --arg pattern "$BINARY_SHA256_PATTERN" '
+            .[0].binarySha256 as $binary |
+            select(length == 2 and .[1].binarySha256 == $binary) |
+            $binary | select(type == "string" and test($pattern))
+          ' "$EXPERIMENTS_LLVM_CAMPAIGN_DIR/campaign.json" "$EXPERIMENTS_KERNEL_CAMPAIGN_DIR/campaign.json")
+          printf 'EXPERIMENTS_BUILD_BINARY_SHA256=%s\n' "$binary" >> "$GITHUB_ENV"
+
+      - name: Validate imported build evidence before any publication
+        if: steps.status.outputs.docs == 'true'
+        env:
+          EXPERIMENTS_BUILD_VALIDATE_ONLY: '1'
+          EXPERIMENTS_LLVM_RUN_ID: ${{ steps.campaigns.outputs.llvm-run }}
+          EXPERIMENTS_LLVM_RUN_ATTEMPT: ${{ steps.campaigns.outputs.llvm-attempt }}
+          EXPERIMENTS_KERNEL_RUN_ID: ${{ steps.campaigns.outputs.kernel-run }}
+          EXPERIMENTS_KERNEL_RUN_ATTEMPT: ${{ steps.campaigns.outputs.kernel-attempt }}
+        run: dispat exec import-build-campaigns --for pkg:experiments --in pkg:experiments
+
       - name: Gather the four test fragments
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -682,17 +651,17 @@ jobs:
       # minimums and badge publication apply when a measured Go module ships
       # on the stable channel; prereleases still require complete evidence.
       - name: Verify coverage freshness gate
-        if: needs.plan.outputs.stable == 'true'
+        if: steps.status.outputs.stable == 'true'
         run: sh scripts/badge-cache-test.sh
 
       # Keep coverage policy in the configured dispat scripts. The docs
       # package measures its release report separately in beforeBuild.
       - name: Compute coverage totals
-        if: needs.plan.outputs.stable == 'true'
+        if: steps.status.outputs.stable == 'true'
         run: dispat exec coverage-badge
 
       - name: Upload merged coverage
-        if: needs.plan.outputs.stable == 'true'
+        if: steps.status.outputs.stable == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage
@@ -702,7 +671,7 @@ jobs:
           retention-days: 7
 
       - name: Push badge JSON to the badges branch
-        if: needs.plan.outputs.stable == 'true'
+        if: steps.status.outputs.stable == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: dispat exec push-badge
@@ -779,12 +748,6 @@ jobs:
           sudo apt-get install -y -qq ffmpeg >/dev/null
           ffmpeg -version | head -1
 
-      - name: Validate imported build evidence before any publication
-        if: needs.plan.outputs.docs == 'true'
-        env:
-          EXPERIMENTS_BUILD_VALIDATE_ONLY: '1'
-        run: dispat exec import-build-campaigns --for pkg:experiments --in pkg:experiments
-
       - name: Run the release
         id: dispat
         # dispat does the whole release itself: autoVersion rewrites, the
@@ -801,6 +764,10 @@ jobs:
         # (packages/docs/dispat.yaml).
         # GITHUB_REPOSITORY is set by Actions; the token is not, so pass it.
         env:
+          EXPERIMENTS_LLVM_RUN_ID: ${{ steps.campaigns.outputs.llvm-run }}
+          EXPERIMENTS_LLVM_RUN_ATTEMPT: ${{ steps.campaigns.outputs.llvm-attempt }}
+          EXPERIMENTS_KERNEL_RUN_ID: ${{ steps.campaigns.outputs.kernel-run }}
+          EXPERIMENTS_KERNEL_RUN_ATTEMPT: ${{ steps.campaigns.outputs.kernel-attempt }}
           DISPAT_DOCS_BUILDER: ${{ steps.docs-builder.outputs.name }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -63,8 +63,10 @@ and [test results](https://dispat.dev/internals/test-results/) pages. The
 [Release workflow](../.github/workflows/release.yml) runs both through `dispat exec` because only a `--since all` run
 generates a complete profile set across all packages.
 
-The release workflow has no manual inputs and has four stages: the release plan, parallel test jobs and credential checks, `Run dispat`,
-and post-release installation checks. Standalone LLVM and kernel campaigns use the separate
+The release workflow has no manual inputs and has four stages. The plan only runs `dispat status --require-release`
+to decide whether anything needs releasing. Two job definitions then run in parallel: a test matrix containing
+unit, integration, race, checks and candidate experiments, and the announcement credential check. `Run dispat`
+requires both to succeed before publication, followed by post-release installation checks. Standalone LLVM and kernel campaigns use the separate
 [Build experiments workflow](../.github/workflows/build-experiments.yml).
 
 CI uses four independent jobs. Each invokes the same package scripts available locally, with dispat selecting and
@@ -81,11 +83,16 @@ The jobs have separate checkouts and link brackets, and explicitly use `--distri
 exercise independent task planning. Only the release's unit job adds the cloud worker. Each job
 collects a fragment with `dispat exec test-fragment-collect`, using `DISPAT_TEST_LANE` to identify its job and
 `DISPAT_TEST_REQUIRE_ALL=true` for a release. Normal CI combines fragments in its aggregate job. The release job
-depends directly on all four parallel lanes and the credential ping, then runs `dispat exec test-fragment-merge`
+depends on the entire test matrix and the credential ping, then runs `dispat exec test-fragment-merge`
 before publication. The merge requires matching source revisions and complete, disjoint inventories, verifies file
 hashes, and rejects failed or incomplete test logs before admitting files into `coverage/`. A release also checks
 the full coverage denominator and commit stamps, including prereleases whose coverage minimum is zero. Stable releases of
 the measured Go modules retain both coverage minimums and the freshness gate before publishing.
+
+The experiments entry runs `dispat exec experiments --for pkg:experiments --in pkg:experiments` against the checkout's
+binary. It retains its own candidate records and identity rather than a coverage fragment. `Run dispat` classifies
+the release's coverage requirements and selects exact full LLVM and kernel artifacts before publication. The docs
+hook separately measures the published image for the site.
 
 `dispat run tests --since all` remains the local convenience command for all four sets of checks. Its commands within
 one package run sequentially; CI obtains concurrency between the four sets by running the named commands in separate

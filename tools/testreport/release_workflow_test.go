@@ -26,7 +26,7 @@ const (
 	releaseWorkflowBadgeSelector           = "dispat exec push-badge"
 	releaseWorkflowPublishStep             = "dispat"
 	releaseWorkflowPublishCondition        = "needs.plan.outputs.releasing == 'true'"
-	releaseWorkflowStableCondition         = "needs.plan.outputs.stable == 'true'"
+	releaseWorkflowStableCondition         = "steps.status.outputs.stable == 'true'"
 	releaseWorkflowFullEnvironment         = "DISPAT_TEST_REQUIRE_ALL"
 	releaseWorkflowFullValue               = "true"
 	releaseWorkflowSuccess                 = "success"
@@ -65,7 +65,111 @@ fi
 `
 )
 
+const (
+	releaseWorkflowNoDependencyCount             = 0
+	releaseWorkflowManualTriggerCount            = 1
+	releaseWorkflowPlanOutputCount               = 1
+	releaseWorkflowSuccessfulExitCode            = 0
+	releaseWorkflowNothingToReleaseExitCode      = 3
+	releaseWorkflowFailedExitCode                = 1
+	isReleaseWorkflowStepPresent                 = true
+	releaseWorkflowPlanJob                       = "plan"
+	releaseWorkflowPingJob                       = "ping"
+	releaseWorkflowMatrixJob                     = "test-lane"
+	releaseWorkflowActionPostJob                 = "post-release"
+	releaseWorkflowNPMPostJob                    = "post-release-npm"
+	releaseWorkflowManualTriggerName             = "workflow_dispatch"
+	releaseWorkflowEmptyValue                    = ""
+	releaseWorkflowPurposeReference              = "inputs.purpose"
+	releaseWorkflowUnitLane                      = "unit"
+	releaseWorkflowIntegrationLane               = "integration"
+	releaseWorkflowRaceLane                      = "race"
+	releaseWorkflowChecksLane                    = "checks"
+	releaseWorkflowExperimentsLane               = "experiments"
+	releaseWorkflowNonExperimentCondition        = "matrix.lane != 'experiments'"
+	releaseWorkflowExperimentCondition           = "matrix.lane == 'experiments'"
+	releaseWorkflowUnitCondition                 = "matrix.lane == 'unit'"
+	releaseWorkflowWorkerEnvironment             = "CI_WORKER"
+	releaseWorkflowMatrixTestCommand             = "dispat run \"test:${{ matrix.lane }}\""
+	releaseWorkflowFullSelectionOption           = "--since all"
+	releaseWorkflowFragmentCollectCommand        = "dispat exec test-fragment-collect"
+	releaseWorkflowLinkCommand                   = "dispat run link"
+	releaseWorkflowUnlinkCommand                 = "dispat run unlink"
+	releaseWorkflowAlwaysCondition               = "always()"
+	releaseWorkflowExperimentsCommand            = "dispat exec experiments --for pkg:experiments --in pkg:experiments"
+	releaseWorkflowCandidateArtifactEnvironment  = "EXPERIMENTS_DISPAT_ARTIFACT"
+	releaseWorkflowCandidateArtifactPath         = "${{ runner.temp }}/dispat-fresh/dispat"
+	releaseWorkflowCandidateIdentityEnvironment  = "EXPERIMENTS_DISPAT_ID"
+	releaseWorkflowCandidateIdentityValue        = "candidate.${{ github.sha }}.linux-amd64"
+	releaseWorkflowCandidateResultsEnvironment   = "EXPERIMENTS_RESULTS"
+	releaseWorkflowCandidateResultsPath          = "${{ runner.temp }}/candidate-experiments"
+	releaseWorkflowCandidateReceiptPath          = "${{ runner.temp }}/experiment-candidate.json"
+	releaseWorkflowCandidateArtifactName         = "candidate-experiments-${{ github.run_id }}-${{ github.run_attempt }}"
+	releaseWorkflowUploadActionPrefix            = "actions/upload-artifact@"
+	releaseWorkflowArtifactNameKey               = "name"
+	releaseWorkflowArtifactPathKey               = "path"
+	releaseWorkflowReleasingOutputName           = "releasing"
+	releaseWorkflowReleasingOutputExpression     = "${{ steps.status.outputs.releasing }}"
+	releaseWorkflowStatusCommand                 = "dispat status --require-release"
+	releaseWorkflowStatusStepID                  = "status"
+	releaseWorkflowConfiguredCommandPrefix       = "dispat exec"
+	releaseWorkflowStatusExitEnvironment         = "RELEASE_WORKFLOW_STATUS_EXIT"
+	releaseWorkflowGitHubOutputEnvironment       = "GITHUB_OUTPUT"
+	releaseWorkflowGitHubSummaryEnvironment      = "GITHUB_STEP_SUMMARY"
+	releaseWorkflowRunnerTempEnvironment         = "RUNNER_TEMP"
+	releaseWorkflowStatusOutputFile              = "plan.outputs"
+	releaseWorkflowStatusSummaryFile             = "summary.md"
+	releaseWorkflowStatusCommandLog              = "status-command.log"
+	releaseWorkflowPathEnvironmentPrefix         = "PATH="
+	releaseWorkflowSystemPathSuffix              = ":/usr/bin:/bin"
+	releaseWorkflowEnvironmentSeparator          = "="
+	releaseWorkflowLineBreak                     = "\n"
+	releaseWorkflowStatusArgumentsLine           = "status --require-release\n"
+	releaseWorkflowPlanYesOutput                 = "releasing=true\n"
+	releaseWorkflowPlanNoOutput                  = "releasing=false\n"
+	releaseWorkflowJQCommand                     = "jq"
+	releaseWorkflowPlanYesCase                   = "release exists"
+	releaseWorkflowPlanNoCase                    = "nothing to release"
+	releaseWorkflowPlanErrorCase                 = "status error"
+	releaseWorkflowPlanUnexpectedCase            = "unexpected status failure"
+	releaseWorkflowStagesErrorFormat             = "Release must contain only plan, two parallel job definitions, release and post-release jobs; got %v"
+	releaseWorkflowManualTriggerError            = "production Release must have only its manual trigger"
+	releaseWorkflowFirstStageError               = "the production plan must be the unconditional first stage"
+	releaseWorkflowPostDependencyErrorFormat     = "%s must follow only the production release"
+	releaseWorkflowParallelDependencyErrorFormat = "%s must run independently after a successful release-existence check"
+	releaseWorkflowPrerequisitesErrorFormat      = "publication prerequisites = %v; the complete matrix and credential ping must gate release"
+	releaseWorkflowPublicationConditionError     = "publication must require a real release plan and preserve failed dependency status"
+	releaseWorkflowMatrixError                   = "unit, integration, race, checks and experiments must run independently without fail-fast or a serial matrix cap"
+	releaseWorkflowWorkerIsolationError          = "only the unit matrix lane may enable the distributed test worker"
+	releaseWorkflowTestSweepError                = "the four test lanes must run complete interpreted sweeps while excluding experiments"
+	releaseWorkflowTestFragmentError             = "complete test fragments must follow successful test sweeps and exclude the experiment lane"
+	releaseWorkflowLinkIsolationError            = "workspace linking must exclude the experiment lane"
+	releaseWorkflowUnlinkIsolationError          = "workspace unlinking must run after test failures while excluding experiments"
+	releaseWorkflowExperimentBindingError        = "the required experiment lane must use this checkout binary and distinct candidate results"
+	releaseWorkflowExperimentArtifactError       = "candidate experiment evidence must be retained separately even when its run fails"
+	releaseWorkflowLaneStepsMissingError         = "the test matrix is missing a required sweep, fragment, experiment run or candidate artifact"
+	releaseWorkflowPlanOutputError               = "the first stage must expose only whether anything needs releasing"
+	releaseWorkflowPlanExtraCommandError         = "the first stage must not run configured checks or campaign discovery"
+	releaseWorkflowPlanStatusStepError           = "release existence must be checked once without a conditional or ignored error"
+	releaseWorkflowPlanExitErrorFormat           = "status exit %d: got exit %d, want %d; output=%s"
+	releaseWorkflowPlanResultErrorFormat         = "status exit %d: release output=%q error=%v, want %q"
+	releaseWorkflowPlanInvocationErrorFormat     = "status invocation=%q error=%v; expected only status --require-release"
+	releaseWorkflowPlanMarkerErrorFormat         = "status exit %d did not control subsequent execution: %s"
+	releaseWorkflowStatusExitValueFormat         = releaseWorkflowStatusExitEnvironment + "=%d"
+	releaseWorkflowStatusStub                    = releaseWorkflowFixtureScriptHead + `
+printf '%s\n' "$*" >> "$RELEASE_WORKFLOW_COMMAND_LOG"
+[ "$#" -eq 2 ] && [ "$1" = status ] && [ "$2" = --require-release ] || exit 91
+printf '%s\n' 'Human-readable release status, deliberately not JSON.'
+exit "$RELEASE_WORKFLOW_STATUS_EXIT"
+`
+	releaseWorkflowUnexpectedJQStub = releaseWorkflowFixtureScriptHead + `
+printf '%s\n' 'Plan must not parse channels or campaign evidence.' >&2
+exit 97
+`
+)
+
 type releaseWorkflowStep struct {
+	Uses            string            `yaml:"uses"`
 	ID              string            `yaml:"id"`
 	If              string            `yaml:"if"`
 	Run             string            `yaml:"run"`
@@ -80,13 +184,16 @@ type releaseWorkflowDefinition struct {
 }
 
 type releaseWorkflowJob struct {
+	Outputs         map[string]string     `yaml:"outputs"`
+	Env             map[string]string     `yaml:"env"`
 	If              string                `yaml:"if"`
 	Needs           yaml.Node             `yaml:"needs"`
 	Steps           []releaseWorkflowStep `yaml:"steps"`
 	ContinueOnError bool                  `yaml:"continue-on-error"`
 	Strategy        struct {
-		FailFast *bool `yaml:"fail-fast"`
-		Matrix   struct {
+		FailFast    *bool `yaml:"fail-fast"`
+		MaxParallel *int  `yaml:"max-parallel"`
+		Matrix      struct {
 			Lane []string `yaml:"lane"`
 		} `yaml:"matrix"`
 	} `yaml:"strategy"`
@@ -145,17 +252,17 @@ func releaseWorkflowStepIndex(t *testing.T, job releaseWorkflowJob, name string)
 func TestReleaseWorkflowRequiresParallelCompleteLanes(t *testing.T) {
 	workflow := readReleaseWorkflow(t)
 	jobs := workflow.Jobs
-	var names []string
-	for name := range jobs {
-		names = append(names, name)
+	var jobNames []string
+	for jobName := range jobs {
+		jobNames = append(jobNames, jobName)
 	}
-	slices.Sort(names)
-	if !slices.Equal(names, []string{"ping", "plan", "post-release", "post-release-npm", "release", "test-lane", "test-unit"}) {
-		t.Fatalf("Release must contain only plan, parallel prerequisites, release and post-release jobs; got %v", names)
+	slices.Sort(jobNames)
+	if !slices.Equal(jobNames, []string{releaseWorkflowPingJob, releaseWorkflowPlanJob, releaseWorkflowActionPostJob, releaseWorkflowNPMPostJob, releaseWorkflowPublishJob, releaseWorkflowMatrixJob}) {
+		t.Fatalf(releaseWorkflowStagesErrorFormat, jobNames)
 	}
-	dispatch, exists := workflow.On["workflow_dispatch"]
-	if !exists || len(workflow.On) != 1 {
-		t.Fatal("production Release must have only its manual trigger")
+	dispatch, isPresent := workflow.On[releaseWorkflowManualTriggerName]
+	if !isPresent || len(workflow.On) != releaseWorkflowManualTriggerCount {
+		t.Fatal(releaseWorkflowManualTriggerError)
 	}
 	var manual struct {
 		Inputs map[string]yaml.Node `yaml:"inputs"`
@@ -166,58 +273,153 @@ func TestReleaseWorkflowRequiresParallelCompleteLanes(t *testing.T) {
 	if len(manual.Inputs) != releaseWorkflowManualInputCount {
 		t.Fatalf(releaseWorkflowManualInputsErrorFormat, manual.Inputs)
 	}
-	plan := jobs["plan"]
-	if len(releaseWorkflowDependencies(t, plan)) != 0 || plan.If != "" || plan.ContinueOnError {
-		t.Fatal("the production plan must be the unconditional first stage")
+	plan := jobs[releaseWorkflowPlanJob]
+	if len(releaseWorkflowDependencies(t, plan)) != releaseWorkflowNoDependencyCount || plan.If != releaseWorkflowEmptyValue || plan.ContinueOnError {
+		t.Fatal(releaseWorkflowFirstStageError)
 	}
-	for _, name := range []string{"post-release", "post-release-npm"} {
-		if !slices.Equal(releaseWorkflowDependencies(t, jobs[name]), []string{releaseWorkflowPublishJob}) ||
-			strings.Contains(jobs[name].If, "inputs.purpose") {
-			t.Fatalf("%s must follow only the production release", name)
+	for _, jobName := range []string{releaseWorkflowActionPostJob, releaseWorkflowNPMPostJob} {
+		if !slices.Equal(releaseWorkflowDependencies(t, jobs[jobName]), []string{releaseWorkflowPublishJob}) ||
+			strings.Contains(jobs[jobName].If, releaseWorkflowPurposeReference) {
+			t.Fatalf(releaseWorkflowPostDependencyErrorFormat, jobName)
 		}
 	}
-	ping := jobs["ping"]
-	if !slices.Equal(releaseWorkflowDependencies(t, ping), []string{"plan"}) ||
-		ping.If != releaseWorkflowPublishCondition || ping.ContinueOnError {
-		t.Fatal("the announcement check must run in parallel when the plan has a release")
+	for _, jobName := range []string{releaseWorkflowPingJob, releaseWorkflowMatrixJob} {
+		job := jobs[jobName]
+		if !slices.Equal(releaseWorkflowDependencies(t, job), []string{releaseWorkflowPlanJob}) ||
+			job.If != releaseWorkflowPublishCondition || job.ContinueOnError {
+			t.Fatalf(releaseWorkflowParallelDependencyErrorFormat, jobName)
+		}
 	}
 	release := jobs[releaseWorkflowPublishJob]
 	dependencies := releaseWorkflowDependencies(t, release)
 	slices.Sort(dependencies)
-	if !slices.Equal(dependencies, []string{"ping", "plan", "test-lane", "test-unit"}) {
-		t.Fatalf("publication prerequisites = %v; every parallel lane and ping must gate release", dependencies)
+	if !slices.Equal(dependencies, []string{releaseWorkflowPingJob, releaseWorkflowPlanJob, releaseWorkflowMatrixJob}) {
+		t.Fatalf(releaseWorkflowPrerequisitesErrorFormat, dependencies)
 	}
 	if release.If != releaseWorkflowPublishCondition || release.ContinueOnError {
-		t.Fatal("publication must require a real release plan and preserve failed dependency status")
+		t.Fatal(releaseWorkflowPublicationConditionError)
 	}
-	lanes := jobs["test-lane"]
+	lanes := jobs[releaseWorkflowMatrixJob]
 	if lanes.Strategy.FailFast == nil || *lanes.Strategy.FailFast ||
-		!slices.Equal(lanes.Strategy.Matrix.Lane, []string{"integration", "race", "checks"}) {
-		t.Fatal("integration, race and checks must run independently without matrix fail-fast")
+		!slices.Equal(lanes.Strategy.Matrix.Lane, []string{releaseWorkflowUnitLane, releaseWorkflowIntegrationLane, releaseWorkflowRaceLane, releaseWorkflowChecksLane, releaseWorkflowExperimentsLane}) ||
+		(lanes.Strategy.MaxParallel != nil && *lanes.Strategy.MaxParallel < len(lanes.Strategy.Matrix.Lane)) {
+		t.Fatal(releaseWorkflowMatrixError)
 	}
-	for _, name := range []string{"test-unit", "test-lane"} {
-		job := jobs[name]
-		if !slices.Equal(releaseWorkflowDependencies(t, job), []string{"plan"}) ||
-			job.If != releaseWorkflowPublishCondition || job.ContinueOnError {
-			t.Fatalf("%s does not run independently after the plan", name)
-		}
-		collected, swept := false, false
-		command := "dispat run test:unit"
-		if name == "test-lane" {
-			command = `dispat run "test:${{ matrix.lane }}"`
-		}
-		for _, step := range job.Steps {
-			if strings.Contains(step.Run, command) {
-				swept = strings.Contains(step.Run, "--since all") && !step.ContinueOnError
+	if !strings.Contains(lanes.Env[releaseWorkflowWorkerEnvironment], releaseWorkflowUnitCondition) {
+		t.Fatal(releaseWorkflowWorkerIsolationError)
+	}
+	var isSwept, isCollected, isExperimentRequired, isCandidateRetained bool
+	for _, step := range lanes.Steps {
+		if strings.Contains(step.Run, releaseWorkflowMatrixTestCommand) {
+			if step.If != releaseWorkflowNonExperimentCondition || step.ContinueOnError || !strings.Contains(step.Run, releaseWorkflowFullSelectionOption) {
+				t.Fatal(releaseWorkflowTestSweepError)
 			}
-			if !strings.Contains(step.Run, "dispat exec test-fragment-collect") {
-				continue
-			}
-			collected = swept && step.Env[releaseWorkflowFullEnvironment] == releaseWorkflowFullValue &&
-				step.If == "" && !step.ContinueOnError
+			isSwept = isReleaseWorkflowStepPresent
 		}
-		if !collected {
-			t.Fatalf("%s must collect complete evidence only after its full successful sweep", name)
+		if strings.Contains(step.Run, releaseWorkflowFragmentCollectCommand) {
+			if !isSwept || step.If != releaseWorkflowNonExperimentCondition || step.ContinueOnError || step.Env[releaseWorkflowFullEnvironment] != releaseWorkflowFullValue {
+				t.Fatal(releaseWorkflowTestFragmentError)
+			}
+			isCollected = isReleaseWorkflowStepPresent
+		}
+		if strings.Contains(step.Run, releaseWorkflowLinkCommand) && step.If != releaseWorkflowNonExperimentCondition {
+			t.Fatal(releaseWorkflowLinkIsolationError)
+		}
+		if strings.Contains(step.Run, releaseWorkflowUnlinkCommand) &&
+			(!strings.Contains(step.If, releaseWorkflowNonExperimentCondition) || !strings.Contains(step.If, releaseWorkflowAlwaysCondition)) {
+			t.Fatal(releaseWorkflowUnlinkIsolationError)
+		}
+		if strings.Contains(step.Run, releaseWorkflowExperimentsCommand) {
+			if step.If != releaseWorkflowExperimentCondition || step.ContinueOnError ||
+				step.Env[releaseWorkflowCandidateArtifactEnvironment] != releaseWorkflowCandidateArtifactPath ||
+				step.Env[releaseWorkflowCandidateIdentityEnvironment] != releaseWorkflowCandidateIdentityValue ||
+				step.Env[releaseWorkflowCandidateResultsEnvironment] != releaseWorkflowCandidateResultsPath {
+				t.Fatal(releaseWorkflowExperimentBindingError)
+			}
+			isExperimentRequired = isReleaseWorkflowStepPresent
+		}
+		if strings.HasPrefix(step.Uses, releaseWorkflowUploadActionPrefix) && step.With[releaseWorkflowArtifactNameKey] == releaseWorkflowCandidateArtifactName {
+			if !isExperimentRequired || step.ContinueOnError || !strings.Contains(step.If, releaseWorkflowExperimentCondition) ||
+				!strings.Contains(step.If, releaseWorkflowAlwaysCondition) || !strings.Contains(step.With[releaseWorkflowArtifactPathKey], releaseWorkflowCandidateResultsPath) ||
+				!strings.Contains(step.With[releaseWorkflowArtifactPathKey], releaseWorkflowCandidateReceiptPath) {
+				t.Fatal(releaseWorkflowExperimentArtifactError)
+			}
+			isCandidateRetained = isReleaseWorkflowStepPresent
+		}
+	}
+	if !isSwept || !isCollected || !isExperimentRequired || !isCandidateRetained {
+		t.Fatal(releaseWorkflowLaneStepsMissingError)
+	}
+}
+
+func TestReleaseWorkflowPlanOnlyChecksExistence(t *testing.T) {
+	plan := readReleaseWorkflow(t).Jobs[releaseWorkflowPlanJob]
+	status := plan.Steps[releaseWorkflowStepIndex(t, plan, releaseWorkflowStatusCommand)]
+	if status.ID != releaseWorkflowStatusStepID || status.If != releaseWorkflowEmptyValue || status.ContinueOnError {
+		t.Fatal(releaseWorkflowPlanStatusStepError)
+	}
+	for _, scenario := range []struct {
+		name                   string
+		statusExit, wantedExit int
+		wantedOutput           string
+	}{
+		{releaseWorkflowPlanYesCase, releaseWorkflowSuccessfulExitCode, releaseWorkflowSuccessfulExitCode, releaseWorkflowPlanYesOutput},
+		{releaseWorkflowPlanNoCase, releaseWorkflowNothingToReleaseExitCode, releaseWorkflowSuccessfulExitCode, releaseWorkflowPlanNoOutput},
+		{releaseWorkflowPlanErrorCase, releaseWorkflowFailedExitCode, releaseWorkflowFailedExitCode, releaseWorkflowEmptyValue},
+		{releaseWorkflowPlanUnexpectedCase, releaseWorkflowInjectedExitCode, releaseWorkflowInjectedExitCode, releaseWorkflowEmptyValue},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			directory := t.TempDir()
+			for name, content := range map[string]string{releaseWorkflowDispatCommand: releaseWorkflowStatusStub, releaseWorkflowJQCommand: releaseWorkflowUnexpectedJQStub} {
+				path := filepath.Join(directory, name)
+				write(t, path, content)
+				if err := os.Chmod(path, releaseWorkflowFixtureMode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			outputPath := filepath.Join(directory, releaseWorkflowStatusOutputFile)
+			commandLog := filepath.Join(directory, releaseWorkflowStatusCommandLog)
+			command := exec.CommandContext(t.Context(), releaseWorkflowShell, releaseWorkflowShellArguments, releaseWorkflowShellCommandFlag, status.Run+releaseWorkflowLineBreak+releaseWorkflowMarkerCommand)
+			command.Dir = directory
+			command.Env = []string{
+				releaseWorkflowPathEnvironmentPrefix + directory + releaseWorkflowSystemPathSuffix,
+				releaseWorkflowGitHubOutputEnvironment + releaseWorkflowEnvironmentSeparator + outputPath,
+				releaseWorkflowGitHubSummaryEnvironment + releaseWorkflowEnvironmentSeparator + filepath.Join(directory, releaseWorkflowStatusSummaryFile),
+				releaseWorkflowRunnerTempEnvironment + releaseWorkflowEnvironmentSeparator + directory,
+				releaseWorkflowLogEnvironment + releaseWorkflowEnvironmentSeparator + commandLog,
+				fmt.Sprintf(releaseWorkflowStatusExitValueFormat, scenario.statusExit),
+			}
+			output, err := command.CombinedOutput()
+			exitCode := releaseWorkflowSuccessfulExitCode
+			if err != nil {
+				var processExit *exec.ExitError
+				if !errors.As(err, &processExit) {
+					t.Fatal(err)
+				}
+				exitCode = processExit.ExitCode()
+			}
+			if exitCode != scenario.wantedExit {
+				t.Fatalf(releaseWorkflowPlanExitErrorFormat, scenario.statusExit, exitCode, scenario.wantedExit, output)
+			}
+			planOutput, err := os.ReadFile(outputPath)
+			if (err != nil && !errors.Is(err, os.ErrNotExist)) || string(planOutput) != scenario.wantedOutput {
+				t.Fatalf(releaseWorkflowPlanResultErrorFormat, scenario.statusExit, planOutput, err, scenario.wantedOutput)
+			}
+			invocation, err := os.ReadFile(commandLog)
+			if err != nil || string(invocation) != releaseWorkflowStatusArgumentsLine {
+				t.Fatalf(releaseWorkflowPlanInvocationErrorFormat, invocation, err)
+			}
+			if strings.Contains(string(output), releaseWorkflowMarker) != (scenario.wantedExit == releaseWorkflowSuccessfulExitCode) {
+				t.Fatalf(releaseWorkflowPlanMarkerErrorFormat, scenario.statusExit, output)
+			}
+		})
+	}
+	if len(plan.Outputs) != releaseWorkflowPlanOutputCount || plan.Outputs[releaseWorkflowReleasingOutputName] != releaseWorkflowReleasingOutputExpression {
+		t.Error(releaseWorkflowPlanOutputError)
+	}
+	for _, step := range plan.Steps {
+		if strings.Contains(step.Run, releaseWorkflowConfiguredCommandPrefix) {
+			t.Error(releaseWorkflowPlanExtraCommandError)
 		}
 	}
 }
@@ -233,7 +435,6 @@ func TestReleaseWorkflowPrerequisiteGuardFailsClosed(t *testing.T) {
 	}
 	bindings := map[string]string{
 		"PLAN_RESULT":      "${{ needs.plan.result }}",
-		"UNIT_RESULT":      "${{ needs['test-unit'].result }}",
 		"TEST_LANE_RESULT": "${{ needs['test-lane'].result }}",
 		"PING_RESULT":      "${{ needs.ping.result }}",
 	}

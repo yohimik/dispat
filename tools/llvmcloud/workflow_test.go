@@ -24,7 +24,10 @@ const (
 	campaignPlanJobName                    = "plan"
 	campaignReleaseJobName                 = "release"
 	campaignDocsOutputName                 = "docs"
-	campaignDocsPlanOutputExpression       = "${{ steps.status.outputs.docs }}"
+	campaignStableOutputName               = "stable"
+	campaignStatusStepID                   = "status"
+	campaignStatusRunCommand               = "dispat status --require-release"
+	campaignDocsOutputPrefix               = "docs="
 	campaignLLVMRunOutputName              = "llvm-run"
 	campaignLLVMAttemptOutputName          = "llvm-attempt"
 	campaignLLVMArtifactOutputName         = "llvm-artifact"
@@ -37,20 +40,20 @@ const (
 	campaignSourceEnvironmentName          = "EXPERIMENTS_BUILD_SOURCE_REVISION"
 	campaignSourceExpression               = "${{ github.sha }}"
 	campaignLLVMRunEnvironmentName         = "EXPERIMENTS_LLVM_RUN_ID"
-	campaignLLVMRunExpression              = "${{ needs.plan.outputs.llvm-run }}"
+	campaignLLVMRunExpression              = "${{ steps.campaigns.outputs.llvm-run }}"
 	campaignLLVMAttemptEnvironmentName     = "EXPERIMENTS_LLVM_RUN_ATTEMPT"
-	campaignLLVMAttemptExpression          = "${{ needs.plan.outputs.llvm-attempt }}"
+	campaignLLVMAttemptExpression          = "${{ steps.campaigns.outputs.llvm-attempt }}"
 	campaignKernelRunEnvironmentName       = "EXPERIMENTS_KERNEL_RUN_ID"
-	campaignKernelRunExpression            = "${{ needs.plan.outputs.kernel-run }}"
+	campaignKernelRunExpression            = "${{ steps.campaigns.outputs.kernel-run }}"
 	campaignKernelAttemptEnvironmentName   = "EXPERIMENTS_KERNEL_RUN_ATTEMPT"
-	campaignKernelAttemptExpression        = "${{ needs.plan.outputs.kernel-attempt }}"
+	campaignKernelAttemptExpression        = "${{ steps.campaigns.outputs.kernel-attempt }}"
 	campaignBinaryEnvironmentName          = "EXPERIMENTS_BUILD_BINARY_SHA256"
 	campaignArtifactActionPrefix           = "actions/download-artifact@"
 	campaignArtifactPathKey                = "path"
 	campaignArtifactDirectoryPrefix        = "coverage/build-campaign-input/"
 	campaignLLVMArtifactWorkloadName       = "llvm"
 	campaignKernelArtifactWorkloadName     = "kernel"
-	campaignDocsImportCondition            = "needs.plan.outputs.docs == 'true'"
+	campaignDocsImportCondition            = "steps.status.outputs.docs == 'true'"
 	campaignArtifactRunIDKey               = "run-id"
 	campaignArtifactIDsKey                 = "artifact-ids"
 	campaignArtifactNameKey                = "name"
@@ -65,11 +68,13 @@ const (
 	campaignValidateOnlyEnabledValue       = "1"
 	campaignPublishStepID                  = "dispat"
 	campaignManualInputDependencyError     = "production release still depends on manually supplied workflow inputs"
-	campaignDocsPlanBindingError           = "docs evidence gate is not tied to the computed release plan"
-	campaignPlanOutputBindingErrorFormat   = "plan output %s does not preserve the automatically selected campaign identity"
+	campaignStatusOrderingError            = "release package classification must precede campaign selection in the release job"
+	campaignPlanOutputBindingErrorFormat   = "plan output %s contains release classification or campaign selection beyond the existence gate"
+	campaignPlanSelectionError             = "campaign selection must run in the release job, not the existence gate"
 	campaignSelectorWiringError            = "docs release must select source-bound campaigns once through its configured dispat script"
 	campaignSelectorMissingError           = "docs release has no automatic source-bound campaign selection"
 	campaignEnvironmentBindingErrorFormat  = "%s is not bound to the checkout and selected campaign"
+	campaignJobEnvironmentErrorFormat      = "%s must be bound at the import and publication steps after campaign selection"
 	campaignBinaryDerivationError          = "the measured binary must be derived from both downloaded campaign manifests"
 	campaignArtifactBindingError           = "campaign download must use the exact automatically selected run and immutable artifact ID"
 	campaignBinaryOrderingError            = "both exact artifacts must arrive before deriving their shared measured binary"
@@ -77,9 +82,8 @@ const (
 	campaignValidationOrderingError        = "complete evidence validation must follow shared binary verification before publication"
 	campaignPublicationOrderingError       = "publication can begin before both selected campaigns and their binary are validated"
 	campaignPublicationMissingError        = "release publication step was not checked"
-	campaignSelectedOutputExpressionFormat = "${{ steps.campaigns.outputs.%s }}"
-	campaignRunOutputExpressionFormat      = "${{ needs.plan.outputs.%s-run }}"
-	campaignArtifactOutputExpressionFormat = "${{ needs.plan.outputs.%s-artifact }}"
+	campaignRunOutputExpressionFormat      = "${{ steps.campaigns.outputs.%s-run }}"
+	campaignArtifactOutputExpressionFormat = "${{ steps.campaigns.outputs.%s-artifact }}"
 	campaignArtifactSelectionUnset         = ""
 	campaignManualInputsError              = "production release must discover campaign evidence without manual inputs"
 )
@@ -191,49 +195,54 @@ func TestDocsCampaignEvidenceIsPinnedAndValidatedBeforePublication(t *testing.T)
 		t.Fatal(err)
 	}
 	plan := workflow.Jobs[campaignPlanJobName]
-	if plan.Outputs[campaignDocsOutputName] != campaignDocsPlanOutputExpression {
-		t.Fatal(campaignDocsPlanBindingError)
-	}
-	for _, outputName := range []string{campaignLLVMRunOutputName, campaignLLVMAttemptOutputName, campaignLLVMArtifactOutputName, campaignKernelRunOutputName, campaignKernelAttemptOutputName, campaignKernelArtifactOutputName} {
-		if plan.Outputs[outputName] != fmt.Sprintf(campaignSelectedOutputExpressionFormat, outputName) {
+	for _, outputName := range []string{campaignDocsOutputName, campaignStableOutputName, campaignLLVMRunOutputName, campaignLLVMAttemptOutputName, campaignLLVMArtifactOutputName, campaignKernelRunOutputName, campaignKernelAttemptOutputName, campaignKernelArtifactOutputName} {
+		if _, isPresent := plan.Outputs[outputName]; isPresent {
 			t.Fatalf(campaignPlanOutputBindingErrorFormat, outputName)
 		}
 	}
-	var isSelected bool
 	for _, step := range plan.Steps {
-		if step.ID != campaignSelectorStepID {
-			continue
+		if step.ID == campaignSelectorStepID || strings.Contains(step.Run, campaignSelectRunCommand) {
+			t.Fatal(campaignPlanSelectionError)
 		}
-		if isSelected || step.If != campaignDocsSelectionCondition || step.ContinueOnError ||
-			strings.TrimSpace(step.Run) != campaignSelectRunCommand {
-			t.Fatal(campaignSelectorWiringError)
-		}
-		isSelected = isCampaignEvidencePresent
-	}
-	if !isSelected {
-		t.Fatal(campaignSelectorMissingError)
 	}
 	release := workflow.Jobs[campaignReleaseJobName]
-	for environmentName, expectedExpression := range map[string]string{
-		campaignSourceEnvironmentName:        campaignSourceExpression,
+	if release.Env[campaignSourceEnvironmentName] != campaignSourceExpression {
+		t.Fatalf(campaignEnvironmentBindingErrorFormat, campaignSourceEnvironmentName)
+	}
+	selectedBindings := map[string]string{
 		campaignLLVMRunEnvironmentName:       campaignLLVMRunExpression,
 		campaignLLVMAttemptEnvironmentName:   campaignLLVMAttemptExpression,
 		campaignKernelRunEnvironmentName:     campaignKernelRunExpression,
 		campaignKernelAttemptEnvironmentName: campaignKernelAttemptExpression,
-	} {
-		if release.Env[environmentName] != expectedExpression {
-			t.Fatalf(campaignEnvironmentBindingErrorFormat, environmentName)
+	}
+	for environmentName := range selectedBindings {
+		if _, isPresent := release.Env[environmentName]; isPresent {
+			t.Fatalf(campaignJobEnvironmentErrorFormat, environmentName)
 		}
 	}
 	if _, isPresent := release.Env[campaignBinaryEnvironmentName]; isPresent {
 		t.Fatal(campaignBinaryDerivationError)
 	}
 	downloadedWorkloads := map[string]bool{}
-	var isBinaryVerified, isValidated, isPublished bool
+	var isClassified, isSelected, isBinaryVerified, isValidated, isPublished bool
 	for _, step := range release.Steps {
+		if step.ID == campaignStatusStepID {
+			if isClassified || isSelected || step.ContinueOnError ||
+				!strings.Contains(step.Run, campaignStatusRunCommand) || !strings.Contains(step.Run, campaignDocsOutputPrefix) {
+				t.Fatal(campaignStatusOrderingError)
+			}
+			isClassified = isCampaignEvidencePresent
+		}
+		if step.ID == campaignSelectorStepID {
+			if !isClassified || isSelected || step.If != campaignDocsSelectionCondition || step.ContinueOnError ||
+				strings.TrimSpace(step.Run) != campaignSelectRunCommand {
+				t.Fatal(campaignSelectorWiringError)
+			}
+			isSelected = isCampaignEvidencePresent
+		}
 		if strings.HasPrefix(step.Uses, campaignArtifactActionPrefix) && strings.Contains(step.With[campaignArtifactPathKey], campaignArtifactDirectoryPrefix) {
 			workload := strings.TrimPrefix(step.With[campaignArtifactPathKey], campaignArtifactDirectoryPrefix)
-			if (workload != campaignLLVMArtifactWorkloadName && workload != campaignKernelArtifactWorkloadName) || downloadedWorkloads[workload] ||
+			if !isSelected || (workload != campaignLLVMArtifactWorkloadName && workload != campaignKernelArtifactWorkloadName) || downloadedWorkloads[workload] ||
 				step.If != campaignDocsImportCondition || step.ContinueOnError ||
 				step.With[campaignArtifactRunIDKey] != fmt.Sprintf(campaignRunOutputExpressionFormat, workload) ||
 				step.With[campaignArtifactIDsKey] != fmt.Sprintf(campaignArtifactOutputExpressionFormat, workload) ||
@@ -253,6 +262,13 @@ func TestDocsCampaignEvidenceIsPinnedAndValidatedBeforePublication(t *testing.T)
 			}
 			isBinaryVerified = isCampaignEvidencePresent
 		}
+		if strings.Contains(step.Run, campaignImportRunCommand) || step.ID == campaignPublishStepID {
+			for environmentName, expectedExpression := range selectedBindings {
+				if step.Env[environmentName] != expectedExpression {
+					t.Fatalf(campaignEnvironmentBindingErrorFormat, environmentName)
+				}
+			}
+		}
 		if strings.Contains(step.Run, campaignImportRunCommand) {
 			if !isBinaryVerified || step.If != campaignDocsImportCondition ||
 				step.Env[campaignValidateOnlyEnvironmentName] != campaignValidateOnlyEnabledValue || step.ContinueOnError {
@@ -266,6 +282,9 @@ func TestDocsCampaignEvidenceIsPinnedAndValidatedBeforePublication(t *testing.T)
 				t.Fatal(campaignPublicationOrderingError)
 			}
 		}
+	}
+	if !isSelected {
+		t.Fatal(campaignSelectorMissingError)
 	}
 	if !isPublished {
 		t.Fatal(campaignPublicationMissingError)
