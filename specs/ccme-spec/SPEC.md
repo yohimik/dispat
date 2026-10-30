@@ -5887,6 +5887,84 @@ many completed finite batches and tasks over unbounded time. It does not compute
 or an arbitrary infinite object to completion. Fair progress can also coexist with an unbounded queue and
 no uniform response bound.
 
+**Perfect distributed system start theorem (informative).** Fix an already bootstrapped active logical
+node whose required membership is the concurrently running pair `M = {a, b}`. Both runtimes, initial
+state and authority are admitted under the preceding contracts. Either member is authorized to originate
+a finite startup request through the existing admission path. The request pins a service/start-slot
+identity, the current epoch, an effective stream generator with a finite description, its initial state,
+the initial input/admission contract and the checking policy. It describes how finite work is generated;
+it need not contain all future inputs and does not encode an arbitrary infinite dataset by naming it.
+
+One member may be the sole request originator. A separately originated request from the other member is
+not a prerequisite for trying to start the workload. Both members still independently check the same
+pinned request and initial finite workload candidate, with `Q = M`, before authorized durable admission.
+The initiator cannot substitute for the second checker or acquire new canonical-write/publication
+authority by submitting a request. This starts a new workload on an existing checking service; the
+bootstrap, monitoring and request construction are already computations. It is not a construction of
+the first computation from an inactive or empty system.
+
+Assume a valid request is submitted for an available start slot, both members remain participating,
+the first nonempty finite-DAG batch is generated in finite time, and its initial inputs and compatible
+capacity become available in finite time. Required delivery, artifact gates, accepting checks and
+durable admission succeed in finite time. Enabled startup and execution
+stages receive fair service without deadlock or cancellation. Then a request from either single member
+suffices for the first finite batch to start in finite time. Proof: request construction, delivery,
+checking, admission and first dispatch form a finite dependency graph with successful finite stages;
+topological induction reaches the first start. If the generator and subsequent execution also satisfy
+the productive-stream and execution-level non-Zeno premises, every finite batch prefix completes in
+finite time and those completion times are unbounded. A mere attempt does not imply successful admission
+or indefinite progress, and startup neither starts infinitely many tasks at once nor finishes an infinite
+computation. Later batches retain their required pinned plans and admission epochs.
+
+The existing serialized, fenced authority admits at most one startup for a given start slot and epoch.
+Repeated requests naming the same candidate refer to that same decision; competing candidates need the
+declared arbitration policy. An admitted startup is not a promise that a command or external effect is
+physically executed exactly once; retries and uncertain outcomes retain their recovery rules. The
+one-originator result supplies no leader-election or consensus algorithm. In a strictly request-triggered
+initial state with no pending/admitted request, external trigger or automatic-start path, zero requests
+cannot enable startup. Only in that declared model is one originator minimal. One initiator is sufficient
+while two checking members remain required; a lone survivor does not satisfy this theorem's premises.
+
+**Logical-node creation on a shared checker pair (informative).** Extend this profile with an authorized
+finite child-creation operation. An active logical node must be able to invoke that operation under its
+declared provisioning contract; this capability and its resources are additional premises, not consequences
+of having two members. Either member may originate the creation request, and both check it. The request
+pins a new logical-node identity, initial state, runtime/configuration/input identities, resource bindings,
+membership epoch, authority limits and a unique creation/start slot. Logical children may reuse the
+parent's exact two checking instances, so `M_child = M_parent = {a, b}`. A child has its own admitted
+logical state and decision scope; it is not another alias to count as additional execution capacity.
+
+The already admitted pair checks and admits the child's required artifacts under an authorized creation
+scope, prepares its finite logical context, and validates its initial state and membership before enabling
+its service. These candidate checks do not require the child to be active beforehand. Reusing immutable
+artifacts or the same pair does not reuse a parent receipt as current child authority; required fresh
+admission and identity-bound checks remain. Both instances must actually participate in each child's
+checking and mutual-monitoring protocol. Parent and child work share the same physical resource pools;
+creation must preserve the service and outstanding obligations promised to the parent. A partial or
+failed attempt does not justify declaring an active child. Uncertain admission or effects require
+reconciliation: a reported error does not prove that no child became active. Actual recovery, cleanup
+and effect obligations remain.
+
+Assume valid authorized creation requests, both members remaining participants, retained inputs/state,
+sufficient shared resources, successful finite preparation/checking/admission stages and fair service.
+Then each requested child is admitted in finite
+time by the same finite-stage argument as startup, and is active when its admitted membership is enabled
+and both members participate. For recursive creation, require each admitted child to receive the explicit
+capability and resources to invoke the same operation within its own authority. Given an effective sequence
+of valid requests whose parents are already admitted, induction establishes each fixed finite prefix of
+child admissions. Parentage alone grants no provisioning authority. Infinite creation additionally needs
+per-prefix resource supply, fairness and execution-level non-Zeno behavior; it does not finish infinitely
+many creations in finite time or silently extend a completed semantic plan.
+
+For `n >= 1` simultaneously active logical nodes, including the original parent, all assigned exactly
+the same pair, `sum_ell |M_ell| = 2n` counts memberships while `|union_ell M_ell| = 2` counts execution
+instances. Logical contexts may share scheduled service; they cannot all claim the pair's full capacity
+at once. Checking work, queueing, retained state, communication and energy remain charged, and retaining
+ever more contexts may require ever more storage even while the instance count stays two. No uniform
+response bound or speedup follows. If either required shared member becomes inactive, every logical node
+depending on that pair is inactive under the pair-activity definition. Separate logical identities do not
+provide independent failure domains. These theorems add no runtime node-creation or startup implementation.
+
 *When does continuation cease?* Finite tasks alone do not prove that only loss of all nodes can stop a
 system. A finite workload can complete with every node alive; an ongoing service can be intentionally
 stopped; available nodes can wait forever on missing inputs, deadlock, lose storage or authority, or be
