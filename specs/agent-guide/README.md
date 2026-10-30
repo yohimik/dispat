@@ -25,7 +25,7 @@ Keep the configuration and API references from the installed binary's help pinne
 3. Keep inspection, testing, configuration changes, and release execution distinct.
 4. Preserve the user's authorization across the task. Do not repeatedly ask for the same approval, but do not expand it to unrelated packages, configuration, credentials, or destinations.
 5. Preview the exact package selection and environment that will be used for release.
-6. Run the repository's required full suite before starting a release, then retain release-time checks for rewritten inputs and built artifacts.
+6. Run the repository's required checks as separate parallel CI jobs on commits and before release. Require the complete suite to pass before invoking `dispat release`, then retain release-time checks for rewritten inputs and built artifacts.
 7. Preserve command exit codes and inspect diagnostics, including warnings.
 8. Treat publishing as non-atomic. Some packages can publish before another package fails.
 9. Treat the publish stage as irreversible. A registry, store or bucket that accepted an upload keeps it; dispat never takes a publication back, and a retry cannot replace an immutable version.
@@ -369,6 +369,12 @@ esac
 
 The status gate answers whether work is pending. A separate full-suite gate checks the proposed revision across the workspace, including consumers that did not change directly.
 
+In CI triggered by commits and before invoking `dispat release`, run all required check suites as separate jobs in parallel. This includes unit, integration, race, lint, type, packaging, build, and any other checks required by the repository. Each job must validate the intended revision; a successful job for a different revision cannot satisfy the gate.
+
+If any job fails, fail the gate immediately and cancel every remaining queued or running sibling job in that validation run. Preserve cleanup and finalization, wait for the jobs and their cleanup to reach terminal states, and verify that delegated workers and temporary resources are stopped or released. A cancellation request alone does not prove the run has stopped.
+
+Start the release only after all check jobs have finished and every required check has succeeded. Failed, cancelled, skipped, or missing required checks are not passes. The release must depend on the complete result set. Verify that the existing workflow enforces these requirements and report any gap. These requirements do not authorize CI/CD setup changes; the [requirement for direct instructions](#release-through-cicd) still applies.
+
 Use the repository's declared scripts and CI workflow. A typical dispat sweep is:
 
 ```sh
@@ -377,7 +383,7 @@ dispat run tests --since all
 
 `tests` is a configured script name, not a built-in command. A package without that script may do nothing. Confirm that repository-wide lint, type checking, unit, integration, and packaging checks are actually represented. Run from the repository root or use an explicit selection so the current directory does not narrow the suite.
 
-`--on-error continue` lets dependent and independent script work continue after a failure, but the overall `dispat run` still fails. It is useful for collecting results, not for weakening a gate. Preserve cleanup with an `always` condition in CI when the suite temporarily edits manifests or links.
+`--on-error continue` lets dependent and independent script work continue after a failure, but the overall `dispat run` still fails. It can collect diagnostic results within one sweep; it does not override cancellation of sibling CI jobs once a job fails. Preserve cleanup with an `always` condition in CI when the suite temporarily edits manifests or links.
 
 When consumers must exercise provider code from the checkout, use the ecosystem's existing workspace mechanism. If the repository temporarily rewrites dependency links, do so in a disposable checkout, clean them up even after failures, and verify cleanup. A release does not automatically remove local links. pnpm repositories should normally retain their existing `workspace:*` declarations; those are persistent workspace policy, not temporary redirects.
 
@@ -686,7 +692,7 @@ A package's stages form a graph resolved from its flow (CCME §13.11). Every pac
 | `onFail`, `onSkip`, and post-run/commit/push hooks | Warn-only observers. |
 | Native records and pushes | Critical after-publish work; failure makes the command fail while preserving the published state. |
 
-Independent graph branches can continue after a package fails. Consumers may be skipped. A hook named `before...` is not necessarily gating: commit, push, and announce observers occur after publication. Put required artifact and policy checks before `publish` so the publish stage contains only its authorized external action.
+Within an active `dispat release`, independent branches of the package graph can continue after a package fails. Consumers may be skipped. A hook named `before...` is not necessarily gating: commit, push, and announce observers occur after publication. Put required artifact and policy checks before `publish` so the publish stage contains only its authorized external action.
 
 Choose the retry policy for each destination before releasing. When a publish response is lost or native records are
 missing, reconcile the exact package, version, artifact digest, source revision, and destination outside the publish
