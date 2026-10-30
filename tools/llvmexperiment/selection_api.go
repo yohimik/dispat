@@ -12,26 +12,27 @@ import (
 )
 
 const (
-	isMalformedCampaignPageValid            = false
-	campaignSelectionTimeoutDuration        = 5 * time.Minute
-	campaignMetadataRequestTimeoutDuration  = 30 * time.Second
-	campaignMetadataMaximumBytes            = 2 * 1024 * 1024
-	campaignMetadataPageSizeCount           = 100
-	campaignMetadataMaximumPagesCount       = 10
-	campaignMetadataFirstPageNumber         = 1
-	campaignRunOrderBefore                  = -1
-	campaignRunOrderEqual                   = 0
-	campaignRunOrderAfter                   = 1
-	campaignMetadataCommandName             = "gh"
-	campaignMetadataSubcommandName          = "api"
-	campaignRunsEndpointFormat              = "repos/%s/actions/workflows/build-experiments.yml/runs?head_sha=%s&event=workflow_dispatch&status=success&per_page=%d&page=%d"
-	campaignArtifactsEndpointFormat         = "repos/%s/actions/runs/%d/artifacts?per_page=%d&page=%d"
-	campaignAttemptEndpointFormat           = "repos/%s/actions/runs/%d/attempts/%d"
-	campaignMetadataCommandErrorFormat      = "GitHub campaign metadata request %q failed: %w"
-	campaignMetadataJSONErrorFormat         = "GitHub campaign metadata response %q is invalid JSON: %w"
-	campaignMetadataPageErrorFormat         = "GitHub campaign metadata page %q has a missing, inconsistent, or excessive inventory"
-	campaignMetadataDuplicateRunErrorFormat = "GitHub campaign metadata repeats run %d across pages"
-	campaignMetadataTooLargeErrorMessage    = "GitHub campaign metadata exceeded the response byte limit"
+	isMalformedCampaignPageValid                 = false
+	campaignSelectionTimeoutDuration             = 5 * time.Minute
+	campaignMetadataRequestTimeoutDuration       = 30 * time.Second
+	campaignMetadataMaximumBytes                 = 2 * 1024 * 1024
+	campaignMetadataPageSizeCount                = 100
+	campaignMetadataMaximumPagesCount            = 10
+	campaignMetadataFirstPageNumber              = 1
+	campaignRunOrderBefore                       = -1
+	campaignRunOrderEqual                        = 0
+	campaignRunOrderAfter                        = 1
+	campaignMetadataCommandName                  = "gh"
+	campaignMetadataSubcommandName               = "api"
+	campaignRunsEndpointFormat                   = "repos/%s/actions/workflows/build-experiments.yml/runs?head_sha=%s&event=workflow_dispatch&status=success&per_page=%d&page=%d"
+	campaignArtifactsEndpointFormat              = "repos/%s/actions/runs/%d/artifacts?per_page=%d&page=%d"
+	campaignAttemptEndpointFormat                = "repos/%s/actions/runs/%d/attempts/%d"
+	campaignMetadataCommandErrorFormat           = "GitHub campaign metadata request %q failed: %w"
+	campaignMetadataJSONErrorFormat              = "GitHub campaign metadata response %q is invalid JSON: %w"
+	campaignMetadataPageErrorFormat              = "GitHub campaign metadata page %q has a missing, inconsistent, or excessive inventory"
+	campaignMetadataDuplicateRunErrorFormat      = "GitHub campaign metadata repeats run %d across pages"
+	campaignMetadataDuplicateArtifactErrorFormat = "GitHub campaign metadata repeats artifact %d in run %d"
+	campaignMetadataTooLargeErrorMessage         = "GitHub campaign metadata exceeded the response byte limit"
 )
 
 type campaignMetadataBuffer struct {
@@ -60,6 +61,7 @@ func requestCampaignMetadata(ctx context.Context, endpoint string) ([]byte, erro
 
 func (selector campaignSelector) readRuns(ctx context.Context) ([]campaignWorkflowRun, error) {
 	var runs []campaignWorkflowRun
+	var initialTotal *int
 	identities := make(map[int64]struct{})
 	for page := campaignMetadataFirstPageNumber; page <= campaignMetadataMaximumPagesCount; page++ {
 		endpoint := fmt.Sprintf(campaignRunsEndpointFormat, selector.Source.Repository, selector.Source.Revision, campaignMetadataPageSizeCount, page)
@@ -74,8 +76,11 @@ func (selector campaignSelector) readRuns(ctx context.Context) ([]campaignWorkfl
 		if err := json.Unmarshal(content, &response); err != nil {
 			return nil, fmt.Errorf(campaignMetadataJSONErrorFormat, endpoint, err)
 		}
-		if !isCampaignPageInventoryValid(campaignPageInventory{Total: response.Total, PageCount: len(response.Runs), PreviousCount: len(runs)}) || response.Runs == nil {
+		if !isCampaignPageInventoryValid(campaignPageInventory{Total: response.Total, InitialTotal: initialTotal, PageCount: len(response.Runs), PreviousCount: len(runs)}) || response.Runs == nil {
 			return nil, fmt.Errorf(campaignMetadataPageErrorFormat, endpoint)
+		}
+		if initialTotal == nil {
+			initialTotal = response.Total
 		}
 		for _, run := range response.Runs {
 			if err := validateCampaignRun(selector.Source, run); err != nil {
@@ -96,6 +101,8 @@ func (selector campaignSelector) readRuns(ctx context.Context) ([]campaignWorkfl
 
 func (selector campaignSelector) readArtifacts(ctx context.Context, run campaignWorkflowRun) ([]campaignWorkflowArtifact, error) {
 	var artifacts []campaignWorkflowArtifact
+	var initialTotal *int
+	identities := make(map[int64]struct{})
 	for page := campaignMetadataFirstPageNumber; page <= campaignMetadataMaximumPagesCount; page++ {
 		endpoint := fmt.Sprintf(campaignArtifactsEndpointFormat, selector.Source.Repository, run.ID, campaignMetadataPageSizeCount, page)
 		content, err := selector.Request(ctx, endpoint)
@@ -109,8 +116,17 @@ func (selector campaignSelector) readArtifacts(ctx context.Context, run campaign
 		if err := json.Unmarshal(content, &response); err != nil {
 			return nil, fmt.Errorf(campaignMetadataJSONErrorFormat, endpoint, err)
 		}
-		if !isCampaignPageInventoryValid(campaignPageInventory{Total: response.Total, PageCount: len(response.Artifacts), PreviousCount: len(artifacts)}) || response.Artifacts == nil {
+		if !isCampaignPageInventoryValid(campaignPageInventory{Total: response.Total, InitialTotal: initialTotal, PageCount: len(response.Artifacts), PreviousCount: len(artifacts)}) || response.Artifacts == nil {
 			return nil, fmt.Errorf(campaignMetadataPageErrorFormat, endpoint)
+		}
+		if initialTotal == nil {
+			initialTotal = response.Total
+		}
+		for _, artifact := range response.Artifacts {
+			if _, exists := identities[artifact.ID]; exists {
+				return nil, fmt.Errorf(campaignMetadataDuplicateArtifactErrorFormat, artifact.ID, run.ID)
+			}
+			identities[artifact.ID] = struct{}{}
 		}
 		artifacts = append(artifacts, response.Artifacts...)
 		if len(artifacts) == *response.Total {
@@ -122,6 +138,7 @@ func (selector campaignSelector) readArtifacts(ctx context.Context, run campaign
 
 type campaignPageInventory struct {
 	Total         *int
+	InitialTotal  *int
 	PageCount     int
 	PreviousCount int
 }
@@ -129,6 +146,9 @@ type campaignPageInventory struct {
 func isCampaignPageInventoryValid(inventory campaignPageInventory) bool {
 	if inventory.Total == nil || *inventory.Total < campaignEmptyCount ||
 		*inventory.Total > campaignMetadataPageSizeCount*campaignMetadataMaximumPagesCount || inventory.PageCount > campaignMetadataPageSizeCount {
+		return isMalformedCampaignPageValid
+	}
+	if inventory.InitialTotal != nil && *inventory.Total != *inventory.InitialTotal {
 		return isMalformedCampaignPageValid
 	}
 	count := inventory.PreviousCount + inventory.PageCount
