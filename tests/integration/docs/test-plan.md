@@ -352,7 +352,8 @@ integration suite itself.
 
 31. **Corrections and reverted changelogs** (`corrections_test.go`): a release record is written in a commit message,
     and a commit message cannot be rewritten once it is pushed. `Edits` restates a named record and `Deletes` discards
-    it, both reaching only work no package has released yet. The claims a release depends on: the corrected record
+    it, both reaching only undischarged work, including a consumer's owed propagation after its own release.
+    The claims a release depends on: the corrected record
     decides the version and the changelog, a correction of released work is a visible no-op nothing can hide, the
     newest correction of a target wins, a correction narrows a record but never widens it, and a correction of a
     correction undoes it. `Reverts` closes the file: it takes a reverted entry and its revert out of the changelog
@@ -2042,6 +2043,7 @@ packages, which is what makes "the correction reached exactly this far" assertab
 | `TestCorrectionWildcardClearsAScope`                    | Adding `Deletes: *` to a `chore` discards pending records for that scope without releasing replacement versions. Packages outside the scope release normally.                                                                       |
 | `TestCorrectionTargetsMustResolve` | Unit errors exit with specific codes: E210 for a sha that is not an earlier commit, for one that resolves to nothing (reported once per correction naming it) and for one on a branch this one never merged; E211 for bare SHAs matching multiple units; and E212 for corrections targeting `cancel` barriers. |
 | `TestCorrectionDiscardsWhatTheRecordPropagated`         | Deleting a record removes its propagated bumps. Dependent packages that would have bumped due to carets skip releasing if no changes remain.                                                                                          |
+| `TestCorrectionConsumerWildcardDiscardsUndeliveredCatchUp` | A consumer's `Deletes: *` discards an owed provider contribution behind its own release baseline without W209, after a real partial release and a later provider-only retry. Deleting that correction restores the catch-up with W215; the restored release updates the manifest and converges without republishing the provider. |
 | `TestCorrectionRidesAVersioningGroupOnlyWhenARecordSurvives` | Discarding the only record driving a versioning group halts the entire group, preventing members from riding (W234) an unprompted version bump.                                                                              |
 | `TestRevertTakesBothEntriesOutOfTheChangelog` | Reverting a commit preserves major bump calculations in case consumers observed the change, but strips both entries from the changelog (W212, traceable at trace level) because the code is unchanged. The target may be written abbreviated and named twice, and resolves once. The run converges. |
 | `TestRevertWithAnUnreachableTargetStaysInformational` | Reverts with unreachable SHAs emit W213 and release normally. Values that are not valid SHAs, by their characters or by their length, emit parser warning W214 without additional error codes. |

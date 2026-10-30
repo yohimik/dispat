@@ -4,8 +4,8 @@
 // Goal 31: corrections and reverted changelogs. A release record is written in
 // a commit message, and a commit message cannot be rewritten once it is
 // pushed. The `Edits` and `Deletes` footers correct such a record by naming it:
-// `Edits` restates it, `Deletes` discards it, and both reach only work no
-// package has released yet.
+// `Edits` restates it, `Deletes` discards it, and both reach only undischarged
+// work, including a consumer's propagation debt after its own release.
 //
 // The claims exercised here are the ones a release depends on: the corrected
 // record decides the version and the changelog, a correction of released work
@@ -37,6 +37,42 @@ func correctionsRepo(t *testing.T) *harness.Repo {
 	r.SeedPackage("packages", "core")
 	r.SeedPackage("packages", "utils")
 	return r
+}
+
+// TestCorrectionConsumerWildcardDiscardsUndeliveredCatchUp uses real partial
+// releases: the consumer first proceeds on its own work, the provider later
+// publishes alone, and the wildcard discards the still-owed contribution even
+// though its commit is behind the consumer's baseline. Undoing the correction
+// restores that obligation, which then publishes and converges.
+func TestCorrectionConsumerWildcardDiscardsUndeliveredCatchUp(t *testing.T) {
+	r := admissionProceeded(t, admissionShape{})
+	r.CommitEmpty("chore(core): retry the provider")
+	provider := r.CommandEnv([]string{admissionProviderOK + "=1"}, "--package", "core")
+	require.Zero(t, provider.Code, "stdout:\n%s\nstderr:\n%s", provider.Stdout, provider.Stderr)
+	require.Equal(t, 1, r.TagCount("core@0.2.0"))
+	require.Zero(t, r.TagCount("cli@0.2.1"))
+	before := r.StatusOK()
+	require.True(t, harness.IsCodePresentForPackage(before.Events, "W193", "cli"), "stdout:\n%s", before.Stdout)
+	require.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.1.0"`)
+
+	r.CommitEmpty("chore(cli): discard the delayed pickup\n\nDeletes: *")
+	correction := r.Git("rev-parse", "HEAD")
+	discarded := r.Status("--require-release")
+	assert.Equal(t, 3, discarded.Code, "the wildcard leaves an empty plan, not a failed plan")
+	assert.Contains(t, discarded.Stdout, `"releasing":0`)
+	assert.False(t, harness.IsCodePresent(discarded.Events, "W209"), "stdout:\n%s", discarded.Stdout)
+	assert.False(t, harness.IsCodePresent(discarded.Events, "W193"), "no catch-up remains")
+	assert.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.1.0"`, "a discarded obligation rewrites no published input")
+
+	r.CommitEmpty("chore(cli): restore the delayed pickup\n\nDeletes: " + correction)
+	restored := r.StatusOK()
+	assert.True(t, harness.IsCodePresentForPackage(restored.Events, "W215", "cli"), "stdout:\n%s", restored.Stdout)
+	assert.Equal(t, "0.2.0 -> 0.2.1", harness.GraphLine(restored.Events, "cli").Str("version"))
+	r.ReleaseOK()
+	assert.Equal(t, 1, r.TagCount("cli@0.2.1"))
+	assert.Equal(t, 1, r.TagCount("core@0.2.0"), "the provider is not republished")
+	assert.Contains(t, admissionManifest(t, r), `"@acme/core": "^0.2.0"`)
+	assertAdmissionSettled(t, r)
 }
 
 // changelogOf returns a package's changelog, or "" when none was written.

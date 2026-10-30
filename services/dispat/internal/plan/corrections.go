@@ -20,12 +20,11 @@ import (
 // records it names: `Deletes` discards them, `Edits` discards them and stands in
 // their place.
 //
-// The pass rewrites the tuple stream of §13.4 in place, which is what lets every
-// later phase stay ignorant of corrections. A tuple is a (package, commit, unit)
-// triple, and the stream is held as `commitRec.scope[i]`: the set of packages
-// unit i addresses. Discarding a record is therefore removing one package from
-// one unit's scope-set, never removing the unit. Removing the unit would
-// renumber its siblings, and `#n` selectors are written against the message.
+// A tuple is a (package, commit, unit) triple. Direct claims are removed from
+// `commitRec.scope[i]`, the set of packages unit i addresses; incoming claims
+// remain in cp.dropped for propagation admission to apply per consumer. The
+// unit itself stays in place: removing it would renumber its siblings, and
+// `#n` selectors are written against the message.
 
 // correctionKind discriminates the two footers of §7.4.
 type correctionKind uint8
@@ -526,8 +525,8 @@ func (cp *computation) dropPending(c *correctionRec, t resolvedTarget, live map[
 			if u.IsControl() {
 				continue
 			}
-			for _, name := range sortedKeys(rec.scope[pos]) {
-				if !live[name] || !cp.pending(name, rec.key) {
+			for _, name := range sortedKeys(cp.pendingRecordPackages(rec, pos)) {
+				if !live[name] {
 					continue
 				}
 				key := dropKey{name, rec.key, u.Index}
@@ -555,6 +554,42 @@ func (cp *computation) dropPending(c *correctionRec, t resolvedTarget, live map[
 	if t.kind == kindEdit {
 		cp.markRestatement(c, t, claimed)
 	}
+}
+
+// pendingRecordPackages includes direct records and incoming contributions on
+// both axes (§7.4.2). A dependent can still be owed a bump after its own release
+// carried the commit (§13.4a); only that debt is discardable, not the published
+// train's aggregate. Channel proposals, like direct records, require fresh work.
+func (cp *computation) pendingRecordPackages(rec *commitRec, pos int) map[string]bool {
+	pending := make(map[string]bool)
+	for name := range rec.scope[pos] {
+		if cp.pending(name, rec.key) {
+			pending[name] = true
+		}
+	}
+	sources := cp.sourcePackages(rec, pos)
+	prop := rec.propagations[pos]
+	if rec.units[pos].Bump != ccme.BumpNone && !prop.inert() {
+		reaching := cp.reachingSources(sources, prop.Depth, prop.kinds)
+		for _, target := range cp.walk(sources, prop.Depth, prop.kinds) {
+			if !prop.allowsTarget(target.name) {
+				continue
+			}
+			admitted, _ := cp.admitBump(target.name, rec.key, reaching.of(target.name))
+			if len(admitted.owed) > 0 {
+				pending[target.name] = true
+			}
+		}
+	}
+	channel := rec.channelPropagations[pos]
+	if !channel.inert() {
+		for _, target := range cp.walk(sources, channel.Depth, channel.kinds) {
+			if channel.allowsTarget(target.name) && cp.pending(target.name, rec.key) {
+				pending[target.name] = true
+			}
+		}
+	}
+	return pending
 }
 
 // markRestatement records that the carrying unit stands in for the target
@@ -590,10 +625,9 @@ func sameRecord(a, b *ccme.Unit) bool {
 		a.Header.Description == b.Header.Description
 }
 
-// commitDrops applies the claims to the tuple stream. A discarded record is a
-// package removed from one unit's scope-set, after which the unit is invisible
-// to that package everywhere: no direct bump, no propagation on either axis, no
-// channel, no changelog entry (§7.4.2).
+// commitDrops removes direct claims from the tuple stream. Incoming claims have
+// no membership in the unit's scope-set: propagation reads their drop keys at
+// target admission, preserving the source and other consumers (§7.4.2).
 func (cp *computation) commitDrops() {
 	for key := range cp.dropped {
 		rec := cp.byKey[key.commit]

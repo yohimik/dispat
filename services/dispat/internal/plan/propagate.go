@@ -388,7 +388,7 @@ func (cp *computation) propagateChannels() {
 					// decision made when the target published.
 					continue
 				}
-				if cp.cancelledFor(rec.key, t.name) { // §13.5a
+				if cp.cancelledFor(rec.key, t.name) || cp.dropped[dropKey{t.name, rec.key, u.Index}] != nil {
 					continue
 				}
 				base := cp.baselineChannel(t.name)
@@ -750,6 +750,13 @@ func (cp *computation) propagateBumps() {
 				}
 				reached++
 				bump, isAdmitted := cp.admitBump(t.name, rec.key, reaching.of(t.name))
+				if cp.dropped[dropKey{t.name, rec.key, u.Index}] != nil {
+					// A wildcard can discard an incoming contribution even
+					// behind the consumer's baseline. Its published train
+					// aggregate remains; only the owed release is removed.
+					bump.owed = nil
+					isAdmitted = bump.isCarried
+				}
 				if !isAdmitted {
 					continue
 				}

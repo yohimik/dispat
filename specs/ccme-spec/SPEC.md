@@ -836,6 +836,11 @@ whose window still contains it. `Deletes: *` does the same for every pending uni
 contributions alike, for each package in the correction unit's resolved scope-set. The wildcard's reach differs from
 `cancel` in exactly one respect: its barrier excludes its own commit, where `cancel`'s is ancestor-or-self (§10.3).
 
+For wildcard suppression, undischarged propagated work includes every otherwise admissible bump contribution to `D`
+for which `owed(u, D)` is nonempty (§13.4a), even when `commitOf(u)` lies outside `Wfresh(D)`. This suppression is local
+to `D`: it does not itself discard the source tuple or another target's contribution. Propagated channels retain
+their `Wfresh(D)` admission gate.
+
 **`Edits` is `Deletes` plus a restatement.** `Edits: T` discards `T` exactly as `Deletes: T` would, and designates
 the carrying unit as `T`'s restatement: the carrying unit's type, breaking marker, and description are what the
 ledger and the changelog now say about that work. No merging of the two records takes place; the target's directives
@@ -2351,6 +2356,11 @@ applyCorrections(tuples, units):
 
 Notes, all normative:
 
+* The wildcard branch MUST also suppress eligible propagated contributions to each `P` in `live` from
+  strict-ancestor units, including the owed bumps identified in §7.4.2; dropping directly scoped tuples alone is
+  insufficient. These target-local exclusions form part of the corrected stream and obey the same newest-wins and
+  correction-voiding rules. In the wildcard branch, `W209` applies only when neither eligible direct work nor an
+  eligible propagated contribution is discarded.
 * The correction unit itself remains an ordinary tuple source: its own record enters the stream under
   `u.effectiveScope` exactly as a scope-set of that value would have entered it.
 * `superseded(P, C, i)` is the newest-wins rule: a record already claimed by a newer correction is not re-dropped,
