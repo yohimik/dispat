@@ -5711,6 +5711,79 @@ the stream theorem's fairness and non-Zeno premises. This is conditional represe
 a speedup theorem or a proof that arbitrary artifact groups can run tasks. Missing runtime, stale authority,
 unavailable capacity or counting two aliases as distinct nodes or independent capacity violate its premises.
 
+**Perfect distributed system: two concurrent checkers per logical node (informative).** Here "perfect
+distributed system" names a declared ideal checking profile. Its logical service nodes are represented
+by actual execution nodes under the artifact-group realization premises above. The name does not assert
+unconditional correctness, fault tolerance or optimality, and the profile is stronger than requiring two
+nodes only at artifact handoffs or two nodes somewhere in an ongoing service.
+
+Let `L(s)` be the active logical nodes in execution state `s`. For each `ell` in `L(s)`, let `C_ell(s)`
+be its finite set of distinct, authorized, compatible execution nodes running its checking protocol
+under the current admitted membership. Throughout every logical node's active lifetime require
+
+`for every s and ell in L(s): |C_ell(s)| >= 2`.
+
+Thus one active logical node is always represented by at least two concurrently running checking nodes.
+Running means live protocol participants with actual resource bindings and service, including legitimate
+waits for inputs; an inert copy, a stored receipt or a standby that never participates does not count.
+Their checking executions may overlap when dependencies and capacity permit. Concurrency does not mean
+simultaneous instructions, equal start times or exact physical clocks. Distinctness uses operational
+instance identities, not merely two manifests, threads or aliases, and does not imply independent failures.
+The invariant covers actual states throughout the active interval, including replacement; periodically
+observing two members or collecting two receipts does not prove continuous availability.
+
+For each proposed logical transition, pin the logical-node identity, preceding admitted state, complete
+input identities, immutable candidate state/output bytes, run/epoch, membership and check-policy version.
+Fix a designated checking set `Q` of at least two distinct members before checking begins. Each independently
+reads that same identified candidate and performs its required checks; no checker may replace its checks
+by copying another's verdict. Checks without dependencies between them may run in parallel on adequate
+capacity. Admission requires all designated checks and their authentic, identity-bound receipts to accept,
+as well as all existing artifact, authority and effect gates. Rejection, absence, interruption, mismatch
+or stale membership cannot authorize admission. Removing a nonresponding member does not turn the old
+incomplete decision into success; a replacement decision needs a fresh authorized scope and its own checks.
+The existing fenced admission authority selects at most one successor for each admitted predecessor;
+parallel checks do not themselves supply that serialization or authority.
+
+*Checked-node representation theorem.* Write `x` for the preceding logical state, `y` for the candidate
+state/output and `u` for the complete pinned inputs and identity context. Assume each initial admitted
+logical state satisfies its declared invariant `J`, and joint acceptance of the designated checks is
+sound for a predicate `P(x, u, y)`: acceptance implies `P(x, u, y)`. Assume that `J(x)` and `P(x, u, y)` imply
+`J(y)`, including any required output validity. Under the preceding identity, admission and realization
+premises, every admitted logical state satisfies `J` and every admitted transition satisfies `P`.
+Proof: the initial state establishes the base case. An admitted successor has the same identified
+predecessor, inputs and candidate that the designated checkers accepted. Authentic receipts and joint
+soundness establish `P`; preservation then establishes `J` for that successor. Induction along each
+admitted state history proves the claim. Cross-node dependencies still require their actual artifact
+gates. The proof concerns admitted states and declared predicates, not unchecked internal activity.
+Two matching verdicts alone do not establish soundness: both checkers can share the same erroneous rule.
+
+This profile retains the ordered commit, readback and acknowledgment stages of the artifact-continuation
+policy. Parallel logical-transition checks do not remove those dependencies or permit consumption before
+an artifact's gate opens. A realization may fill several roles only when their actual ordering, identity,
+authority and capacity requirements hold. Charge all additional execution, checking, transfer, storage
+and membership operations in the expanded graph; representation adds no free capacity or speedup.
+
+Continuous representation is a deployment premise with an explicit failure model. Planned replacement
+requires overlapping admitted checking members, retained state and fenced membership changes. One crash
+from exactly two members immediately violates the continuous-two-checker invariant; blocking admission
+preserves its acceptance rule but does not repair that availability claim. A guarantee across failures
+therefore needs adequate redundancy, fault restrictions and recovery guarantees. Eventual admission also
+requires valid candidates, checks that accept them in finite time, successful finite communication and
+storage, available designated members and fair service. Soundness alone permits rejection or waiting
+forever. Indefinite service additionally retains the following stream theorem's resource and non-Zeno
+premises. This representation theorem alone does not establish cessation only after total node loss.
+
+For `m` simultaneously active logical nodes, `sum_(ell in L(s)) |C_ell(s)| >= 2m` counts assignments.
+Pairwise-disjoint checking sets imply at least `2m` distinct execution nodes. Without that extra condition,
+the per-node lower bound alone gives no `2m` bound on distinct nodes. Shared sets can use fewer distinct
+execution nodes, subject to all actual capacity and concurrency requirements;
+one instance cannot be counted twice within a single logical node's set. The logical service layer and
+its execution realizations are distinct levels of this model. It does not recursively require two new
+nodes for every checker. Already admitted verifier runtimes and resources supply the explicit bootstrap
+premise above; mutual checking cannot establish that premise from nothing. This informative theorem
+implements no replication mechanism and changes no §28 conformance requirement. It supplies no perfect
+failure detector, Byzantine agreement, energy source or removal of random inputs.
+
 **Distributed systems and indefinite finite-task streams (informative).** In this execution-theory
 model, a distributed system consists of tasks and their input/output artifacts. Artifact groups provide
 the nodes that execute tasks and pass admitted artifacts to dependent tasks, under the realization
