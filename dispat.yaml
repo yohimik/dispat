@@ -238,6 +238,8 @@ initials:
 # Standalone paths are registered here; their behavior lives in each folder's
 # dispat.yaml.
 packages:
+  sol:
+    path: contracts/sonic
   agent-guide:
     path: specs/agent-guide
   ccme-spec:

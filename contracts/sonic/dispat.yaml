@@ -1,0 +1,36 @@
+versioning: independent
+tagFormat: contracts/sonic/v{version}
+
+autoVersion:
+  enabled: true
+  manifests: root
+  syncLock: [npm-lock]
+
+scripts:
+  npm-lock: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+  build:
+    - npm ci --ignore-scripts --no-audit --no-fund
+    - npm run build
+  tests:
+    - npm ci --ignore-scripts --no-audit --no-fund
+    - npm test
+  test:checks:
+    - npm ci --ignore-scripts --no-audit --no-fund
+    - npm run format:check
+    - npm test
+    - npm run demo
+  vet:
+    - npm ci --ignore-scripts --no-audit --no-fund
+    - npm run format:check
+  format:
+    - npm ci --ignore-scripts --no-audit --no-fund
+    - npm run format
+
+# This package releases source records; deployment belongs to its caller.
+flow:
+  build: build
+  test:
+    script: tests
+    after: [build]
+    before: [publish]
+  publish: [changelog, commit]

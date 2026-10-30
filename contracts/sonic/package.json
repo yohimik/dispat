@@ -1,0 +1,22 @@
+{
+  "name": "@dispat/sol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Solidity CCME release planning kernel for Sonic",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "forge": "node scripts/forge.mjs",
+    "build": "node scripts/forge.mjs build",
+    "test": "node --test test/ForgeLauncher.test.mjs && node scripts/forge.mjs test",
+    "test:gas": "node scripts/forge.mjs test --gas-report",
+    "demo": "node scripts/forge.mjs script script/LocalLedger.s.sol:LocalLedgerDemo -vv",
+    "format": "node scripts/forge.mjs fmt",
+    "format:check": "node scripts/forge.mjs fmt --check"
+  },
+  "devDependencies": {
+    "@foundry-rs/forge": "1.7.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
