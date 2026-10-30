@@ -14,38 +14,40 @@ import (
 )
 
 const (
-	releaseWorkflowPath              = "../../.github/workflows/release.yml"
-	releaseWorkflowPublishJob        = "release"
-	releaseWorkflowBuildSelector     = "--target bootstrap-export"
-	releaseWorkflowGatherSelector    = "test-fragment-*"
-	releaseWorkflowMergeSelector     = "dispat exec test-fragment-merge"
-	releaseWorkflowFreshnessSelector = "sh scripts/badge-cache-test.sh"
-	releaseWorkflowCoverageSelector  = "dispat exec coverage-badge"
-	releaseWorkflowBadgeSelector     = "dispat exec push-badge"
-	releaseWorkflowPublishStep       = "dispat"
-	releaseWorkflowPublishCondition  = "needs.plan.outputs.releasing == 'true'"
-	releaseWorkflowStableCondition   = "needs.plan.outputs.stable == 'true'"
-	releaseWorkflowFullEnvironment   = "DISPAT_TEST_REQUIRE_ALL"
-	releaseWorkflowFullValue         = "true"
-	releaseWorkflowSuccess           = "success"
-	releaseWorkflowMarker            = "publication-reached"
-	releaseWorkflowMarkerCommand     = "printf '%s\\n' '" + releaseWorkflowMarker + "'"
-	releaseWorkflowShell             = "/bin/sh"
-	releaseWorkflowShellArguments    = "-eu"
-	releaseWorkflowShellCommandFlag  = "-c"
-	releaseWorkflowFixtureMode       = 0o755
-	releaseWorkflowLogName           = "commands.log"
-	releaseWorkflowLogEnvironment    = "RELEASE_WORKFLOW_COMMAND_LOG"
-	releaseWorkflowFailEnvironment   = "RELEASE_WORKFLOW_FAIL_COMMAND"
-	releaseWorkflowInjectedExitCode  = 73
-	releaseWorkflowDispatCommand     = "dispat"
-	releaseWorkflowMergeCommand      = "test-fragment-merge"
-	releaseWorkflowFreshnessCommand  = "freshness"
-	releaseWorkflowCoverageCommand   = "coverage-badge"
-	releaseWorkflowBadgeCommand      = "push-badge"
-	releaseWorkflowFreshnessPath     = "scripts/badge-cache-test.sh"
-	releaseWorkflowFixtureScriptHead = "#!/bin/sh\nset -eu\n"
-	releaseWorkflowCommandStub       = releaseWorkflowFixtureScriptHead + `
+	releaseWorkflowManualInputCount        = 0
+	releaseWorkflowManualInputsErrorFormat = "production Release must discover its evidence automatically, without manual inputs: %v"
+	releaseWorkflowPath                    = "../../.github/workflows/release.yml"
+	releaseWorkflowPublishJob              = "release"
+	releaseWorkflowBuildSelector           = "--target bootstrap-export"
+	releaseWorkflowGatherSelector          = "test-fragment-*"
+	releaseWorkflowMergeSelector           = "dispat exec test-fragment-merge"
+	releaseWorkflowFreshnessSelector       = "sh scripts/badge-cache-test.sh"
+	releaseWorkflowCoverageSelector        = "dispat exec coverage-badge"
+	releaseWorkflowBadgeSelector           = "dispat exec push-badge"
+	releaseWorkflowPublishStep             = "dispat"
+	releaseWorkflowPublishCondition        = "needs.plan.outputs.releasing == 'true'"
+	releaseWorkflowStableCondition         = "needs.plan.outputs.stable == 'true'"
+	releaseWorkflowFullEnvironment         = "DISPAT_TEST_REQUIRE_ALL"
+	releaseWorkflowFullValue               = "true"
+	releaseWorkflowSuccess                 = "success"
+	releaseWorkflowMarker                  = "publication-reached"
+	releaseWorkflowMarkerCommand           = "printf '%s\\n' '" + releaseWorkflowMarker + "'"
+	releaseWorkflowShell                   = "/bin/sh"
+	releaseWorkflowShellArguments          = "-eu"
+	releaseWorkflowShellCommandFlag        = "-c"
+	releaseWorkflowFixtureMode             = 0o755
+	releaseWorkflowLogName                 = "commands.log"
+	releaseWorkflowLogEnvironment          = "RELEASE_WORKFLOW_COMMAND_LOG"
+	releaseWorkflowFailEnvironment         = "RELEASE_WORKFLOW_FAIL_COMMAND"
+	releaseWorkflowInjectedExitCode        = 73
+	releaseWorkflowDispatCommand           = "dispat"
+	releaseWorkflowMergeCommand            = "test-fragment-merge"
+	releaseWorkflowFreshnessCommand        = "freshness"
+	releaseWorkflowCoverageCommand         = "coverage-badge"
+	releaseWorkflowBadgeCommand            = "push-badge"
+	releaseWorkflowFreshnessPath           = "scripts/badge-cache-test.sh"
+	releaseWorkflowFixtureScriptHead       = "#!/bin/sh\nset -eu\n"
+	releaseWorkflowCommandStub             = releaseWorkflowFixtureScriptHead + `
 [ "$#" -eq 2 ] && [ "$1" = exec ] || exit 91
 printf '%s\n' "$2" >> "$RELEASE_WORKFLOW_COMMAND_LOG"
 if [ "$2" = test-fragment-merge ]; then
@@ -161,10 +163,8 @@ func TestReleaseWorkflowRequiresParallelCompleteLanes(t *testing.T) {
 	if err := dispatch.Decode(&manual); err != nil {
 		t.Fatal(err)
 	}
-	for name := range manual.Inputs {
-		if name == "purpose" || name == "llvm-profile" || strings.HasPrefix(name, "cloud-") {
-			t.Fatalf("experiment execution input %q remains in production Release", name)
-		}
+	if len(manual.Inputs) != releaseWorkflowManualInputCount {
+		t.Fatalf(releaseWorkflowManualInputsErrorFormat, manual.Inputs)
 	}
 	plan := jobs["plan"]
 	if len(releaseWorkflowDependencies(t, plan)) != 0 || plan.If != "" || plan.ContinueOnError {

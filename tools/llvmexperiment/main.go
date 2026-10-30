@@ -174,6 +174,9 @@ func run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("LLVM experiment requires run or build")
 	}
+	if args[campaignSelectCommandIndex] == campaignSelectCommandName {
+		return selectCampaigns(ctx, args[campaignSelectArgumentOffset:])
+	}
 	if args[0] == "build" {
 		return buildTask(ctx)
 	}

@@ -25,33 +25,10 @@ name: Release
 # the docs package's beforeBuild hook, against the image the same run just
 # published, so the figures the site ships are that run's own rather than a
 # courier's. Separate build campaigns use fresh output trees on isolated GCE
-# workers in build-experiments.yml. Docs imports explicit, source-bound
+# workers in build-experiments.yml. Docs automatically selects source-bound
 # campaign artifacts; standalone build campaigns run outside this graph.
 on:
   workflow_dispatch:
-    inputs:
-      llvm-campaign-run:
-        description: Successful full LLVM workflow run ID required when releasing docs
-        required: false
-        type: string
-      llvm-campaign-attempt:
-        description: Exact full LLVM workflow attempt
-        required: false
-        default: '1'
-        type: string
-      kernel-campaign-run:
-        description: Successful full kernel workflow run ID required when releasing docs
-        required: false
-        type: string
-      kernel-campaign-attempt:
-        description: Exact full kernel workflow attempt
-        required: false
-        default: '1'
-        type: string
-      campaign-binary-sha256:
-        description: Exact measured Dispat binary SHA256 shared by both full campaigns
-        required: false
-        type: string
 
 # Read by default; the unit lane widens access for coordination branches,
 # and the release job widens it for badges and publication. Other jobs hold
@@ -94,6 +71,12 @@ jobs:
       releasing: ${{ steps.status.outputs.releasing }}
       stable: ${{ steps.status.outputs.stable }}
       docs: ${{ steps.status.outputs.docs }}
+      llvm-run: ${{ steps.campaigns.outputs.llvm-run }}
+      llvm-attempt: ${{ steps.campaigns.outputs.llvm-attempt }}
+      llvm-artifact: ${{ steps.campaigns.outputs.llvm-artifact }}
+      kernel-run: ${{ steps.campaigns.outputs.kernel-run }}
+      kernel-attempt: ${{ steps.campaigns.outputs.kernel-attempt }}
+      kernel-artifact: ${{ steps.campaigns.outputs.kernel-artifact }}
     steps:
       - name: Require main for production releases
         if: github.ref != 'refs/heads/main'
@@ -172,26 +155,21 @@ jobs:
             *) exit "$rc" ;;
           esac
 
-      - name: Verify selected build campaign attempts before release gates
+      - name: Select full build campaigns for this checkout
+        id: campaigns
         if: steps.status.outputs.docs == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          LLVM_RUN: ${{ inputs.llvm-campaign-run }}
-          LLVM_ATTEMPT: ${{ inputs.llvm-campaign-attempt }}
-          KERNEL_RUN: ${{ inputs.kernel-campaign-run }}
-          KERNEL_ATTEMPT: ${{ inputs.kernel-campaign-attempt }}
-          BINARY_SHA256: ${{ inputs.campaign-binary-sha256 }}
-        run: |
-          [[ "$BINARY_SHA256" =~ ^[a-f0-9]{64}$ ]] || { echo "A docs release requires the exact campaign Dispat binary SHA256." >&2; exit 1; }
-          for selection in "$LLVM_RUN:$LLVM_ATTEMPT" "$KERNEL_RUN:$KERNEL_ATTEMPT"; do
-            [[ "$selection" =~ ^[1-9][0-9]*:[1-9][0-9]*$ ]] || { echo "A docs release requires explicit positive LLVM and kernel run/attempt IDs." >&2; exit 1; }
-            run=${selection%:*}
-            attempt=${selection#*:}
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/attempts/$attempt" \
-              | jq -e --arg source "$GITHUB_SHA" --argjson run "$run" --argjson attempt "$attempt" \
-                '.id == $run and .run_attempt == $attempt and .head_sha == $source and .event == "workflow_dispatch" and .path == ".github/workflows/build-experiments.yml" and .status == "completed" and .conclusion == "success"' \
-              || { echo "Campaign $run attempt $attempt must be a successful Build experiments workflow at $GITHUB_SHA." >&2; exit 1; }
-          done
+        run: dispat exec select-build-campaigns --for pkg:experiments --in pkg:experiments
+
+      - name: Keep the selected build campaign identities
+        if: steps.status.outputs.docs == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build-campaign-selection
+          path: ${{ runner.temp }}/dispat-build-campaign-selection.json
+          retention-days: 30
+          if-no-files-found: error
 
   ping:
     name: Do the announcement's credentials still work
@@ -571,11 +549,10 @@ jobs:
       EXPERIMENTS_LLVM_CAMPAIGN_DIR: ${{ github.workspace }}/coverage/build-campaign-input/llvm
       EXPERIMENTS_KERNEL_CAMPAIGN_DIR: ${{ github.workspace }}/coverage/build-campaign-input/kernel
       EXPERIMENTS_BUILD_SOURCE_REVISION: ${{ github.sha }}
-      EXPERIMENTS_BUILD_BINARY_SHA256: ${{ inputs.campaign-binary-sha256 }}
-      EXPERIMENTS_LLVM_RUN_ID: ${{ inputs.llvm-campaign-run }}
-      EXPERIMENTS_LLVM_RUN_ATTEMPT: ${{ inputs.llvm-campaign-attempt }}
-      EXPERIMENTS_KERNEL_RUN_ID: ${{ inputs.kernel-campaign-run }}
-      EXPERIMENTS_KERNEL_RUN_ATTEMPT: ${{ inputs.kernel-campaign-attempt }}
+      EXPERIMENTS_LLVM_RUN_ID: ${{ needs.plan.outputs.llvm-run }}
+      EXPERIMENTS_LLVM_RUN_ATTEMPT: ${{ needs.plan.outputs.llvm-attempt }}
+      EXPERIMENTS_KERNEL_RUN_ID: ${{ needs.plan.outputs.kernel-run }}
+      EXPERIMENTS_KERNEL_RUN_ATTEMPT: ${{ needs.plan.outputs.kernel-attempt }}
     steps:
       - name: Require every release prerequisite to succeed
         env:
@@ -612,17 +589,29 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.llvm-campaign-run }}
-          name: llvm-gce-report-full-${{ inputs.llvm-campaign-run }}-${{ inputs.llvm-campaign-attempt }}
+          run-id: ${{ needs.plan.outputs.llvm-run }}
+          artifact-ids: ${{ needs.plan.outputs.llvm-artifact }}
           path: coverage/build-campaign-input/llvm
       - name: Download the exact full kernel campaign
         if: needs.plan.outputs.docs == 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.kernel-campaign-run }}
-          name: kernel-gce-report-full-${{ inputs.kernel-campaign-run }}-${{ inputs.kernel-campaign-attempt }}
+          run-id: ${{ needs.plan.outputs.kernel-run }}
+          artifact-ids: ${{ needs.plan.outputs.kernel-artifact }}
           path: coverage/build-campaign-input/kernel
+
+      - name: Verify the campaigns measured the same binary
+        id: campaign-binary
+        if: needs.plan.outputs.docs == 'true'
+        run: |
+          BINARY_SHA256_PATTERN='^[a-f0-9]{64}$'
+          binary=$(jq -er -s --arg pattern "$BINARY_SHA256_PATTERN" '
+            .[0].binarySha256 as $binary |
+            select(length == 2 and .[1].binarySha256 == $binary) |
+            $binary | select(type == "string" and test($pattern))
+          ' "$EXPERIMENTS_LLVM_CAMPAIGN_DIR/campaign.json" "$EXPERIMENTS_KERNEL_CAMPAIGN_DIR/campaign.json")
+          printf 'EXPERIMENTS_BUILD_BINARY_SHA256=%s\n' "$binary" >> "$GITHUB_ENV"
 
       # The docker space builds two architectures per image, so the arm64 legs
       # run emulated. The containerd image store is what lets a multi-platform

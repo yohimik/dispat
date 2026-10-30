@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -13,6 +14,74 @@ import (
 const (
 	experimentWorkflowPath = "../../.github/workflows/build-experiments.yml"
 	productionWorkflowPath = "../../.github/workflows/release.yml"
+)
+
+const (
+	campaignManualInputCount               = 0
+	campaignRequiredWorkloadCount          = 2
+	isCampaignEvidencePresent              = true
+	campaignManualInputExpressionPrefix    = "inputs."
+	campaignPlanJobName                    = "plan"
+	campaignReleaseJobName                 = "release"
+	campaignDocsOutputName                 = "docs"
+	campaignDocsPlanOutputExpression       = "${{ steps.status.outputs.docs }}"
+	campaignLLVMRunOutputName              = "llvm-run"
+	campaignLLVMAttemptOutputName          = "llvm-attempt"
+	campaignLLVMArtifactOutputName         = "llvm-artifact"
+	campaignKernelRunOutputName            = "kernel-run"
+	campaignKernelAttemptOutputName        = "kernel-attempt"
+	campaignKernelArtifactOutputName       = "kernel-artifact"
+	campaignSelectorStepID                 = "campaigns"
+	campaignDocsSelectionCondition         = "steps.status.outputs.docs == 'true'"
+	campaignSelectRunCommand               = "dispat exec select-build-campaigns --for pkg:experiments --in pkg:experiments"
+	campaignSourceEnvironmentName          = "EXPERIMENTS_BUILD_SOURCE_REVISION"
+	campaignSourceExpression               = "${{ github.sha }}"
+	campaignLLVMRunEnvironmentName         = "EXPERIMENTS_LLVM_RUN_ID"
+	campaignLLVMRunExpression              = "${{ needs.plan.outputs.llvm-run }}"
+	campaignLLVMAttemptEnvironmentName     = "EXPERIMENTS_LLVM_RUN_ATTEMPT"
+	campaignLLVMAttemptExpression          = "${{ needs.plan.outputs.llvm-attempt }}"
+	campaignKernelRunEnvironmentName       = "EXPERIMENTS_KERNEL_RUN_ID"
+	campaignKernelRunExpression            = "${{ needs.plan.outputs.kernel-run }}"
+	campaignKernelAttemptEnvironmentName   = "EXPERIMENTS_KERNEL_RUN_ATTEMPT"
+	campaignKernelAttemptExpression        = "${{ needs.plan.outputs.kernel-attempt }}"
+	campaignBinaryEnvironmentName          = "EXPERIMENTS_BUILD_BINARY_SHA256"
+	campaignArtifactActionPrefix           = "actions/download-artifact@"
+	campaignArtifactPathKey                = "path"
+	campaignArtifactDirectoryPrefix        = "coverage/build-campaign-input/"
+	campaignLLVMArtifactWorkloadName       = "llvm"
+	campaignKernelArtifactWorkloadName     = "kernel"
+	campaignDocsImportCondition            = "needs.plan.outputs.docs == 'true'"
+	campaignArtifactRunIDKey               = "run-id"
+	campaignArtifactIDsKey                 = "artifact-ids"
+	campaignArtifactNameKey                = "name"
+	campaignArtifactPatternKey             = "pattern"
+	campaignBinaryStepID                   = "campaign-binary"
+	campaignLLVMDirectoryEnvironmentName   = "EXPERIMENTS_LLVM_CAMPAIGN_DIR"
+	campaignKernelDirectoryEnvironmentName = "EXPERIMENTS_KERNEL_CAMPAIGN_DIR"
+	campaignBinaryExportPrefix             = "EXPERIMENTS_BUILD_BINARY_SHA256="
+	campaignGitHubEnvironmentFileName      = "GITHUB_ENV"
+	campaignImportRunCommand               = "dispat exec import-build-campaigns"
+	campaignValidateOnlyEnvironmentName    = "EXPERIMENTS_BUILD_VALIDATE_ONLY"
+	campaignValidateOnlyEnabledValue       = "1"
+	campaignPublishStepID                  = "dispat"
+	campaignManualInputDependencyError     = "production release still depends on manually supplied workflow inputs"
+	campaignDocsPlanBindingError           = "docs evidence gate is not tied to the computed release plan"
+	campaignPlanOutputBindingErrorFormat   = "plan output %s does not preserve the automatically selected campaign identity"
+	campaignSelectorWiringError            = "docs release must select source-bound campaigns once through its configured dispat script"
+	campaignSelectorMissingError           = "docs release has no automatic source-bound campaign selection"
+	campaignEnvironmentBindingErrorFormat  = "%s is not bound to the checkout and selected campaign"
+	campaignBinaryDerivationError          = "the measured binary must be derived from both downloaded campaign manifests"
+	campaignArtifactBindingError           = "campaign download must use the exact automatically selected run and immutable artifact ID"
+	campaignBinaryOrderingError            = "both exact artifacts must arrive before deriving their shared measured binary"
+	campaignBinaryBindingErrorFormat       = "shared campaign binary gate omits %s"
+	campaignValidationOrderingError        = "complete evidence validation must follow shared binary verification before publication"
+	campaignPublicationOrderingError       = "publication can begin before both selected campaigns and their binary are validated"
+	campaignPublicationMissingError        = "release publication step was not checked"
+	campaignSelectedOutputExpressionFormat = "${{ steps.campaigns.outputs.%s }}"
+	campaignRunOutputExpressionFormat      = "${{ needs.plan.outputs.%s-run }}"
+	campaignArtifactOutputExpressionFormat = "${{ needs.plan.outputs.%s-artifact }}"
+	campaignArtifactSelectionUnset         = ""
+	campaignManualInputsError              = "production release must discover campaign evidence without manual inputs"
 )
 
 func TestExperimentDockerStoreIsInitializedBeforeImageUse(t *testing.T) {
@@ -103,6 +172,9 @@ func TestDocsCampaignEvidenceIsPinnedAndValidatedBeforePublication(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(string(content), campaignManualInputExpressionPrefix) {
+		t.Fatal(campaignManualInputDependencyError)
+	}
 	var workflow struct {
 		Jobs map[string]struct {
 			Outputs map[string]string `yaml:"outputs"`
@@ -111,55 +183,92 @@ func TestDocsCampaignEvidenceIsPinnedAndValidatedBeforePublication(t *testing.T)
 				ID, If, Run, Uses string
 				With              map[string]string `yaml:"with"`
 				Env               map[string]string `yaml:"env"`
+				ContinueOnError   bool              `yaml:"continue-on-error"`
 			} `yaml:"steps"`
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(content, &workflow); err != nil {
 		t.Fatal(err)
 	}
-	if workflow.Jobs["plan"].Outputs["docs"] != "${{ steps.status.outputs.docs }}" {
-		t.Fatal("docs evidence gate is not tied to the computed release plan")
+	plan := workflow.Jobs[campaignPlanJobName]
+	if plan.Outputs[campaignDocsOutputName] != campaignDocsPlanOutputExpression {
+		t.Fatal(campaignDocsPlanBindingError)
 	}
-	gate := false
-	for _, step := range workflow.Jobs["plan"].Steps {
-		if !strings.Contains(step.Run, "actions/runs/$run/attempts/$attempt") {
+	for _, outputName := range []string{campaignLLVMRunOutputName, campaignLLVMAttemptOutputName, campaignLLVMArtifactOutputName, campaignKernelRunOutputName, campaignKernelAttemptOutputName, campaignKernelArtifactOutputName} {
+		if plan.Outputs[outputName] != fmt.Sprintf(campaignSelectedOutputExpressionFormat, outputName) {
+			t.Fatalf(campaignPlanOutputBindingErrorFormat, outputName)
+		}
+	}
+	var isSelected bool
+	for _, step := range plan.Steps {
+		if step.ID != campaignSelectorStepID {
 			continue
 		}
-		gate = step.If == "steps.status.outputs.docs == 'true'"
-		for _, predicate := range []string{".head_sha == $source", ".run_attempt == $attempt", ".conclusion == \"success\"", ".path == \".github/workflows/build-experiments.yml\""} {
-			if !strings.Contains(step.Run, predicate) {
-				t.Fatalf("campaign provenance gate omits %s", predicate)
-			}
+		if isSelected || step.If != campaignDocsSelectionCondition || step.ContinueOnError ||
+			strings.TrimSpace(step.Run) != campaignSelectRunCommand {
+			t.Fatal(campaignSelectorWiringError)
+		}
+		isSelected = isCampaignEvidencePresent
+	}
+	if !isSelected {
+		t.Fatal(campaignSelectorMissingError)
+	}
+	release := workflow.Jobs[campaignReleaseJobName]
+	for environmentName, expectedExpression := range map[string]string{
+		campaignSourceEnvironmentName:        campaignSourceExpression,
+		campaignLLVMRunEnvironmentName:       campaignLLVMRunExpression,
+		campaignLLVMAttemptEnvironmentName:   campaignLLVMAttemptExpression,
+		campaignKernelRunEnvironmentName:     campaignKernelRunExpression,
+		campaignKernelAttemptEnvironmentName: campaignKernelAttemptExpression,
+	} {
+		if release.Env[environmentName] != expectedExpression {
+			t.Fatalf(campaignEnvironmentBindingErrorFormat, environmentName)
 		}
 	}
-	if !gate {
-		t.Fatal("docs release has no selected-attempt provenance gate")
+	if _, isPresent := release.Env[campaignBinaryEnvironmentName]; isPresent {
+		t.Fatal(campaignBinaryDerivationError)
 	}
-	release := workflow.Jobs["release"]
-	if release.Env["EXPERIMENTS_BUILD_SOURCE_REVISION"] != "${{ github.sha }}" || release.Env["EXPERIMENTS_BUILD_BINARY_SHA256"] != "${{ inputs.campaign-binary-sha256 }}" {
-		t.Fatal("campaign import is not bound to the checkout and selected binary")
-	}
-	downloads := map[string]bool{}
-	validated, published := false, false
+	downloadedWorkloads := map[string]bool{}
+	var isBinaryVerified, isValidated, isPublished bool
 	for _, step := range release.Steps {
-		if strings.Contains(step.With["name"], "-gce-report-full-") {
-			if step.If != "needs.plan.outputs.docs == 'true'" || step.With["run-id"] == "" || step.With["pattern"] != "" {
-				t.Fatal("campaign artifact download is not an exact selected run")
+		if strings.HasPrefix(step.Uses, campaignArtifactActionPrefix) && strings.Contains(step.With[campaignArtifactPathKey], campaignArtifactDirectoryPrefix) {
+			workload := strings.TrimPrefix(step.With[campaignArtifactPathKey], campaignArtifactDirectoryPrefix)
+			if (workload != campaignLLVMArtifactWorkloadName && workload != campaignKernelArtifactWorkloadName) || downloadedWorkloads[workload] ||
+				step.If != campaignDocsImportCondition || step.ContinueOnError ||
+				step.With[campaignArtifactRunIDKey] != fmt.Sprintf(campaignRunOutputExpressionFormat, workload) ||
+				step.With[campaignArtifactIDsKey] != fmt.Sprintf(campaignArtifactOutputExpressionFormat, workload) ||
+				step.With[campaignArtifactNameKey] != campaignArtifactSelectionUnset || step.With[campaignArtifactPatternKey] != campaignArtifactSelectionUnset {
+				t.Fatal(campaignArtifactBindingError)
 			}
-			downloads[step.With["name"]] = true
+			downloadedWorkloads[workload] = isCampaignEvidencePresent
 		}
-		if strings.Contains(step.Run, "dispat exec import-build-campaigns") {
-			validated = step.If == "needs.plan.outputs.docs == 'true'" && step.Env["EXPERIMENTS_BUILD_VALIDATE_ONLY"] == "1"
+		if step.ID == campaignBinaryStepID {
+			if isBinaryVerified || len(downloadedWorkloads) != campaignRequiredWorkloadCount || step.If != campaignDocsImportCondition || step.ContinueOnError {
+				t.Fatal(campaignBinaryOrderingError)
+			}
+			for _, binding := range []string{campaignLLVMDirectoryEnvironmentName, campaignKernelDirectoryEnvironmentName, campaignBinaryExportPrefix, campaignGitHubEnvironmentFileName} {
+				if !strings.Contains(step.Run, binding) {
+					t.Fatalf(campaignBinaryBindingErrorFormat, binding)
+				}
+			}
+			isBinaryVerified = isCampaignEvidencePresent
 		}
-		if step.ID == "dispat" {
-			published = true
-			if !validated || len(downloads) != 2 {
-				t.Fatal("publication can begin before both campaigns are downloaded and validated")
+		if strings.Contains(step.Run, campaignImportRunCommand) {
+			if !isBinaryVerified || step.If != campaignDocsImportCondition ||
+				step.Env[campaignValidateOnlyEnvironmentName] != campaignValidateOnlyEnabledValue || step.ContinueOnError {
+				t.Fatal(campaignValidationOrderingError)
+			}
+			isValidated = isCampaignEvidencePresent
+		}
+		if step.ID == campaignPublishStepID {
+			isPublished = isCampaignEvidencePresent
+			if !isValidated {
+				t.Fatal(campaignPublicationOrderingError)
 			}
 		}
 	}
-	if !published {
-		t.Fatal("release publication step was not checked")
+	if !isPublished {
+		t.Fatal(campaignPublicationMissingError)
 	}
 }
 
@@ -245,7 +354,7 @@ func TestBuildExperimentsRemainSeparateFromRelease(t *testing.T) {
 	if err := productionDispatch.Decode(&manual); err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := manual.Inputs["purpose"]; exists {
-		t.Fatal("production release still accepts an experiment purpose")
+	if len(manual.Inputs) != campaignManualInputCount {
+		t.Fatal(campaignManualInputsError)
 	}
 }

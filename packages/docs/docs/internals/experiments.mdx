@@ -366,11 +366,15 @@ This purpose runs only experiment jobs. Each cell has a four-hour execution limi
 cleanup; the VMs have a five-hour maximum lifetime. The final artifact contains all six results, raw evidence
 and a validated report. `llvm-profile=smoke` checks the harness with the smaller target list.
 
-The documentation release imports successful full LLVM and kernel campaigns selected by the
-`llvm-campaign-run`, `llvm-campaign-attempt`, `kernel-campaign-run`, and `kernel-campaign-attempt` workflow inputs.
-`campaign-binary-sha256` pins their shared measured Dispat binary. Both selected runs must belong to this
-repository's `Build experiments` workflow at the original checkout revision. Evidence is validated before publication
-and again when imported after the standard experiment campaign; missing, partial or mismatched inputs fail.
+The documentation release selects successful full LLVM and kernel campaigns automatically, with no manual
+Release inputs. It selects the highest successful run ID with a full report for each workload at the original
+checkout revision in this repository's `Build experiments` workflow. It freezes the run, attempt and artifact IDs
+in the plan and retains the selection receipt. Expired or ambiguous full reports fail selection; missing evidence
+never starts another campaign or substitutes another source revision.
+
+The two downloaded manifests must name the same valid Dispat binary SHA256. Complete source, trial, raw-evidence,
+resource and formula validation runs before publication and again when importing after the standard campaign.
+Selecting successful campaign evidence does not turn failed or canceled campaigns into successful measurements.
 
 The existing `dispat exec llvm-experiments --for pkg:experiments --in pkg:experiments` command remains an optional
 standalone, one-host diagnostic campaign. It does not provision GCE. Standalone cells default to four hours.

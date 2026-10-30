@@ -63,7 +63,7 @@ and [test results](https://dispat.dev/internals/test-results/) pages. The
 [Release workflow](../.github/workflows/release.yml) runs both through `dispat exec` because only a `--since all` run
 generates a complete profile set across all packages.
 
-The release workflow has four stages: the release plan, parallel test jobs and credential checks, `Run dispat`,
+The release workflow has no manual inputs and has four stages: the release plan, parallel test jobs and credential checks, `Run dispat`,
 and post-release installation checks. Standalone LLVM and kernel campaigns use the separate
 [Build experiments workflow](../.github/workflows/build-experiments.yml).
 

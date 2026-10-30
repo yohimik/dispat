@@ -152,7 +152,7 @@ scripts:
   # whose expectations did not hold fails the docs package and no site ships
   # for that run. The records are the artifact either way.
   #
-  # Full cloud comparisons are imported from explicitly selected, validated
+  # Full cloud comparisons are imported from automatically selected, validated
   # workflow artifacts. Their candidate source/version/hash remain separate
   # from the standard cells measured against the published alpine image.
   experiments: |

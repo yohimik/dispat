@@ -154,6 +154,16 @@ scripts:
       echo
       cat "$ROOT/coverage/experiments.md"
     } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  select-build-campaigns: |
+    set -eu
+    ROOT=$(git rev-parse --show-toplevel)
+    : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
+    mkdir -p "$RUNNER_TEMP/dispat-campaign-tools"
+    docker run --rm --user "$(id -u):$(id -g)" -v "$ROOT:/src:ro" \
+      -v "$RUNNER_TEMP/dispat-campaign-tools:/out" -w /src/tools \
+      -e GOWORK=off -e GOCACHE=/tmp/go-build -e GOMODCACHE=/tmp/go-mod \
+      golang:1.26.10 go build -trimpath -buildvcs=false -o /out/llvmexperiment ./llvmexperiment
+    "$RUNNER_TEMP/dispat-campaign-tools/llvmexperiment" select
   # The release workflow validates these selected full artifacts before any
   # release effects, then imports them after standard campaign cache cleanup.
   # Candidate version/source/hash fields are retained without relabeling.
