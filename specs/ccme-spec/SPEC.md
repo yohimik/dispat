@@ -5717,11 +5717,20 @@ by actual execution nodes under the artifact-group realization premises above. T
 unconditional correctness, fault tolerance or optimality, and the profile is stronger than requiring two
 nodes only at artifact handoffs or two nodes somewhere in an ongoing service.
 
-Let `L(s)` be the active logical nodes in execution state `s`. For each `ell` in `L(s)`, let `C_ell(s)`
-be its finite set of distinct, authorized, compatible execution nodes running its checking protocol
-under the current admitted membership. Throughout every logical node's active lifetime require
+For each logical node `ell` and admitted membership epoch `e`, fix a finite required set `M_ell(e)` of
+at least two distinct execution nodes. The default realization is exactly two; it minimizes the required
+checker count under this rule, not every possible latency, cost or fault-tolerance objective. Let
+`C_ell,e(s)` be the members of that fixed set that are actually authorized, compatible, running and
+participating in the current checking and mutual-monitoring protocol in execution state `s`. Define
+the represented logical node's activity by
 
-`for every s and ell in L(s): |C_ell(s)| >= 2`.
+`Active_ell(s) iff Enabled_ell(s) and C_ell,e(s) = M_ell(e)`,
+
+where `Enabled_ell(s)` means its current membership is admitted and its service has not been disabled.
+Here `e` denotes the current epoch of the particular logical node. Let `L(s)` contain exactly those
+logical nodes whose activity predicate is true. It follows that
+
+`for every s and ell in L(s): |C_ell,e(s)| >= 2`.
 
 Thus one active logical node is always represented by at least two concurrently running checking nodes.
 Running means live protocol participants with actual resource bindings and service, including legitimate
@@ -5732,11 +5741,30 @@ instance identities, not merely two manifests, threads or aliases, and does not 
 The invariant covers actual states throughout the active interval, including replacement; periodically
 observing two members or collecting two receipts does not prove continuous availability.
 
+*Pair-activity lemma.* If any required member stops running or participating, then it is absent from
+`C_ell,e(s)`, so that set differs from `M_ell(e)` and `Active_ell(s)` is false. In particular, a default
+pair represents one active logical node only while both members participate. One surviving checker is
+not an active realization of that logical node by itself. This is a consequence of the declared activity
+definition, not a proof that the pair stays active despite failures. Extra standby members cannot
+silently replace a missing required member in the same pinned decision.
+
+Both members of the default pair continually run the mutual-monitoring protocol, exchanging authenticated
+activity/progress evidence bound to their identities and current membership. "Continually" means an
+ongoing scheduled protocol with actual service and permitted waits, not infinitely frequent probes.
+The monitoring policy states its probe, response and expiry rules and charges their work and communication.
+Actual activity is distinct from an observer's knowledge: a receipt proves neither that its sender is
+still running now nor that a silent peer has crashed. The preceding failure-detection limitation applies.
+Missing, expired or suspect evidence cannot supply positive current permission under that policy; a
+conservative refusal can also occur while both peers are alive. Instantaneous, globally known inactivity
+would require an additional observation/oracle premise, not just mutual heartbeats. Inactivity does not
+simultaneously stop the survivor, revoke already-issued external effects or establish settled completion;
+existing fencing, recovery and outstanding-effect accounting remain necessary.
+
 For each proposed logical transition, pin the logical-node identity, preceding admitted state, complete
 input identities, immutable candidate state/output bytes, run/epoch, membership and check-policy version.
-Fix a designated checking set `Q` of at least two distinct members before checking begins. Each independently
-reads that same identified candidate and performs its required checks; no checker may replace its checks
-by copying another's verdict. Checks without dependencies between them may run in parallel on adequate
+The designated checking set is the complete required set `Q = M_ell(e)`, fixed before checking begins.
+Each independently reads that same identified candidate and performs its required checks; no checker
+may replace its checks by copying another's verdict. Checks without dependencies between them may run in parallel on adequate
 capacity. Admission requires all designated checks and their authentic, identity-bound receipts to accept,
 as well as all existing artifact, authority and effect gates. Rejection, absence, interruption, mismatch
 or stale membership cannot authorize admission. Removing a nonresponding member does not turn the old
@@ -5763,17 +5791,19 @@ an artifact's gate opens. A realization may fill several roles only when their a
 authority and capacity requirements hold. Charge all additional execution, checking, transfer, storage
 and membership operations in the expanded graph; representation adds no free capacity or speedup.
 
-Continuous representation is a deployment premise with an explicit failure model. Planned replacement
-requires overlapping admitted checking members, retained state and fenced membership changes. One crash
-from exactly two members immediately violates the continuous-two-checker invariant; blocking admission
-preserves its acceptance rule but does not repair that availability claim. A guarantee across failures
-therefore needs adequate redundancy, fault restrictions and recovery guarantees. Eventual admission also
-requires valid candidates, checks that accept them in finite time, successful finite communication and
-storage, available designated members and fair service. Soundness alone permits rejection or waiting
+Uninterrupted logical-node activity is a separate deployment premise with an explicit failure model.
+Losing one required member makes the aggregate inactive, preserving the conditional two-checker invariant
+while breaking uninterrupted availability. Planned replacement needs overlapping admitted members,
+retained state and fenced membership changes. Resumption requires authorized recovery and revalidation;
+a changed required set needs a newly admitted membership epoch, not deletion of a missing check from
+an old decision. A guarantee of uninterrupted activity across failures needs adequate redundancy, fault
+restrictions and recovery guarantees. Eventual admission also requires valid candidates, checks that
+accept them in finite time, successful finite communication and storage, available designated members
+and fair service. Soundness alone permits rejection or waiting
 forever. Indefinite service additionally retains the following stream theorem's resource and non-Zeno
 premises. This representation theorem alone does not establish cessation only after total node loss.
 
-For `m` simultaneously active logical nodes, `sum_(ell in L(s)) |C_ell(s)| >= 2m` counts assignments.
+For `m` simultaneously active logical nodes, `sum_(ell in L(s)) |C_ell,e(s)| >= 2m` counts assignments.
 Pairwise-disjoint checking sets imply at least `2m` distinct execution nodes. Without that extra condition,
 the per-node lower bound alone gives no `2m` bound on distinct nodes. Shared sets can use fewer distinct
 execution nodes, subject to all actual capacity and concurrency requirements;
