@@ -46,6 +46,12 @@ sh test.sh
 
 The verifier checks version declarations, required normative sections and files, local links and license material, and refuses symlinked inputs. During the build it also checks `DISPAT_NEW_VERSION`. The lifecycle suite uses an executable `DISPAT_BIN` or dispat on `PATH`, disposable repositories, and local-only release records. It verifies a minor specification release with the parser held, packaging, and version substitution. It does not turn prose conformance vectors into implementation evidence for external adapters, rollback or distributed execution.
 
+The mathematical claims have explicit premises: [§13.7c](./SPEC.md#137c-guarantees) states the retry guarantees and
+[§13.11](./SPEC.md#1311-complexity-and-scale) gives the complexity accounting and scheduling proof. The scheduling
+bounds assume a failure-free task graph and the stated resource model; they do not prove unique recovery architecture,
+minimum memory use or a duration bound across failures. The package verifier and lifecycle suite do not machine-check
+these proofs.
+
 The package uses the documented [replacing strategy](../../packages/docs/docs/editing/replacer.md#replacing-during-a-release): `autoVersion.manifests: none` disables manifest scanning, and four explicit rules update `VERSION` and the declarations in `SPEC.md`. Examples and unrelated files are preserved. [dispat.yaml](./dispat.yaml) contains the configuration.
 
 Validation brackets replacement through `beforeVersion` and `build`. Multi-file writes are not one atomic transaction; a failed release retains local edits for inspection and must not publish an invalid specification. Version classification follows SPEC.md §17.3. The optional polyrepository profile is a minor addition because omitting it preserves the existing single-repository plan exactly.

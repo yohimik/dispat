@@ -14,30 +14,22 @@
 # `crier publish --dry-run --json` prints each platform's caption, which is how
 # to check a rewrite against those limits.
 --- |-
-  {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .new_version }} is out.
-  Release notes: https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}
-  Worker nodes guide: https://dispat.dev/distributed-execution/
-  Linked repositories guide: https://dispat.dev/choreographed-repositories/
-  Get started: https://dispat.dev/
+  {{ if eq .Platform "discord" }}@everyone {{ end }}dispat v{{ .new_version }}: every completed step should count.
+  Release: https://github.com/yohimik/dispat/releases/tag/services/dispat/v{{ .new_version }}
+  Explore: https://dispat.dev
 
-  Worker nodes. One release, builds on several machines.
+  A release should not lose its memory when the lights go out. Yet a failure halfway through can leave us searching the wreckage: what shipped, what stopped, and what must never happen twice?
 
-  Start a release on one machine and let others do the building. The machine you started on keeps the locks, the plan and the records.
+  I built dispat around a conviction: work already done should remain done. A published package is a fact in the world. Recovery begins by remembering it.
 
-  Everything travels over Git. The orchestrator leaves work on branches of the project's own repository and workers pick it up, so there are no open ports and nothing to install but dispat.
+  That conviction led me to formulate the dispat theorem. For fixed inputs, dispat compiles one deterministic plan: the tasks, their dependencies, and the actions whose effects cannot simply be undone. The theorem gives a lower bound on execution time and, under its scheduling assumptions, a bound on how closely a greedy executor can approach it. The longest chain of dependencies sets a pace that no number of machines can outrun.
 
-  What one machine builds, the next one can use, checked before it is used.
+  Across failure, progress needs a durable memory. This is the heart of saga recovery: record completed work, hold back tasks whose prerequisites failed, and rebuild the remaining plan from what actually happened. When a publication outlives its record, verify its identity before adopting it. Then carry the unfinished work forward.
 
-  Publishing and credentials stay on one machine. Without a workers section, nothing changes.
+  The idea reaches beyond JavaScript, across languages and ecosystems; beyond a single monorepo, into a fleet of repositories. Its wider promise begins wherever work can be described in advance as tasks, dependencies, and irreversible steps.
 
-  New and optional: a sign stage writes each package's own version before anything else runs, and the version stage can be written as propagate. Existing configurations run exactly as before.
+  Even outside software, there is something familiar here. We cannot always undo the steps we have taken. We can remember them, understand what they make possible, and choose the next one with care.
 
-  Faster on long histories: planning a 50,000-commit benchmark takes 0.4 seconds instead of 2.9.
+  One plan. A memory of progress. A way forward.{{ if ne .Platform "discord" }}
 
-  If a library ships and an app using it fails, nothing is repeated: the next run finishes what is left. An app with changes of its own ships anyway and picks the library up later, also when it sat out the run where the library shipped.
-
-  Next generation CI/CD framework. Mathematical planning. Saga recovery.
-
-  Preview with `dispat status`; it publishes nothing.{{ if ne .Platform "discord" }}
-
-  #golang #opensource #devtools #releaseengineering #cli #monorepo #polyrepo #devops #cicd #automation #distributedbuilds #releasemanagement #buildtools #orchestration #sagapattern #distributedsystems #platformengineering{{ end }}
+  #dispat #OpenSource #DevTools #ReleaseEngineering #Monorepo #Polyrepo #CICD #DistributedSystems #SagaPattern #Automation{{ end }}

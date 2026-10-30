@@ -389,6 +389,9 @@ func TestChoreographyFaultCannotReadTheConsumersOwnRevision(t *testing.T) {
 			fleet, marker := faultingConsumerFleet(t)
 			api := fleet.peer("api")
 			api.ReleaseOK("--package", "sdk-pkg")
+			require.NotEqual(t, gitlinkAt(api.Repo, "HEAD", ".links/sdk"),
+				api.Git("-C", ".links/sdk", "rev-parse", "HEAD"),
+				"the consumer still needs to settle the provider's release revision")
 			fault := harness.NewGitFault(t, harness.GitFault{
 				Pattern: "*-C " + canonicalRoot(t, api.Repo) + " rev-parse HEAD^{commit}*",
 				Nth:     tc.nth})

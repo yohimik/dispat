@@ -459,12 +459,12 @@ func TestAutoVersionManifestsNoneFlag(t *testing.T) {
 // autoPropagate and beforeVersion under autoVersion. The syncLock script the
 // block names runs between it and the build either way.
 func TestAutoPropagateReleasesLikeAutoVersion(t *testing.T) {
-	release := func(t *testing.T, isPropagate bool) (web, core, stages string, tags []string) {
+	release := func(t *testing.T, isPropagate bool) (web, core string, stages map[string]string, tags []string) {
 		t.Helper()
 		r := harness.New(t)
-		cfg := libsConfig(`echo "build:$DISPAT_STAGE" >> ../../stages.log`, 1)
-		cfg.Scripts["locksync"] = models.Script{`echo "lock:$DISPAT_STAGE" >> ../../stages.log`}
-		cfg.Scripts["mark"] = models.Script{`echo "hook:$DISPAT_STAGE" >> ../../stages.log`}
+		cfg := libsConfig(`echo "build:$DISPAT_STAGE" >> stages.log`, 1)
+		cfg.Scripts["locksync"] = models.Script{`echo "lock:$DISPAT_STAGE" >> stages.log`}
+		cfg.Scripts["mark"] = models.Script{`echo "hook:$DISPAT_STAGE" >> stages.log`}
 		policy := &models.AutoVersionConfig{Match: []string{"workspace:*"}, SyncLock: []string{"locksync"}}
 		space := models.SpaceConfig{Path: models.PathList{"packages"}, Flow: buildPublish()}
 		if isPropagate {
@@ -485,7 +485,10 @@ func TestAutoPropagateReleasesLikeAutoVersion(t *testing.T) {
 		r.Commit("feat(core,web): bootstrap")
 		r.ReleaseOK()
 		return readFile(t, r, "packages", "web", "package.json"), readFile(t, r, "packages", "core", "package.json"),
-			readFile(t, r, "stages.log"), r.TagList()
+			map[string]string{
+				"core": readFile(t, r, "packages", "core", "stages.log"),
+				"web":  readFile(t, r, "packages", "web", "stages.log"),
+			}, r.TagList()
 	}
 	web, core, stages, tags := release(t, false)
 	pWeb, pCore, pStages, pTags := release(t, true)
@@ -495,11 +498,10 @@ func TestAutoPropagateReleasesLikeAutoVersion(t *testing.T) {
 	assert.Equal(t, web, pWeb)
 	assert.Equal(t, core, pCore)
 	assert.Equal(t, tags, pTags)
-	assert.Equal(t, strings.ReplaceAll(stages, "hook:beforeVersion\n", "hook:beforePropagate\n"), pStages,
-		"the hook reports the name the stage was configured under, and nothing else differs")
-	assert.Equal(t, 2, strings.Count(stages, "hook:beforeVersion\n"), "stages:\n%s", stages)
-	assert.Equal(t, 2, strings.Count(pStages, "hook:beforePropagate\n"), "stages:\n%s", pStages)
-	assert.Equal(t, 2, strings.Count(pStages, "lock:syncLock\n"), "stages:\n%s", pStages)
+	for _, packageName := range []string{"core", "web"} {
+		assert.Equal(t, "hook:beforeVersion\nlock:syncLock\nbuild:build\n", stages[packageName], packageName)
+		assert.Equal(t, "hook:beforePropagate\nlock:syncLock\nbuild:build\n", pStages[packageName], packageName)
+	}
 }
 
 // TestAutoSignWritesTheOwnVersionBeforePropagate: with autoSign beside

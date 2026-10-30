@@ -108,48 +108,6 @@ Choose the section that matches the last completed operation:
 | npm accepted the package, but there is no release tag | [npm publication recovery](#recover-an-npm-publication-without-a-release-tag) |
 | A push was rejected after publication | [Concurrent pushes](#when-somebody-pushes-while-the-release-runs) |
 
-Treat npm's version and dispat's release tag as separate records. If npm accepts a tarball and the run stops before
-the Git tag reaches the remote, do not create the missing Git tag or npm dist-tag by hand. First inspect the exact npm
-version, the workflow revision, and the tarball integrity outside the publish script.
-
-If a workflow is interrupted after npm reports success and before Git records are written, and the build exported the
-tarball's `INTEGRITY`, the next run adopts the version when npm's `dist.integrity` matches the tarball it built
-(`W196`), and refuses it with `E198` when it does not. A build is reproducible only when the tarball's bytes are, so a
-rebuilt tarball whose integrity differs is refused. A project whose publisher runs only `npm publish` and exports no
-integrity leaves the decision to the workflow operator; rerunning the same publish command is unsafe. npm does not permit a name and version combination to be reused after
-publication, including after an unpublish. Recover forward with a new patch version through the reviewed workflow, while keeping any independent
-binary or provider pin unchanged when its bytes did not change. For example, reserve `1.10.0` and release `1.10.1`
-rather than trying to recreate `1.10.0`.
-
-Keep artifact validation before publication: build and inspect one tarball, verify its package name, version, and digest,
-exercise that exact file, then give the same path to npm. The publish stage can then remain one upload operation. If the
-entire package and all its versions are unpublished, npm also requires waiting 24 hours before publishing another
-version of that package. Use npm's authenticated procedure and follow its
-[unpublish policy](https://docs.npmjs.com/policies/unpublish/) as a separate administrative action; removal does not
-make its version reusable.
-
-The 24-hour restriction applies to every new version under the removed package name. Advancing the patch version
-does not bypass it. A registry E409 indicating that the package is still being processed can occur during this
-interval; inspect the package's `time.unpublished.time` and wait until the restriction has expired before retrying CI.
-
-After a successful publication, independent installation checks may need to wait for registry metadata to become
-available. Poll for the exact version with a bounded deadline before installing it. Keep that readiness check in a
-post-release job, after release records, so a delayed registry response cannot turn an accepted upload into a failed
-publish stage. This short readiness wait does not replace the 24-hour restriction after complete removal.
-
-### Publish the next patch before removing the previous version
-
-If the package is still published, an alternative is to keep its name and publish the next patch through the reviewed
-workflow first. For example, publish `1.10.1`, verify its release records and installation, then unpublish only
-`1.10.0` using `npm unpublish <package-name>@1.10.0`, if npm's
-[unpublish policy](https://docs.npmjs.com/policies/unpublish/) permits it. Keep `1.10.1` published: removing only the
-previous version avoids complete package removal and its 24-hour restriction, without renaming the package.
-
-Exact dependency pins and lockfiles that still require `1.10.0` may fail to install after removal; update those
-consumers to the replacement patch. If removal is not permitted or would disrupt consumers, deprecate only the old
-version with a message directing users to the patch. The removed version remains unusable for future publications.
-If all versions were already unpublished, wait out the restriction described above before publishing the patch.
-
 ## Continue after a dependent build fails
 
 In this example, `core` and its consumer `app` release together. The tests for `app` break its build after `core`
@@ -364,15 +322,18 @@ dispat preview --package core --version 0.1.0 --github
 
 The output is the body the release would have sent. The preview reads the current configuration, so check that the
 `github` entry format has not changed since the release.
+
 ## Recover an npm publication without a release tag
 
 Treat npm's version and dispat's release tag as separate records. If npm accepts a tarball and the run stops before
 the Git tag reaches the remote, do not create the missing Git tag or npm dist-tag by hand. First inspect the exact npm
 version, the workflow revision, and the tarball integrity outside the publish script.
 
-If a workflow is interrupted after npm reports success and before Git records are written, inspect npm separately.
-A project whose publisher intentionally runs only `npm publish` leaves that decision to the workflow operator;
-rerunning the same publish command is unsafe. npm does not permit a name and version combination to be reused after
+If a workflow is interrupted after npm reports success and before Git records are written, and the build exported the
+tarball's `INTEGRITY`, the next run adopts the version when npm's `dist.integrity` matches the tarball it built
+(`W196`), and refuses it with `E198` when it does not. A build is reproducible only when the tarball's bytes are, so a
+rebuilt tarball whose integrity differs is refused. A project whose publisher runs only `npm publish` and exports no
+integrity leaves the decision to the workflow operator; rerunning the same publish command is unsafe. npm does not permit a name and version combination to be reused after
 publication, including after an unpublish. Recover forward with a new patch version through the reviewed workflow, while keeping any independent
 binary or provider pin unchanged when its bytes did not change. For example, reserve `1.10.0` and release `1.10.1`
 rather than trying to recreate `1.10.0`.

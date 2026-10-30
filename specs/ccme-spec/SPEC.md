@@ -86,8 +86,9 @@ engine (§20). Appendix A gives regular expressions for implementers who prefer 
 Alongside these capabilities sits one guarantee that is not syntax: **a release is durable under partial failure.** Publishing
 is a sequence of independent, individually-fallible registry operations, and any of them may fail. The engine therefore
 computes propagation against the *consumer's* release position rather than the provider's (§13.7a), publishes in
-dependency order and skips the dependents of anything that failed (§19), and converges to an empty plan by re-running
-(§13.7c). A half-finished release is a resumable state, not a lost one. Explicit rollback adds a separate withdrawal ledger;
+dependency order and applies dependency-aware failure blocking (§19). Completed release records survive partial failure;
+retries converge under the hypotheses of §13.7c, while ambiguous outcomes require reconciliation (§§19.3–19.4).
+Explicit rollback adds a separate withdrawal ledger;
 its activation and external-availability limits are specified in §26. Ordinary publish failure never requests rollback.
 
 **Example combining the original commit directives:**
@@ -2491,7 +2492,7 @@ with no commits of its own and no releasing dependency is otherwise baffling to 
 * it never widens depth: targets come from the same depth-bounded traversal from the same source set (§9.2);
 * it never resurrects a cancelled contribution (§13.5a);
 * it never releases a held package (§13.6a);
-* it never changes the version the target was originally planned at (G3 below);
+* it preserves the originally planned version only under G3's hypotheses; a consumer that already released is versioned from its new baseline;
 * it never propagates onward from the catching-up package (§9.2, last property).
 
 ### 13.7b Detecting staleness from the consumer
@@ -2553,8 +2554,8 @@ rows equals that bump. The two formulations are duals over the same relation and
 implementation bug, and testing one against the other over a random workspace is a cheap and effective conformance
 check.
 
-**The cheap tag-level screen.** Walking units is `O(|window|)`. A far cheaper *screening* test, adequate for a warning
-banner or a CI dashboard, compares release positions directly:
+**The cheap tag-level screen.** Where both packages have baselines, a dashboard MAY compare their release positions
+before examining individual units:
 
 > `D` is possibly behind `P` if `tagCommit(baseline(P))` is **not** an ancestor-or-self of `tagCommit(baseline(D))`.
 
@@ -2575,9 +2576,9 @@ away by `Propagate-Scope`, or reach `D` only beyond their declared depth, or be 
 screen to decide releases would manufacture bumps that no commit asked for. Use it to flag already-released
 provider positions for inspection, without discarding other pending work; use §9.2 to decide.
 
-Note also the case the screen cannot see at all: `P` and `D` released at the **same commit**, in the same run, but with
-`D` published first. Ancestry cannot distinguish them, and no rule over tags can. That case is prevented rather than
-detected, by publishing in dependency order (§19.2).
+Two releases at the same commit have no order in ancestry. The screen therefore cannot detect a consumer published
+before its provider at that commit. Dependency-first publication (§19.2) prevents this within a run; §19.3 specifies
+`E201` and explicit reconciliation for the corresponding ambiguity across runs.
 
 ### 13.7c Guarantees
 
@@ -2588,8 +2589,12 @@ means no package whose contribution to a unit is initially suppressed by cancell
 nevertheless released at `HEAD` during that sequence. They are components, not by themselves a complete proof premise.
 Where a guarantee says **retry invariant**, it additionally requires the corrected tuple stream, source sets, graph,
 scope/depth predicates, target baselines, and resolved source/target channel admission for every outstanding unit to
-remain unchanged except for baseline tags written for packages that successfully released. Neither H1 nor H2 is needed
-for one invocation's deterministic computation.
+remain unchanged except for baseline tags written for packages that successfully released. Consumer boundaries must
+advance by ancestry, so an already true `delivered(P, C, D)` remains true. The invariant also excludes the `E201`
+record ambiguity of §19.3: a newly written provider record must not make an earlier consumer release appear to have
+incorporated it. If provider publication at the consumer's existing baseline commit succeeds and the required consumer
+republication fails, the sequence leaves this invariant and requires the explicit reconciliation of §19.3. Neither H1
+nor H2 is needed for one invocation's deterministic computation.
 For CCME 3 these are claims about the forward-publish projection. The retry invariant also fixes rollback activation,
 withdrawal inventories and completion state. They do not promise artifact availability after explicit withdrawal.
 The separate rollback progress argument is in §26 and requires durable receipts and successful idempotent operations.
@@ -2603,16 +2608,22 @@ receives at least `u`'s propagated bump in every run until `D` releases at or af
 carrying `C`. Admission is `owed(u, D) ≠ ∅` (§13.4a); only a baseline tag for `D` at such a commit discharges it. A
 release by the source alone cannot, and neither can a release by `D` that precedes the source's.
 
-**G3, version stability.** Under the retry invariant, a package caught up in run *k* receives the same version it was
-planned at in run 1. `effective(D)` is the same `max()` and the failed run wrote no tag for `D`. A source
-graduation can change an `inherit` channel, and discharge of a suppressed source can add a tuple; either change requires
-a newly surfaced plan rather than a claim that the old number is preserved.
+**G3, version stability before a package's first successful release.** Under the retry invariant, an independently
+versioned package `D` that has not released since run 1 receives the same version in run *k* that it was planned at in
+run 1. Its baseline, fresh direct work, admitted propagated bumps, resolved channel, exact-version directive and train
+aggregate are unchanged, so the version computation is unchanged. A consumer that already proceeded past a failed
+provider has a new baseline; its later catch-up is a new version (Appendix B.7, vectors 80d and 80e). Shared-version
+groups have the separate guarantees and counter exception of §13.9a. A source graduation can change an `inherit`
+channel, and discharge of a suppressed source can add a tuple; either change requires a newly surfaced plan rather
+than a claim that the old number is preserved.
 
 **G4, no double ledger delivery.** Once `D` is tagged at a commit `T` that reaches a release of every source of `u`
-carrying `C`, `owed(u, D)` is empty, so the contribution is not re-admitted. A `D` that proceeded past `C` before a
-source released it is bumped once more when that release comes, and that is the delivery, not a second one. Combined
-with G2 this is exactly-once **in CCME's tag ledger**. It does not promise an exactly-once registry operation: §19.4
-explicitly reconciles interruption between external publication and tagging.
+carrying `C`, `owed(u, D)` is empty. Under the retry invariant it remains empty, so the contribution is not
+re-admitted. Before that point a consumer may release more than once as different owed sources become available;
+each such release discharges only the source contributions it actually incorporates. Combined with G2, this is
+exactly-once delivery of each **source contribution in CCME's tag ledger**, not one consumer release per unit. It does
+not promise an exactly-once registry operation: §19.4 explicitly reconciles interruption between external publication
+and tagging.
 
 **G5, no blast-radius widening under the retry invariant.** Each unit's later target set is a subset of its initial set:
 the source, traversal, and channel-admission predicates stay fixed while `delivered` only grows. Outside the
@@ -2656,8 +2667,10 @@ packages where nobody is watching a registry. A permanent exception to convergen
 is a defect. Hence §13.10a: tag whatever is released.
 
 **G7, channel discharge.** A propagated channel contribution from commit `C` is admitted for `d` only while
-`C ∈ Wfresh(d)`. Once `d` releases at a commit containing `C`, its baseline tag removes `C` and the contribution cannot
-reappear. While `C` is fresh, `propagatedChannelFor` (§9.3) separately rejects a value equal to
+`C ∈ Wfresh(d)`. Once `d` releases at a commit containing `C`, its baseline tag removes `C`. The contribution cannot
+reappear while later selected consumer boundaries retain that commit by ancestry, as required by the retry invariant.
+A higher-precedence tag on an incomparable history does not establish that premise. While `C` is fresh,
+`propagatedChannelFor` (§9.3) separately rejects a value equal to
 `channelOf(baseline(d))` (`W199`) and a transition whose `<from>` does not match. Implementations MUST apply both the
 fresh-work admission gate and these no-op checks.
 
@@ -2895,9 +2908,11 @@ released at the line as a ride, unless its own mode leaves it behind, exactly as
 earlier run's unfinished propagation. With a counter of its own it joins at the start of its own line rather than at
 the group's published prerelease.
 
-**Guarantees.** Under `counter: independent`, `G1` to `G6` of §13.7c hold per member exactly as they hold for a package
-that versions alone: a retry at a fixed `HEAD` plans each unpublished member at the version the failed run planned for
-it, and plans nothing for the members that published.
+**Guarantees.** Under `counter: independent` and the retry invariant of §13.7c, a member that has not released since
+the initial plan retains its planned version. A member that completed its own work and every admitted source
+contribution is not released again merely to align its counter. A consumer that proceeded past a failed provider may
+still require a later release for the remaining debt. G6 additionally requires its finite-debt progress premises;
+independent counters alone do not establish those premises.
 
 Under `counter: fixed` this is weaker, and the weakening is stated rather than hidden. A retry after a partial
 publication on a shared train advances the group's counter, so the members that failed are planned at a later
@@ -3006,8 +3021,8 @@ Notation: `P` packages, `E` workspace dependency edges, `H` commits and `A` pare
 the fixed `HEAD`, `C` commits in the union of all pending windows, `U` units in those commits, `N` total bytes of their
 messages and changed paths, `T` reachable tags, and `M` tag-record/package-format matches examined while partitioning
 the inventory (at worst `P · T`). `k` is the number of **distinct** commits carrying a boundary: a stable baseline, a
-package's newest baseline of any channel where that is another commit, or the release of a provider that bounds a
-consumer's owed window (§13.3), of which there are none while no consumer has got ahead of a provider. `m` is the number
+package's newest baseline of any channel where that is another commit, or any provider release used to exclude history
+from a consumer's owed window (§13.3). An owed window may have several incomparable exclusion boundaries. `m` is the number
 of distinct **marker** commits, the commits some ancestry question of §13 is asked about: the `k` boundaries, every
 `cancel` commit, and every commit carrying an `Edits`, `Deletes` or `Reverts` footer. `R` is the actual work of
 resolving scopes and changed paths against the workspace, including candidates examined when the result is empty. `I` is
@@ -3021,12 +3036,15 @@ including candidates rejected by cancellation. `Jc` is not bounded by direct inc
 contribution count `Z`. Write `bw(x) = max(1, ceil(x / wordSize))`, so a zero-marker phase still pays for traversal or
 query dispatch. `F` is the number of publish failures, and `Oout` is the size of diagnostics and other emitted output.
 In the per-target row, and there only, `D` is the number of targets one unit reaches, `S` its source-set size, and `Σ`
-its resolved scope-set size.
+its resolved scope-set size. Let `Ow` count the provider/consumer pairs requiring owed windows. Let `Jo` count the work
+of discovering those pairs, selecting their release boundaries, and constructing and querying their exclusion masks,
+including unsuccessful record probes and mask-word operations. This work is additional to the shared ancestry pass;
+it is not bounded by the number of memberships that survive.
 
 For the polyrepository profile, `H` and `A` below mean the sums over the fixed reachable snapshots of all repositories,
 not the size of a fictitious merged history. Let `Q` be the number of repositories, `Hq` and `Aq` one repository's
 reachable commits and parent edges, `G` the number of control-repository gitlink transitions examined, and `Kq` the
-number of distinct boundary revisions used in repository `q`, stable and newest-baseline boundaries counted together and
+number of distinct boundary revisions used in repository `q`, stable, newest-baseline and owed exclusion boundaries counted together and
 the no-boundary class counted once. `Kq` counts revisions and not `(stable, fresh)` pairs, which can number the product
 of the two. `mq` is the marker count `m` restricted to the commits of repository `q`. Let `V` be the number of package
 memberships in shared-version groups (`V <= P`). Under the linked peer topology of §27.11 there is no control index and
@@ -3049,7 +3067,7 @@ In graph construction and readiness bounds, `Tk` includes zero-duration build an
 |----------------------------|-----------------------|-----------------------|---------------------------------------------|
 | Load workspace (§13.1)     | `O(P + E)`            | `O(P + E)`            |                                             |
 | Load tags (§13.2)          | `O(T log T + M)`      | `O(T + M)`            | Running maximum per package; hash `(package, version)` for `E191`. One inventory can still require many matches |
-| Pending windows (§13.3)    | **`O(P · (H + A))`**  | `O((H + A) · bw(m) + Iw)` | One marker pass; `O((k + 1) · (H + A) + Iw)` with a walk per boundary |
+| Pending windows (§13.3)    | **`O((P + Ow) · (H + A) + Jo)`** | `O((H + A) · bw(m) + Jo + Iw)` | One marker pass; `O((k + 1) · (H + A) + Jo + Iw)` with a walk per boundary. Owed-window masks require all their boundaries |
 | Parse and resolve (§13.4)  | `O(N + R + I)`        | `O(N + R + I)`        | Lexing and resolution have different cache keys |
 | Corrections (§13.4b)       | repeated ancestry and scope scans | `O(H + Fc + Jcorr + wildcards · I + Oout)` | Indexed ancestry charged above; count package/target probes even with no wildcards |
 | Cancellation predicates (§13.5, §9.2) | a cancel scan per query | `O(Ic + (Pc + Jc) · bw(cancels))` | Build per-package cancel masks; ancestry charged above; diagnostic attribution adds its own work |
@@ -3061,11 +3079,11 @@ In graph construction and readiness bounds, `Tk` includes zero-duration build an
 | Channel resolution (§13.8) | **`O(P · U)`**        | `O(U + I + P)`        | Invert unit-to-package incidences           |
 | Versions/plan (§13.9–10)   | repeated member/record scans | `O(P + I + Z + Oout)` | Consume already-built aggregates/provenance; scan each disjoint version group once |
 | Publish order (§19.2)      | `O(P² + E)`           | `O(E + P log P)`      | Scanning the ready set for the least name; a comparison heap instead |
-| Blocking closure (§19.3)   | **`O(P · (P + E))`**  | `O(P + E)` per run    | A walk per planned package; one multi-source reverse traversal instead. The cause test of §19.3 reads each planned package's admitted causes once, `O(P + I)` |
+| Blocking closure (§19.3)   | **`O(P · (P + E))`**  | `O(P + E)` per run    | A walk per planned package; one multi-source reverse traversal instead. Scanning stored admitted causes for §19.3 is separate, `O(P + I + Z)`, including propagated provenance |
 | Build readiness (§19.2a)   | `O(P · (P + E))`      | `O(P + E)`            | Retain build and publish relay nodes per nonbuilding package and bounded mode-labeled edges per package edge. Eliminating relays can create `Theta(P²)` direct building-pair edges even when `E = O(P)` |
 | Stage order (configured)   | `O(sum(S_p · (S_p + C_p)))` | `O(sum((S_p + C_p) · ceil(S_p / wordSize)))` | A walk from every stage to find cycles and related `parallel` pairs; one depth-first search for the strongly connected components instead, which finds every stage on a cycle, then one reach bitset per task of the package graph, the union of its successors' sets in reverse topological order, and one bit test per `parallel` pair. Default, required, publication and record edges number `O(S_p)`, and `A_p` takes one traversal. A package typically has a few stages, and then each set is one word. Condition 4 is one such search over the packages, `O(P + E)` per workspace |
 | Polyrepository snapshots (§27) | repeated control scans | `O(G + sum(Hq + Aq))` input walk | Index control gitlinks once; walk each source snapshot once |
-| Polyrepository windows (§27) | `O(P · sum(Hq + Aq))` | `O(sum((Hq + Aq) · bw(mq)) + Iw)` | One marker pass per repository; `O(sum(Kq · (Hq + Aq)) + Iw)` with a walk per boundary |
+| Polyrepository windows (§27) | `O((P + Ow) · sum(Hq + Aq) + Jo)` | `O(sum((Hq + Aq) · bw(mq)) + Jo + Iw)` | One marker pass per repository; `O(sum(Kq · (Hq + Aq)) + Jo + Iw)` with a walk per boundary |
 | Publication input closure (§27.2) | `O(P · (P + E + V))` | `O((P + E + V) · ceil(Q / wordSize))` | Condense the augmented graph, then one bitset union per edge |
 | Link evidence (§27.11)     | `O(X · (Q + Y))`, `X · Y` tree reads | `O(Q + X · Y)`, `B` tree reads | Root the link tree once; read each `(repository, revision)` tree once |
 | Link settlement (§27.11)   | one commit per route hop | one commit per recording repository | Merge a package's routes into one tree: at most `Q - 1` commits, 2 in a star |
@@ -3112,16 +3130,25 @@ once and visit its members as one adjacency list instead.
 
 **Windows: group by distinct baseline commit.** For a fixed `HEAD`, `W(P)` is determined by `stableCommit(P)`. Different
 package tags that resolve to the same commit therefore share a window. A release MAY record packages at different
-commits; `k` counts distinct boundary commits, not release runs, and can be as large as `2P` plus one per owed window
-(§13.3). Computing reachability once per distinct boundary commit, plus once for packages with no baseline, and testing
-membership by lookup replaces `P` traversals with at most `k + 1`, and the marker pass below replaces those with one.
+commits; `k` counts distinct boundary commits, not release runs. It includes every exclusion boundary used by an owed
+window, not one representative per window. Computing reachability once per distinct boundary commit, plus once for
+the no-boundary case, requires at most `k + 1` traversals, and the marker pass below replaces those with one.
 The fresh window needs no class of its own. By §13.3, `Wfresh(P) = W(P) - reach(baselineCommit(P))`, so with `after(b) =
 reach(HEAD) - reach(b)` a commit is in `Wfresh(P)` exactly when it is in both `after(stableCommit(P))` and
-`after(baselineCommit(P))`. Every window is therefore a function of one boundary commit, a fresh membership test is the
+`after(baselineCommit(P))`. Each ordinary pending window is therefore a function of one boundary commit; a fresh membership test is the
 conjunction of two lookups, and no reachability set is keyed by a `(stable, fresh)` pair. The identity holds whether or
 not the newest baseline descends from the stable one. The traversals range over the reachable history, so their safe
 bound is in `H + A`, not `C`: proving that a commit is outside a pending window may require walking commits that never
-enter the union. `Iw` is the number of stored or emitted package/window memberships and is `P · C` in the worst case.
+enter the union. `Iw` counts stored or emitted memberships, up to `O((P + Ow) · C)` when owed windows are materialised
+separately; ordinary package windows alone require at most `O(P · C)`.
+
+For an owed window, let `B(P, D)` contain every release commit of `P` reached by `baselineCommit(D)`. Then
+`owedWindow(P, D) = reach(HEAD) - union { reach(t) : t in B(P, D) }`. Ancestor-redundant members of `B(P, D)` may be
+removed, but incomparable members cannot be replaced by the highest-version tag. Membership is an empty intersection
+between a commit's ancestry mask and the mask of `B(P, D)`, costing up to `bw(k)` word operations per query. If
+`B(P, D)` is empty, the owed window is all reachable history. For example, if provider releases at incomparable commits
+`a` and `b` are both reached by the consumer's baseline, both ancestries are excluded; using only `b` incorrectly
+includes `a`. Boundary selection and these mask operations are charged in `Jo`, even when no owed membership results.
 
 **Inventory once, partition explicitly.** An adapter may return one complete release-record inventory for the fixed
 snapshot and let the planner match package formats in memory. This reduces adapter queries from one per package to one;
@@ -3137,10 +3164,10 @@ or be keyed by that second boundary too. Keying the second operand by its own bo
 without a class per pair.
 
 In the polyrepository profile, the identity of the repository whose history a window ranges over is also part of the
-window key. Two equal SHA byte strings in different repositories are unrelated. A window over repository `q` is a
+window key. Two equal SHA byte strings in different repositories are unrelated. An ordinary pending window over repository `q` is a
 function of `q`, its planned head, and one boundary revision in `q`, and of nothing else: packages may share an
 immutable window over `q` exactly when their boundary in `q` is the same qualified revision, whichever repositories
-own them. A materialised fresh window may be shared only when both its stable and newest-baseline boundaries are equal.
+own them. An owed window instead requires the same exclusion-boundary set in `q`. A materialised fresh window may be shared only when both its stable and newest-baseline boundaries are equal.
 This is the `Kq` grouping above. A control snapshot's gitlink index or a linked peer's recorded links can locate those
 boundaries, but neither can replace the source repository's ancestry walk.
 
@@ -3153,8 +3180,8 @@ Storing `W(P)` as an explicit set per package costs `O(P · C)` **memory**. A de
 history index uses `k + 1` bitsets of `H` bits: one for each distinct boundary commit plus the no-baseline window class.
 Alternatively, after the pending union is known, a representation indexed only by its `C` commits uses
 `O((k + 1) · C)` bits, but computing that union and each membership still requires reachability over `H + A`. A sparse
-representation costs in `Iw`, the actual membership incidences. Each makes §13.4a admission a membership lookup; none
-turns the history traversal itself into `O(C)`.
+representation costs in `Iw`, the actual membership incidences. Ordinary fresh-window admission is a pair of membership
+lookups; owed-window masks and the delivery test retain their additional costs. None turns the history traversal itself into `O(C)`.
 
 **Ancestry: one marker pass, not one walk per question.** Every ancestry question §13 asks has one shape: is commit
 `c` an ancestor-or-self of a marker `x`? The markers are the window boundaries (§13.3), the `cancel` commits (§10.3),
@@ -3181,10 +3208,12 @@ With indexed induced parent adjacency, a pass over the union sets exactly the fu
 lists adds `O(C + Au)` work with constant-time indexed union membership; `Au` counts all parent entries of union
 commits, including edges leaving the union. Index construction is charged separately. Correction and revert checks
 can query a target outside the union; their ancestry queries or a full-history pass have separate costs.
-What remains in `H + A` is finding the union in the first place. A backend that can name it in one query,
-as Git can (`HEAD` with the best common ancestors of the boundaries excluded), reads messages and changed paths
-once for the union where a read per boundary repeats every commit two windows share; each window is then the
-union minus one marker's bits, in the union's order.
+What remains in `H + A` is finding the union in the first place. A backend that can name the exact union reads
+messages and changed paths once where a read per window repeats every commit two windows share. For ordinary
+single-boundary windows, Git can name the union using `HEAD` with all best common ancestors of the boundaries
+excluded. Owed windows require their complete exclusion-set expression; taking the common ancestors of all individual
+boundaries does not in general express that union. Each window is then selected by its own marker predicate, in the
+union's order.
 
 Two refinements bound the pass further, and neither changes its worst case. Equal masks SHOULD be interned: on a
 linear release history the boundaries are nested, `reach(b1) ⊆ reach(b2) ⊆ …`, so at most `k + 1` distinct boundary
@@ -3200,14 +3229,15 @@ An OR-result cache MAY reuse equal mask pairs, but its keys and values also need
 walk, as decreasing commit-graph generation number is. A window is closed under descendants, so its complement is
 closed under ancestors. Once every unvisited commit that has a visited child carries all `k` boundary bits, every
 unvisited commit is an ancestor-or-self of one of them, lies in no window, and is named by no tuple of §13.4. The stop
-is sound only when no package lacks a stable baseline, because such a package keeps the whole history in its window,
-and only after every commit named by an `Edits`, `Deletes` or `Reverts` footer has been visited, because `E210` and
+is sound only when every included window has a non-empty exclusion boundary. A package without a stable baseline, or
+an owed pair whose consumer reaches no provider release, keeps the whole history in the union. The stop also requires
+every commit named by an `Edits`, `Deletes` or `Reverts` footer to have been visited, because `E210` and
 `W213` read the ancestry of a target that lies outside every window.
 
 **Propagation: cache traversal, preserve unit identity.** A graph walk may be reused when its source set, depth and edge
 kinds are identical. Its reached nodes and distances are then the same. The remaining work MUST still be evaluated per
-unit and target: admission uses that unit's commit in `Wfresh(d)`; cancellation uses the `(commit, d)` pair; scope
-filters are unit-specific; inherited channel is derived from that unit and its sources; and provenance and diagnostics
+unit and target: channel admission uses that unit's commit in `Wfresh(d)`, while bump admission uses `owed(u, d)`;
+cancellation uses the `(commit, d)` pair; scope filters are unit-specific; inherited channel is derived from that unit and its sources; and provenance and diagnostics
 identify the contributing unit and sources. Thus `(window class, directive)` is not a sufficient cache key, and taking
 the union of source sets is not generally semantics-preserving. A safe implementation caches walks and hoisted per-unit
 predicates, or uses indexes that retain the contributing unit for every reached target. No sublinear bound in
@@ -3248,9 +3278,9 @@ their graph walks and contribution incidences are counted in the propagation row
 > finding some edge over-admits a source of another unit. Implementations SHOULD test a bucketed
 > propagation against a literal per-unit one over randomised workspaces; the two MUST agree exactly.
 
-**Per-target predicates: hoist everything that does not read the target.** Inside the target loop of §9.2, three things
-are loop-invariant and three are not. `commitOf(u)`, `resolve(u.propagateScope)`, and the source-channel set of §9.3a
-depend only on the unit; only `Wfresh(d)`, `cancelledFor(·, d)` and the final `channel[d]` membership read the target. A
+**Per-target predicates: hoist everything that does not read the target.** Inside the target loop of §9.2,
+`commitOf(u)`, `resolve(u.propagateScope)`, and the source-channel set of §9.3a depend only on the unit. Channel
+freshness, source reachability and delivery on the bump axis, cancellation, and final-channel membership depend on the target. A
 transcription that resolves the scope-set and re-scans the source set once per target turns an `O(D + S + Σ)` unit into
 an `O(D · (S + Σ))` one, and the unit where that bites is precisely the one an author reaches for when they mean it: a
 `^^` across a wide scope-set has a large `D`, and re-deriving a two-element channel set thousands of times to answer a
@@ -3296,9 +3326,9 @@ the path against every package root costs `P` per changed path, in every commit 
 is one map lookup. A glob whose only `*` is its last byte, which `@acme/*` and nearly every written glob is, selects a
 contiguous range of the byte-wise sorted package names and costs `O(log P)` plus its matches; only a glob with an
 interior `*` needs a pass over the names, at the per-candidate cost §18.3 requires. A scope-set's resolution depends
-on its commit only through `.` and, under §27, through the repository that owns the commit, so every other scope-set,
-a `Propagate-Scope` repeated along a train in particular, MAY be resolved once per distinct text. None of this changes
-`I`, which is output.
+on its commit only through `.` and, under §27, through the repository that owns the commit. Every other scope-set,
+a `Propagate-Scope` repeated along a train in particular, MAY be resolved once per distinct text within a fixed
+workspace snapshot and resolution context, including repository identity under §27. None of this changes `I`, which is output.
 
 **Deterministic order and failure closure.** Kahn's topological sort is `O(P + E)` if any available zero-indegree node
 may be chosen. CCME requires the byte-wise least available package: scanning the ready set for it at every step is `O(P²
@@ -3322,6 +3352,7 @@ inputs retained, a conservative storage ledger is:
 | Parsed messages and resolved incidences | `O(N + U + I)` | Byte buffers plus unit/incidence records; cached resolution has its own key |
 | Dense history marker rows | `O(H · ceil(m / wordSize))` | Plus history traversal state; zero markers need no rows |
 | Explicit package windows | `O(Iw)` | Optional materialisation; shared boundary indexes can avoid it |
+| Owed-window exclusion masks | `O(Ow · bw(k))` | Optional dense masks; shared or sparse sets can reduce storage; their construction and query work is in `Jo` |
 | Cancel masks | `O(Pc · ceil(cancels / wordSize))` | Plus scoped-package lookup and diagnostic state |
 | One propagation BFS | `O(P)` auxiliary | On top of shared adjacency; retained walk caches have a separate budget |
 | Direct channel candidates | `O(P + I)` as lists, or `O(P)` summaries | Summaries require the §13.8 deferred-output rule; diagnostics/provenance storage is additional |
@@ -3372,7 +3403,7 @@ takes `Omega(N)` byte reads; validating every entry of a supplied tag inventory 
 explicit provenance output takes
 `Omega(Z)` writes when `Z` entries are required. None of these proves a matching lower bound for marker
 matrices, every propagation walk, correction probes or peak auxiliary memory. In particular, `R`, `Jcorr`,
-`Jc` and `Zv` include candidates examined by a chosen method, not mandatory output sizes. A sum of phase
+`Jc`, `Jo` and `Zv` include candidates or mask words examined by a chosen method, not mandatory output sizes. A sum of phase
 upper bounds does not become a joint minimum merely because some phases separately match lower bounds.
 
 For a concrete representation limit, take a linear history `c_0, ..., c_P`, `P` independent packages,
@@ -6314,7 +6345,7 @@ finishes within `Wk / s + (1 - 1/s) Lk`. Distributed runs need not satisfy that 
 and speed, budgets and owner lanes bind, and transfers delay consumers. Clause 3 covers only disjoint stage pools
 without those further constraints. For the full distributed resource model this section claims lower bounds but no
 matching upper factor; §28.7 measures actual time. On a fixed chain no extra node reduces span. Under the one-pool
-premise, `s = Wk / Lk` marks only the point where the aggregate work lower bound ceases to dominate. Packing can
+premise with `Lk > 0`, `s = Wk / Lk` marks only the point where the aggregate work lower bound ceases to dominate. Packing can
 leave task makespan above `Lk`: four independent tasks of durations 10, 7, 7 and 6 on three slots can end at 13,
 although `Lk = 10`. More slots can shorten such a schedule even above that threshold.
 Clause 4 gives a separate sufficient saturation condition using poset width, and a placement-dependent transport
@@ -6617,7 +6648,7 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 81  | `feat!` and a `revert` of it in one window                             | Still `major`; `max()` of `major` and `patch`. Pair with `cancel` to drop the signal (§7.3).                                                             |
 | 82  | Engine run twice with no new commits                                   | Identical plan (§17.2).                                                                                                                                   |
 | 83  | Engine run again after a successful publish                            | Empty plan; new baseline tags emptied `Wfresh`, including on a prerelease train.                                                                                                    |
-| 84  | Run fails after publishing 3 of 7 packages                             | Under the §13.7c retry invariant, the 3 are tagged and re-running publishes the remaining 4 at the same versions (§13.7c G3, §19.3).                                 |
+| 84  | Run fails after publishing 3 of 7 independently versioned packages | Under the retry invariant, the 4 packages not yet released retain their planned versions. The 3 tagged packages stay out of the plan if all their admitted contributions were delivered (§13.7c G3–G4, §19.3). |
 | 85  | Bot commit rewriting dependent manifests                               | MUST use a type mapping to `none`, or be excluded from the window, or the release loops (§19.5).                                                          |
 | 86  | Message exceeding `limits.*`                                           | `E158`, message-scoped; never a crash (§18.3).                                                                                                            |
 
@@ -6625,7 +6656,7 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 
 | #   | Case                                                                     | Resolution                                                                                                                                                                                          |
 |-----|--------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 87  | Provider published, consumer's publish failed                            | Consumer is released on the next run at the **same** version (§13.7c G3), marked `W193`. The case §13.7a exists for.                                                                                |
+| 87  | Provider published; independently versioned consumer has not yet released and its publish failed | Under the retry invariant, the retry plans the consumer at the **same** version (§13.7c G3), marked `W193`. This is the catch-up of §13.7a. |
 | 88  | The same, five runs later, with no new commits                           | Still released at the same version while the §13.7c retry invariant holds. Admission depends on the consumer's unchanged `Wfresh` (G2).                                                                                   |
 | 88a | Scheduled staleness audit over a workspace that has never run the engine | Reports every package behind a dependency as `W195` (§13.7b). Reporting only; it never blocks and never releases.                                                                                  |
 | 89  | Provider published, consumer succeeded, run re-run                       | Empty plan. The contribution is discharged once in the tag ledger (G4).                                                                                                                                       |
@@ -6644,7 +6675,7 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 99b | A cycle among packages none of which have a bump this run                | Still `E200`. Acyclicity is a property of the workspace, checked at load, not of the plan.                                                                                                          |
 | 99c | A cycle is introduced by the commit being released                       | `E200`; nothing is published. The graph is read at `HEAD` (§13.1), so the offending commit is the one that must be fixed.                                                                           |
 | 100 | Optional dependency fails to publish                                     | Dependents are **not** blocked; an optional dependency is installable in its absence. Ordering still respects the edge (`publish.blockingKinds`, §19.3).                                           |
-| 101 | Every package in the plan fails to publish                               | Not a partial failure. The run made no progress; the engine MUST fail loudly rather than report a resumable state (§13.7c G6).                                                                      |
+| 101 | Every package in the plan fails to publish | The run made no progress and MUST report failure rather than partial success. A later retry may succeed; G6 gives no finite bound on attempts that make no progress. |
 | 102 | Registry is idempotent and silently accepts a republish                  | Still MUST NOT be relied upon. Tags, not the registry, decide what is released (§12.4); the tag-after-publish rule (§19.1) is what prevents the loop.                                               |
 | 103 | Ordering constraint runs through a package that is not in the plan       | Still binding. The order is computed over the full graph and filtered afterwards; inducing it on the plan first is a conformance failure (§19.2).                                                   |
 | 104 | Failed package reachable only through a package with no bump this run    | The dependent is still blocked (`W194`). The blocking closure traverses packages that are not in the plan (§19.3).                                                                                  |
@@ -6652,7 +6683,7 @@ document, a bare `#n` refers to an edge case in this section; a conformance test
 | 106 | `Release-As: none` on a stranded consumer, later `auto`                  | Held meanwhile (`W154`, carrying the withheld version); on `auto` it releases at the `max()` of the catch-up and anything accumulated since.                                                        |
 | 107 | `cancel(<provider>)` after the provider published                        | No-op for the provider (`W170`); consumers still catch up. Suppression reaches only undischarged work (§13.4a).                                                                                     |
 | 108 | `Release-As: none` on a provider that already published                  | Identical: the hold governs the provider's future releases only, and consumers still catch up (§13.4a). Treating this differently from #107 is a conformance failure.                               |
-| 109 | A breaking change lands on a stranded consumer after the failure         | It releases at `max(major, propagated)` = `major`. G3 pins the version only while `HEAD` is unchanged (§13.7c).                                                                                     |
+| 109 | A breaking change lands on a stranded consumer after the failure | It releases at `max(major, propagated)` = `major`. The new commit violates G3's fixed-`HEAD` premise, so G3 does not preserve the earlier planned version (§13.7c). |
 | 110 | `cancel(*)` after a partial failure                                      | Every pending contribution is discarded, propagated ones included; nothing releases. The changelog is unrecoverable (§8.6.2).                                                                       |
 
 ### 15.7 Corrections and reverted changelogs
@@ -6694,7 +6725,7 @@ Every row assumes an engine that offers groups (§13.9a). `d` is the group's sha
 
 | #   | Case                                                                      | Resolution                                                                                                                                                                  |
 |-----|---------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 139 | Retry at a fixed `HEAD` on a shared train, `counter: independent`         | Each unpublished member releases at the version the failed run planned for it; the members that published release nothing. `G3` per member.                                  |
+| 139 | Retry at a fixed `HEAD` on a shared train, `counter: independent` | Under the retry invariant, each planned member that has not yet released retains its planned version. Completed members with no remaining source debt are not released merely to align their counters (§13.9a). |
 | 140 | The same under `counter: fixed`                                           | The group's counter advances: every member releases at the next prerelease, the published ones as rides. `G3` covers the core, not the counter (§13.9a).                      |
 | 141 | A member's own window justifies a core below the group's line             | Its `target` is raised to the line's core (§11.4, §13.9a), so a rider continues the train rather than raising `E195`.                                                        |
 | 142 | A graduation whose second leg failed, retried                             | The members that never carried the feature setting the train's core graduate at that core, not at what their own windows compute: the floor applies before `E185` (§11.5).    |
@@ -6973,8 +7004,9 @@ Both are normative, and both are testable:
   suppressed source may produce a finite, newly surfaced follow-up plan; it MUST be reviewed rather than described as
   byte-identical resumption. Held packages remain excluded from publication (§13.6a).
 
-Idempotency is the special case of convergence in which nothing failed. Stating only the special case is what leaves the
-general one unimplemented, so both are required here explicitly.
+Repeatability for unchanged inputs and convergence after recording completed work are distinct requirements. The
+former compares plans over the same state; the latter concerns a sequence of changed states under §13.7c's hypotheses.
+The post-success check in §19.6 tests exhaustion of the observed state, not repeatability alone.
 
 Implementations MUST sort every collection that reaches the output (packages, contributing units, diagnostics) by a
 total order (package name byte-wise; then commit topological index; then unit index). Iteration order of an unordered
@@ -7127,8 +7159,10 @@ Parsing and computation are the specification's subject; publication is not. But
 next run reads, so the obligations below are normative: the guarantees of §13.7c are joint properties of the computation
 and the publish protocol, and do not survive an implementation that gets this section wrong.
 
-The model throughout is that **every publish can fail independently**, and that a run which fails partway leaves a state
-that is consistent, inspectable, and resumable without operator intervention.
+The model throughout is that **every publish can fail independently**. A partial run preserves its completed release
+records and reports failures and uncertain outcomes. Recomputing from those records resumes the work under §13.7c's
+hypotheses; an unverifiable publication (`E198`) or ambiguous equal-commit delivery (`E201`) requires explicit
+reconciliation and is not guaranteed to resume without operator intervention.
 
 CCME 3 runs execute explicitly requested rollback under §26 before ordinary publication; a rollback failure prevents
 ordinary publication in that attempt. No rollback is inferred from failure below. Existing tags remain immutable,
@@ -7485,15 +7519,16 @@ The check uses no registry traffic. Repositories running the engine on a schedul
 
 A workspace arriving from another release tool (or from a hand-run process that failed partway at some point) may hold
 packages that are already behind their dependencies. The engine does not treat these as a special case: their
-propagating commits are still inside their pending windows, precisely because those packages never released, so the
-first run finds them and releases them like any other catch-up (§13.7a). The backlog may nonetheless be large enough to
-be worth looking at before it publishes:
+propagating commits are retained through the pending and owed windows of §13.3, so the first run finds the debt that
+the available records can establish and plans it like any other catch-up (§13.7a). A consumer may already have released
+before its provider; equal-commit records cannot establish that order and require the reconciliation of §19.3. The
+backlog may be large enough to warrant inspection before publication:
 
 1. Run the engine in plan-only mode (`--dry-run`, §18.2) and read the `W193` entries. These are the stale packages.
-2. Confirm the versions look right. By G3 they are the versions those packages were owed, which may be lower than an
-   operator expects if the workspace has moved on considerably. They are still correct: the bump is `max()` over
-   everything pending, so nothing is under-counted.
-3. Release normally. One run discharges the whole backlog: one release per package, not one per missed propagation.
+2. Confirm the versions against the current baselines and pending work. Bumps combine by `max()`; they are not added
+   once per missed release. G3 preserves a prior plan's version only under its stated retry hypotheses.
+3. A fully successful run under the retry invariant discharges the admitted backlog with at most one release per
+   package, rather than one per missed propagation. Inspect the post-run plan under §19.6.
 
 If an accumulated catch-up is genuinely unwanted (the dependency change no longer matters and the operator prefers not
 to publish at all), the supported way to drop it is `cancel(<consumer>)` (§13.5a), not tag surgery. A blanket
@@ -8456,8 +8491,8 @@ placed `ui` first (`publish.orderKinds`), but failure does not propagate over th
 
 **Vector 80**: nothing published. Every package in the plan fails.
 
-→ Not a resumable partial failure. The run made no progress, so retrying cannot make any either; the engine MUST fail
-loudly rather than report a partial success (§13.7c G6).
+→ The run made no progress and MUST report failure rather than partial success. A later retry may succeed if the
+failure is resolved; G6 places no bound on the number of attempts that make no progress.
 
 **Vector 80a**: ordering and blocking through a package that is not in the plan. Commit `C1`:
 `feat(core)^^: x` with `Propagate-Scope: -ui`, so `ui` is excluded from the plan while `core` and `@acme/theme`, which
@@ -8517,6 +8552,11 @@ did not exist. Two more cases: run 2 at `cli`'s own release commit with `cli` he
 with `E201` before `core` publishes, because after both tags sat on one commit nothing could tell that `cli` came first;
 and `core` published at a later commit in a run `cli` sat out leaves `C1` in `cli`'s owed window (§13.3), so the next
 run plans `cli`'s catch-up.
+
+If run 2 publishes `core` at `cli`'s existing baseline commit but the scheduled `cli@2.1.1` publication fails, report
+`E201` and require the explicit consumer `Release-As` remedy of §19.3. The old consumer tag now reaches the new
+provider tag, so ancestry alone reports the debt as delivered. This outcome is outside the retry invariant and MUST
+NOT be described as a G2 no-orphan guarantee or as successful consumer catch-up.
 
 **Vector 80e**: the consumer of vector 80d proceeds onto a prerelease train. `C1` carries `feat(core)^: x` and
 `feat(cli)%beta: y`. Run 1: `core@1.5.0` fails to publish; `cli` proceeds at its planned `2.1.0-beta.0` and is tagged
@@ -8641,10 +8681,12 @@ provenance. Inherited channel, admission and provenance remain per unit even whe
 
 **Vector 82j**: equal directives do not imply equal admission. Two `feat(provider)^` units are at commits `C1` and
 `C2`; consumer `app` depends on `provider`, and `C1 ∈ Wfresh(app)` while `C2 ∉ Wfresh(app)` because the histories
-diverge around `app`'s stable baseline.
+diverge around `app`'s stable baseline. A provider release carrying `C2` is reached by that baseline, so
+`delivered(provider, C2, app)` is true.
 
 → Only `C1` contributes to `app`. A bucket that admits the union once by window class and directive over-admits `C2`;
-admission remains the per-unit test `commitOf(u) ∈ Wfresh(app)`.
+bump admission remains the per-unit `owed(u, app)` test. The delivery premise is necessary: absence from
+`Wfresh(app)` alone does not discharge a source that released after the consumer.
 
 **Vector 82k**: a no-op direct channel cannot hide an older proposal. `ui` has baseline channel `beta`, an older
 `release(ui)%stable` and a newer `release(ui)%beta`, both in `Wfresh(ui)`.
@@ -9352,7 +9394,8 @@ that one package.
 ### D.8 A release that failed halfway, and what the next run does
 
 The plan below was produced from a single commit, `feat(@acme/core)^^minor: new plugin API`, in a workspace where
-`cli`, `ui`, and `api` depend on `core`, and `@acme/theme` depends on `ui`.
+`cli`, `ui`, and `api` depend on `core`, and `@acme/theme` depends on `ui`. Packages are independently versioned,
+all channels remain stable, and the retry invariant of §13.7c holds.
 
 ```
 run 1: plan (publish order)
@@ -9390,8 +9433,9 @@ plan:
 
 * **The three successes are gone from run 2.** Their tags moved `stableCommit` forward, so their windows no longer
   contain the commit (§13.6, G4). They cannot be republished by a retry.
-* **The two failures are still there, at the same version numbers.** `ui` is `0.9.2` in both runs, not `0.9.3`: no tag
-  was written for it, so its baseline never moved (G3). Nobody needs to re-review the numbers.
+* **The two unfinished packages retain their planned version numbers.** `ui` is `0.9.2` in both runs, not `0.9.3`.
+  Neither `ui` nor `@acme/theme` released in run 1; their baselines and version inputs remain unchanged under the retry
+  invariant. G3 therefore preserves their previously reviewed versions.
 * **`@acme/theme` is at depth 2 from `core`, and it is still at depth 2.** It was admitted in run 1 by `^^`, and it is
   admitted in run 2 by the same traversal from the same source. It is *not* re-derived at depth 1 from the republishing
   `ui`, which would be a different (and wider) release (G5).
@@ -9400,8 +9444,8 @@ plan:
   whoever reviews it.
 
 Had `HEAD` moved between the runs, say because someone merged a `fix(ui)`, run 2 would plan `ui` at `0.9.2` still, since `max()`
-of a propagated patch and a direct patch is a patch, and the changelog would carry both entries. G3 fixes the version
-only against a fixed `HEAD`; new commits legitimately change the outcome.
+of a propagated patch and a direct patch is a patch, and the changelog would carry both entries. A new commit leaves
+G3's fixed-`HEAD` hypotheses, so the newly computed version may coincide with the earlier one or differ from it.
 
 
 ---
@@ -9662,9 +9706,13 @@ snapshot**, so it cannot rewrite or suppress source work that the control revisi
 
 For a package `P`, direct work is collected from its owning repository. Its stable and fresh direct boundaries are the
 reachable source release tags defined by §§12–13. A source unit is parsed and stored once, resolves to its repository-
-local direct source set, and then propagates through the one combined graph. Admission remains
-`commitOf(u) in Wfresh(D)`, but for a consumer `D` in another repository that membership means that `D`'s last release
-had not yet incorporated the qualified source revision. Section 27.6 defines how that consumer position is proven.
+local direct source set, and then propagates through the one combined graph. Channel admission retains
+`commitOf(u) in Wfresh(D)`: for a consumer `D` in another repository, that membership means that its last release had
+not yet incorporated the repository-qualified source revision. Bump admission instead retains `owed(u, D) ≠ ∅`
+(§§9.2, 13.4a): incorporating the unit's commit before its provider publishes does not discharge the later delivery.
+For each source, evaluate delivery against its release records and the consumer's proven boundary in that source's
+history, never against an unrelated repository's SHA. Section 27.6 defines how that boundary is proven; §27.11 supplies
+the corresponding evidence for linked peers.
 
 Stable train aggregation and fresh admission remain separate. A window ranges over one repository's history, which for
 a cross-repository consumer is not the repository that owns the package. Packages can share an immutable train window
@@ -9805,8 +9853,9 @@ under the keys in §27.5. It SHOULD use bounded reachability and ancestry caches
 quadratic memory even when history is walked once. Equal SHA spellings across repositories MUST occupy distinct keys.
 
 With the notation of §13.11, input traversal is realistically `O(G + sum(Hq + Aq))` before distinct-boundary window
-work, and window reachability is `O(sum((Hq + Aq) * bw(mq)) + Iw)` with one marker pass per repository,
-or `O(sum(Kq * (Hq + Aq)) + Iw)` with a walk per boundary. Parsing, scope
+work, and window reachability is `O(sum((Hq + Aq) * bw(mq)) + Jo + Iw)` with one marker pass per repository,
+or `O(sum(Kq * (Hq + Aq)) + Jo + Iw)` with a walk per boundary. `Jo` includes the additional owed-window boundary and
+mask work; ordinary single-boundary windows do not incur it. Parsing, scope
 incidences, propagation, provenance, sorting, and output retain their separate `N`, `R`, `I`, `Z`, and `Oout` costs.
 This profile makes no globally linear end-to-end claim and permits no synthetic ancestry shortcut.
 

@@ -1276,3 +1276,19 @@ accepted operation intervals; retaining omitted phases does not extend those qua
 comparable interval evidence against precedence and slot ceilings and preserve structural validation on
 incomplete trials. These reporting clarifications precede producer/validator fixes and assert no completed
 experiment campaign or implementation-wide conformance.
+
+## 2026-10-30: Further ledger and window premises
+
+The retry guarantees distinguish an unpublished package's stable planned version from a consumer's later catch-up
+version. They require consumer boundaries to preserve ancestry and exclude the equal-commit `E201` ambiguity, in which
+a later provider record can make an earlier consumer release appear to have incorporated it. Source contributions,
+rather than consumer releases per unit, are the objects of ledger delivery. The finite-debt potential and progress
+premises of G6 remain in force, including their distinction between new progress and repeated shared-counter rides.
+Repeatability on unchanged inputs is stated separately from convergence after recorded work changes those inputs.
+
+An owed window retains all incomparable provider-release boundaries reached by its consumer. Complexity accounting
+charges the discovery of those boundaries, exclusion-mask construction and queries, and propagated provenance even
+when few final memberships survive. A whole-history owed window prevents the boundary-based early stop. Scope-cache
+reuse retains repository-local resolution context, and bump-admission vectors distinguish source delivery from channel
+freshness. The distributed work-to-span threshold explicitly excludes zero span. These clarifications preserve the
+existing release computation, execution contracts and published version declarations.

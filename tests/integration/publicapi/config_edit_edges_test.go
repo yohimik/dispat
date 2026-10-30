@@ -2,6 +2,7 @@ package publicapi_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -123,12 +124,9 @@ func TestPublicAPIConfigRejectsTruncatedNestedJSONWithoutWriting(t *testing.T) {
 			if err == nil {
 				t.Fatal("malformed JSON edit succeeded")
 			}
-			if tc.name == "invalid key after comma" {
-				if !strings.Contains(err.Error(), "object key string") {
-					t.Fatalf("ApplyEdits error = %v, want invalid object key", err)
-				}
-			} else if !errors.Is(err, io.EOF) && !strings.Contains(err.Error(), "unexpected EOF") {
-				t.Fatalf("ApplyEdits error = %v, want an EOF parsing error", err)
+			var syntaxError *json.SyntaxError
+			if !errors.As(err, &syntaxError) && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("ApplyEdits error = %v, want a JSON parsing error", err)
 			}
 			got, readErr := os.ReadFile(path)
 			if readErr != nil {

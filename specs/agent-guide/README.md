@@ -31,7 +31,7 @@ Keep the configuration and API references from the installed binary's help pinne
 9. Treat the publish stage as irreversible. A registry, store or bucket that accepted an upload keeps it; dispat never takes a publication back, and a retry cannot replace an immutable version.
 10. Serialize normal releases, but interrupt a release immediately when an urgent correction invalidates its contents. The lock must not delay cancellation or local repairs. Verify remote outcomes before retrying.
 11. Report what ran, what published, what failed or was skipped, and what remains uncertain.
-12. Release through the repository's CI/CD workflow. Configure the release path instead of publishing by hand.
+12. Release through the repository's established CI/CD workflow. Change CI/CD setup only when the user directly instructs you to do so; otherwise use or rerun the existing workflow.
 13. When a release delegates work to choreographers, start those nodes through the pipeline and never from your own shell, and read the per-task summary before reporting what a run did.
 
 ## Release through CI/CD
@@ -47,11 +47,11 @@ Bare `dispat` is an alias for `dispat release`, not a status check. Even `dispat
 lock before it can discover that there is nothing to release. Use `dispat status --require-release` for that CI gate.
 A status check does not reserve the repository: the release job acquires its own lock and recomputes the plan.
 
-Set up or repair the repository's CI/CD release workflow when that work is authorized. Put the dispat invocation, package selection, credentials, checks, artifact validation, publication, and recording in that workflow. Keep its configuration in version control so reviewers can inspect the release path before it runs.
+Set up or repair the repository's CI/CD release workflow only when the user directly instructs you to change that setup. A request to fix tests, rerun checks, or release through an existing pipeline does not authorize changes to workflows, runners, permissions, secrets, toolchain pins, build scripts, or release configuration. Diagnose failures and fix the application or tests within the requested scope, then rerun the existing checks. If the cause requires a CI/CD setup change, report it and obtain a direct instruction before making that change. When setup changes are authorized, keep them in version control so reviewers can inspect the release path before it runs.
 
 Do not run a production release from an agent's local shell, publish directly to a registry, create release tags by hand, or upload release assets outside the workflow. Do not use standalone dispat commands or another tool to bypass this rule. A request to release authorizes using the established pipeline; it does not authorize inventing a manual publication path.
 
-If the repository has no release workflow, configure and validate one first. When a release is authorized, trigger that workflow for the intended revision, wait for its required gates, and verify its published artifacts and records. A manual workflow dispatch is acceptable: the pipeline still performs the release. Local read-only planning and tests in disposable repositories remain useful preparation.
+If the repository has no release workflow, report that prerequisite and obtain a direct instruction before configuring one. When a release is authorized, trigger the established workflow for the intended revision, wait for its required gates, and verify its published artifacts and records. A manual workflow dispatch is acceptable: the pipeline still performs the release. Local read-only planning and tests in disposable repositories remain useful preparation.
 
 If the pipeline fails, inspect the failure, fix the cause in version control, and retry through the pipeline after resolving any ambiguous publication. Do not finish the release manually to make a failed run appear successful. Exceptional destructive recovery requires a documented procedure and specific authorization; it must not become an alternative publication path. See [dispat in CI](../../packages/docs/docs/reference/ci.md).
 

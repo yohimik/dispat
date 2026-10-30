@@ -175,6 +175,18 @@ must align to the run that invoked them. Two codes belong to that alignment.
 | `E219` | The step cannot align to the run. The package is missing from its plan, or the run's version renders a different tag. dispat writes nothing. A failed leg re-runs, but a drifted record does not. |
 | `W229` | A wired `dispat github` ran before the run's tag existed. GitHub would invent the tag at the default branch head. Run the commit step first. |
 
+## A publication and its record
+
+A publication and its release record are two writes, and a run can stop between them. These codes report how a run met
+a publication whose record an earlier run did not finish. See
+[A run stopped between a publication and its record](./releasing/recovery.md#a-run-stopped-between-a-publication-and-its-record).
+
+| Code | Means | What to do |
+|------|-------|------------|
+| `W196` | A publish command failed, and the destination already held the planned version as the artefact this run built. dispat adopted it: the package is published, its tag is written, and nothing was uploaded again. Identity is established by the space's [`publish.adoptPublished`](../configuration/spaces.md#publish) verify script, or for npm by comparing the exported `INTEGRITY` with the registry's `dist.integrity`. | Nothing. Read it as the record of a publication an earlier run made and never recorded. |
+| `E198` | A publish command failed and the destination holds the planned version with another or unverifiable identity; or a retry built an artefact whose identity differs from its pending receipt. An ordinary publish failure leaves the package failed. A receipt mismatch leaves its earlier publication and receipt intact, blocks its dependents, and refuses the new release record. The run starts no further publication and exits `1`. | Investigate the destination and retained receipt before recovery. Do not tag the version by hand or discard the receipt to force a retry. |
+| `W246` | An earlier run published this package and left a publication receipt. This run published nothing for it. If the receipt names the current head and has an identity matching the rebuilt artefact, this run finishes its release commit and tag. If the receipt has no identity, or names an earlier commit, the tag records the receipt's original commit and the run replans. | Check the changelog when a receipt is recorded at its original commit: an entry the stopped run never pushed may need to be written by hand. |
+
 ## A record that renders less than it was asked to
 
 Records are written after the plan is settled and, for a GitHub release, after the package is already published. What a
@@ -250,120 +262,6 @@ to react: `execution-configuration`, `execution-authority`, `io-integrity` and `
 | `E228` | A first-node publication command may have sent an external request, then ended without a verified destination outcome. A negative read at that moment cannot prove the destination will not complete the request later. The release lock and publication exclusion remain held. | Inspect the exact destination request and its eventual outcome before retrying. Do not delete the retained lock or submit the version again merely because the immediate verification returned absent. |
 | `E229` | Transport state the run could not leave in a safe place: an attempt that had to be fenced, or owned refs whose survival leaves an effect unresolved. | Inspect the named refs, verify their current tips belong to this run, and establish whether any attempt is still active before deleting. Investigate a changed or unauthenticated tip instead of deleting it as this run's residue; refs cannot erase a release record, but they can leave an attempt unsettled. |
 | `W244` | The harmless half of the same subject: coordination refs a completed run could not safely delete, and tracked files a task wrote outside its declared `buildOutputs`. Neither erases a release record, so an otherwise clean run still exits `0`. | Inspect each retained ref's current tip and ownership before deleting it. Investigate a changed or unauthenticated tip; use [recovery](./releasing/recovery.md) for an uncertain orchestrator publication. For stray writes, declare the paths in `buildOutputs` if a consumer needs them, or stop the build writing them: they are carried nowhere. |
-
-## Repository-scoped errors: no correct plan exists
-
-Six diagnostics say the repository is in a state where **any** plan would be wrong. They abort the run regardless of
-your `commitErrors` setting. The alternative is releasing something incorrect.
-
-| Code | Means | What to do |
-|------|-------|------------|
-| `E196` | The clone is shallow or grafted. History is incomplete, and every window and baseline computed over it is silently wrong. Also reported by a release that pushes: the remote it records to holds a release tag on a commit this checkout's head reaches, and this checkout does not have that tag, so the version would be planned and published a second time. A clone made without tags, or made before another run recorded, is the usual cause. | Run `git fetch --unshallow`. For the missing records, run `git fetch --tags` and run again; dispat never fetches them for you, because a run that refreshed its records after reading them would plan from something it never checked. In CI, fetch the full history and its tags. `actions/checkout` needs `fetch-depth: 0`. This is the single most common error on a fresh pipeline. |
-| `E191` | Two tags parse to the same version of one package but point at different commits. The baseline is ambiguous. A release that pushes reports it for the same version named at two commits across the two copies as well: the tag in this checkout and the one the remote it records to holds. | Decide which tag is the release and delete the other locally and on the remote. This is usually a hand-made tag colliding with a real one. Neither copy is moved for you: a tag that has been pushed is the record of a publication. |
-| `E200` | The dependency graph has a cycle. The message names the edges. | Break the cycle in [`dependencies`](../configuration/dependencies.md). Split the packages if the manifests really depend on each other in a loop. No ordering exists for a cycle. |
-| `E195` | A computed version is not greater than the baseline it must exceed. | This is almost always a hand-edited or hand-deleted tag, or a `Release-As` that shipped and left the baseline ahead. See below. |
-| `E185` | Graduating a prerelease would go backwards from the baseline it is graduating from. | This happens with hand-edited tags, or when an exact `Release-As` raises a train above the pending window. The pin lives in the baseline tag instead of the window, and graduation computes without it. Pin the graduation with `Release-As` (`Release-As: auto` resumes holds, not this), or restore the removed tag. |
-| `E182` | A prerelease baseline has no numeric counter. The train cannot continue. | The tag was written by hand in a shape dispat cannot count from, like `1.0.0-beta` rather than `1.0.0-beta.0`. Tag the next one explicitly with `Release-As`. |
-
-### E195 in practice
-
-This error looks alarming but is usually mundane. The plan wants to release a version that is not above what the
-package already published. The baseline and the pending work disagree. Three usual causes:
-
-- **A tag was deleted.** dispat reads baselines from tags. Remove one and the package appears further back than it is,
-  and the pending window spans work that already released.
-- **A tag was moved or hand-written** at a version above where the commits lead.
-- **A prerelease train was interrupted** by a directive that voided the bump that started it. The train's target falls
-  below the candidate already published.
-
-The fix is a decision rather than a command. Choose the version this package should ship next and say so with an
-explicit `Release-As:` footer on an empty commit. This is a normal, supported move. It discharges the conflict for good
-because the tag it creates becomes the new baseline.
-
-## Unit-scoped errors: one thing is broken
-
-These errors name a commit or a package. The default `commitErrors: "warn"` means the offending unit contributes
-nothing and **the rest of the run proceeds**. One malformed footer should not hold up four healthy packages. Under
-`"error"`, dispat refuses the release and tags nothing. `dispat status` still exits `0` and shows you the plan.
-
-| Code | Means |
-|------|-------|
-| `E130` | A commit scope *includes* a package that does not exist at HEAD, like `fix(cro):` when the package is `core`. This is an error rather than a warning because a typo silently drops a release. Fix the spelling, or list it in [`nonPackageScopes`](../configuration/parser.md) if the scope is deliberately not a package name. |
-| `E140` | A commit type is not in the configured table, and `strictTypes` is on. |
-| `E153` | `Release-As` does not move the package forward from its baseline. |
-| `E154` | `Release-As` names an exact version, but the scope reaches more than one package. |
-| `E156` | `Release-As` is below what the pending commits require. A breaking change cannot ship as a patch. |
-| `E157` | `Release-As` raises the major more than one above the computed version. A typo'd major is irreversible, so dispat refuses this by default. |
-| `E210` | An `Edits` or `Deletes` target names no commit, names more than one commit, or is not an earlier commit than the correction. |
-| `E211` | A correction's unit position is past the end of the target commit, or a bare sha names a commit carrying several units. |
-| `E212` | A correction targets a `cancel` or `release` unit. Neither carries a record to correct. |
-| `E213` | A correction names a package its target's record does not. Narrowing a record is legal, but widening is not. |
-
-Every rejected `Release-As` falls back to the ordinarily computed version rather than swallowing the commit. A sibling
-`feat` in the same commit still releases. The four correction errors work the same way. The correction contributes
-nothing and the record it aimed at stands untouched. See [Correcting a release record](./corrections.md).
-
-Notice the asymmetry between including and excluding an unknown name. Including one triggers `E130`. **Excluding** one
-triggers `W130`, a warning. A scope that excludes a deleted or renamed package is harmless and common. The include
-changes what ships.
-
-## A step command inside a run
-
-[Step commands](./releasing/steps.md#four-rules-that-make-them-safe) invoked from a stage script replan. The replan
-must align to the run that invoked them. Two codes belong to that alignment.
-
-| Code | Means |
-|------|-------|
-| `E219` | The step cannot align to the run. The package is missing from its plan, or the run's version renders a different tag. dispat writes nothing. A failed leg re-runs, but a drifted record does not. |
-| `W229` | A wired `dispat github` ran before the run's tag existed. GitHub would invent the tag at the default branch head. Run the commit step first. |
-
-## A publication and its record
-
-A publication and its release record are two writes, and a run can stop between them. These codes report how a run met
-a publication whose record an earlier run did not finish. See
-[A run stopped between a publication and its record](./releasing/recovery.md#a-run-stopped-between-a-publication-and-its-record).
-
-| Code | Means | What to do |
-|------|-------|------------|
-| `W196` | A publish command failed, and the destination already held the planned version as the artefact this run built. dispat adopted it: the package is published, its tag is written, and nothing was uploaded again. Identity is established by the space's [`publish.adoptPublished`](../configuration/spaces.md#publish) verify script, or for npm by comparing the exported `INTEGRITY` with the registry's `dist.integrity`. | Nothing. Read it as the record of a publication an earlier run made and never recorded. |
-| `E198` | A publish command failed and the destination holds the planned version with another or unverifiable identity; or a retry built an artefact whose identity differs from its pending receipt. An ordinary publish failure leaves the package failed. A receipt mismatch leaves its earlier publication and receipt intact, blocks its dependents, and refuses the new release record. The run starts no further publication and exits `1`. | Investigate the destination and retained receipt before recovery. Do not tag the version by hand or discard the receipt to force a retry. |
-| `W246` | An earlier run published this package and left a publication receipt. This run published nothing for it. If the receipt names the current head and has an identity matching the rebuilt artefact, this run finishes its release commit and tag. If the receipt has no identity, or names an earlier commit, the tag records the receipt's original commit and the run replans. | Check the changelog when a receipt is recorded at its original commit: an entry the stopped run never pushed may need to be written by hand. |
-
-## A record that renders less than it was asked to
-
-Records are written after the plan is settled and, for a GitHub release, after the package is already published. What a
-record's own configuration could not do is therefore reported rather than refused, and the entry is published in the
-shape dispat could actually render.
-
-| Code | Means |
-|------|-------|
-| `W240` | [Commit references](../configuration/records.md#naming-the-commit-behind-a-line) are configured, and some of the entry's lines have no commit id to point at. Those lines render without a reference instead of with one that resolves nowhere. The warning names the package and how many lines it covers, once per release and per record. |
-| `W241` | [`noChangesText`](../configuration/records.md#what-an-entry-with-no-sections-says) is configured, and it expanded to nothing or to whitespace alone. The entry carries the built-in line naming the release's cause instead. The substitution is invisible in the file itself, which is why it is reported once per release and per record. |
-| `W242` | The release push was refused because commits landed on the branch while the run was working. dispat pulled them and merged them with its release commit, which it left exactly as it was, then pushed the merge. The release is still the one that was planned: the commits that arrived are outside the tag's ancestry, carry no record here, and are released by the next run. See [When somebody pushes while the release runs](./releasing/recovery.md#when-somebody-pushes-while-the-release-runs). |
-| `W243` | The release push was refused because commits landed on the branch while the run was working, and those commits changed the same content the release did. The release still completes: this release's side of every conflicting file is what the branch keeps, the other side is pushed to a `release-conflicts/...` branch of its own, and the changelog and the GitHub release both name the files and that branch. Somebody has to reconcile the two sides. See [When somebody pushes while the release runs](./releasing/recovery.md#when-somebody-pushes-while-the-release-runs). |
-| `W245` | The GitHub release body was over the API's limit of 125,000 characters. dispat kept its whole entries up to 120,000 characters and closed the sections with a line naming the package's changelog file at the release tag, where the rest is. The header, the authors, the `### Release` details and the footer are kept. The warning names the package, the tag, the rendered and the kept lengths. See [`github`](../configuration/records.md#github). |
-
-An `auto` link that cannot be derived is the quieter member of the same family. It falls back to the plain unlinked
-text and says so at `debug` level, because a repository with no GitHub coordinates configured is a normal thing to be
-rather than something to warn about on every release.
-
-## The plan is fine and nothing releases
-
-These are not errors, but they read like errors.
-
-- **`no pending changes`**. Nothing addressed any package since the last tag. `dispat status` shows every package as
-  `unchanged`.
-- **A commit that touched only ignored files** reports `W131` and releases nothing. See
-  [what counts as a change](../configuration/change-scope.md).
-- **A selection that reaches nothing.** Run `dispat release -p core` when core has no pending work, and dispat releases
-  nothing and exits `0`. The filter narrows the window without replacing it. Pass `--since all` to reach an unchanged
-  package.
-- **`W230` / `W231`**. The selection is releasable but incomplete. A consumer is withheld because its provider was left
-  out, or a versioning group is being split. Both release what they can and warn. Pass `--strict` to refuse the release
-  before anything builds. See [Partial releases](./releasing/partial-releases.md).
-- **A package of a `versioning: none` space.** This package never releases, regardless of what it has pending. The
-  graph shows it as `script-only (versioning: none)`. A `Release-As` aimed at it warns `W238` and moves nothing. See
-  [Packages that never release](./releasing/versioning.md#packages-that-never-release-none).
 
 ## Getting more out of the failure
 

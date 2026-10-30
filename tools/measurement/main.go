@@ -16,7 +16,7 @@ const (
 	inputHelp           = "raw measurement JSON"
 	outputHelp          = "new derived measurement JSON"
 	missingPathsMessage = "measurement input and a fresh output path are required"
-	outputFileMode      = 0o600
+	outputFileMode      = 0o644
 )
 
 func main() {

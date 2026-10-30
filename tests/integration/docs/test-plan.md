@@ -142,15 +142,15 @@ integration suite itself.
     order is taken over the whole dependency graph, so a provider reached through a package with nothing to release
     still builds first.
 
-62. **The stages a flow orders and defines** (`flow_stages_test.go`): every stage of a release is optional and a flow
-    may add its own, so the order the stages run in is configuration rather than a table. A stage entry written as an
-    object moves its stage with `before`, `after` or `parallel`, and a key that is no built-in stage or hook defines a
+62. **The stages a flow orders and defines** (`flow_stages_test.go`): every release has a version stage and a build,
+    and a flow may add optional built-in stages and its own. A stage entry written as an object places its stage with
+    `before` or `after`, while `parallel` asserts that two stages are unordered. A key that is no built-in stage or hook defines a
     stage with `before<Name>` and `post<Name>` hooks. The claims are that a moved built-in stage runs where the
     constraint puts it and gates there when that is before the publish; that a defined stage runs under its own name
     and label with its hooks, reads the earlier exports and hands its own on; that a set of constraints no order
     satisfies is refused with its code by the release, by status and by a script sweep before any script runs; that a
-    package with no publish stage is still tagged and recorded after its last stage and one with no stage at all at
-    once; that two stages in one tier run at once and the publish waits for both; and that with worker nodes a defined
+    package with no publish stage is still tagged and recorded after its last gating stage, and one with no scripts
+    runs no command before recording; that two unordered stages run at once and the publish waits for both; and that with worker nodes a defined
     stage after the build is placed the way the build is, on a worker, with the build's bytes installed and its export
     reaching the publication.
 
@@ -1149,11 +1149,11 @@ bootstrap ancestry to restore the return endpoint and TLS pin; a different ambie
 
 | Test | Claim proven |
 |------|--------------|
-| `TestFlowConstraintMovesABuiltInStage` | `announce: {after: build}` runs the announce frame right after the build frame and before the tests and the publish, and there it gates: a failing announce fails the package before anything is published or tagged, and the failure names the `announce` stage. |
+| `TestFlowConstraintMovesABuiltInStage` | `announce: {after: build}` beside `publish: {after: build}` runs the announce frame after the build and before the publish, unordered with the test stage, and there it gates: a failing announce fails the package before anything is published or tagged, and the failure names the `announce` stage. |
 | `TestFlowUserStageRunsWithHooksAndExports` | A stage the flow defines runs under its own name between the build and the publish, its `before<Name>` and `post<Name>` hooks report their names around it and before the publish frame, it reads the build's export and hands its own to the publish under its own source, and its log lines carry the label the flow gave it. |
-| `TestFlowConflictsAreRefusedBeforeAnyWork` | A cycle or a stage named under both `before` and `after` (`E231`), a constraint naming a stage the package does not have (`E230`) and a `parallel` pair that required edges already order (`E232`) each exit 1 with the code, package and entry named, from the release, from `status` and from `dispat run`, with no tag and no script run. |
+| `TestFlowConflictsAreRefusedBeforeAnyWork` | A cycle or a stage named under both `before` and `after` (`E231`), a constraint naming an undefined stage (`E230`) and a `parallel` pair related by the graph (`E232`) each exit 1 with the code, package and entry named, from the release, from `status` and from `dispat run`, with no tag and no script run. |
 | `TestFlowPackagesWithoutAPublishAreStillRecorded` | A package whose flow has no publish stage is tagged, recorded and reported published after its last gating stage with no publish stage observed. A package whose flow configures no script still has a commandless build and is recorded after it; `status` plans both. |
-| `TestFlowParallelStagesRunAtOnce` | A stage declared parallel to tests starts while the tests run, proven with the tests waiting for the stage's marker rather than with a sleep, and the publish waits for both. |
+| `TestFlowParallelStagesRunAtOnce` | A stage unordered with the test stage starts while that stage runs, proven with the test stage waiting for the stage's marker rather than with a sleep, and the publish waits for both. |
 | `TestExecutionUserStageRunsOnAWorkerWithItsOutputs` | A defined stage after the build is placed the way the build is: with builds pinned to workers every frame runs on a worker under a canonical task identity distinct from its build, reads the bytes that build produced, and returns its export to first-node publication. The orchestrator logs the configured label; nothing is built twice, and signed task and ledger refs remain for recovery. |
 | `TestExecutionWorkerStageUsesCleanBaselineAndGraphInputs` | An actual worker build and two unordered worker stages retain a tracked file under an ignored declared output root, receive only their graph predecessor outputs even after a peer is admitted, remap an exported absolute output-root path into each checkout, and publish the joined verified sets on the orchestrator. |
 | `TestExecutionLocalParallelStagesHaveIsolatedOutputs` | Two unordered stages placed on the orchestrator run concurrently in distinct private source checkouts, each sees the tracked seed and its build predecessor's output but not its peer's output, and the local publisher sees both verified output sets together. |
