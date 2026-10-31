@@ -32,8 +32,6 @@ const (
 	privateDirectoryMode       = 0700
 	privateFileMode            = 0600
 	publicFileMode             = 0644
-	vmLifetime                 = "5h"
-	cellTimeout                = 4 * time.Hour
 	setupTimeout               = 35 * time.Minute
 	cleanupTimeout             = 15 * time.Minute
 	pollInterval               = 5 * time.Second
@@ -76,6 +74,30 @@ const (
 	workloadFlagHelp       = "build workload: llvm or linux-kernel"
 	workloadSelectionError = "cloud workload must be llvm or linux-kernel"
 )
+
+const (
+	llvmExecutionTimeout    = 4 * time.Hour
+	kernelExecutionTimeout  = 5 * time.Hour
+	llvmVMLifetime          = 5 * time.Hour
+	kernelVMLifetime        = 6 * time.Hour
+	wholeHourDurationFormat = "%dh"
+)
+
+type workloadTimeouts struct {
+	execution  time.Duration
+	vmLifetime time.Duration
+}
+
+func resolveWorkloadTimeouts(workload string) workloadTimeouts {
+	if workload == kernelWorkloadName {
+		return workloadTimeouts{execution: kernelExecutionTimeout, vmLifetime: kernelVMLifetime}
+	}
+	return workloadTimeouts{execution: llvmExecutionTimeout, vmLifetime: llvmVMLifetime}
+}
+
+func formatTimeoutHours(duration time.Duration) string {
+	return fmt.Sprintf(wholeHourDurationFormat, duration/time.Hour)
+}
 
 var safeName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
 var bootImageIdentity = regexp.MustCompile(bootImageIdentityPattern)
@@ -404,14 +426,19 @@ func (d *driver) run(ctx context.Context) (result error) {
 	if err := writeJSON(filepath.Join(d.settings.Root, "results/cloud/provenance.json"), d.state); err != nil {
 		return err
 	}
-	cellCtx, stop := context.WithTimeout(ctx, cellTimeout)
+	return d.runCoordinator(ctx)
+}
+
+func (d *driver) runCoordinator(ctx context.Context) error {
+	timeouts := resolveWorkloadTimeouts(d.settings.Workload)
+	cellCtx, stop := context.WithTimeout(ctx, timeouts.execution)
 	defer stop()
 	self, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	args := []string{"create", "--name", "llvm-coordinator-" + d.settings.ID, "--label", "dispat-trial=" + d.settings.ID, "--network", "host", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--env", "HOME=/cloud/work/home", "--mount", "type=bind,src=" + self + ",dst=/usr/local/bin/llvmcloud,readonly", "--env", "GIT_CONFIG_GLOBAL=" + d.plan.CoordinatorGitConfig, "--env", "GIT_CONFIG_NOSYSTEM=1", "--env", "EXPERIMENTS_DISPAT_SOURCE_REVISION=" + d.settings.Source, "--entrypoint", "llvmexperiment", d.settings.Image}
-	args = append(args, d.formatCoordinatorRunArgs()...)
+	args = append(args, d.formatCoordinatorRunArgs(timeouts.execution)...)
 	mounts := []string{}
 	for _, entry := range []struct {
 		path     string
@@ -432,8 +459,8 @@ func (d *driver) run(ctx context.Context) (result error) {
 	return err
 }
 
-func (d *driver) formatCoordinatorRunArgs() []string {
-	args := []string{"run", "--tool", d.settings.Tool, "--mode", d.settings.Mode, "--profile", d.settings.Profile, "--trial-id", d.settings.ID, "--repetition", "1", "--timeout", "4h", "--jobs", "2", "--results", "/cloud/results", "--work", "/cloud/work", "--remote-plan", "/cloud/plan.json"}
+func (d *driver) formatCoordinatorRunArgs(executionTimeout time.Duration) []string {
+	args := []string{"run", "--tool", d.settings.Tool, "--mode", d.settings.Mode, "--profile", d.settings.Profile, "--trial-id", d.settings.ID, "--repetition", "1", "--timeout", formatTimeoutHours(executionTimeout), "--jobs", "2", "--results", "/cloud/results", "--work", "/cloud/work", "--remote-plan", "/cloud/plan.json"}
 	// Existing prepared LLVM images predate the workload selector.
 	if d.settings.Workload == kernelWorkloadName {
 		args = append(args, workloadFlagArgument, d.settings.Workload)

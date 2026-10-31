@@ -134,6 +134,8 @@ func TestBootImageResolutionUsesExactPinWithoutFamilyFallback(t *testing.T) {
 func TestProvisionRequiresExactCampaignPinsOnEachWorker(t *testing.T) {
 	for _, scenario := range []struct {
 		name          string
+		workload      string
+		vmLifetime    string
 		machine       string
 		expectedCPU   string
 		platforms     []string
@@ -146,7 +148,8 @@ func TestProvisionRequiresExactCampaignPinsOnEachWorker(t *testing.T) {
 		wantError     string
 		wantVMs       int
 	}{
-		{name: "matching pair", platforms: []string{iceLakePlatformName, iceLakePlatformName}, diskImage: testBootImage, wantVMs: 2},
+		{name: "matching LLVM pair", workload: "llvm", platforms: []string{iceLakePlatformName, iceLakePlatformName}, diskImage: testBootImage, wantVMs: 2},
+		{name: "matching kernel pair", workload: "linux-kernel", vmLifetime: "6h", platforms: []string{iceLakePlatformName, iceLakePlatformName}, diskImage: testBootImage, wantVMs: 2},
 		{name: "first worker drifts", platforms: []string{cascadeLakePlatformName, iceLakePlatformName}, diskImage: testBootImage, wantError: "expected exact platform", wantVMs: 1},
 		{name: "second worker drifts", platforms: []string{iceLakePlatformName, cascadeLakePlatformName}, diskImage: testBootImage, wantError: "expected exact platform", wantVMs: 2},
 		{name: "both workers drift together", platforms: []string{cascadeLakePlatformName, cascadeLakePlatformName}, diskImage: testBootImage, wantError: "expected exact platform", wantVMs: 1},
@@ -164,6 +167,9 @@ func TestProvisionRequiresExactCampaignPinsOnEachWorker(t *testing.T) {
 		{name: "C3 stockout has no fallback", machine: c3MachineTypeName, expectedCPU: sapphirePlatformName, createErr: errors.New("platform unavailable"), wantError: "platform unavailable", wantVMs: 1},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
+			if scenario.vmLifetime == "" {
+				scenario.vmLifetime = "5h"
+			}
 			if scenario.machine == "" {
 				scenario.machine = defaultMachineTypeName
 			}
@@ -183,6 +189,7 @@ func TestProvisionRequiresExactCampaignPinsOnEachWorker(t *testing.T) {
 				scenario.memoryMB = 16384
 			}
 			d := cleanupDriver(t)
+			d.settings.Workload = scenario.workload
 			d.settings.BootImage, d.settings.CPUPlatform, d.settings.MachineType = testBootImage, scenario.expectedCPU, scenario.machine
 			d.state.Options = d.settings
 			created := []string{}
@@ -203,6 +210,9 @@ func TestProvisionRequiresExactCampaignPinsOnEachWorker(t *testing.T) {
 					case slices.Equal(args[:3], []string{"compute", "instances", "list"}):
 						return []byte("[]"), nil
 					case slices.Equal(args[:3], []string{"compute", "instances", "create"}):
+						if flagValue(args, "--max-run-duration") != scenario.vmLifetime || flagValue(args, "--instance-termination-action") != "DELETE" {
+							t.Fatalf("create changed workload lifetime or automatic deletion: %v", args)
+						}
 						if flagValue(args, "--image") != testBootImage || flagValue(args, "--machine-type") != scenario.machine || flagValue(args, "--boot-disk-size") != "100GB" || flagValue(args, "--boot-disk-type") != "pd-balanced" {
 							t.Fatalf("create omitted exact campaign pins: %v", args)
 						}

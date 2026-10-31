@@ -362,9 +362,11 @@ fresh committed run identity, preventing another cell's cached build output from
 Fresh output directories do not establish a cold operating-system page cache.
 
 Dispatch the separate `Build experiments` workflow with `purpose=llvm-gce` and `llvm-profile=full` for the two-VM campaign.
-This purpose runs only experiment jobs. Each cell has a four-hour execution limit and bounded setup and
-cleanup; the VMs have a five-hour maximum lifetime. The final artifact contains all six results, raw evidence
-and a validated report. `llvm-profile=smoke` checks the harness with the smaller target list.
+This purpose runs only experiment jobs. Each LLVM cell has a four-hour execution limit, a five-hour VM maximum
+lifetime and a 300-minute workflow job limit. Setup has a 35-minute limit and the driver's deferred cleanup
+has a 15-minute limit. Cleanup verification and evidence upload must also finish within the job limit.
+The final artifact contains all six results, raw evidence and a validated report. `llvm-profile=smoke` checks
+the harness with the smaller target list.
 
 The documentation release selects successful full LLVM and kernel campaigns automatically, with no manual
 Release inputs. It selects the highest successful run ID with a full report for each workload at the original
@@ -402,8 +404,10 @@ architecture across competitors. Fresh output trees prevent reuse of prior build
 cold operating-system page caches. A failure or timeout remains a failed trial.
 
 Dispatch `purpose=kernel-gce` with `llvm-profile=full` in the `Build experiments` workflow. The shared profile input also
-accepts `smoke` for a smaller functional check. The kernel campaign has the same execution, setup, cleanup and VM
-lifetime limits as LLVM. Its results and resource evidence are retained in a separate campaign artifact.
+accepts `smoke` for a smaller functional check. Each kernel cell has a five-hour execution limit, a six-hour VM
+maximum lifetime and a 360-minute workflow job limit. The 35-minute setup and 15-minute deferred cleanup limits
+remain the same as LLVM; cleanup verification and evidence upload must fit within the job limit. Its results
+and resource evidence are retained in a separate campaign artifact.
 
 ## Recorded execution inputs and formulas
 

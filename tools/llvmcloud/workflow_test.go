@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,6 +16,47 @@ const (
 	experimentWorkflowPath = "../../.github/workflows/build-experiments.yml"
 	productionWorkflowPath = "../../.github/workflows/release.yml"
 )
+
+func TestCloudTimeoutsFitWorkloadJobAndVMLifetimes(t *testing.T) {
+	content, err := os.ReadFile(experimentWorkflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workflow struct {
+		Jobs map[string]struct {
+			TimeoutMinutes string `yaml:"timeout-minutes"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(content, &workflow); err != nil {
+		t.Fatal(err)
+	}
+	const timeoutExpressionFormat = "${{ inputs.purpose == 'kernel-gce' && %d || %d }}"
+	expression := workflow.Jobs["llvm-gce"].TimeoutMinutes
+	var kernelMinutes, llvmMinutes int
+	if count, err := fmt.Sscanf(expression, timeoutExpressionFormat, &kernelMinutes, &llvmMinutes); err != nil || count != 2 || expression != fmt.Sprintf(timeoutExpressionFormat, kernelMinutes, llvmMinutes) {
+		t.Fatalf("cell job must select its timeout only by workload: %q (%v)", expression, err)
+	}
+	if setupTimeout != 35*time.Minute || cleanupTimeout != 15*time.Minute {
+		t.Fatal("workload execution extension changed setup or cleanup limits")
+	}
+	for _, scenario := range []struct {
+		workload   string
+		jobMinutes int
+		lifetime   time.Duration
+	}{{"llvm", llvmMinutes, 5 * time.Hour}, {"linux-kernel", kernelMinutes, 6 * time.Hour}} {
+		t.Run(scenario.workload, func(t *testing.T) {
+			timeouts := resolveWorkloadTimeouts(scenario.workload)
+			jobTimeout := time.Duration(scenario.jobMinutes) * time.Minute
+			if jobTimeout != scenario.lifetime || timeouts.vmLifetime != scenario.lifetime {
+				t.Fatalf("job/VM lifetime = %v/%v, want %v", jobTimeout, timeouts.vmLifetime, scenario.lifetime)
+			}
+			phaseBudget := setupTimeout + timeouts.execution + cleanupTimeout
+			if remaining := jobTimeout - phaseBudget; remaining < 10*time.Minute {
+				t.Fatalf("job has only %v for evidence upload and cleanup recheck after bounded phases", remaining)
+			}
+		})
+	}
+}
 
 const (
 	campaignManualInputCount               = 0

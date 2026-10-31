@@ -18,8 +18,8 @@ defaults to `us-central1-b` and `Intel Cascade Lake`; these selections apply to
 every competitor and every Dispat mode in the campaign.
 
 The driver defaults to `--workload llvm`. Use `--workload linux-kernel` to select
-the runner's separate Linux-kernel build profile with the same VM, container,
-task-slot, inner-job and timeout limits. The selector is passed explicitly to
+the runner's separate Linux-kernel build profile with the same VM hardware,
+container, task-slot and inner-job limits. The selector is passed explicitly to
 the coordinator and retained with the requested trial options; it does not
 replace or relabel LLVM results. Both workloads use the same exact OCI archive
 and image-identity contract.
@@ -66,9 +66,12 @@ Use `llvm-profile=full` for both complete LLVM backend builds. Smoke is a partia
 functional check and cannot be reported as a full LLVM build. For `kernel-gce`,
 the full profile builds the large `allmodconfig` kernel-and-modules workload for
 `x86_64` and `arm64`; smoke uses `defconfig` and omits modules. Fresh output trees
-do not establish a cold operating-system page cache. Every cell has a
-four-hour execution limit; setup has a separate 35-minute limit. The job and VM
-lifetimes are bounded at five hours, leaving cleanup time. No machine/zone
+do not establish a cold operating-system page cache. LLVM cells have a four-hour
+execution limit, a five-hour VM maximum lifetime and a 300-minute workflow job
+limit. Kernel cells have a five-hour execution limit, a six-hour VM maximum
+lifetime and a 360-minute job limit. Both workloads retain a 35-minute setup
+limit and a 15-minute limit for the driver's deferred cleanup. Cleanup
+verification and evidence upload must also finish within the job limit. No machine/zone
 fallback, warm build directory or silent competitor fallback is allowed.
 
 The runner obtains existing repository-scoped GCP Workload Identity credentials.

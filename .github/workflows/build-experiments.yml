@@ -187,7 +187,7 @@ jobs:
     if: inputs.purpose == 'llvm-gce' || inputs.purpose == 'kernel-gce'
     needs: llvm-prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: ${{ inputs.purpose == 'kernel-gce' && 360 || 300 }}
     env:
       BUILD_WORKLOAD: ${{ inputs.purpose == 'kernel-gce' && 'linux-kernel' || 'llvm' }}
     permissions:
