@@ -14,8 +14,9 @@ export interface DispatTheoremProps extends BaseDispatTheoremProps {
   children?: never;
 }
 
-const PROOF_URL = 'https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md#1311-complexity-and-scale';
-const FORMULA_TEX = String.raw`t=\max(D+E)`;
+const MODEL_URL = 'https://github.com/yohimik/dispat/blob/main/specs/ccme-spec/SPEC.md#1311-complexity-and-scale';
+const FORMULA_TEX = String.raw`T=\min\left(\iint(D+E)\,\mathrm{d}D\,\mathrm{d}E\right)`;
+const DIFFERENTIAL_SPACING = '0.1667em';
 const EMPTY_CLASS_NAME = '';
 
 export const DispatTheorem: FC<DispatTheoremProps> = (props) => {
@@ -24,39 +25,39 @@ export const DispatTheorem: FC<DispatTheoremProps> = (props) => {
   return (
     <figure className={`${styles.theorem} ${className}`} aria-labelledby="dispat-theorem-title">
       <div className={styles.header}>
-        <span className={styles.sectionNumber}>THE DISPAT THEOREM</span>
+        <span className={styles.sectionNumber}>THE DISPAT OBJECTIVE</span>
         <span>§ 13.11</span>
       </div>
       <div className={styles.statement}>
-        <span className={styles.label} id="dispat-theorem-title">The ideal finish time</span>
-        <math className={styles.formula} display="block" aria-label="t equals the maximum over complete dependency paths of discovery and acquisition time D plus execution and other modeled time E on the same path">
+        <span className={styles.label} id="dispat-theorem-title">A symbolic optimization target</span>
+        <math className={styles.formula} display="block" aria-label="T equals the minimum of the double integral of D plus E with respect to D and E">
           <semantics>
             <mrow>
-              <mi>t</mi>
+              <mi>T</mi>
               <mo>=</mo>
-              <mo>max</mo>
+              <mo>min</mo>
+              <mo>(</mo>
+              <mo>∬</mo>
               <mo>(</mo>
               <mi>D</mi>
               <mo>+</mo>
+              <mi>E</mi>
+              <mo>)</mo>
+              <mspace width={DIFFERENTIAL_SPACING} />
+              <mi mathvariant="normal">d</mi>
+              <mi>D</mi>
+              <mspace width={DIFFERENTIAL_SPACING} />
+              <mi mathvariant="normal">d</mi>
               <mi>E</mi>
               <mo>)</mo>
             </mrow>
             <annotation encoding="application/x-tex">{FORMULA_TEX}</annotation>
           </semantics>
         </math>
-        <p className={styles.translation}>The slowest complete dependency path sets the ideal finish time.</p>
-        <p className={styles.notation}>For each complete dependency path, <i>D</i> totals discovery and input acquisition. <i>E</i> totals the remaining execution, overhead, and waits. Take the largest combined total.</p>
+        <p className={styles.translation}>Optimize discovery and execution together.</p>
+        <p className={styles.notation}><i>D</i> represents discovery and input acquisition. <i>E</i> represents execution and other modeled overhead. <i>T</i> is a symbolic objective; its integration domain, weighting, and admissible plans remain to be specified.</p>
       </div>
-      <figcaption className={styles.conditions}>
-        <span className={styles.conditionsTitle}>Exact under these ideal conditions</span>
-        <ul>
-          <li>One fixed, finite dependency graph with no cycles includes all required work and delays.</li>
-          <li>Each step represents sequential work; overlapping activities are separate steps linked by their actual dependencies.</li>
-          <li>Enough compatible capacity to start every ready step immediately.</li>
-          <li>No failures or unmodeled waits.</li>
-        </ul>
-      </figcaption>
-      <Link className={styles.proof} to={PROOF_URL}>Read the proof in the specification <span aria-hidden="true">↗</span></Link>
+      <Link className={styles.proof} to={MODEL_URL}>Read the scheduling model <span aria-hidden="true">↗</span></Link>
     </figure>
   );
 };
