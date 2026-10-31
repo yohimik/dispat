@@ -5194,6 +5194,48 @@ candidate and minimum-completion premises, the optimal-plan formulation remains
 work and constraints. This notation does not prove that dispat's chosen plan attains that optimum,
 make unknown durations available in advance, or change any execution-mode or release-authority rule.
 
+**Expected completion-time objective.** Fix a finite nonempty set `Pi` of admissible strategies that
+preserve the same required work, correctness obligations and resource constraints, and fix the workload
+and environment probability model used to compare them. Choose a strategy `pi in Pi` before outcomes
+are realized. A strategy may be a nonanticipating policy: its decisions may depend on information
+already available to it, but not on future outcomes. Its outcome distribution is induced by that strategy
+and the fixed probability model; distributions are not independent optimization variables.
+
+For each strategy, let `H_pi` be a measurable random finite timed DAG whose realization `H_pi(omega)`
+completely represents the resulting execution, measured from a common origin. Require measurable finite
+nonnegative `d_v` and `e_v`, stage durations `w_v = d_v + e_v`, and the preceding combined-DAG premises.
+The graph must account for all required discovery, execution, planning, transfer, coordination, initial
+delays, resource ordering and waits. Its earliest starts must realize the represented execution; any
+additional policy idling must be represented explicitly. Thus the preceding path formula gives its modeled completion time
+`C_pi(omega) = T(H_pi(omega))`, not merely a lower bound obtained by omitting elapsed time.
+
+Fix a measurable tie-breaking rule that selects one longest path `p_pi(omega)` in each nonempty graph.
+Define `D_pi(omega) = sum_{v in p_pi(omega)} d_v` and
+`E_pi(omega) = sum_{v in p_pi(omega)} e_v` on that same selected path. For the empty graph set
+`D_pi = E_pi = C_pi = 0`. Then `D_pi + E_pi = C_pi` for every outcome. These variables are path sums,
+not totals over parallel work, and their two maxima are not selected separately. Selecting the realized
+longest path retrospectively defines the measured variables; it gives no future information to the policy.
+
+Let `nu_pi` be the induced joint probability law of `(D_pi, E_pi)` on `[0,infinity)^2`, and require
+`E[C_pi] < infinity` for every admissible strategy, where `E[.]` denotes expectation. The law may be
+discrete, deterministic, continuous or mixed. The expected completion-time objective is
+
+`T = min_{pi in Pi} ∬_{[0,infinity)^2} (D + E) d nu_pi(D,E) = min_{pi in Pi} E[C_pi]`.
+
+If every induced law admits a joint density `f_pi` with respect to `dD dE`, then `f_pi >= 0`,
+`∬_{[0,infinity)^2} f_pi(D,E) dD dE = 1`, and the same objective can be written
+
+`T = min_{pi in Pi} ∬_{[0,infinity)^2} (D + E) f_pi(D,E) dD dE`.
+
+No independence between discovery and execution is assumed. With both coordinates measured in seconds,
+the joint density has units `seconds^-2`, so the integral and `T` have units of seconds. A deterministic
+or other law without such a density uses the probability-law formula above. The equality with expected
+completion time follows from `D_pi + E_pi = C_pi` and integration against their joint law. The finite
+nonempty strategy set and finite expectations ensure that the minimum exists. The minimum remains
+outside the expectation: this chooses one admissible strategy before outcomes, not the best strategy
+separately after observing each outcome. This objective neither asserts that dispat attains the minimum
+nor changes the preceding scheduling premises or any execution-mode or release-authority rule.
+
 For a scoped input lower bound, use a fresh query model with `R` independently addressable records and no
 trusted summary. If, at a base input, each record can be changed alone to an admitted input requiring a
 different exact decision, every record must be queried on that base input: otherwise the unchanged

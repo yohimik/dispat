@@ -15,9 +15,11 @@ declare module 'react' {
       mrow: MathMLAttributes;
       mspace: MathMLAttributes;
       msub: MathMLAttributes;
+      msup: MathMLAttributes;
       munder: MathMLAttributes;
       mtext: MathMLAttributes;
       mi: MathMLAttributes;
+      mn: MathMLAttributes;
       mo: MathMLAttributes;
       annotation: MathMLAttributes;
     }

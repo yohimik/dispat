@@ -88,5 +88,5 @@
 @media (max-width: 760px) {
   .theorem { padding: 1.3rem 1.2rem; }
   .statement { padding-block: 1.5rem 1.2rem; }
-  .formula { font-size: clamp(1.05rem, 4.8vw, 1.35rem); }
+  .formula { font-size: clamp(.85rem, 4vw, 1.35rem); }
 }
