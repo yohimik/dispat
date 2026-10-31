@@ -161,9 +161,9 @@ func (w *Worker) runTask(ctx context.Context, task *claimedTask, log zerolog.Log
 			return taskOutcome{status: StatusFailed, failedPart: release.PartInputs,
 				reason: ReasonOutputIdentity}
 		}
-		task.assignment = assignment
 	}
-	outcome = w.runFrame(ctx, task, checkout.Dir(owner, assignment.Package.Dir), log)
+	outcome = w.runFrame(ctx, taskFrameOptions{Task: task, Assignment: assignment,
+		Dir: checkout.Dir(owner, assignment.Package.Dir), Log: log})
 	outcome.strayWrites = checkout.CountStrayWrites(ctx, owner, formatDeclaredPaths(assignment))
 	if outcome.status != StatusSucceeded {
 		if assignment.Protocol == ChoreographyProtocolVersion && assignment.Kind == KindRun &&
@@ -311,6 +311,13 @@ func ownerPathOf(assignment Assignment) string {
 	return "."
 }
 
+type taskFrameOptions struct {
+	Task       *claimedTask
+	Assignment Assignment
+	Dir        string
+	Log        zerolog.Logger
+}
+
 // runFrame runs the three sequences of one stage frame in order, each
 // fail-fast, and answers at the first one that did not succeed.
 //
@@ -318,9 +325,8 @@ func ownerPathOf(assignment Assignment) string {
 // that exported a value before the stage's own script ran is a hook whose
 // value that script reads, so the environment is rebuilt for each sequence
 // from what the ones before it produced.
-func (w *Worker) runFrame(ctx context.Context, task *claimedTask, dir string,
-	log zerolog.Logger) taskOutcome {
-	assignment := task.assignment
+func (w *Worker) runFrame(ctx context.Context, opts taskFrameOptions) taskOutcome {
+	task, assignment, dir, log := opts.Task, opts.Assignment, opts.Dir, opts.Log
 	mappings := workerOutputPathMappings(assignment, dir)
 	// carried is everything the run had exported before this frame plus
 	// everything the frame exports, which is what the scripts read; produced is

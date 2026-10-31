@@ -40,6 +40,8 @@ const withdrawalNoRejectionReason = ""
 // crosses is deliberately small, one cancellation and three facts about
 // progress, and every one of them is behind the mutex below.
 type claimedTask struct {
+	// assignment stays immutable after registration: poll-side retirement and
+	// cancellation share it with the task. Rehomed exports belong to its frame.
 	assignment Assignment
 	// slotLease survives a lost return reply. Only a verified first-node
 	// Result or Ack receipt releases the shared physical-node capacity.
