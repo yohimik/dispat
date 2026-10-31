@@ -62,8 +62,13 @@ func TestChoreographyPostCancelContactLossRetainsOldChargeAndAcceptsLateAck(t *t
 	deadline, err := time.Parse(time.RFC3339, deadlineText)
 	require.NoError(t, err)
 	require.False(t, deadline.Before(cancelIssuedAfter.Add(time.Duration(choreographyContactTestDeadlineSeconds)*time.Second)))
-	require.ErrorContains(t, broker.MarkPickupContactLost(t.Context(), spec.Task, first.PickupID),
-		choreographyPickupContactNotDueError)
+	lossErr := broker.MarkPickupContactLost(t.Context(), spec.Task, first.PickupID)
+	require.ErrorContains(t, lossErr, choreographyPickupContactNotDueError)
+	var refused *choreographyPickupContactDeadlineRefusal
+	require.ErrorAs(t, lossErr, &refused)
+	require.Equal(t, spec.Task, refused.task)
+	require.Equal(t, first.PickupID, refused.pickupID)
+	require.Equal(t, deadline, refused.deadline)
 	if remaining := time.Until(deadline.Add(choreographyContactTestClockMargin)); remaining > 0 {
 		timer := time.NewTimer(remaining)
 		defer timer.Stop()

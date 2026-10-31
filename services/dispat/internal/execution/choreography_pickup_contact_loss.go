@@ -43,6 +43,16 @@ type ChoreographyPickupContactPersistable interface {
 	PersistPickupContactLost(context.Context, ChoreographyPickupContactLoss) error
 }
 
+type choreographyPickupContactDeadlineRefusal struct {
+	task     string
+	pickupID string
+	deadline time.Time
+}
+
+func (r *choreographyPickupContactDeadlineRefusal) Error() string {
+	return choreographyPickupContactNotDueError
+}
+
 // MarkPickupContactLost opens one bounded successor without releasing the
 // unresolved pickup's physical lease or run budget charge. A single missed
 // poll cannot invoke it: the exact signed post-Cancel reply deadline must elapse.
@@ -79,7 +89,8 @@ func (b *FirstNodeBroker) MarkPickupContactLost(ctx context.Context,
 		return fmt.Errorf(choreographyPickupContactSignedClaimError)
 	}
 	if time.Now().UTC().Before(deadline) {
-		return fmt.Errorf(choreographyPickupContactNotDueError)
+		return &choreographyPickupContactDeadlineRefusal{
+			task: taskID, pickupID: pickupID, deadline: deadline}
 	}
 	persist, ok := b.persist.(ChoreographyPickupContactPersistable)
 	if !ok {
@@ -153,8 +164,12 @@ func (g *GitChoreographyPersist) PersistPickupContactLost(ctx context.Context,
 		return fmt.Errorf(choreographyPickupContactSignedClaimError)
 	}
 	deadline, err := time.Parse(time.RFC3339, loss.CancelReplyDeadlineUTC)
-	if err != nil || time.Now().UTC().Before(deadline) {
+	if err != nil {
 		return fmt.Errorf(choreographyPickupContactNotDueError)
+	}
+	if time.Now().UTC().Before(deadline) {
+		return &choreographyPickupContactDeadlineRefusal{
+			task: loss.Task, pickupID: loss.PickupID, deadline: deadline}
 	}
 	tip, err := g.opts.Mailbox.readRemoteTip(ctx, loss.Branch)
 	if err != nil {

@@ -411,6 +411,13 @@ func (c *Coordinator) waitCompiledTask(ctx context.Context,
 			if claimedPickupID != compiledStageAbsentIdentity && !stopping {
 				lossErr := c.choreographyBroker.MarkPickupContactLost(activeCtx, taskID, claimedPickupID)
 				if lossErr != nil {
+					var refused *choreographyPickupContactDeadlineRefusal
+					if errors.As(lossErr, &refused) && refused.task == taskID &&
+						refused.pickupID == claimedPickupID && !refused.deadline.IsZero() {
+						// Local timers cannot shorten or replace the signed Cancel fence.
+						deadline = refused.deadline
+						continue
+					}
 					c.choreographyBroker.mu.Lock()
 					indexed := c.choreographyBroker.tasks[taskID]
 					var pickup *indexedChoreographyPickup
